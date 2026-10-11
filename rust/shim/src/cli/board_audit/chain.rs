@@ -5,14 +5,19 @@
 //! `Err(Deferred)` means the row is outside the reproduced domain.
 use super::codec;
 use crate::sent_json::Json;
-use serde_json::{Map, Value};
+use codec::J;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 #[derive(Debug)]
-pub(super) struct Deferred;
+pub(super) enum Failure {
+    Deferred,
+    Python,
+}
+pub(super) use Failure::Deferred;
 
 pub(super) struct Row {
     /// The exported row: columns by name, `payload` parsed (archive) or the
@@ -25,7 +30,7 @@ pub(super) struct Row {
 struct Cut {
     seq: i64,
     created_at: f64,
-    cutoff: Value,
+    cutoff: J,
     retention_days: i64,
     through_seq: i64,
     actor: String,
@@ -39,7 +44,7 @@ struct Edge {
 }
 
 pub(super) struct Walker {
-    expect: Option<(i64, String)>,
+    expect: Option<super::args::Head>,
     first: Option<Edge>,
     prev: Option<Edge>,
     count: u64,
@@ -54,7 +59,7 @@ fn integer(value: impl ToString) -> Json {
     Json::Integer(value.to_string())
 }
 
-pub(super) fn broken(seq: i64, reason: &str) -> Json {
+pub(super) fn broken(seq: impl ToString, reason: &str) -> Json {
     Json::Object(vec![
         ("ok".into(), Json::Bool(false)),
         ("seq".into(), integer(seq)),
@@ -62,33 +67,21 @@ pub(super) fn broken(seq: i64, reason: &str) -> Json {
     ])
 }
 
-/// A Python `int` token (never a bool or a float).
-fn int_token(value: &Value) -> Option<String> {
-    let number = value.as_number()?.to_string();
-    (!number.contains(['.', 'e', 'E'])).then_some(number)
+/// `type(value) is int`; large Python ints can name no i64 chain row.
+fn python_int(value: &J) -> Option<Option<i64>> {
+    if let J::Int(token) = value {
+        Some(token.parse().ok())
+    } else {
+        None
+    }
 }
 
-/// `type(value) is int`, read as i64; `Some(None)` for an int beyond i64,
-/// which can name no row of a chain this walker reads.
-fn python_int(value: &Value) -> Option<Option<i64>> {
-    int_token(value).map(|token| token.parse::<i64>().ok())
-}
-
-/// `_parsed_payload`: the payload as a JSON object, or `None` when it is not
-/// one. Stored text Python would read differently defers.
-fn parsed_payload(row: &Value) -> Result<Option<Map<String, Value>>, Deferred> {
-    let payload = match &row["payload"] {
-        Value::String(text) => codec::python_loads(text).ok_or(Deferred)?,
-        other => other.clone(),
-    };
-    Ok(match payload {
-        Value::Object(map) => Some(map),
-        _ => None,
-    })
+fn parsed_payload(row: &Value) -> Result<Option<codec::Payload>, Failure> {
+    codec::parsed_payload(row).map_err(|_| Failure::Python)
 }
 
 /// `body_commitment(salt, body) == payload["text_commitment"]`.
-fn body_matches(body: &str, salt: &Value, payload: Option<&Map<String, Value>>) -> bool {
+fn body_matches(body: &str, salt: &Value, payload: Option<&codec::Payload>) -> bool {
     let Some(commitment) = payload.and_then(|p| p.get("text_commitment")?.as_str()) else {
         return false;
     };
@@ -108,15 +101,11 @@ fn body_matches(body: &str, salt: &Value, payload: Option<&Map<String, Value>>) 
 }
 
 /// `_cut`: an `audit_prune` row's fields when shaped as prune writes them.
-fn cut(row: &Row) -> Result<Option<(i64, String, Cut)>, Deferred> {
-    let payload = match &row.value["payload"] {
-        Value::String(text) => codec::python_loads(text).ok_or(Deferred)?,
-        other => other.clone(),
-    };
-    let Value::Object(map) = payload else {
+fn cut(row: &Row) -> Result<Option<(i64, String, Cut)>, Failure> {
+    let Some(map) = codec::parsed_payload(&row.value).map_err(|_| Failure::Python)? else {
         return Ok(None);
     };
-    let field = |name: &str| map.get(name).unwrap_or(&Value::Null);
+    let field = |name: &str| map.get(name).unwrap_or(&J::Null);
     let (Some(through_seq), Some(through_hash)) = (
         python_int(field("through_seq")),
         field("through_hash").as_str(),
@@ -127,7 +116,8 @@ fn cut(row: &Row) -> Result<Option<(i64, String, Cut)>, Deferred> {
     let Some(days) = python_int(field("retention_days")) else {
         return Ok(None);
     };
-    if !cutoff.is_number() || !days.is_some_and(|d| (0..=36500).contains(&d)) {
+    if !matches!(cutoff, J::Int(_) | J::Float(_)) || !days.is_some_and(|d| (0..=36500).contains(&d))
+    {
         return Ok(None);
     }
     // A through_seq beyond i64 can never be first_seq - 1 of a read chain.
@@ -149,7 +139,7 @@ fn cut(row: &Row) -> Result<Option<(i64, String, Cut)>, Deferred> {
 }
 
 /// `audit_cutoff(now, days)`, exactly (Python's floor is an unbounded int).
-fn audit_cutoff(now: f64, days: i64) -> Result<i128, Deferred> {
+fn audit_cutoff(now: f64, days: i64) -> Result<i128, Failure> {
     let quotient = ((now - (days * 86400) as f64) / 86400.0).floor();
     if !quotient.is_finite() || quotient.abs() > 1e30 {
         return Err(Deferred);
@@ -158,38 +148,27 @@ fn audit_cutoff(now: f64, days: i64) -> Result<i128, Deferred> {
 }
 
 /// Python `number == integer` for an int or float JSON number.
-fn equals_integer(value: &Value, integer: i128) -> Result<bool, Deferred> {
-    if let Some(token) = int_token(value) {
-        return Ok(token.parse::<i128>().is_ok_and(|v| v == integer));
+fn equals_integer(value: &J, integer: i128) -> Result<bool, Failure> {
+    match value {
+        J::Int(token) => Ok(token.parse::<i128>().is_ok_and(|v| v == integer)),
+        J::Float(number) => Ok(number.is_finite()
+            && number.fract() == 0.0
+            && number.abs() < 1e30
+            && *number as i128 == integer),
+        _ => Err(Deferred),
     }
-    let number = value
-        .as_number()
-        .ok_or(Deferred)?
-        .to_string()
-        .parse::<f64>()
-        .map_err(|_| Deferred)?;
-    if !number.is_finite() {
-        return Err(Deferred);
-    }
-    Ok(number.fract() == 0.0 && number.abs() < 1e30 && number as i128 == integer)
 }
 
-fn cutoff_json(value: &Value) -> Result<Json, Deferred> {
-    if let Some(token) = int_token(value) {
-        let parsed: i128 = token.parse().map_err(|_| Deferred)?;
-        return Ok(integer(parsed));
+fn cutoff_json(value: &J) -> Result<Json, Failure> {
+    match value {
+        J::Int(token) => Ok(Json::Integer(token.clone())),
+        J::Float(number) => Ok(Json::Float(*number)),
+        _ => Err(Deferred),
     }
-    let number = value
-        .as_number()
-        .ok_or(Deferred)?
-        .to_string()
-        .parse::<f64>()
-        .map_err(|_| Deferred)?;
-    Ok(Json::Float(number))
 }
 
 impl Walker {
-    pub(super) fn new(expect: Option<(i64, String)>) -> Self {
+    pub(super) fn new(expect: Option<super::args::Head>) -> Self {
         Self {
             expect,
             first: None,
@@ -203,7 +182,7 @@ impl Walker {
     }
 
     /// One row in chain order; `Ok(Some(report))` is the first break.
-    pub(super) fn push(&mut self, row: Row) -> Result<Option<Json>, Deferred> {
+    pub(super) fn push(&mut self, row: Row) -> Result<Option<Json>, Failure> {
         let value = &row.value;
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_owned();
         let seq = row.seq;
@@ -265,13 +244,13 @@ impl Walker {
             && value["actor"] == "operator"
             && let Some(payload) = &payload
             // An int beyond i64 names no row this walker read: nothing to do.
-            && let Some(Some(named)) = python_int(payload.get("seq").unwrap_or(&Value::Null))
+            && let Some(Some(named)) = python_int(payload.get("seq").unwrap_or(&J::Null))
         {
             if self.kept.contains(&named) {
                 return Ok(Some(broken(named, "body_mismatch")));
             }
-            let message_id = payload.get("message_id").and_then(Value::as_str);
-            if payload.get("audit_copy").and_then(Value::as_str) == Some("removed")
+            let message_id = payload.get("message_id").and_then(J::as_str);
+            if payload.get("audit_copy").and_then(J::as_str) == Some("removed")
                 && let Some(message_id) = message_id
                 && self
                     .absent
@@ -286,7 +265,11 @@ impl Walker {
         {
             self.cuts.insert((through_seq, through_hash), found);
         }
-        if self.expect.as_ref().is_some_and(|(want, _)| *want == seq) {
+        if self
+            .expect
+            .as_ref()
+            .is_some_and(|(want, _)| want == &seq.to_string())
+        {
             self.expected = Some(hash.clone());
         }
         let edge = Edge {
@@ -309,14 +292,14 @@ impl Walker {
     }
 
     /// The report once every row was read, and whether the chain is intact.
-    pub(super) fn finish(self) -> Result<(Json, bool), Deferred> {
+    pub(super) fn finish(self) -> Result<(Json, bool), Failure> {
         let ok = self.ok_report()?;
         let intact = matches!(&ok, Json::Object(fields)
             if matches!(fields.first(), Some((_, Json::Bool(true)))));
         Ok((ok, intact))
     }
 
-    fn ok_report(self) -> Result<Json, Deferred> {
+    fn ok_report(self) -> Result<Json, Failure> {
         let mut start_cut = Json::Null;
         if let Some(first) = self.first.as_ref().filter(|first| first.seq != 1) {
             let found = first
@@ -363,17 +346,21 @@ impl Walker {
         if let Some((seq, digest)) = &self.expect {
             match &self.expected {
                 None => {
-                    if self.first.as_ref().is_some_and(|first| *seq < first.seq) {
-                        let Json::Object(mut fields) = broken(*seq, "head_pruned") else {
+                    if self
+                        .first
+                        .as_ref()
+                        .is_some_and(|first| seq.parse::<i64>().is_ok_and(|seq| seq < first.seq))
+                    {
+                        let Json::Object(mut fields) = broken(seq, "head_pruned") else {
                             unreachable!("broken is an object")
                         };
                         fields.push(("start_cut".into(), start_cut));
                         return Ok(Json::Object(fields));
                     }
-                    return Ok(broken(*seq, "head_missing"));
+                    return Ok(broken(seq, "head_missing"));
                 }
                 Some(expected) if expected != digest => {
-                    return Ok(broken(*seq, "head_mismatch"));
+                    return Ok(broken(seq, "head_mismatch"));
                 }
                 Some(_) => {}
             }

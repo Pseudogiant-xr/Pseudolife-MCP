@@ -149,6 +149,8 @@ struct Reader<'a> {
     at: usize,
     depth: usize,
     limit: usize,
+    unique: bool,
+    duplicate: bool,
 }
 
 impl Reader<'_> {
@@ -331,6 +333,7 @@ impl Reader<'_> {
     fn object(&mut self) -> Result<J, Refused> {
         self.at += 1;
         let mut dict = Vec::new();
+        let mut repeated = false;
         self.space();
         if self.peek() == Some(b'}') {
             self.at += 1;
@@ -349,6 +352,7 @@ impl Reader<'_> {
             self.space();
             let value = self.value()?;
             // dict assignment: a repeated key keeps its first place.
+            repeated |= dict.iter().any(|(old, _)| old == &key);
             set_key(&mut dict, key, value);
             self.space();
             match self.peek() {
@@ -358,6 +362,10 @@ impl Reader<'_> {
                 }
                 Some(b'}') => {
                     self.at += 1;
+                    if self.unique && repeated {
+                        self.duplicate = true;
+                        return Err(Refused::NotJson);
+                    }
                     return Ok(J::Dict(dict));
                 }
                 _ => return Err(Refused::NotJson),
@@ -393,20 +401,35 @@ impl Reader<'_> {
 
 /// `json.loads(text)` on a path whose recursion limit is `limit`.
 pub(super) fn loads(text: &str, limit: usize) -> Result<J, Refused> {
+    read(text, limit, false).0
+}
+
+/// `object_pairs_hook` refuses a repeated key only when its object closes.
+pub(super) fn loads_unique(text: &str, limit: usize) -> Result<J, Option<Refused>> {
+    let (result, duplicate) = read(text, limit, true);
+    result.map_err(|error| if duplicate { None } else { Some(error) })
+}
+
+fn read(text: &str, limit: usize, unique: bool) -> (Result<J, Refused>, bool) {
     let mut reader = Reader {
         text,
         at: 0,
         depth: 0,
         limit,
+        unique,
+        duplicate: false,
     };
-    reader.space();
-    let value = reader.value()?;
-    reader.space();
-    if reader.at == text.len() {
-        Ok(value)
-    } else {
-        Err(Refused::NotJson)
-    }
+    let result = stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
+        reader.space();
+        let value = reader.value()?;
+        reader.space();
+        if reader.at == text.len() {
+            Ok(value)
+        } else {
+            Err(Refused::NotJson)
+        }
+    });
+    (result, reader.duplicate)
 }
 
 /// Python's `repr()` of a str (`unicode_repr`), from its code units.
@@ -430,7 +453,7 @@ fn str_repr(units: &[u16], out: &mut String) {
                 out.push('\\');
                 out.push(c);
             }
-            Ok(c) if !super::printable(c) => {
+            Ok(c) if !super::pairing::printable(c) => {
                 let point = c as u32;
                 if point <= 0xff {
                     let _ = write!(out, "\\x{point:02x}");
@@ -783,8 +806,8 @@ mod tests {
     #[test]
     fn float_repr_matches_cpython_tables() {
         for table in [
-            include_str!("float_repr_ties.tsv"),
-            include_str!("../../../tests/cli_audit_float_repr.tsv"),
+            include_str!("pairing/float_repr_ties.tsv"),
+            include_str!("../../tests/cli_audit_float_repr.tsv"),
         ] {
             for line in table
                 .lines()

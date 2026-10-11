@@ -1,13 +1,13 @@
-//! `pseudolife-mcp board-audit` (board_audit_cli.py) for its canonical argv:
-//! verify an export file or the bank, export the bank, redact one body.
-//! The bank is reached through an explicit `PSEUDOLIFE_MCP_DATABASE_URL`;
-//! `stats`, help, the lite tier's embedded instance, the daemon-container
-//! transport and every other shape defer before any effect.
+//! `pseudolife-mcp board-audit`: argparse options and help, archive or bank
+//! verification, export and redaction over an explicit database URL.
+//! Stats execution, embedded/container transports and local-time ISO values
+//! retain their separate deferrals.
 mod archive;
 mod args;
 mod bank;
 mod chain;
 mod codec;
+mod help;
 mod redact;
 use crate::sent_json::{self, Json};
 use std::{
@@ -17,10 +17,37 @@ use std::{
 
 /// Run the action after `board-audit`, returning the process exit code.
 pub fn run(arguments: Vec<OsString>) -> u8 {
+    // Deep historical payloads also recurse when dropped; use the same
+    // stack allowance as the other commands using the Python JSON reader.
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(move || run_inner(arguments))
+        .ok()
+        .and_then(|worker| worker.join().ok())
+        .unwrap_or_else(deferred)
+}
+
+fn run_inner(arguments: Vec<OsString>) -> u8 {
     let Some(action) = args::parse(&arguments) else {
         return deferred();
     };
     match action {
+        args::Action::Error(message) => {
+            crate::stderrln!("{message}");
+            2
+        }
+        args::Action::Help(text) => {
+            let mut out = io::stdout().lock();
+            if out
+                .write_all(&super::text_bytes(text))
+                .and_then(|()| out.flush())
+                .is_ok()
+            {
+                0
+            } else {
+                120
+            }
+        }
         args::Action::VerifyInput { input, expect } => verify_input(&input, expect),
         args::Action::VerifyBank { expect } => {
             with_bank(|dsn| async move { bank::verify(&dsn, expect).await })
@@ -37,8 +64,9 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
                         if matches!(
                             error.kind(),
                             io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-                        ) => {}
-                    Err(_) => return deferred(),
+                        ) || cfg!(windows)
+                            && matches!(error.raw_os_error(), Some(21 | 123 | 1921)) => {}
+                    Err(_) => return failed(),
                 }
             }
             with_bank(|dsn| async move { bank::export(&dsn, &export).await })
@@ -69,55 +97,104 @@ where
     }
 }
 
-/// Python's text-mode universal newlines: `\r\n`, `\r` and `\n` end a line.
-fn python_lines(text: &str) -> impl Iterator<Item = &str> {
-    let mut rest = text;
-    std::iter::from_fn(move || {
-        if rest.is_empty() {
-            return None;
+/// TextIOWrapper decodes 8192-byte reads lazily: a bad byte in the same
+/// read precedes its lines, but a later read cannot hide an earlier break.
+struct PythonLines<'a> {
+    bytes: &'a [u8],
+    at: usize,
+    tail: Vec<u8>,
+    decoded: String,
+}
+impl<'a> PythonLines<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            at: 0,
+            tail: Vec::new(),
+            decoded: String::new(),
         }
-        let end = rest.find(['\r', '\n']).unwrap_or(rest.len());
-        let line = &rest[..end];
-        let skip = if rest[end..].starts_with("\r\n") {
-            2
-        } else {
-            usize::from(end < rest.len())
-        };
-        rest = &rest[end + skip..];
-        Some(line)
-    })
+    }
+    fn next(&mut self) -> Result<Option<String>, ()> {
+        loop {
+            if let Some(end) = self.decoded.find(['\r', '\n'])
+                && (self.decoded.as_bytes()[end] != b'\r'
+                    || end + 1 < self.decoded.len()
+                    || self.at == self.bytes.len() && self.tail.is_empty())
+            {
+                let skip = if self.decoded[end..].starts_with("\r\n") {
+                    2
+                } else {
+                    1
+                };
+                let line = self.decoded[..end].to_owned();
+                self.decoded.drain(..end + skip);
+                return Ok(Some(line));
+            }
+            if self.at == self.bytes.len() {
+                if !self.tail.is_empty() {
+                    return Err(());
+                }
+                return Ok((!self.decoded.is_empty()).then(|| std::mem::take(&mut self.decoded)));
+            }
+            let end = (self.at + 8192).min(self.bytes.len());
+            self.tail.extend_from_slice(&self.bytes[self.at..end]);
+            self.at = end;
+            match std::str::from_utf8(&self.tail) {
+                Ok(text) => {
+                    self.decoded.push_str(text);
+                    self.tail.clear();
+                }
+                Err(error) if error.error_len().is_none() => {
+                    self.decoded.push_str(
+                        std::str::from_utf8(&self.tail[..error.valid_up_to()]).map_err(|_| ())?,
+                    );
+                    self.tail.drain(..error.valid_up_to());
+                }
+                Err(_) => return Err(()),
+            }
+        }
+    }
 }
 
 fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
     let bytes = match std::fs::read(input) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        Err(_) => {
             crate::stderrln!("board-audit: cannot read {input}");
             return 2;
         }
-        Err(_) => return deferred(),
     };
-    // Python decodes in chunks and can refuse a file before reading lines
-    // that precede the bad bytes, so any invalid UTF-8 defers outright.
-    let Ok(text) = String::from_utf8(bytes) else {
-        return deferred();
-    };
+    let mut lines = PythonLines::new(&bytes);
     let mut walker = chain::Walker::new(expect);
-    for (index, line) in python_lines(&text).enumerate() {
-        if archive::blank(line) {
+    let mut index = 0;
+    loop {
+        let line = match lines.next() {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(()) => {
+                crate::stderrln!(
+                    "board-audit: {input} is not UTF-8 JSON lines (write exports with --out rather than a shell redirect)"
+                );
+                return 2;
+            }
+        };
+        index += 1;
+        if archive::blank(&line) {
             continue;
         }
-        let (value, seq, created_at) = match archive::row(line) {
+        let (value, seq, created_at) = match archive::row(&line) {
             Ok(row) => row,
             Err(archive::Error::Deferred) => return deferred(),
+            Err(archive::Error::Encoding) => return failed(),
             Err(error) => {
                 let diagnostic = match error {
+                    archive::Error::NotJson => "is not JSON",
                     archive::Error::Duplicate => {
                         "has a duplicate key, so a reader and verify could see different values; it cannot be checked"
                     }
                     _ => "is not an exported audit event",
                 };
-                crate::stderrln!("board-audit: {input} line {} {diagnostic}", index + 1);
+                crate::stderrln!("board-audit: {input} line {} {diagnostic}", index);
                 return 2;
             }
         };
@@ -129,11 +206,13 @@ fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
             Ok(None) => {}
             Ok(Some(broken)) => return report(broken, 1),
             Err(chain::Deferred) => return deferred(),
+            Err(chain::Failure::Python) => return failed(),
         }
     }
     match walker.finish() {
         Ok((report_value, intact)) => report(report_value, if intact { 0 } else { 1 }),
         Err(chain::Deferred) => deferred(),
+        Err(chain::Failure::Python) => failed(),
     }
 }
 
@@ -168,15 +247,28 @@ fn deferred() -> u8 {
     1
 }
 
+fn failed() -> u8 {
+    crate::stderrln!(
+        "board-audit failed; the database error is not shown because it can include the connection string. Check PSEUDOLIFE_MCP_DATABASE_URL."
+    );
+    2
+}
+
 #[cfg(test)]
 mod tests {
-    use super::python_lines;
+    use super::PythonLines;
 
     #[test]
     fn universal_newlines_number_lines_as_python_does() {
-        let lines: Vec<_> = python_lines("a\r\nb\rc\n\rd").collect();
+        let mut reader = PythonLines::new(b"a\r\nb\rc\n\rd");
+        let mut lines = Vec::new();
+        while let Some(line) = reader.next().unwrap() {
+            lines.push(line);
+        }
         assert_eq!(lines, ["a", "b", "c", "", "d"]);
-        assert_eq!(python_lines("a\n").count(), 1);
-        assert_eq!(python_lines("").count(), 0);
+        let mut reader = PythonLines::new(b"a\n");
+        assert_eq!(reader.next().unwrap(), Some("a".into()));
+        assert_eq!(reader.next().unwrap(), None);
+        assert_eq!(PythonLines::new(b"").next().unwrap(), None);
     }
 }

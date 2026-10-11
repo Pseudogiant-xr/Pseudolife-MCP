@@ -2,6 +2,7 @@
 //! `_vacuum`, as `board_audit_cli._redact` runs them.
 use super::{bank, codec};
 use crate::{pg, sent_json::Json};
+use codec::J;
 use serde_json::{Value, json};
 use tokio_postgres::{GenericClient, error::SqlState};
 
@@ -16,6 +17,7 @@ enum Stop {
     Busy,
     /// Outside the reproduced domain; the transaction is rolled back.
     Deferred,
+    Python,
     /// The commit was not confirmed: the redaction may have landed.
     Unconfirmed,
 }
@@ -25,7 +27,7 @@ impl From<tokio_postgres::Error> for Stop {
         if error.code() == Some(&SqlState::LOCK_NOT_AVAILABLE) {
             Stop::Busy
         } else {
-            Stop::Deferred
+            Stop::Python
         }
     }
 }
@@ -241,10 +243,7 @@ async fn redact_in(
     };
     let sent_seq: i64 = sent.try_get("seq")?;
     let stored: String = sent.try_get("payload")?;
-    let payload = match codec::python_loads(&stored).ok_or(Stop::Deferred)? {
-        Value::Object(map) => Some(map),
-        _ => None,
-    };
+    let payload = codec::payload_text(&stored).map_err(|_| Stop::Python)?;
     let audit_copy = if payload
         .as_ref()
         .is_none_or(|p| !p.contains_key("text_commitment"))
@@ -288,9 +287,9 @@ async fn redact_in(
     let mut siblings = Vec::new();
     if let Some(payload) = payload.as_ref().filter(|p| p.contains_key("fanout")) {
         let request: Option<&str> = match payload.get("request_id") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(text)) => Some(text),
-            Some(_) => return Err(Stop::Deferred),
+            None | Some(J::Null) => None,
+            Some(J::Str(text)) => Some(text),
+            Some(_) => return Err(Stop::Python),
         };
         for row in tx
             .query(
@@ -384,6 +383,7 @@ async fn run_in(session: &mut pg::Session, message_id: &str, reason: &str) -> ba
     }
     let redacted = match redact_in(session, message_id, reason).await {
         Ok(redacted) => redacted,
+        Err(Stop::Python) => return bank::Ending::Exit(super::failed()),
         Err(Stop::Deferred) => return bank::Ending::Deferred,
         Err(Stop::Busy) => {
             crate::stderrln!(
