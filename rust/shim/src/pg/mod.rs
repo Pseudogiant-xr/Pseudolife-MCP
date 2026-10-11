@@ -89,9 +89,6 @@ pub struct Session {
 type Ended = std::sync::Arc<std::sync::Mutex<Option<tokio_postgres::error::SqlState>>>;
 type Notices =
     std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<tokio_postgres::error::DbError>>>;
-/// Notices kept until a caller takes them; beyond this the oldest are
-/// dropped, so a long-lived session that never takes them stays bounded.
-pub const NOTICE_LIMIT: usize = 4096;
 impl Session {
     pub async fn open(dsn: &Dsn) -> Result<Self, Error> {
         Self::open_in(dsn, &TlsEnvironment::from_environment()).await
@@ -150,10 +147,7 @@ impl Session {
                     let mut kept = sink
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if kept.len() == NOTICE_LIMIT {
-                        kept.pop_front();
-                    }
-                    kept.push_back(notice);
+                    keep_notice(&mut kept, notice);
                 }
             }
             Ok(())
@@ -178,7 +172,7 @@ impl Session {
         self.client.as_mut().expect("open PostgreSQL session")
     }
     /// Server notices received so far (in order), removed from the session.
-    /// At most the newest [`NOTICE_LIMIT`] are kept between takes.
+    /// Every notice is retained: audit cleanup must not silently lose warnings.
     pub fn take_notices(&self) -> Vec<tokio_postgres::error::DbError> {
         std::mem::take(
             &mut *self
@@ -209,5 +203,22 @@ impl Drop for Session {
     fn drop(&mut self) {
         // Cancellation/error closes exactly this connection; never a bank/server.
         self.driver.abort();
+    }
+}
+
+fn keep_notice<T>(kept: &mut std::collections::VecDeque<T>, notice: T) {
+    kept.push_back(notice);
+}
+
+#[cfg(test)]
+mod notice_tests {
+    #[test]
+    fn warnings_past_the_old_limit_are_complete_and_ordered() {
+        let mut kept = std::collections::VecDeque::new();
+        for index in 0..4100 {
+            super::keep_notice(&mut kept, index);
+        }
+        assert_eq!(kept.len(), 4100);
+        assert!(kept.into_iter().eq(0..4100));
     }
 }

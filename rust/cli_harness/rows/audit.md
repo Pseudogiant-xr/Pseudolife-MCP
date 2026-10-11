@@ -74,8 +74,6 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 ## Declared divergences
 
 - Every deferral above (Python answers; the candidate defers).
-- More than `pg::NOTICE_LIMIT` (4096) warnings in one vacuum keep only the
-  newest 4096 in the clean-up note.
 - A process limit that raises SIGXFSZ during a `--out` write: CPython ignores
   the signal and reports `cannot write`; the native process is not shielded.
 - `export` to stdout with descriptor 1 closed at exec (POSIX `>&-`): CPython
@@ -87,6 +85,9 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 
 ## Coverage notes
 
+- PostgreSQL notices are retained until drained; a Rust unit case checks all
+  4100 notices remain in order beyond the former 4096-entry cap. Audit
+  redaction is the only notice consumer and drains around its vacuum work.
 - Vacuum skips: the test login owns every table, so Postgres never skips for
   it; the harness drives the same path with an expression index whose
   ANALYZE-time `RAISE WARNING` arrives exactly like a skip, with the database
