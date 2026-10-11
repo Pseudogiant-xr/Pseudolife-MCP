@@ -34,6 +34,35 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+@pytest.mark.parametrize("fault", [
+    {"mismatches": ["fifo:missing"]},
+    {"hardlink_same_inode": False},
+    {"socket_omitted": False},
+])
+@pytest.mark.parametrize("both_arms", [False, True])
+def test_backup_restore_fault_controls_are_rejected(fault, both_arms):
+    good = {"mismatches": [], "hardlink_same_inode": True, "socket_omitted": True}
+    bad = dict(good, **fault)
+    assert compare.diff(obs(restore=bad if both_arms else good), obs(restore=bad), ())
+
+
+@pytest.mark.parametrize("restore", [None, {}, {"archive_missing": True},
+                                    {"mismatches": [], "hardlink_same_inode": 1,
+                                     "socket_omitted": True}])
+def test_backup_restore_requires_complete_typed_success(restore):
+    good = {"mismatches": [], "hardlink_same_inode": True, "socket_omitted": True}
+    assert compare.diff(obs(restore=good), obs(restore=restore), ())
+
+
+def test_backup_restore_case_requires_observations_from_both_arms(monkeypatch):
+    from cli_harness.rows import backup
+    monkeypatch.setattr(backup, "_have_pg0", lambda: False)
+    case = next(case for case in backup.cases() if case.id == "member-kinds-roundtrip")
+    good = {"mismatches": [], "hardlink_same_inode": True, "socket_omitted": True}
+    assert compare.diff(obs(restore=good), obs(restore=good), case.rules) == []
+    assert compare.diff(obs(), obs(), case.rules)
+
+
 @pytest.mark.parametrize("directory", ["bank/backups", "bank/mybk"])
 @pytest.mark.parametrize("kind,extension", [("state", "tar.gz"), ("memory", "sql.gz")])
 def test_backup_mode_paths_use_each_arms_validated_timestamp(directory, kind, extension):
@@ -1565,7 +1594,7 @@ def test_home_tokens_preserve_surrogateescape_link_targets():
     assert compare.diff(want, wrong, ())
 
 
-def test_golden_secret_guards_scan_surrogateescape_strings(tmp_path):
+def test_golden_secret_guards_scan_surrogateescape_strings(tmp_path, monkeypatch):
     import json
     from cli_harness import runner
     clean = {"raw-link": "link:raw-\udcff"}
@@ -1573,8 +1602,12 @@ def test_golden_secret_guards_scan_surrogateescape_strings(tmp_path):
     assert normalize.drawn_login_secrets(clean) == []
     runner.write_golden(tmp_path / "raw.json", clean)
     assert json.loads((tmp_path / "raw.json").read_text(encoding="utf-8")) == clean
-    for secret in ["SCRAM-SHA-256$marker", _drawn_login_line().decode("ascii")]:
-        unsafe = {"raw-link": "link:raw-\udcff/" + secret}
+    def unexpected_write(*args, **kwargs):
+        raise AssertionError("rejected fixture must not reach the file writer")
+
+    monkeypatch.setattr(Path, "write_text", unexpected_write)
+    for marker in ["SCRAM-SHA-256$marker", _drawn_login_line().decode("ascii")]:
+        rejected = {"raw-link": "link:raw-\udcff/" + marker}
         with pytest.raises(SystemExit, match="refusing to write"):
-            runner.write_golden(tmp_path / "unsafe.json", unsafe)
+            runner.write_golden(tmp_path / "unsafe.json", rejected)
         assert not (tmp_path / "unsafe.json").exists()

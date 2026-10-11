@@ -318,6 +318,13 @@ def backup_stdout_closed(obs: dict) -> None:
 RULES = ("backup-files",)
 
 
+@normalize.rule("backup-restoration")
+def backup_restoration(obs: dict) -> None:
+    """Require the restoration observation even when both arms omitted it."""
+    if "restore" not in obs:
+        obs.setdefault("vacuous", []).append("backup restoration observation missing")
+
+
 def _have_pg0() -> bool:
     return PG0.is_dir() and any((p / "bin").is_dir() for p in PG0.iterdir())
 
@@ -334,7 +341,8 @@ def cases() -> list[Case]:
     no_pg_dump = {"PATH": f"{{HOME}}{sep}no-bin"}
     return [
         Case("help", ["backup", "--help"]),
-        Case("member-kinds-roundtrip", ["backup", *data], setup=member_kinds, after=restore_members, rules=RULES),
+        Case("member-kinds-roundtrip", ["backup", *data], setup=member_kinds,
+             after=restore_members, rules=RULES + ("backup-restoration",)),
         Case("raw-rotation-names", ["backup", *data], setup=raw_rotation,
              platforms=("linux",), rules=RULES),
         Case("missing-absolute", ["backup", "--data-dir", f"{{HOME}}{sep}absent-µ"]),

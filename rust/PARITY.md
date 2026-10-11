@@ -30,6 +30,11 @@ size; a file that shrinks while archived fails the backup. A closed stdout
 exits 120, as CPython's shutdown flush does (declared substitution
 `backup-stdout-closed`: no interpreter trailer).
 
+The member-kind case declares `backup-restoration`: both arms must report a
+Python-extracted archive with no missing or mismatched members, preserved
+hardlink identity and omitted sockets. Restoration observations are compared
+without substitution; matching failures in both arms still fail the gate.
+
 Deferred by name, before any effect: anything that could need the lite tier's
 embedded instance (no DSN and `<data>/embedded_pg/PG_VERSION` present, or no
 `--data-dir`/`PSEUDOLIFE_MCP_DATA_DIR` while the lite default dir exists);
