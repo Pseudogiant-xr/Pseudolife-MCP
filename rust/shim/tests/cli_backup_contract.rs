@@ -723,3 +723,25 @@ fn matching_raw_rotation_names_defer_before_utf8_stdout_failure() {
     fs::write(backups.join(raw), b"old state").unwrap();
     assert_deferred(&home, &["--data-dir", &text(&bank)]);
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
+    let home = Home::new("link-flags");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    let link = bank.join("link");
+    std::os::windows::fs::symlink_dir("absent", &link).unwrap();
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
+    fs::remove_dir(&link).unwrap();
+    fs::create_dir(bank.join("z-directory")).unwrap();
+    std::os::windows::fs::symlink_dir("z-directory", &link).unwrap();
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
+    fs::remove_dir(&link).unwrap();
+}

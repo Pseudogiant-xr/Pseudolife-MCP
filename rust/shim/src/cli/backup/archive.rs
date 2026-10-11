@@ -304,7 +304,25 @@ fn supported(
     active: &mut HashSet<PathBuf>,
 ) -> Option<()> {
     if is_link(path, meta)? {
-        return encodable(read_link(path).ok()?.as_os_str()).then_some(());
+        let link = read_link(path).ok()?;
+        if !encodable(link.as_os_str()) {
+            return None;
+        }
+        #[cfg(windows)]
+        {
+            // Python's extractor infers the directory flag from the target;
+            // it does not store that flag in a symlink member.
+            let directory = is_directory(meta);
+            let target_directory = match fs::metadata(path) {
+                Ok(target) => is_directory(&target),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+                Err(_) => return None,
+            };
+            if directory != target_directory || directory && !link.is_absolute() {
+                return None;
+            }
+        }
+        return Some(());
     }
     if !is_directory(meta) {
         return Some(());
