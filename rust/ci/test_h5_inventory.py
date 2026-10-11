@@ -43,6 +43,14 @@ def test_ported_row_and_mutant_ci_inventory():
     check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text()))
 
 
+def test_source_control_target_is_bound_at_step_scope():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text())
+    source = workflow['jobs']['source-mutants']
+    invocation = next(s for s in source['steps'] if s.get('name') == 'CLI source mutants')
+    assert invocation.get('env') == {'CARGO_TARGET_DIR': '${{ runner.temp }}/source-mutants-target'}
+    assert 'runner.temp' not in str(source.get('env', {}))
+
+
 def test_cli_mutant_summary_names_witnesses_and_durations(tmp_path, monkeypatch):
     from rust.cli_harness import mutants
     mutant = mutants.Mutant("fixture-control", "mail", "unused", "a", "b")
