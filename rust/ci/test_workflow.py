@@ -834,3 +834,13 @@ def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():
     job = workflow()["jobs"]["parity-checks"]
     assert job["timeout-minutes"] == (
         "${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}")
+
+
+@pytest.mark.parametrize("name", [
+    "Prepare disposable PostgreSQL for W1-C rows",
+    "Build the test_login container image",
+])
+def test_w1c_network_setup_has_a_five_minute_floor(name):
+    job = workflow()["jobs"]["parity-checks"]
+    step = next(s for s in job["steps"] if s.get("name") == name)
+    assert step["timeout-minutes"] == 5
