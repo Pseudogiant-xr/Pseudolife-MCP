@@ -390,7 +390,7 @@ def test_episode_daemon_uses_fixture_with_empty_model_cache(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize('platform', ['linux', 'windows'])
-def test_windows_encodings_gap_keeps_linux_and_auth_control(monkeypatch, tmp_path, platform):
+def test_encodings_bank_gap_keeps_auth_control_on_both_platforms(monkeypatch, tmp_path, platform):
     import run_coverage
     from coverage_plan import DAEMON_CONTROLS
     invoked = []
@@ -401,8 +401,14 @@ def test_windows_encodings_gap_keeps_linux_and_auth_control(monkeypatch, tmp_pat
     monkeypatch.setattr(run_coverage.subprocess, 'run', lambda argv, **kw: invoked.append(argv) or SimpleNamespace(returncode=0))
     assert run_coverage.main() == 0
     encodings = [a for a in invoked if a[a.index('--only') + 1] == 'encodings']
-    assert len(encodings) == (0 if platform == 'windows' else 2)
+    assert not encodings
     assert DAEMON_CONTROLS['auth-candidate-order'] == ['encodings']
+    invoked.clear()
+    monkeypatch.setattr(sys, 'argv', ['run_coverage.py', '--suite', 'h5-daemon-mutants',
+                                    '--out-dir', str(tmp_path)])
+    assert run_coverage.main() == 0
+    auth = [a for a in invoked if a[a.index('--mutants') + 1] == 'auth-candidate-order']
+    assert len(auth) == 1 and auth[0][auth[0].index('--only') + 1] == 'encodings'
 
 
 @pytest.mark.parametrize('job, name', [('parity-checks', 'Ported rows and daemon controls'),

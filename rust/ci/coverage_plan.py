@@ -24,6 +24,7 @@ EXCEPTIONS = {
         'config': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
         'seeded': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
         'json-float-shortest-ties': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
+        'encodings': 'Three HTTP responses match, but hosted Linux run 38139355489 differs on the bank sequence catalog in live and golden modes; Windows run 38132737537 differs on eleven initialization bank entries. The auth-only scenario does not settle initialization. The separately passing auth-candidate-order control remains selected on both OSes.',
     },
     'daemon_mutants': {
         'del-unescaped': 'Its tokens witness has the named retrieval telemetry bank-state difference; the control baseline is not clean.',
@@ -37,9 +38,7 @@ EXCEPTIONS = {
                                 'unconstrained-dims', 'db-lost')},
     'w1a_platform': {
         'linux': {},
-        'windows': {
-            'encodings': 'Hosted Windows run 38132737537: three HTTP responses match, but Python alone writes writer_lease_epoch and ten default relations before shutdown; the scenario does not settle initialization. Linux and the separately passing Windows auth control remain selected.',
-        },
+        'windows': {},
     },
     'cli_mutants': {
         'linux': {

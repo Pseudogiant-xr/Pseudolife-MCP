@@ -225,7 +225,8 @@
       "tokenless": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.",
       "config": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.",
       "seeded": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.",
-      "json-float-shortest-ties": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11."
+      "json-float-shortest-ties": "Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.",
+      "encodings": "Three HTTP responses match, but hosted Linux run 38139355489 differs on the bank sequence catalog in live and golden modes; Windows run 38132737537 differs on eleven initialization bank entries. The auth-only scenario does not settle initialization. The separately passing auth-candidate-order control remains selected on both OSes."
     },
     "daemon_mutants": {
       "del-unescaped": "Its tokens witness has the named retrieval telemetry bank-state difference; the control baseline is not clean.",
@@ -244,9 +245,7 @@
     },
     "w1a_platform": {
       "linux": {},
-      "windows": {
-        "encodings": "Hosted Windows run 38132737537: three HTTP responses match, but Python alone writes writer_lease_epoch and ten default relations before shutdown; the scenario does not settle initialization. Linux and the separately passing Windows auth control remain selected."
-      }
+      "windows": {}
     },
     "cli_mutants": {
       "linux": {
@@ -278,5 +277,46 @@
       0,
       0
     ]
+  },
+  "hosted_w1a_followup": {
+    "run": 38139355489,
+    "head": "cc6fb180e8b3e28b5c4dcc9f7aa07ee4b78e8332",
+    "observed_exception": "encodings: three responses match; sequence catalog differs in live and golden modes",
+    "selected_actions": 26,
+    "selected_seconds": 434.92,
+    "action_exits": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "live_cases": 49,
+    "golden_cases": 38,
+    "live_scenarios": 13,
+    "golden_scenarios": 7,
+    "live_only_scenarios": 6,
+    "note": "Original local W1-A measurement above included encodings; this hosted subset omits the newly observed difference, without changing any remaining scenario or comparator."
   }
 }
