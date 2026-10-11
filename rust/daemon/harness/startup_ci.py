@@ -46,7 +46,7 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
             result[variant] = {"exit_code": run.returncode, "accepted": accepted}
         finally:
             pg.drop(name)
-    name = pg.PREFIX + "mutation_" + str(time.time_ns())
+    name = pg.name(pg.PREFIX + "mutation_" + str(time.time_ns()))
     dsn = pg.create(name)
     try:
         child = dict(env, PL_PGS_MUTATION_DSN=dsn, PL_PGS_CASE="zero-timestamp-seating")
