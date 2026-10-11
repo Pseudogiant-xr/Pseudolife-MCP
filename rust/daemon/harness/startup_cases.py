@@ -495,7 +495,7 @@ def epoch(state):
 
 
 def cell(binary, number, case, result, mutant=None):
-    names = [f"{pg.PREFIX}{number + index}" for index in range(3)]
+    names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(3)]
     created = []
     try:
         with tempfile.TemporaryDirectory(prefix="pl-pgs-startup-") as scratch:

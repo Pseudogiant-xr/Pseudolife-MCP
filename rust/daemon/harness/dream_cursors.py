@@ -344,9 +344,9 @@ def seed_template(dsn: str, fixture: dict, home: Path) -> None:
 
 def run_scenario(scenario, binary, root, mode, golden_dir, record=False, mutant=None):
     name = scenario["name"]
-    tag = f"{name.replace('-', '_')}_{os.getpid()}"
-    template = pg.PREFIX + tag + "_t"
-    dbs = {side: pg.PREFIX + tag + suffix for side, suffix in (("python", "_py"), ("rust", "_rs"))}
+    tag = name.replace("-", "_")
+    template = pg.name(pg.PREFIX + tag + "_t")
+    dbs = {side: pg.name(pg.PREFIX + tag + suffix) for side, suffix in (("python", "_py"), ("rust", "_rs"))}
     if mode == "golden":
         dbs.pop("python")
     procs, dsns = {}, {}

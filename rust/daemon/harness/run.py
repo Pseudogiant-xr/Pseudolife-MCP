@@ -1029,6 +1029,21 @@ STARTUP_REFUSALS = [
     ("dream sweep interval not a number", {}, "memory:\n  dream:\n    sweep_interval_seconds: abc\n", 1),
 ]
 
+# Each setting uses float(raw) in the oracle; malformed separators must
+# refuse after earlier startup guards and before binding the HTTP listener.
+for seconds_name in ("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", "PSEUDOLIFE_SESSION_IDLE_SECONDS",
+                     "PSEUDOLIFE_SESSION_REAP_SECONDS"):
+    for malformed in ("1__0", "_10", "10_"):
+        STARTUP_REFUSALS.append((f"{seconds_name} malformed underscore {malformed}",
+                                 {seconds_name: malformed}, None, 1))
+STARTUP_REFUSALS.extend([
+    ("bind guard precedes malformed seconds",
+     {"PSEUDOLIFE_MCP_HOST": "0.0.0.0", "PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1__0"}, None, 2),
+    ("token guard precedes malformed seconds",
+     {"PSEUDOLIFE_MCP_TOKENS": "junk,,x:default",
+      "PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": "1__0"}, None, 2),
+])
+
 class NullEmbedding(Scenario):
     """A stored row with a NULL vector: hydration fails, not_ready, backoff."""
     name = "null-embedding"
@@ -1089,8 +1104,8 @@ class DbLost(Scenario):
     def timeline(self, procs, holders):
         import psycopg
         out = self.partial = []
-        dbs = [f"{pg.PREFIX}db_lost_{side}" for side in ("py", "rs")]
-        with psycopg.connect(pg.dsn(f"{pg.PREFIX}db_lost_t"), autocommit=True) as conn:
+        dbs = [pg.name(f"{pg.PREFIX}db_lost_{side}") for side in ("py", "rs")]
+        with psycopg.connect(pg.dsn(pg.name(f"{pg.PREFIX}db_lost_t")), autocommit=True) as conn:
             assert_disposable(conn)
             for db in dbs:
                 if not pg.DISPOSABLE_NAME.fullmatch(db):
@@ -1560,18 +1575,18 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
     finally:
         # Only this scenario's three exact names, including seed failure.
         for suffix in ("t", "py", "rs"):
-            pg.drop(f"{pg.PREFIX}{tag}_{suffix}")
+            pg.drop(pg.name(f"{pg.PREFIX}{tag}_{suffix}"))
 
 
 def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
-    template = f"{pg.PREFIX}{tag}_t"
+    template = pg.name(f"{pg.PREFIX}{tag}_t")
     dsn_t = pg.create(template)
     scn.prepare_template(dsn_t)
     # The banks' state before either daemon touched them: declared writes and
     # clock values are judged against it, so changes to existing rows show.
     before = dbstate.dump(dsn_t)
-    dbs = {"python": f"{pg.PREFIX}{tag}_py", "rust": f"{pg.PREFIX}{tag}_rs"}
+    dbs = {"python": pg.name(f"{pg.PREFIX}{tag}_py"), "rust": pg.name(f"{pg.PREFIX}{tag}_rs")}
     dsns = {k: pg.create(v, template=template) for k, v in dbs.items()}
     if scn.unreachable_database:
         dsns = {k: f"postgresql://nobody:nothing@127.0.0.1:{daemons.free_port()}/{pg.PREFIX}down" for k in dsns}

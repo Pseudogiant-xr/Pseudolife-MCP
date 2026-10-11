@@ -208,10 +208,19 @@ def seed_legacy(conn) -> dict:
     return {"legacy": message}
 
 
+def seed_fraction_boundary(conn) -> dict:
+    """One oracle-written event between two differently rounded ISO limits."""
+    store = _store(conn)
+    store.test_time[0] = -1.0000000000287557e-6
+    store.register("alice", project="p")
+    return {}
+
+
 # --- disposable banks --------------------------------------------------------
 
 PREFIX = "pl_cf_w1c_audit_"
-SEEDERS = {"rich": seed_rich, "pruned": seed_pruned, "legacy": seed_legacy}
+SEEDERS = {"rich": seed_rich, "pruned": seed_pruned, "legacy": seed_legacy,
+           "fraction": seed_fraction_boundary}
 _IDS: dict[str, dict] = {}
 _BASELINE: dict[str, dict] = {}
 _ARCHIVES: dict[str, bytes] = {}
@@ -219,7 +228,7 @@ _CREATED: set[str] = set()
 
 
 def _name(kind: str) -> str:
-    return PREFIX + kind
+    return _bank.name(PREFIX + kind)
 
 
 def _drop_all() -> None:
@@ -291,6 +300,7 @@ def ids(kind: str) -> dict:
 
 def export_bytes(kind: str) -> bytes:
     """The oracle's own ``board-audit export --out`` of a seeded bank."""
+    _bank.NAMES.require_process()
     if kind not in _ARCHIVES:
         from pseudolife_memory.board_audit_cli import main  # noqa: PLC0415
         name = ensure(kind)
@@ -331,6 +341,21 @@ def _send_index(rows, message_id) -> int:
 
 def archive(variant: str) -> bytes:
     """An export of a seeded bank, unchanged or edited one way."""
+    if variant == "head-19-digits":
+        from pseudolife_memory.storage.coordination import (  # noqa: PLC0415
+            audit_hash, verify_audit_chain)
+        # Lift an oracle-produced retention-anchored chain to a BIGINT head.
+        rows = export_rows("pruned")
+        shift = 1000000000000000000 - rows[-1]["seq"]
+        previous = rows[0]["prev_hash"]
+        for row in rows:
+            row["seq"] += shift
+            row["prev_hash"] = previous
+            if row["event"] == "audit_prune":
+                row["payload"]["through_seq"] += shift
+            row["hash"] = previous = audit_hash(previous, row)
+        assert verify_audit_chain(rows, expect_head=(rows[-1]["seq"], previous))["ok"]
+        return _lines(rows)
     if variant.startswith("reserved-number-key-"):
         from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
         # Keep one complete exported row, hashed by the oracle with an ordinary
@@ -606,7 +631,7 @@ def archive_case(case_id, variant, *extra, rules=(), stdout_closed=False):
                      stdout_closed=stdout_closed)
 
 
-REDACT_DB = PREFIX + "rd"
+REDACT_DB = _bank.name(PREFIX + "rd")
 
 
 def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock",),
@@ -687,6 +712,13 @@ def cases() -> list[core.Case]:
                      _Lazy(lambda: head("rich", digest="0" * 64))),
         archive_case("input-head-missing", "rich", "--expect-head",
                      _Lazy(lambda: head("rich", seq=9999))),
+        archive_case("input-head-19-digits", "rich", "--expect-head",
+                     _Lazy(lambda: head("rich", seq=1000000000000000000))),
+        archive_case("input-head-i64-max", "rich", "--expect-head",
+                     _Lazy(lambda: head("rich", seq=9223372036854775807))),
+        archive_case("input-head-19-digits-matches", "head-19-digits", "--expect-head",
+                     _Lazy(lambda: "1000000000000000000:" +
+                           json.loads(archive("head-19-digits").splitlines()[-1])["hash"])),
         archive_case("input-head-earlier", "rich", "--expect-head",
                      _Lazy(lambda: f"3:{export_rows('rich')[2]['hash']}")),
         archive_case("input-rich-crlf", "rich-crlf"),
@@ -745,6 +777,13 @@ def cases() -> list[core.Case]:
         read_case("export-since-iso", "rich",
                   ["export", "--since", "2023-11-14T22:14:20+00:00", "--until",
                    "2023-11-14T23:15:00+01:00"]),
+        read_case("export-since-iso-fraction", "rich",
+                  ["export", "--since", "2023-11-14T22:14:20.500000+00:00", "--until",
+                   "2023-11-14T23:15:00.000001+01:00"]),
+        read_case("export-since-iso-long-fraction", "rich",
+                  ["export", "--since", "2023-11-14T22:14:20.123456789+00:00"]),
+        read_case("export-until-iso-epoch-boundary", "fraction",
+                  ["export", "--until", "1970-01-01T00:00:59.999999+00:01"]),
         read_case("export-agent-full", "rich", ["export", "--agent", _rich("b")]),
         read_case("export-agent-prefix", "rich", ["export", "--agent", _rich("a", cut=8)]),
         read_case("export-agent-literal", "rich", ["export", "--agent", "alice"]),

@@ -6,9 +6,9 @@ use std::time::Duration;
 
 fn fast(runtime: &pseudolife_stdio::lifecycle::Runtime, home: &Home, setting: &str) -> Options {
     let mut options = options(runtime, home, setting);
-    options.timing.startup = Duration::from_millis(60);
-    // Keep the production probe deadline: client setup is inside that budget.
-    options.timing.retry_attempt = Duration::from_millis(300);
+    // Accelerate only the backoff. A gated 350 ms registration on 2026-10-11
+    // made the old 300 ms retry budget register twice; client and private-file
+    // setup must retain their production budgets even on a loaded runner.
     options.timing.retry_delays = [Duration::from_millis(40); 6];
     options
 }
@@ -107,6 +107,93 @@ fn outage(mode: &str) -> Answer {
     }
 }
 
+async fn attach(
+    runtime: std::sync::Arc<pseudolife_stdio::lifecycle::Runtime>,
+    options: Options,
+    gate: Option<&mut ResponseGate>,
+) -> std::sync::Arc<Board> {
+    let Some(gate) = gate else {
+        return Board::attach_options(runtime, options).await;
+    };
+    // Expire only the deliberately held startup request. Keep virtual time
+    // still during real client setup; the blocker bounds a missing gate too.
+    let (hold, release) = std::sync::mpsc::channel::<()>();
+    let clock = tokio::task::spawn_blocking(move || {
+        let _ = release.recv_timeout(Duration::from_secs(15));
+    });
+    tokio::time::pause();
+    let startup = options.timing.startup;
+    let pending = tokio::spawn(Board::attach_options(runtime, options));
+    gate.wait().await;
+    tokio::time::advance(startup + Duration::from_millis(1)).await;
+    // Keep time frozen while the expired startup timer runs. A later request
+    // timeout must not substitute for the startup deadline under test.
+    let finish_by = std::time::Instant::now() + Duration::from_secs(1);
+    while !pending.is_finished() && std::time::Instant::now() < finish_by {
+        tokio::task::yield_now().await;
+    }
+    let completed = pending.is_finished();
+    if !completed {
+        pending.abort();
+    }
+    tokio::time::resume();
+    drop(hold);
+    clock.await.unwrap();
+    gate.release();
+    assert!(
+        completed,
+        "attach did not finish at the frozen startup deadline"
+    );
+    pending.await.unwrap()
+}
+
+#[tokio::test]
+async fn board_retry_slow_successful_attempt_registers_once() {
+    let fixture = Fixture::new(0);
+    fixture.answer("context", outage("overloaded"));
+    // Healthy setup may exceed the gate's former 2 s observer while staying
+    // inside the production request budget. It is not the held registration.
+    fixture.answer(
+        "context",
+        Answer::json(200, json!({"bank_id":BANK,"principal":"fixture"}))
+            .delayed(Duration::from_millis(2100)),
+    );
+    let (answer, mut gate) = Answer::json(
+        200,
+        json!({"agent_id":"fixture-agent","credential":"fixture-agent-key"}),
+    )
+    .gated();
+    fixture.answer("register", answer);
+    let home = Home::new();
+    let runtime = runtime(&fixture, false);
+    // Freeze before retry setup as well as while registration is held. Real
+    // socket and private-file setup consume none of the virtual phase budget.
+    let (hold, release) = std::sync::mpsc::channel::<()>();
+    let clock = tokio::task::spawn_blocking(move || {
+        let _ = release.recv_timeout(Duration::from_secs(15));
+    });
+    tokio::time::pause();
+    let options = fast(&runtime, &home, "1");
+    let backoff = options.timing.retry_delays[0];
+    let board = Board::attach_options(runtime.clone(), options).await;
+    tokio::task::yield_now().await;
+    // Cross the timer wheel's millisecond tick as well as the backoff deadline.
+    tokio::time::advance(backoff + Duration::from_millis(1)).await;
+    gate.wait().await;
+    // Pin the fixture budget: a successful 350 ms registration must still fit
+    // the production retry budget when only the backoff is accelerated.
+    tokio::time::advance(Duration::from_millis(350)).await;
+    tokio::task::yield_now().await;
+    gate.release();
+    tokio::time::resume();
+    drop(hold);
+    clock.await.unwrap();
+    let call = registered(&board).await;
+    assert_eq!(call.operation.headers["x-pl-agent"], "fixture-agent");
+    assert_eq!(fixture.count("/register"), 1);
+    board.close().await;
+}
+
 #[tokio::test]
 async fn board_retry_transient_startup_matrix() {
     if capture(
@@ -121,10 +208,17 @@ async fn board_retry_transient_startup_matrix() {
     }
     for mode in ["refused", "overloaded", "hung"] {
         let fixture = Fixture::new(0);
-        fixture.answer("context", outage(mode));
+        let mut gate = if mode == "hung" {
+            let (answer, gate) = outage(mode).gated();
+            fixture.answer("context", answer);
+            Some(gate)
+        } else {
+            fixture.answer("context", outage(mode));
+            None
+        };
         let home = Home::new();
         let runtime = runtime(&fixture, false);
-        let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
+        let board = attach(runtime.clone(), fast(&runtime, &home, "1"), gate.as_mut()).await;
         let error = board
             .prepare_call(
                 "memory_agents",
@@ -299,12 +393,20 @@ async fn board_retry_permanent_later_refusal_stops_and_hints_once() {
 async fn board_retry_close_cancels_hung_and_continuously_refused_attempts() {
     for mode in ["refused", "hung"] {
         let fixture = Fixture::new(0);
-        for _ in 0..20 {
+        let mut gate = if mode == "hung" {
+            let (answer, gate) = outage(mode).gated();
+            fixture.answer("context", answer);
+            Some(gate)
+        } else {
+            fixture.answer("context", outage(mode));
+            None
+        };
+        for _ in 0..19 {
             fixture.answer("context", outage(mode));
         }
         let home = Home::new();
         let runtime = runtime(&fixture, false);
-        let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
+        let board = attach(runtime.clone(), fast(&runtime, &home, "1"), gate.as_mut()).await;
         fixture.wait("/context", 2).await;
         tokio::time::timeout(Duration::from_millis(100), board.close())
             .await
@@ -318,18 +420,15 @@ async fn board_retry_close_cancels_hung_and_continuously_refused_attempts() {
 #[tokio::test]
 async fn board_retry_cancelled_attach_waits_out_attachment_busy() {
     let fixture = Fixture::new(0);
-    fixture.answer(
-        "attach",
-        Answer::json(200, json!({"generation":1,"pending_count":0}))
-            .delayed(Duration::from_millis(350)),
-    );
+    let (answer, mut gate) = Answer::json(200, json!({"generation":1,"pending_count":0})).gated();
+    fixture.answer("attach", answer);
     fixture.answer(
         "attach",
         Answer::json(409, json!({"error":"attachment_busy"})),
     );
     let home = Home::new();
     let runtime = runtime(&fixture, false);
-    let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
+    let board = attach(runtime.clone(), fast(&runtime, &home, "1"), Some(&mut gate)).await;
     let call = registered(&board).await;
     assert_eq!(call.operation.headers["x-pl-agent"], "fixture-agent");
     assert_eq!(fixture.count("/register"), 1);

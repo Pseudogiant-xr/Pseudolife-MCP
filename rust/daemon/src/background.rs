@@ -14,10 +14,23 @@ pub type Duty<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>
 pub fn seconds(raw: Option<&str>, default: f64) -> Result<f64, String> {
     match raw {
         None => Ok(default),
-        Some(raw) => crate::storage::py_strip(raw)
-            .replace('_', "")
-            .parse::<f64>()
-            .map_err(|_| "background interval is not a number".into()),
+        Some(raw) => {
+            let text = crate::storage::py_strip(raw);
+            let bytes = text.as_bytes();
+            for (index, byte) in bytes.iter().enumerate() {
+                if *byte == b'_'
+                    && !(index > 0
+                        && index + 1 < bytes.len()
+                        && bytes[index - 1].is_ascii_digit()
+                        && bytes[index + 1].is_ascii_digit())
+                {
+                    return Err("background interval is not a number".into());
+                }
+            }
+            text.replace('_', "")
+                .parse::<f64>()
+                .map_err(|_| "background interval is not a number".into())
+        }
     }
 }
 
@@ -194,6 +207,23 @@ where
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn seconds_underscores_match_python_float() {
+        // CPython float(raw), checked 2026-10-10: separators sit between digits.
+        for raw in ["1__0", "_10", "10_", "1_.0", "1._0", "1_e2", "1e_2", "+_10"] {
+            assert!(seconds(Some(raw), 30.0).is_err(), "{raw:?}");
+        }
+        for (raw, expected) in [
+            ("1_0", 10.0),
+            ("  +1_0.0_5e+1_0\t", 100_500_000_000.0),
+            (".1_0", 0.1),
+            ("-0_0", -0.0),
+        ] {
+            assert_eq!(seconds(Some(raw), 30.0), Ok(expected), "{raw:?}");
+        }
+        assert_eq!(seconds(None, 30.0), Ok(30.0));
+    }
 
     #[derive(Default)]
     struct Fake {

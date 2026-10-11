@@ -4,7 +4,7 @@ use serde_json::Value;
 pub(super) fn input(text: &str) -> Result<Value, ()> {
     // Keep serde_json's default nesting limit. Do not recreate interpreter stack
     // limits or disable the bound for untrusted host input and daemon metadata.
-    serde_json::from_str(text).map_err(|_| ())
+    super::doorbell_seen::json::value_from_str(text).map_err(|_| ())
 }
 
 pub(super) fn quoted(text: &str) -> String {
@@ -35,6 +35,19 @@ pub(super) fn quoted(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_number_keys_remain_ordinary_hook_metadata() {
+        // briefing_cli.py:55,183: json.loads retains nested objects verbatim.
+        for token in ["not a number", "123"] {
+            let text = format!(
+                r#"{{"session_id":"sess-1","markdown":"ok","other":[{{"$serde_json::private::Number":"{token}"}}]}}"#
+            );
+            let value = input(&text).unwrap();
+            assert!(value["other"][0].is_object());
+            assert_eq!(value["other"][0]["$serde_json::private::Number"], token);
+        }
+    }
 
     #[test]
     fn ignored_metadata_retains_valid_large_numbers_and_duplicate_keys() {

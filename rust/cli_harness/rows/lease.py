@@ -96,7 +96,7 @@ class Board:
 
     def __init__(self, scenario="free", bank=True):
         from pseudolife_memory.storage.coordination import CoordinationStore
-        self.name = f"pl_cf_lease_{uuid.uuid4().int % 10**18}" if bank else None
+        self.name = _bank.name(f"pl_cf_lease_{uuid.uuid4().int % 10**18}") if bank else None
         self.conn = None
         self.records = []
         self.states = []
@@ -359,6 +359,16 @@ def cases():
             add(f"check-suite-{state}-{slot}" + ("-json" if flag else ""),
                 ["check", "full-suite", *flag], setup=_suite(state, slot))
     add("check-suite-elsewhere", ["check", "full-suite@box", "--json"], setup=_suite("held"))
+    # lease_cli.py:1391 copies these holder fields after json.loads.
+    for suffix, value in (("text", "not a number"), ("numeric", "123")):
+        def private_holder(arm, value=value):
+            from ..producers import write_private
+            _suite("held")(arm)
+            write_private(arm.home / "suite" / "full-suite.holder.json", json.dumps(
+                {"pid": 1, "worktree": {"$serde_json::private::Number": value},
+                 "started": "fixture"}))
+        add(f"check-suite-private-number-{suffix}", ["check", "full-suite", "--json"],
+            setup=private_holder, golden=False)
     for scenario in ("free", "claim", "other-mirror", "same-mirror"):
         for flag in ([], ["--json"]):
             add("check-board-" + scenario + ("-json" if flag else ""),

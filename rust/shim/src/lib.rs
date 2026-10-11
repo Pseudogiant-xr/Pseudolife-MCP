@@ -6,6 +6,8 @@ pub mod cli;
 pub mod credentials;
 pub mod daemon_url;
 mod errors;
+#[path = "../../shared/float_repr.rs"]
+mod float_repr;
 pub mod lifecycle;
 pub mod maintainer_sent;
 mod owned_transport;

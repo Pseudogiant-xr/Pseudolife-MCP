@@ -641,4 +641,389 @@ mod tests {
         assert_eq!(got[1].0, 2);
         assert!((got[1].1 - 0.3).abs() < 1e-12);
     }
+
+    fn mutation_params() -> Params {
+        Params {
+            query: String::new(),
+            k: 8,
+            sources: None,
+            tags: None,
+            min_score: None,
+            default_floor: 0.25,
+            bm25: None,
+            hide_superseded: false,
+            bands: None,
+        }
+    }
+
+    fn mutation_bank(entries: Vec<Entry>, cosines: &[f32]) -> Bank {
+        assert_eq!(entries.len(), cosines.len());
+        Bank {
+            dim: 2,
+            entries,
+            matrix: cosines.iter().flat_map(|&c| [c, 0.0]).collect(),
+        }
+    }
+
+    #[test]
+    fn filters_apply_before_dense_slot_and_lexical_caps() {
+        // cms.py:920-947,998,1135-1143,1204-1221.
+        for channel in 0..3 {
+            for filter in 0..3 {
+                let mut excluded = entry(1, "needle", "assistant", false);
+                excluded.band = "deep".into();
+                excluded.tags = vec![json!("bad")];
+                let mut included = entry(2, "needle alpha beta", "agent", false);
+                included.tags = vec![json!("good")];
+                excluded.slots = vec![json!(["needle", "kind", "value", "+"])];
+                included.slots = excluded.slots.clone();
+                let bank = mutation_bank(
+                    vec![excluded, included],
+                    if channel == 0 {
+                        &[1.0, 0.5]
+                    } else {
+                        &[0.0, 0.0]
+                    },
+                );
+                let mut p = mutation_params();
+                p.k = 1;
+                if channel != 0 {
+                    p.query = "needle".into();
+                }
+                if channel == 2 {
+                    // Exercise the lexical channel without slot injection.
+                    p.query = "needle".into();
+                    p.bm25 = Some(DEFAULT_BM25);
+                }
+                match filter {
+                    0 => p.bands = Some(["flat".into()].into()),
+                    1 => p.sources = Some(["agent".into()].into()),
+                    _ => p.tags = Some(["good".into()].into()),
+                }
+                let mut bank = bank;
+                if channel == 2 {
+                    for row in &mut bank.entries {
+                        row.slots.clear();
+                    }
+                }
+                let hits = rank(&bank, &[1.0, 0.0], &p);
+                assert_eq!(
+                    hits.iter()
+                        .map(|h| bank.entries[h.idx].id)
+                        .collect::<Vec<_>>(),
+                    [2],
+                    "channel {channel}, filter {filter}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dense_floor_is_inclusive_before_source_and_supersession_weights() {
+        // cms.py:1036-1067 gates relevance before adjusted source/supersession score.
+        let bank = mutation_bank(
+            vec![
+                entry(1, "current", "assistant", false),
+                entry(2, "history", "agent", true),
+            ],
+            &[0.5, 0.5],
+        );
+        let p = Params {
+            min_score: Some(0.5),
+            ..mutation_params()
+        };
+        let hits = rank(&bank, &[1.0, 0.0], &p);
+        assert_eq!(hits.iter().map(|h| h.idx).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(hits[0].score, 0.425);
+        assert_eq!(hits[1].score, 0.275);
+        let hidden = Params {
+            hide_superseded: true,
+            k: 1,
+            ..p
+        };
+        let bank = mutation_bank(bank.entries, &[0.5, 1.0]);
+        assert_eq!(rank(&bank, &[1.0, 0.0], &hidden)[0].idx, 0);
+        let above = Params {
+            min_score: Some(0.500001),
+            ..hidden
+        };
+        assert!(rank(&bank, &[1.0, 0.0], &above).is_empty());
+    }
+
+    #[test]
+    fn slot_pool_keeps_history_and_skips_superseded_digests() {
+        // cms.py:1851-1954 and 1145-1155: own scale, explicit floor only.
+        let mut history = entry(1, "history", "agent", true);
+        history.slots = vec![json!(["needle", "ignored", "", "+"])];
+        let mut digest = entry(2, "digest", "digest", true);
+        digest.slots = history.slots.clone();
+        let bank = mutation_bank(vec![history, digest], &[0.0, 0.0]);
+        let p = Params {
+            query: "needle".into(),
+            hide_superseded: true,
+            default_floor: 0.99,
+            ..mutation_params()
+        };
+        let hits = rank(&bank, &[1.0, 0.0], &p);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].idx, 0);
+        assert!((hits[0].score - 0.495).abs() < 1e-12);
+        let equal_floor = Params {
+            query: "needle".into(),
+            hide_superseded: true,
+            min_score: Some(0.49500000000000005),
+            ..mutation_params()
+        };
+        assert_eq!(rank(&bank, &[1.0, 0.0], &equal_floor).len(), 1);
+        assert!(
+            rank(
+                &bank,
+                &[1.0, 0.0],
+                &Params {
+                    min_score: Some(0.5),
+                    ..p
+                }
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            slot_text(Some(&json!([true, null, "needle"]))),
+            "[True, None, 'needle']"
+        );
+        assert_eq!(slot_text(Some(&json!(false))), "False");
+        assert_eq!(slot_text(Some(&json!(null))), "None");
+        assert_eq!(slot_text(None), "None");
+        let mut current = entry(3, "current", "agent", false);
+        current.slots = vec![json!(["needle", "kind", "", "+"])];
+        let dense_bank = mutation_bank(vec![current], &[0.5]);
+        let dense_params = Params {
+            query: "needle".into(),
+            ..mutation_params()
+        };
+        let dense_hits = rank(&dense_bank, &[1.0, 0.0], &dense_params);
+        assert_eq!(dense_hits.len(), 1);
+        assert_eq!(dense_hits[0].score, 0.5);
+
+        assert_eq!(
+            content_tokens("An AB abc abcde O'NEIL your YOU 123 xyz"),
+            ["abc", "abcde", "o'neil", "xyz"].map(String::from).into()
+        );
+    }
+
+    #[test]
+    fn bm25_normalized_scores_match_python_for_nonuniform_documents() {
+        // memory/bm25.py:152-181,219-248; cms.py:1226-1233,1277-1289.
+        // Python BM25Index + normalize_scores, measured 2026-10-10 on five documents.
+        // Large finite k1 exposes floating-point underflow in algebraic rescaling.
+        for (k1, b, middle) in [
+            (1.5, 0.75, 0.5699109960117469),
+            (0.0, 0.0, 1.0),
+            (2.2, 0.25, 0.8644745252830662),
+            (1e200, 0.75, 0.3697540973920596),
+        ] {
+            let rows = [
+                "alpha alpha beta",
+                "alpha beta beta gamma delta",
+                "beta gamma",
+                "unrelated",
+                "the is are",
+            ];
+            let bank = mutation_bank(
+                rows.iter()
+                    .enumerate()
+                    .map(|(i, t)| entry(i as i64 + 1, t, "agent", false))
+                    .collect(),
+                &[0.0; 5],
+            );
+            let p = Params {
+                query: "alpha beta beta".into(),
+                bm25: Some(Bm25Knobs {
+                    k1,
+                    b,
+                    min_norm: 0.0,
+                    ..DEFAULT_BM25
+                }),
+                ..mutation_params()
+            };
+            let hits = rank(&bank, &[1.0, 0.0], &p);
+            assert_eq!(
+                hits.iter()
+                    .map(|h| bank.entries[h.idx].id)
+                    .collect::<Vec<_>>(),
+                [1, 2, 3]
+            );
+            for (hit, expected) in hits.iter().zip([0.3, 0.3 * middle, 0.0]) {
+                assert!(
+                    (hit.score - expected).abs() < 1e-12,
+                    "{k1} {b}: {}",
+                    hit.score
+                );
+            }
+            let boosted_bank = mutation_bank(bank.entries, &[0.0, 0.5, 0.0, 0.0, 0.0]);
+            let boosted = rank(&boosted_bank, &[1.0, 0.0], &p);
+            assert_eq!(boosted.len(), 3);
+            assert_eq!(boosted[0].idx, 1);
+            assert!((boosted[0].score - (0.5 + 0.3 * middle)).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn bm25_boosts_dense_hits_and_applies_inclusive_injection_gates() {
+        // cms.py:1257-1262,1277-1289: boost, then lexical-only explicit-floor gate.
+        let bank = mutation_bank(
+            vec![
+                entry(1, "needle", "agent", false),
+                entry(2, "needle", "agent", false),
+            ],
+            &[0.5, 0.0],
+        );
+        let p = Params {
+            query: "needle".into(),
+            bm25: Some(Bm25Knobs {
+                min_norm: 1.0,
+                ..DEFAULT_BM25
+            }),
+            ..mutation_params()
+        };
+        let hits = rank(&bank, &[1.0, 0.0], &p);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].idx, 0);
+        assert_eq!(hits[0].score, 0.8);
+        let bank = mutation_bank(vec![entry(1, "needle", "agent", false)], &[0.0]);
+        let p = Params {
+            min_score: Some(0.3),
+            ..p
+        };
+        assert_eq!(rank(&bank, &[1.0, 0.0], &p)[0].score, 0.3);
+        assert!(
+            rank(
+                &bank,
+                &[1.0, 0.0],
+                &Params {
+                    min_score: Some(0.300001),
+                    ..p
+                }
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn bm25_handles_empty_pools_stop_words_and_top_n() {
+        // memory/bm25.py:164-167,184-214,219-248.
+        let empty = mutation_bank(vec![], &[]);
+        let mut p = Params {
+            query: "needle".into(),
+            bm25: Some(DEFAULT_BM25),
+            ..mutation_params()
+        };
+        assert!(rank(&empty, &[1.0, 0.0], &p).is_empty());
+        let bank = mutation_bank(
+            vec![
+                entry(1, "needle", "agent", false),
+                entry(2, "needle needle extra", "agent", false),
+            ],
+            &[0.0, 0.0],
+        );
+        p.bm25.as_mut().unwrap().top_n = 0;
+        assert!(rank(&bank, &[1.0, 0.0], &p).is_empty());
+        p.bm25.as_mut().unwrap().top_n = 1;
+        assert_eq!(rank(&bank, &[1.0, 0.0], &p).len(), 1);
+        for query in ["", "the is are", "missing"] {
+            p.query = query.into();
+            assert!(rank(&bank, &[1.0, 0.0], &p).is_empty(), "{query}");
+        }
+        let bank = mutation_bank(vec![entry(1, "the is are", "agent", false)], &[0.0]);
+        p.query = "needle".into();
+        assert!(rank(&bank, &[1.0, 0.0], &p).is_empty());
+    }
+
+    #[test]
+    fn search_json_preserves_metadata_and_python_rounding() {
+        // service.py:147-195,213-259; sync.py:82-103.
+        let mut row = entry(7, "note", "agent", false);
+        row.ts = 12.5;
+        row.access_count = 3;
+        row.surprise_value = 0.12345;
+        row.episode_id = Some("episode".into());
+        row.episode_title = Some("title".into());
+        row.tags = vec![json!("tag"), json!(7)];
+        row.slots = vec![json!(["entity", "attribute", true, "+"])];
+        row.authority = Some("observed".into());
+        row.distortion_tolerance = Some("constraint".into());
+        let bank = mutation_bank(vec![row], &[0.0]);
+        assert_eq!(
+            entry_json(&bank, &bank.entries[0], 0.03125),
+            json!({
+                "id":7,"text":"note","source":"agent","bank":"flat","timestamp":12.5,
+                "access_count":3,"surprise_score":0.1235,"superseded":false,
+                "superseded_at":null,"superseded_by_text":null,"episode_id":"episode",
+                "episode_title":"title","tags":["tag",7],"authority":"observed",
+                "distortion_tolerance":"constraint","score":0.0312,
+                "slots":[{"entity":"entity","attribute":"attribute","value":true,"polarity":"+"}]
+            })
+        );
+        let mut bank = bank;
+        bank.entries[0].authority = Some("".into());
+        bank.entries[0].distortion_tolerance = Some("".into());
+        bank.entries[0].slots.clear();
+        let served = entry_json(&bank, &bank.entries[0], 0.0);
+        for key in [
+            "authority",
+            "distortion_tolerance",
+            "slots",
+            "superseded_by_id",
+        ] {
+            assert!(served.get(key).is_none(), "{key}");
+        }
+    }
+
+    #[test]
+    fn supersession_resolves_only_an_unambiguous_other_entry() {
+        // service.py:213-259: exclude self, choose sole current twin, do not follow chains.
+        for (sources, retired, want_id, verified, current) in [
+            (vec![], vec![], None, false, false),
+            (vec!["correction"], vec![true], Some(2), true, false),
+            (vec!["consolidation"], vec![false], Some(2), true, true),
+            (vec!["agent"], vec![false], Some(2), false, true),
+            (
+                vec!["correction", "agent"],
+                vec![true, false],
+                Some(3),
+                false,
+                true,
+            ),
+            (
+                vec!["correction", "agent"],
+                vec![false, false],
+                None,
+                false,
+                false,
+            ),
+            (
+                vec!["correction", "agent"],
+                vec![true, true],
+                None,
+                false,
+                false,
+            ),
+        ] {
+            let mut subject = entry(1, "replacement", "agent", true);
+            subject.superseded_by_text = Some("replacement".into());
+            let mut rows = vec![subject];
+            for (i, (source, retired)) in sources.iter().zip(retired).enumerate() {
+                rows.push(entry(i as i64 + 2, "replacement", source, retired));
+            }
+            let bank = mutation_bank(rows, &vec![0.0; sources.len() + 1]);
+            let value = entry_json(&bank, &bank.entries[0], 0.5);
+            assert_eq!(value["superseded_by_id"], json!(want_id));
+            assert_eq!(value["supersession_verified"], json!(verified));
+            assert_eq!(value["superseded_by_current"], json!(current));
+        }
+        let bank = mutation_bank(vec![entry(1, "no successor", "agent", true)], &[0.0]);
+        assert_eq!(
+            entry_json(&bank, &bank.entries[0], 0.0)["superseded_by_id"],
+            json!(null)
+        );
+    }
 }

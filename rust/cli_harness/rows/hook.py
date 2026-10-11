@@ -64,6 +64,16 @@ def _briefing_cases() -> list[Case]:
     add(Case("briefing-help", ["briefing", "--help"]))
     add(Case("briefing-daemon-down", ["briefing", "--hook-json"]))
     add(Case("briefing-plain", ["briefing"], daemon=daemon(), env=TOKEN))
+    # briefing_cli.py:55 and :183 retain ordinary nested JSON objects.
+    for suffix, value in (("text", "not a number"), ("numeric", "123")):
+        extra = {"$serde_json::private::Number": value}
+        add(Case(f"briefing-private-number-{suffix}", ["briefing"], expect_output=True,
+                 golden=False,
+                 daemon=daemon(**{"/api/briefing": json_body(
+                     {"markdown": MARKDOWN, "extra": [extra]})}), env=TOKEN))
+        add(Case(f"prompt-private-number-{suffix}", ["prompt-hook"], expect_output=True,
+                 golden=False,
+                 stdin=prompt_input(extra=[extra]), daemon=daemon(), env=TOKEN))
     add(Case("briefing-caps", ["briefing", "--max-unsure", "5", "--max-lessons", "2",
                                "--max-world", "0"], daemon=daemon(), env=TOKEN))
     add(Case("briefing-hook-json", ["briefing", "--hook-json"], daemon=daemon(), env=TOKEN))
