@@ -128,10 +128,6 @@ fn help_accepts_default_and_wide_columns() {
 
 #[test]
 fn argparse_spellings_and_parent_paths_archive_the_selected_tree() {
-    let home = Home::new("argv");
-    let bank = home.path().join("bank");
-    fs::create_dir_all(bank.join("sub")).unwrap();
-    fs::write(bank.join("state.json"), "state").unwrap();
     let separator = std::path::MAIN_SEPARATOR;
     let parent = format!("bank{separator}sub{separator}..{separator}.");
     for arguments in [
@@ -151,8 +147,14 @@ fn argparse_spellings_and_parent_paths_archive_the_selected_tree() {
             "--keep=1e3".into(),
         ],
     ] {
-        let output = command(home.path()).args(arguments).output().unwrap();
-        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        // Each spelling needs a fresh output: Python's Windows rename refuses
+        // an archive with the same second's timestamp from a preceding run.
+        let home = Home::new("argv");
+        let bank = home.path().join("bank");
+        fs::create_dir_all(bank.join("sub")).unwrap();
+        fs::write(bank.join("state.json"), "state").unwrap();
+        let output = command(home.path()).args(&arguments).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{arguments:?}: {output:?}");
         assert!(output.stderr.is_empty());
         let stdout = String::from_utf8(output.stdout).unwrap();
         let state = stdout
