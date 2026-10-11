@@ -43,6 +43,18 @@ def test_ported_row_and_mutant_ci_inventory():
     check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text()))
 
 
+def test_inventory_reads_utf8_sources_under_windows_default_encoding(monkeypatch):
+    from inventory import check
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    read_text = Path.read_text
+
+    def windows_read_text(path, encoding=None, errors=None):
+        return read_text(path, encoding=encoding or 'cp1252', errors=errors)
+
+    monkeypatch.setattr(Path, 'read_text', windows_read_text)
+    check(workflow)
+
+
 def test_source_control_target_is_bound_at_step_scope():
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text())
     source = workflow['jobs']['source-mutants']

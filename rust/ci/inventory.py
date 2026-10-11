@@ -15,7 +15,7 @@ SYSTEMS = ["ubuntu-latest", "windows-latest"]
 def cli_controls():
     result = {}
     for path in (ROOT / "rust/cli_harness/rows").glob("*.py"):
-        ids = {node.args[0].value for node in ast.walk(ast.parse(path.read_text()))
+        ids = {node.args[0].value for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                and node.func.id == "Mutant"}
         if ids:
@@ -24,14 +24,14 @@ def cli_controls():
 
 
 def assigned_list(path, name):
-    tree = ast.parse((ROOT / path).read_text())
+    tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
     return next(ast.literal_eval(node.value) for node in tree.body
                 if isinstance(node, ast.Assign)
                 and any(isinstance(target, ast.Name) and target.id == name for target in node.targets))
 
 
 def daemon_scenarios():
-    tree = ast.parse((ROOT / 'rust/daemon/harness/run.py').read_text())
+    tree = ast.parse((ROOT / 'rust/daemon/harness/run.py').read_text(encoding="utf-8"))
     classes = {}
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
@@ -48,7 +48,7 @@ def check(workflow):
     from coverage_plan import SUITES, DAEMON_CONTROLS, GRAPH_CONTROLS, W1A, EXCEPTIONS, SOURCE_SHARDS
 
     declared = cli_controls()
-    selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text())
+    selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
     assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"
     rows = assigned_list("rust/cli_harness/rows/__init__.py", "ROWS")
     assert set(rows) == set(selected), "accepted row without a source-control CI selection"
@@ -134,5 +134,5 @@ def check(workflow):
 
 if __name__ == "__main__":
     import yaml
-    check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text()))
+    check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
     print("ported-row-and-mutant-ci-inventory: all named selections accounted for")
