@@ -1193,6 +1193,22 @@ class StaticBuild(Scenario):
 
 class StaticPaths(StaticBuild):
     name = "static-paths"
+    golden_replay = True
+
+    def timeline(self, procs, holders):
+        yield from self.cases()
+        if type(self) is StaticPaths and os.name != "nt":
+            for d in procs.values():
+                index = d.cwd / "static" / "index.html"
+                index.unlink()
+                index.symlink_to(d.cwd / "outside" / "secret.txt")
+            for path in ("/ui/", "/ui/unknown/route"):
+                yield case("outside index " + path, "GET", path)
+            for d in procs.values():
+                index = d.cwd / "static" / "index.html"
+                index.unlink()
+                index.symlink_to("sub/index.html")
+            yield case("inside index fallback", "GET", "/ui/unknown/route")
 
     def prepare_home(self, home):
         root = home / "static"

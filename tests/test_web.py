@@ -9,6 +9,7 @@ so these tests require torch installed and run under ``.venv``.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import pytest
@@ -539,6 +540,45 @@ def test_asgi_static_index(svc):
 def test_asgi_static_traversal_blocked(svc):
     st, _ = call(_app(svc), "GET", "/ui/../../../etc/passwd")
     assert st == 403
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
+def test_spa_fallback_refuses_index_resolving_outside_root(tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    root = tmp_path / "static"
+    root.mkdir()
+    outside = tmp_path / "index.html"
+    outside.write_bytes(b"marker")
+    (root / "index.html").symlink_to(outside)
+    monkeypatch.setattr(api, "STATIC_DIR", root)
+    direct = api._serve_static("/ui/")
+    assert direct == (403, b"forbidden", "text/plain")
+    assert api._serve_static("/ui/unknown/route") == direct
+
+
+@pytest.mark.parametrize("linked", [False, pytest.param(True, marks=pytest.mark.skipif(
+    os.name == "nt", reason="file-link fixtures run on POSIX"))])
+def test_spa_fallback_serves_index_within_root(tmp_path, monkeypatch, linked):
+    from pseudolife_memory.web import api
+
+    root = tmp_path / "static"
+    root.mkdir()
+    if linked:
+        (root / "shell.html").write_bytes(b"shell")
+        (root / "index.html").symlink_to("shell.html")
+    else:
+        (root / "index.html").write_bytes(b"shell")
+    monkeypatch.setattr(api, "STATIC_DIR", root)
+    assert api._serve_static("/ui/unknown/route") == (
+        200, b"shell", "text/html; charset=utf-8")
+
+
+def test_spa_fallback_without_index_is_not_found(tmp_path, monkeypatch):
+    from pseudolife_memory.web import api
+
+    monkeypatch.setattr(api, "STATIC_DIR", tmp_path)
+    assert api._serve_static("/ui/unknown/route") == (404, b"not found", "text/plain")
 
 
 def test_asgi_root_redirects(svc):
