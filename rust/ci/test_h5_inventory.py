@@ -310,3 +310,11 @@ def test_inventory_rejects_dropped_runtime_background_scenario(monkeypatch, scen
                                                if a['scenario'] != scenario])
     with pytest.raises(AssertionError, match='accepted daemon scenario'):
         check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
+
+
+def test_h5_artifacts_do_not_walk_deliberate_scratch_symlink_loops():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    upload = next(s for s in workflow['jobs']['parity-checks']['steps']
+                  if s.get('name') == 'Retain H5 row and control outcomes')
+    assert upload['with']['path'].splitlines() == ['${{ runner.temp }}/h5/*.json',
+                                                 '${{ runner.temp }}/h5/goldens/*.json']

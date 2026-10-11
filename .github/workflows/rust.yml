@@ -734,7 +734,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: h5-${{ runner.os }}-${{ matrix.suite }}
-          path: ${{ runner.temp }}/h5/**/*.json
+          # Static-path witnesses leave deliberate symlink loops in scratch.
+          # Upload only receipts and oracle captures, without walking scratch.
+          path: |
+            ${{ runner.temp }}/h5/*.json
+            ${{ runner.temp }}/h5/goldens/*.json
           if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'
