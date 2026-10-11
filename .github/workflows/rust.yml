@@ -576,8 +576,9 @@ jobs:
           if-no-files-found: error
       - name: Prepare disposable PostgreSQL for W1-C rows
         if: startsWith(matrix.suite, 'w1c-')
-        # Master run 38076979343, 2026-10-10: Windows setup 12s; twice, rounded up.
-        timeout-minutes: 1
+        # Master run 38076979343, 2026-10-10: Windows setup 12s.
+        # Five-minute floor because this step is network-bound.
+        timeout-minutes: 5
         shell: pwsh
         # pg0's initdb inherits the locale on Linux; template1 then retains
         # both the recorded graph-read ordering and the test login's vector.
@@ -609,8 +610,9 @@ jobs:
       #   report.
       - name: Build the test_login container image
         if: runner.os == 'Linux' && matrix.suite == 'w1c-connection'
-        # Master run 38076979343, 2026-10-10: Linux image build 13s; twice, rounded up.
-        timeout-minutes: 1
+        # Master run 38076979343, 2026-10-10: Linux image build 13s.
+        # Five-minute floor because this step is network-bound.
+        timeout-minutes: 5
         run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
       - name: CLI W1-C differential harness
         if: startsWith(matrix.suite, 'w1c-')
@@ -646,7 +648,7 @@ jobs:
         if: "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
         uses: actions/upload-artifact@v4
         with:
-          name: test_login-linux-golden-${{ matrix.suite }}
+          name: test_login-linux-golden
           path: |
             rust/cli_harness/goldens/test_login.linux.json
             ${{ runner.temp }}/test-login-linux-record.json

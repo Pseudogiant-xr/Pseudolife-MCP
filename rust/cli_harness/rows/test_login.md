@@ -162,9 +162,10 @@ and `os.replace` on Windows, with ` -> '<dst>'` for a replace, file names in
 
 ## Hosted CI and goldens
 
-Both Parity lanes (`.github/workflows/rust.yml`) run the row live after the
-lease step installs pg0, whose `~/.pg0/installation/<ver>/bin` supplies
-`initdb` and pgvector for the throwaway clusters. The ubuntu lane first
+Both Parity lanes (`.github/workflows/rust.yml`) run the row live after
+`Prepare disposable PostgreSQL for W1-C rows` installs pg0, whose
+`~/.pg0/installation/<ver>/bin` supplies `initdb` and pgvector for the
+throwaway clusters. The ubuntu lane first
 builds `pseudolife-pg:18` from `ops/Dockerfile.pg`, so its container cases
 run too.
 
