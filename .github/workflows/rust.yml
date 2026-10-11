@@ -74,7 +74,7 @@ jobs:
         working-directory: .
         shell: pwsh
         run: |
-          python -m pip install pytest pyyaml
+          python -m pip install pytest pyyaml "psycopg[binary]" psutil
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py -k 'not committed_census_matches_current_tree'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -221,7 +221,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
-        suite: [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-daemon-mutants, h5-graph-mutants]
+        suite: [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
         # W1-C row sums: master run 38076979343, 2026-10-10, Windows.
         # Live + golden: doctor 15.3m; pairing 17.6m; connection 20.1m.
         # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice
@@ -256,6 +256,12 @@ jobs:
             h5_timeout: 15
             h5_windows_timeout: 40
             job_timeout: 56
+          # Linux 2026-10-11: six background scenarios, 9 live cases,
+          # 110s combined; 4m allows about twice measured CPU work.
+          - suite: h5-background
+            h5_timeout: 4
+            h5_windows_timeout: 20
+            job_timeout: 30
           - suite: h5-daemon-mutants
             h5_timeout: 6
             h5_windows_timeout: 20
@@ -700,7 +706,7 @@ jobs:
           python rust/cli_harness/lease_ci.py
           exit $LASTEXITCODE
       - name: Install offline W1-A fixture dependencies
-        if: matrix.suite == 'h5-w1a' || matrix.suite == 'h5-daemon-mutants'
+        if: matrix.suite == 'h5-w1a' || matrix.suite == 'h5-background' || matrix.suite == 'h5-daemon-mutants'
         # Network-bound setup gets the five-minute floor.
         timeout-minutes: 5
         run: python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0"
@@ -828,7 +834,9 @@ jobs:
   source-mutants:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
     name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
-    needs: [candidate, rust]
+    # These shards compile their own source copies and consume no rust-job
+    # artifact; the final Parity gate still requires both Rust jobs.
+    needs: [candidate]
     strategy:
       fail-fast: false
       matrix:

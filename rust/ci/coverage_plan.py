@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SOURCE_MUTANTS = json.loads((HERE / 'source_mutants.json').read_text())
+SOURCE_MUTANTS = json.loads((HERE / 'source_mutants.json').read_text(encoding="utf-8"))
 # Linux 2026-10-11: the slowest eight-control selection took 81s;
 # the first cold compile added 65s. Keep that bound on each parallel job.
 SOURCE_SHARDS = {f'{row}-{index // 8}': (row, ids[index:index + 8])
                  for row, ids in SOURCE_MUTANTS.items() for index in range(0, len(ids), 8)}
-AUDIT_GOLDEN_CASES = json.loads((HERE / 'audit_golden_cases.json').read_text())
+AUDIT_GOLDEN_CASES = json.loads((HERE / 'audit_golden_cases.json').read_text(encoding="utf-8"))
 W1A = ('tokens', 'tokenless', 'pair-budget', 'config', 'extractor', 'db-down',
        'lease-held', 'reaper', 'dim-mismatch', 'stamped', 'seeded',
        'json-float-shortest-ties', 'trust-bind', 'null-embedding',
@@ -78,6 +78,8 @@ GRAPH_CONTROLS = {
              'graph-read-inverse-closure', 'graph-read-provenance', 'graph-read-depth',
              'graph-read-path-order', 'graph-read-suggestions'],
 }
+BACKGROUND = ('session-reap', 'session-restart', 'session-resume-refusal',
+              'session-sweep', 'session-tombstone-restart', 'sweep-recovery')
 SUITES = {
     'h5-audit': [dict(kind='cli', row='audit', mode=mode,
                       cases=AUDIT_GOLDEN_CASES if mode != 'live' else [])
@@ -87,7 +89,37 @@ SUITES = {
     'h5-w1a': [dict(kind='daemon', scenario=name, mode=mode, record=mode == 'live')
                 for name in W1A if name not in EXCEPTIONS['w1a']
                 for mode in ('live', 'golden')],
+    'h5-background': [dict(kind='daemon', scenario=name, mode='live') for name in BACKGROUND],
     'h5-daemon-mutants': [dict(kind='daemon', mutant=name, scenarios=scenarios, mode='mutants')
                           for name, scenarios in DAEMON_CONTROLS.items()],
     'h5-graph-mutants': [dict(kind='graph', mode='mutants', row=row) for row in GRAPH_CONTROLS],
+}
+
+
+# Platform-specific declarations are pinned separately from observed failures.
+# Host runtime registration must match this roster before a shard can filter.
+PLATFORM_EXCLUSIONS = {
+    'linux': {
+        'backup-dotfile-suffix-windows': 'Registered only by the Windows backup source branch.',
+        'backup-member-mode-windows': 'Registered only by the Windows backup source branch.',
+        'backup-top-order-windows': 'Registered only by the Windows backup source branch.',
+        'doctor-json-depth-off-by-one': 'Registered only by the Windows doctor source branch.',
+        'doctor-pathlib-keeps-dot-parts': 'Registered only by the Windows doctor source branch.',
+        'doctor-which-skips-cwd': 'Registered only by the Windows doctor source branch.',
+        'episode-home-drive-insensitive': 'Declared Windows-only drive spelling witness.',
+        'hook-first-address-only': 'Declared Windows-only resolver witness.',
+        'pair-cleanup-error-swallowed': 'Registered only by the Windows pairing source branch.',
+        'pair-not-owner-only': 'Registered only by the Windows pairing source branch.',
+        'tunnel-dangling-junction-answered': 'Registered only by the Windows junction source branch.',
+    },
+    'windows': {
+        'backup-member-mode-posix': 'Registered only by the POSIX backup source branch.',
+        'pair-mode-not-owner-only': 'Registered only by the POSIX pairing source branch.',
+    },
+}
+# These two controls have no selected OS witness; global gaps cannot arise
+# merely by adding the same platform exception twice.
+UNOBSERVED_CONTROLS = {
+    'connect-remote-keeps-spawn': 'Linux witness survived; Windows is inferred from the platform-neutral dry-run fixture and has not been measured.',
+    'tl-script-lf': 'Linux container witness survived because text_bytes already uses LF; hosted Windows lacks the Linux container witness.',
 }

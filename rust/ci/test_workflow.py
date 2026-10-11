@@ -99,7 +99,7 @@ def row_commands(invocations, required_rows, golden):
 
 
 W1C_SUITES = ("w1c-doctor", "w1c-pairing", "w1c-connection")
-H5_SUITES = ("h5-audit", "h5-backup", "h5-w1a", "h5-daemon-mutants", "h5-graph-mutants")
+H5_SUITES = ("h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants")
 
 
 # The W1-C step passes its rows through PowerShell arrays (@live, @golden), so

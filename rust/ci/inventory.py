@@ -4,6 +4,7 @@ import ast
 from collections import Counter
 import json
 import re
+import sys
 from pathlib import Path
 
 from test_workflow import commands
@@ -31,25 +32,46 @@ def assigned_list(path, name):
 
 
 def daemon_scenarios():
-    tree = ast.parse((ROOT / 'rust/daemon/harness/run.py').read_text(encoding="utf-8"))
-    classes = {}
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef):
-            for field in node.body:
-                if isinstance(field, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'name'
-                                                        for t in field.targets):
-                    classes[node.name] = ast.literal_eval(field.value)
-    registry = next(node.value for node in tree.body if isinstance(node, ast.Assign)
-                    and any(isinstance(t, ast.Name) and t.id == 'SCENARIOS' for t in node.targets))
-    return {classes[node.id] for node in registry.generators[0].iter.elts}
+    sys.path.insert(0, str(ROOT / 'rust/daemon/harness'))
+    import run
+    return set(run.SCENARIOS)
+
+
+def exception_reasons(value):
+    if isinstance(value, dict):
+        for reason in value.values():
+            exception_reasons(reason)
+    else:
+        assert isinstance(value, str) and value.strip(), 'empty or invalid exception reason'
+
+
+def exit_propagation(step):
+    lines = [line.strip() for line in step['run'].splitlines()
+             if line.strip() and not line.lstrip().startswith('#')]
+    assert step.get('shell') == 'pwsh' and len(lines) == 2 \
+        and lines[1] == 'exit $LASTEXITCODE', 'H5 exit propagation changed'
 
 
 def check(workflow):
-    from coverage_plan import SUITES, DAEMON_CONTROLS, GRAPH_CONTROLS, W1A, EXCEPTIONS, SOURCE_SHARDS
+    from coverage_plan import (SUITES, DAEMON_CONTROLS, GRAPH_CONTROLS, W1A, EXCEPTIONS,
+                               SOURCE_SHARDS, PLATFORM_EXCLUSIONS, UNOBSERVED_CONTROLS, BACKGROUND)
+    from control_selection import runtime_controls
+    from rust.cli_harness import core
 
     declared = cli_controls()
     selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
     assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"
+    exception_reasons(EXCEPTIONS)
+    exception_reasons(PLATFORM_EXCLUSIONS)
+    exception_reasons(UNOBSERVED_CONTROLS)
+    all_controls = set().union(*declared.values())
+    for platform in ('linux', 'windows'):
+        assert set(PLATFORM_EXCLUSIONS[platform]) <= all_controls, 'unknown platform exclusion'
+    observed = set().union(*(all_controls - set(PLATFORM_EXCLUSIONS[p])
+                             - set(EXCEPTIONS['cli_mutants'][p]) for p in ('linux', 'windows')))
+    assert all_controls - observed == set(UNOBSERVED_CONTROLS), 'source control without any OS execution or named global exception'
+    for row in declared:
+        runtime_controls(row, core.PLATFORM)
     rows = assigned_list("rust/cli_harness/rows/__init__.py", "ROWS")
     assert set(rows) == set(selected), "accepted row without a source-control CI selection"
     # Payloads must retain every declaration before the dispatcher's platform
@@ -71,6 +93,7 @@ def check(workflow):
     assert ["python", "rust/ci/run_coverage.py", "--suite", "${{", "matrix.suite", "}}"] \
         == commands(step["run"])[0][:6]
     assert "--out-dir" in commands(step["run"])[0]
+    exit_propagation(step)
     setup = next(s for s in parity["steps"] if s.get("name") == "Prepare disposable PostgreSQL for H5")
     assert setup["if"] == step["if"] and parity["steps"].index(setup) < parity["steps"].index(step)
 
@@ -98,6 +121,7 @@ def check(workflow):
     invocation = next(s for s in source["steps"] if s.get("name") == "CLI source mutants")
     assert not invocation.get("if") and not invocation.get("continue-on-error")
     assert commands(invocation["run"])[0][:6] == ["python", "rust/ci/run_coverage.py", "--source-shard", "${{", "matrix.shard", "}}"]
+    exit_propagation(invocation)
     oracle = next(s for s in source['steps'] if s.get('name') == 'Bind the source-control Python oracle')
     assert source['steps'].index(oracle) < source['steps'].index(invocation)
     assert oracle['env'] == {'GITHUB_REF': '${{ github.ref }}'}
@@ -123,12 +147,17 @@ def check(workflow):
     expected_w1a = [dict(kind='daemon', scenario=name, mode=mode, record=mode == 'live')
                     for name in W1A if name in supported for mode in ('live', 'golden')]
     assert SUITES['h5-w1a'] == expected_w1a, 'W1-A recording/replay selection dropped or changed'
+    assert SUITES['h5-background'] == [dict(kind='daemon', scenario=name, mode='live')
+                                     for name in BACKGROUND], 'accepted daemon scenario lost live background execution'
     existing = set()
     for step in parity['steps']:
         for words in commands(step.get('run', '')):
-            if words[:3] == ['python', 'rust/daemon/harness/run.py', 'live'] and '--only' in words:
-                existing.update(words[words.index('--only') + 1:])
-    assert daemon_scenarios() <= existing | set(W1A), 'accepted daemon scenario missing from CI inventory'
+            if words[:2] == ['python', 'rust/daemon/harness/run.py'] and words[2] in ('live', 'golden') and '--only' in words:
+                existing.update(w for w in words[words.index('--only') + 1:] if not w.startswith('--'))
+    added = {a['scenario'] for actions in SUITES.values() for a in actions if 'scenario' in a}
+    exceptions = set(EXCEPTIONS.get('daemon_scenarios', {}))
+    assert exceptions <= daemon_scenarios(), 'unknown daemon scenario exception'
+    assert daemon_scenarios() <= existing | added | set(EXCEPTIONS['w1a']) | exceptions, 'accepted daemon scenario missing from CI inventory'
     assert any(s.get("name") == "ported-row-and-mutant-ci-inventory" for s in jobs["rust"]["steps"])
 
 

@@ -8,7 +8,8 @@ import subprocess
 import sys
 import time
 
-from coverage_plan import EXCEPTIONS, SOURCE_SHARDS, SUITES
+from coverage_plan import EXCEPTIONS, PLATFORM_EXCLUSIONS, SOURCE_SHARDS, SUITES, UNOBSERVED_CONTROLS
+from control_selection import select_controls
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,14 +75,7 @@ def main():
     platform = 'windows' if os.name == 'nt' else 'linux'
     if args.source_shard:
         row, selected = SOURCE_SHARDS[args.source_shard]
-        # Include only controls declared by this platform's row module;
-        # backup has separate POSIX and Windows source substitutions.
-        sys.path.insert(0, str(ROOT / 'rust'))
-        from cli_harness import rows
-
-        declared = {m.id for m in rows.mutants(row) if platform in m.platforms}
-        excepted = EXCEPTIONS['cli_mutants'][platform]
-        ids = [m for m in selected if m in declared and m not in excepted]
+        ids = select_controls(row, selected, platform)
         assert ids, 'no source mutants selected'
         actions = [dict(kind='cli', mode='mutants', row=row, mutants=ids)]
         selection = 'source-' + args.source_shard
@@ -97,10 +91,17 @@ def main():
         print(f'{selection}: {name} {action["mode"]}', flush=True)
         started = time.monotonic()
         code = subprocess.run(argv, cwd=ROOT, env=environment).returncode
-        receipts.append(dict(selection=action, seconds=time.monotonic() - started, exit=code,
-                             output=output.name))
+        receipt = dict(selection=action, seconds=time.monotonic() - started, exit=code,
+                       output=output.name, status='fail' if code else 'pass')
+        if not code and action['mode'] == 'golden' and action.get('scenario') in EXCEPTIONS['w1a_golden']:
+            receipt.update(status='skip', skip_reason=EXCEPTIONS['w1a_golden'][action['scenario']])
+        receipts.append(receipt)
+        omitted = ({name: (EXCEPTIONS['cli_mutants'][platform].get(name)
+                          or PLATFORM_EXCLUSIONS[platform][name])
+                    for name in selected if name not in ids} if args.source_shard else {})
         (args.out_dir / f'{selection}-timings.json').write_text(
-            json.dumps(dict(platform=platform, receipts=receipts, exceptions=EXCEPTIONS), indent=2),
+            json.dumps(dict(platform=platform, receipts=receipts, exceptions=EXCEPTIONS,
+                            omitted_controls=omitted, unobserved_controls=UNOBSERVED_CONTROLS), indent=2),
             encoding='utf-8')
         if code and not args.keep_going:
             return code

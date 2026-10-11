@@ -95,6 +95,28 @@
       "read_caught": 8,
       "store_seconds": 134.863,
       "read_seconds": 258.636
+    },
+    "h5-background": {
+      "seconds": 92.646,
+      "action_exits": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "live_cases": 9,
+      "golden_cases": 0,
+      "live_only_scenarios": 6,
+      "scenarios": {
+        "session-reap": 15.911,
+        "session-restart": 21.576,
+        "session-resume-refusal": 13.757,
+        "session-sweep": 13.432,
+        "session-tombstone-restart": 21.42,
+        "sweep-recovery": 6.549
+      }
     }
   },
   "source_loops": {

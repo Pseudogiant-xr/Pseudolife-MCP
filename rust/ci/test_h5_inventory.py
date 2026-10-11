@@ -30,7 +30,7 @@ def test_w1a_offline_fixture_preserves_scenario_configuration(tmp_path, monkeypa
     (home / "data").mkdir(parents=True)
     (home / "data/config.yaml").write_text(scenario.config_yaml)
     environment = scenario.prepare_home(home)
-    configuration = yaml.safe_load((home / "data/config.yaml").read_text())
+    configuration = yaml.safe_load((home / "data/config.yaml").read_text(encoding="utf-8"))
     assert created == [(home / "model", {"dimension": 1024})]
     assert configuration["memory"]["top_k"] == 3
     assert configuration["coordination"]["enabled"] is False
@@ -40,7 +40,7 @@ def test_w1a_offline_fixture_preserves_scenario_configuration(tmp_path, monkeypa
 
 def test_ported_row_and_mutant_ci_inventory():
     from inventory import check
-    check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text()))
+    check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
 
 
 def test_inventory_reads_utf8_sources_under_windows_default_encoding(monkeypatch):
@@ -56,7 +56,7 @@ def test_inventory_reads_utf8_sources_under_windows_default_encoding(monkeypatch
 
 
 def test_source_control_target_is_bound_at_step_scope():
-    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text())
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding="utf-8"))
     source = workflow['jobs']['source-mutants']
     invocation = next(s for s in source['steps'] if s.get('name') == 'CLI source mutants')
     assert invocation.get('env') == {'CARGO_TARGET_DIR': '${{ runner.temp }}/source-mutants-target'}
@@ -71,17 +71,17 @@ def test_cli_mutant_summary_names_witnesses_and_durations(tmp_path, monkeypatch)
     monkeypatch.setattr(mutants, "_sync_source", lambda *args: None)
     output = tmp_path / "mutants.json"
     assert mutants.main(["mail"], [], None, False, out=output) == 0
-    result = json.loads(output.read_text())
+    result = json.loads(output.read_text(encoding="utf-8"))
     assert result["mutants"]["fixture-control"]["caught_by"] == ["fixture-witness"]
     assert result["mutants"]["fixture-control"]["seconds"] >= 0
     assert result["survivors"] == []
 
 
 @pytest.mark.parametrize("suite", ["h5-audit", "h5-backup", "h5-w1a",
-                                  "h5-daemon-mutants", "h5-graph-mutants"])
+                                  "h5-background", "h5-daemon-mutants", "h5-graph-mutants"])
 def test_inventory_rejects_a_dropped_suite(suite):
     from inventory import check
-    workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text())
+    workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8"))
     workflow["jobs"]["parity-checks"]["strategy"]["matrix"]["suite"].remove(suite)
     with pytest.raises(AssertionError, match="missing H5 suite"):
         check(workflow)
@@ -90,7 +90,7 @@ def test_inventory_rejects_a_dropped_suite(suite):
 def test_inventory_rejects_each_dropped_source_shard():
     from inventory import check
     from coverage_plan import SOURCE_SHARDS
-    workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text())
+    workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8"))
     for shard in SOURCE_SHARDS:
         mutated = copy.deepcopy(workflow)
         mutated["jobs"]["source-mutants"]["strategy"]["matrix"]["shard"].remove(shard)
@@ -104,7 +104,7 @@ def test_inventory_rejects_a_control_dropped_from_an_executable_shard(monkeypatc
     row, ids = SOURCE_SHARDS['audit-0']
     monkeypatch.setitem(SOURCE_SHARDS, 'audit-0', (row, [m for m in ids if m != 'audit-body-reason-swap']))
     with pytest.raises(AssertionError, match='executable source controls'):
-        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text()))
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding="utf-8")))
 
 
 @pytest.mark.parametrize('field, value', [('mode', 'live'), ('kind', 'cli'),
@@ -116,13 +116,13 @@ def test_inventory_rejects_a_daemon_control_without_its_mutant_witness(monkeypat
     next(a for a in actions if a['mutant'] == 'static-no-csp')[field] = value
     monkeypatch.setitem(SUITES, 'h5-daemon-mutants', actions)
     with pytest.raises(AssertionError, match='executable daemon control'):
-        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text()))
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding="utf-8")))
 
 
 def test_inventory_rejects_each_dropped_named_mutant(monkeypatch):
     import inventory
     from coverage_plan import DAEMON_CONTROLS, SOURCE_MUTANTS, SUITES
-    workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text())
+    workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8"))
     original_loads = json.loads
     for row, mutants in SOURCE_MUTANTS.items():
         for mutant in mutants:
@@ -166,7 +166,7 @@ def test_inventory_rejects_lost_w1a_recording_or_replay(monkeypatch, mutation):
         action['record' if mutation == 'drop_record' else 'kind'] = False if mutation == 'drop_record' else 'cli'
     monkeypatch.setitem(SUITES, 'h5-w1a', actions)
     with pytest.raises(AssertionError, match='W1-A recording/replay'):
-        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text()))
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding="utf-8")))
 
 
 def test_w1a_named_golden_exceptions_match_scenario_support():
@@ -220,3 +220,93 @@ def test_daemon_replays_the_selected_temporary_golden_directory(tmp_path, monkey
                                     '--golden-dir', str(tmp_path / 'goldens')])
     assert run.main() == 0
     assert observed == [tmp_path / 'goldens']
+
+
+@pytest.mark.parametrize('job,step', [('parity-checks', 'Ported rows and daemon controls'),
+                                     ('source-mutants', 'CLI source mutants')])
+def test_inventory_rejects_masked_h5_exit(job, step):
+    from inventory import check
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    selected = next(s for s in workflow['jobs'][job]['steps'] if s.get('name') == step)
+    selected['run'] = selected['run'].replace('exit $LASTEXITCODE', 'exit 0')
+    with pytest.raises(AssertionError, match='exit propagation'):
+        check(workflow)
+
+
+def test_inventory_includes_runtime_daemon_registrations():
+    import run
+    from inventory import daemon_scenarios
+    assert daemon_scenarios() == set(run.SCENARIOS)
+
+
+@pytest.mark.parametrize('mutation', ['unregistered', 'platform_removed'])
+def test_inventory_rejects_runtime_source_control_drift(monkeypatch, mutation):
+    from dataclasses import replace
+    from inventory import check
+    from rust.cli_harness import core, rows
+    original = rows.mutants
+
+    def changed(row):
+        controls = original(row)
+        if row == 'audit':
+            if mutation == 'unregistered':
+                controls = [m for m in controls if m.id != 'audit-body-reason-swap']
+            else:
+                controls = [replace(m, platforms=tuple(p for p in m.platforms if p != core.PLATFORM))
+                            if m.id == 'audit-body-reason-swap' else m for m in controls]
+        return controls
+
+    monkeypatch.setattr(rows, 'mutants', changed)
+    with pytest.raises(AssertionError, match='runtime source-control'):
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
+
+
+def test_inventory_rejects_empty_exception_reason(monkeypatch):
+    from inventory import check
+    from coverage_plan import EXCEPTIONS
+    monkeypatch.setitem(EXCEPTIONS['cli_mutants']['linux'], 'connect-config-not-private', ' ')
+    with pytest.raises(AssertionError, match='exception reason'):
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
+
+
+@pytest.mark.parametrize('mutation', ['unregistered', 'platform_removed'])
+def test_dispatcher_rejects_runtime_source_control_drift(monkeypatch, tmp_path, mutation):
+    from dataclasses import replace
+    from rust.cli_harness import core, rows
+    import run_coverage
+    original = rows.mutants
+
+    def changed(row):
+        controls = original(row)
+        if row == 'audit':
+            if mutation == 'unregistered':
+                return [m for m in controls if m.id != 'audit-body-reason-swap']
+            return [replace(m, platforms=tuple(p for p in m.platforms if p != core.PLATFORM))
+                    if m.id == 'audit-body-reason-swap' else m for m in controls]
+        return controls
+
+    monkeypatch.setattr(rows, 'mutants', changed)
+    monkeypatch.setattr(sys, 'argv', ['run_coverage.py', '--source-shard', 'audit-0',
+                                    '--out-dir', str(tmp_path)])
+    with pytest.raises(AssertionError, match='runtime source-control'):
+        run_coverage.main()
+
+
+def test_inventory_rejects_control_excepted_on_every_os_without_global_reason(monkeypatch):
+    from inventory import check
+    from coverage_plan import EXCEPTIONS
+    for platform in ('linux', 'windows'):
+        monkeypatch.setitem(EXCEPTIONS['cli_mutants'][platform], 'audit-body-reason-swap', 'fixture exclusion')
+    with pytest.raises(AssertionError, match='without any OS execution'):
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
+
+
+@pytest.mark.parametrize('scenario', ['session-reap', 'session-restart', 'session-resume-refusal',
+                                     'session-sweep', 'session-tombstone-restart', 'sweep-recovery'])
+def test_inventory_rejects_dropped_runtime_background_scenario(monkeypatch, scenario):
+    from inventory import check
+    from coverage_plan import SUITES
+    monkeypatch.setitem(SUITES, 'h5-background', [a for a in SUITES['h5-background']
+                                               if a['scenario'] != scenario])
+    with pytest.raises(AssertionError, match='accepted daemon scenario'):
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
