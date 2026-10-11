@@ -78,6 +78,27 @@ def test_inventory_rejects_each_dropped_source_shard():
             check(mutated)
 
 
+def test_inventory_rejects_a_control_dropped_from_an_executable_shard(monkeypatch):
+    from inventory import check
+    from coverage_plan import SOURCE_SHARDS
+    row, ids = SOURCE_SHARDS['audit-0']
+    monkeypatch.setitem(SOURCE_SHARDS, 'audit-0', (row, [m for m in ids if m != 'audit-body-reason-swap']))
+    with pytest.raises(AssertionError, match='executable source controls'):
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text()))
+
+
+@pytest.mark.parametrize('field, value', [('mode', 'live'), ('kind', 'cli'),
+                                        ('scenarios', ['extractor'])])
+def test_inventory_rejects_a_daemon_control_without_its_mutant_witness(monkeypatch, field, value):
+    from inventory import check
+    from coverage_plan import SUITES
+    actions = copy.deepcopy(SUITES['h5-daemon-mutants'])
+    next(a for a in actions if a['mutant'] == 'static-no-csp')[field] = value
+    monkeypatch.setitem(SUITES, 'h5-daemon-mutants', actions)
+    with pytest.raises(AssertionError, match='executable daemon control'):
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text()))
+
+
 def test_inventory_rejects_each_dropped_named_mutant(monkeypatch):
     import inventory
     from coverage_plan import DAEMON_CONTROLS, SOURCE_MUTANTS, SUITES

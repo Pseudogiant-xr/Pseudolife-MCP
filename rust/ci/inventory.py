@@ -1,6 +1,7 @@
 """Check executable CI selections against the accepted row/control registries."""
 
 import ast
+from collections import Counter
 import json
 import re
 from pathlib import Path
@@ -51,6 +52,14 @@ def check(workflow):
     assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"
     rows = assigned_list("rust/cli_harness/rows/__init__.py", "ROWS")
     assert set(rows) == set(selected), "accepted row without a source-control CI selection"
+    # Payloads must retain every declaration before the dispatcher's platform
+    # eligibility and named-exception filters, not merely retain shard names.
+    assert set(row for row, ids in SOURCE_SHARDS.values()) == set(rows), 'executable source controls changed rows'
+    executable = {row: Counter(mutant for owner, ids in SOURCE_SHARDS.values()
+                               if owner == row for mutant in ids) for row in rows}
+    assert executable == {row: Counter(ids) for row, ids in selected.items()}, 'executable source controls dropped or duplicated'
+    assert all(set(exceptions) <= set().union(*declared.values())
+               for exceptions in EXCEPTIONS['cli_mutants'].values()), 'unknown source-control exception'
     jobs = workflow["jobs"]
     parity = jobs["parity-checks"]
     matrix = parity["strategy"]["matrix"]
@@ -99,6 +108,10 @@ def check(workflow):
     assert generic == set(DAEMON_CONTROLS) | set(EXCEPTIONS["daemon_mutants"]), "daemon control dropped"
     executed = {action["mutant"] for action in SUITES["h5-daemon-mutants"]}
     assert set(DAEMON_CONTROLS) == executed, ("daemon source mutant dropped", set(DAEMON_CONTROLS) - executed)
+    assert len(SUITES['h5-daemon-mutants']) == len(DAEMON_CONTROLS), 'executable daemon control duplicated'
+    assert all(action == dict(kind='daemon', mode='mutants', mutant=action['mutant'],
+                              scenarios=DAEMON_CONTROLS[action['mutant']])
+               for action in SUITES['h5-daemon-mutants']), 'executable daemon control lost mode or witnesses'
     for row, path in (("store", "graph_store.py"), ("read", "graph_read_profile.py")):
         assert any(action == {"kind": "graph", "mode": "mutants", "row": row}
                    for action in SUITES["h5-graph-mutants"])
