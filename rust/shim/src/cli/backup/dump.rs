@@ -26,11 +26,26 @@ fn ignorable_code(code: Option<i32>) -> bool {
 
 #[cfg(windows)]
 fn ignorable_code(code: Option<i32>) -> bool {
+    windows_ignorable(code)
+}
+
+#[cfg(any(windows, test))]
+fn windows_ignorable(code: Option<i32>) -> bool {
     // pathlib's ignored winerrors plus CPython's ENOENT/ENOTDIR/EBADF map.
     matches!(
         code,
-        Some(2 | 3 | 6 | 15 | 18 | 21 | 53 | 67 | 123 | 161 | 206 | 267 | 1921)
+        Some(2 | 3 | 6 | 15 | 18 | 21 | 53 | 67 | 114 | 123 | 130 | 161 | 206 | 267 | 1921)
     )
+}
+
+fn windows_class(code: i32) -> &'static str {
+    match code {
+        2 | 3 | 15 | 18 | 53 | 67 | 161 | 206 => "FileNotFoundError",
+        5 | 16 | 19..=36 | 65 | 82 | 83 | 108 | 132 | 158 | 167 => "PermissionError",
+        80 | 183 => "FileExistsError",
+        267 => "NotADirectoryError",
+        _ => "OSError",
+    }
 }
 
 pub(super) struct DiscoveryError {
@@ -55,20 +70,14 @@ impl DiscoveryError {
         if cfg!(windows) {
             // CPython maps the Win32 code to errno before selecting a subclass;
             // sharing violations, for example, are PermissionError there.
-            class = match code {
-                2 | 3 | 15 | 18 | 53 | 67 | 123 | 161 | 206 => "FileNotFoundError",
-                5 | 19 | 21 | 32 | 33 | 65 | 108 | 4390 => "PermissionError",
-                80 | 183 => "FileExistsError",
-                267 => "NotADirectoryError",
-                _ => "OSError",
-            };
+            class = windows_class(code);
         }
         let message = self.error.to_string();
         let message = message
             .strip_suffix(&format!(" (os error {code})"))
             .unwrap_or(&message);
         let message = if cfg!(windows) {
-            message.trim_end_matches(|c: char| c.is_whitespace() || c == '.')
+            message.trim_end_matches(|c: char| c <= ' ' || c == '.')
         } else {
             message
         };
@@ -264,6 +273,29 @@ mod windows_tests {
         assert!(!sharing.diagnostic().contains(".: "));
         for code in [6, 21, 123, 267, 1921] {
             assert!(ignorable(&io::Error::from_raw_os_error(code)));
+        }
+    }
+}
+
+#[cfg(test)]
+mod error_map_tests {
+    use super::*;
+
+    #[test]
+    fn win32_codes_follow_cpython_311_errno_classes() {
+        // CPython PC/errmap.h: EACCES includes device read failures; EBADF
+        // includes both invalid-target and direct-access handles.
+        for code in [
+            5, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 65, 82,
+            83, 108, 132, 158, 167,
+        ] {
+            assert_eq!(windows_class(code), "PermissionError", "{code}");
+        }
+        for code in [123, 4390] {
+            assert_eq!(windows_class(code), "OSError", "{code}");
+        }
+        for code in [6, 114, 130, 267, 1921] {
+            assert!(windows_ignorable(Some(code)), "{code}");
         }
     }
 }

@@ -87,35 +87,46 @@ fn supported(path: &Path, meta: &Metadata) -> Option<()> {
     Some(())
 }
 
-/// `Path.resolve()` for an output dir that may not exist yet: the deepest
-/// existing ancestor canonicalized, the remaining names appended.
+/// Resolve components and symlink targets in order, including targets that
+/// become reachable after mkdir creates an earlier nonexistent component.
 fn resolved(path: &Path) -> Option<PathBuf> {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir().ok()?.join(path)
-    };
-    let mut tail = Vec::new();
-    let mut cursor = absolute.as_path();
-    loop {
-        match fs::canonicalize(cursor) {
-            Ok(mut base) => {
-                for part in tail.iter().rev() {
-                    if part == ".." {
-                        base.pop();
-                    } else {
-                        base.push(part);
+    fn walk(
+        mut base: PathBuf,
+        path: &Path,
+        links: &mut std::collections::HashSet<PathBuf>,
+    ) -> Option<PathBuf> {
+        use std::path::Component;
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    base.pop();
+                }
+                Component::Prefix(_) | Component::RootDir => base.push(component.as_os_str()),
+                Component::Normal(_) => {
+                    base.push(component.as_os_str());
+                    match fs::symlink_metadata(&base) {
+                        Ok(meta) if meta.is_symlink() => {
+                            let link = base.clone();
+                            if !links.insert(link.clone()) {
+                                return None;
+                            }
+                            let target = fs::read_link(&base).ok()?;
+                            base.pop();
+                            base = walk(base, &target, links)?;
+                            links.remove(&link);
+                        }
+                        Ok(_) => base = fs::canonicalize(&base).ok()?,
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(_) => return None,
                     }
                 }
-                return Some(base);
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                tail.push(cursor.components().next_back()?.as_os_str().to_owned());
-                cursor = cursor.parent()?;
-            }
-            Err(_) => return None,
         }
+        Some(base)
     }
+    let base = std::env::current_dir().ok()?;
+    walk(base, path, &mut std::collections::HashSet::new())
 }
 
 /// Admit the data dir's tree before any effect. Defers when the output dir

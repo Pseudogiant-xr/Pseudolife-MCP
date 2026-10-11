@@ -85,6 +85,10 @@ fn option(raw: &str) -> Result<Option<&'static str>, String> {
 }
 
 fn optional(raw: &str) -> bool {
+    // Recognized options are classified before argparse's space shortcut.
+    if !matches!(option(raw), Ok(None)) {
+        return true;
+    }
     let normalized = decimal_digits(raw);
     // CPython's regex `$` also matches before one final newline; its `\d`
     // follows Python 3.11's Unicode database, rather than Rust's newer one.
@@ -401,10 +405,35 @@ pub(super) fn pathlib(path: &Path) -> PathBuf {
     };
     #[cfg(windows)]
     let path = normalized.as_path();
+    #[cfg(unix)]
     let mut spelled: PathBuf = path
         .components()
         .filter(|component| !matches!(component, Component::CurDir))
         .collect();
+    #[cfg(windows)]
+    let mut spelled = {
+        // PathBuf::push normalizes parents under verbatim prefixes, whereas
+        // pathlib preserves them. Rebuild the spelling as an OsString.
+        let mut raw = OsString::new();
+        let mut separator = false;
+        for component in path.components() {
+            match component {
+                Component::CurDir => continue,
+                Component::Prefix(_) | Component::RootDir => {
+                    raw.push(component.as_os_str());
+                    separator = false;
+                }
+                Component::Normal(_) | Component::ParentDir => {
+                    if separator {
+                        raw.push("\\");
+                    }
+                    raw.push(component.as_os_str());
+                    separator = true;
+                }
+            }
+        }
+        PathBuf::from(raw)
+    };
     if spelled.as_os_str().is_empty() {
         spelled = PathBuf::from(".");
     }
@@ -430,6 +459,7 @@ mod windows_tests {
         for (input, expected) in [
             ("//server/share/missing", r"\\server\share\missing"),
             ("//?/C:/bank/./missing", r"\\?\C:\bank\missing"),
+            (r"\\?\C:\bank\sub\..\missing", r"\\?\C:\bank\sub\..\missing"),
             ("C:/bank/./missing", r"C:\bank\missing"),
             ("/bank/./missing", r"\bank\missing"),
             ("", "."),

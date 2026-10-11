@@ -334,6 +334,7 @@ def cases() -> list[Case]:
              setup=tree(), rules=RULES),
         *[Case(f"argparse-{label}", ["backup", *argv]) for label, argv in [
             ("missing-value", ["--out"]), ("unknown", ["--unknown"]),
+            ("option-space-value", ["--keep-days", "--out=two words"]),
             ("invalid-float", ["--keep=oops"]), ("help-inline-error", ["--help=value"]),
             ("help-after-unknown", ["--unknown", "-h"]),
             ("help-short-tail", ["-hx"]), ("help-short-cluster", ["-hh"]),

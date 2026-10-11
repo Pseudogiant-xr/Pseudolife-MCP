@@ -249,6 +249,23 @@ fn outputs_that_would_archive_themselves_defer() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
 
+#[cfg(unix)]
+#[test]
+fn parent_after_missing_component_still_resolves_later_symlinks() {
+    let home = Home::new("parent-symlink");
+    let bank = home.path().join("bank");
+    fs::create_dir_all(bank.join("sub")).unwrap();
+    fs::write(bank.join("state"), "state").unwrap();
+    std::os::unix::fs::symlink(bank.join("sub"), home.path().join("alias")).unwrap();
+    let out = home.path().join("missing/../alias/bk");
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    // Creating the missing ancestor could also make a currently broken
+    // symlink resolve into the tree after admission.
+    fs::remove_file(home.path().join("alias")).unwrap();
+    std::os::unix::fs::symlink("missing/../bank/sub", home.path().join("alias")).unwrap();
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+}
+
 #[test]
 fn hard_links_in_the_tree_defer() {
     let home = Home::new("hardlink");
