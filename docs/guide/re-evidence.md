@@ -1,5 +1,49 @@
 # Reverse-engineering evidence
 
+## Recovery dependencies and hypotheses
+
+`re_evidence(action="dependencies", project="example", binary_id="sample:sha256:<full-hash>", path="dependencies.json")`
+reads a bounded JSON manifest and returns a deterministic recheck queue. It
+does not write evidence, change historical claim statuses or persist a cache.
+The exact project and binary identity must match the manifest. Example (replace
+the illustrative hashes with actual lower-case SHA-256 identities):
+
+```json
+{
+  "kind": "recovery_dependency_manifest", "schema_version": 1,
+  "project": "example", "binary_id": "sample:sha256:<full-hash>",
+  "bindings": {"read-function": "<current-sha256>", "file-layout": "<current-sha256>"},
+  "claims": [
+    {"id": "read-behavior", "requires": {"read-function": "<recorded-sha256>"}, "depends_on": []},
+    {"id": "ownership", "requires": {"file-layout": "<recorded-sha256>"}, "depends_on": ["read-behavior"]}
+  ]
+}
+```
+
+`requires` records the identities used when assessing an assertion; `bindings`
+supplies the identities now being checked. Name function bytes, type/layout
+reports, compiler/adapter artifacts and test corpora separately. A changed or
+missing binding queues the assertion and its transitive dependents in
+dependency-first order. Unknown references, cycles, duplicate IDs, invalid
+hashes and unscoped manifests are rejected. Each assertion must declare at
+least one artifact or assertion dependency. At most 10000 assertions/bindings
+are accepted, within the existing 16 MiB evidence limit.
+
+`current` means only that the **declared hashes** match caller-supplied
+bindings. It does not establish correctness, detect omitted dependencies or
+validate caller hash collection. Assertion IDs are portable manifest labels,
+not database claim IDs. The audit deliberately never changes a stored claim.
+Ingest the manifest and saved audit through the existing immutable `ingest`
+action when you want an enduring record. No database migration or new setup is
+required; the action is available after the normal daemon update.
+
+For competing type/ownership interpretations, keep separate `hypothesis`
+claims. Ingest RE Hub's experiment plan and raw comparison report under the
+same project/build, then explicitly record observed/rejected claims with
+their artifact IDs. Similarity matches from another build remain leads:
+create a separately scoped manifest and collect new evidence before reuse.
+An unchanged dependency manifest never authorizes automatic verification.
+
 `re_evidence` is an optional, strict proof store for native-client recreation
 and similar evidence-led work. It complements Pseudolife's ordinary memory; it
 does not turn memories, summaries, or model output into evidence.

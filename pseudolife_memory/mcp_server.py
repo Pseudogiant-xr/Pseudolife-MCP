@@ -2965,14 +2965,15 @@ def memory_relation_define(
 
 @_tool(tier="core")
 def re_evidence(
-    action: Annotated[Literal["ingest", "claim", "query", "export", "import", "stats"], Field(
+    action: Annotated[Literal["ingest", "claim", "query", "export", "import", "stats", "dependencies"], Field(
         description="Operation: ingest immutable Evidence Hub JSON; record an "
                     "evidence-gated claim; query exact addresses/claims; export "
-                    "or import a portable archive; or return project counts.")],
+                    "or import a portable archive; audit declared dependency hashes; "
+                    "or return project counts.")],
     project: Annotated[str, Field(
         description="Stable project key, for example 'srfn-client'.")],
     path: Annotated[str | None, Field(
-        description="For ingest: JSON input path. For export/import: archive "
+        description="For ingest/dependencies: JSON input path. For export/import: archive "
                     "path beneath the server's configured RE evidence archive "
                     "root (relative paths are preferred).")] = None,
     kind: Annotated[str, Field(
@@ -2983,7 +2984,7 @@ def re_evidence(
     summary: Annotated[str | None, Field(
         description="For ingest: short human-reviewed description; never proof.")] = None,
     binary_id: Annotated[str | None, Field(
-        description="Required build identity for ingest/claim/query/export/import, "
+        description="Required build identity for ingest/claim/query/export/import/dependencies, "
                     "preferably filename plus cryptographic hash. Optional stats filter.")] = None,
     subject: Annotated[str | None, Field(
         description="For claim/query: exact address or other stable subject.")] = None,
@@ -3022,6 +3023,11 @@ def re_evidence(
         return service.re_evidence_ingest(
             path=path, project=project, kind=kind, locator=locator,
             summary=summary, binary_id=binary_id)
+    if action == "dependencies":
+        if not path:
+            raise ValueError("re_evidence dependencies requires path")
+        return service.re_evidence_dependencies(
+            path=path, project=project, binary_id=binary_id)
     if action == "claim":
         if not subject or not claim or not status:
             raise ValueError("re_evidence claim requires subject, claim, and status")

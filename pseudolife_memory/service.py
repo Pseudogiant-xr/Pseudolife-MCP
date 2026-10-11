@@ -1708,6 +1708,17 @@ class MemoryService(DreamOps, MaintainerOps):
             "immutable": True,
         }
 
+    def re_evidence_dependencies(self, *, path: str, project: str,
+                                 binary_id: str) -> dict[str, Any]:
+        from pseudolife_memory.re_dependencies import audit_dependencies
+        from pseudolife_memory.re_evidence import parse_evidence_file
+
+        artifact = parse_evidence_file(path)
+        result = audit_dependencies(artifact["payload"], project=project,
+                                    binary_id=binary_id)
+        result["manifest_sha256"] = artifact["content_hash"]
+        return result
+
     def re_claim_record(
         self, *, project: str, binary_id: str, subject: str, claim: str, status: str,
         evidence_ids: list[int] | None = None,
