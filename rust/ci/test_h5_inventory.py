@@ -129,14 +129,45 @@ def test_inventory_rejects_each_dropped_named_mutant(monkeypatch):
                 inventory.check(workflow)
 
 
-def test_linux_test_login_selects_its_bundled_icu(tmp_path):
+@pytest.mark.parametrize('host_separator', [':', ';'])
+def test_linux_test_login_selects_its_bundled_icu(tmp_path, monkeypatch, host_separator):
+    import run_coverage
     from run_coverage import source_environment
+    monkeypatch.setattr(run_coverage.os, 'pathsep', host_separator)
     installation = tmp_path / '.pg0/installation/18.1.0'
     (installation / 'bin').mkdir(parents=True)
     (installation / 'lib').mkdir()
     environment = source_environment('test_login', 'linux', tmp_path, {'LD_LIBRARY_PATH': 'existing'})
     assert environment['LD_LIBRARY_PATH'] == str(installation / 'lib') + ':existing'
     assert source_environment('test_login', 'windows', tmp_path, {}) == {}
+
+
+@pytest.mark.parametrize('mutation', ['drop_golden', 'drop_record', 'wrong_kind'])
+def test_inventory_rejects_lost_w1a_recording_or_replay(monkeypatch, mutation):
+    from inventory import check
+    from coverage_plan import SUITES
+    actions = copy.deepcopy(SUITES['h5-w1a'])
+    if mutation == 'drop_golden':
+        actions = [a for a in actions if not (a['scenario'] == 'extractor' and a['mode'] == 'golden')]
+    else:
+        action = next(a for a in actions if a['scenario'] == 'extractor' and a['mode'] == 'live')
+        action['record' if mutation == 'drop_record' else 'kind'] = False if mutation == 'drop_record' else 'cli'
+    monkeypatch.setitem(SUITES, 'h5-w1a', actions)
+    with pytest.raises(AssertionError, match='W1-A recording/replay'):
+        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text()))
+
+
+def test_w1a_named_golden_exceptions_match_scenario_support():
+    import run
+    from coverage_plan import W1A, EXCEPTIONS
+    live_only = set()
+    for name in W1A:
+        if name in EXCEPTIONS['w1a']:
+            continue
+        scenario = run.SCENARIOS[name]()
+        if scenario.live_only or (type(scenario).timeline is not run.Scenario.timeline and not scenario.golden_replay):
+            live_only.add(name)
+    assert set(EXCEPTIONS['w1a_golden']) == live_only
 
 
 def test_health_db_mutant_uses_an_independent_readiness_witness(monkeypatch):

@@ -21,7 +21,7 @@ def source_environment(row, platform, home, environment):
         versions = sorted(p for p in (home / '.pg0/installation').iterdir() if (p / 'bin').is_dir())
         library = str(versions[-1] / 'lib')
         previous = environment.get('LD_LIBRARY_PATH')
-        environment['LD_LIBRARY_PATH'] = library + (os.pathsep + previous if previous else '')
+        environment['LD_LIBRARY_PATH'] = library + (':' + previous if previous else '')
     return environment
 
 

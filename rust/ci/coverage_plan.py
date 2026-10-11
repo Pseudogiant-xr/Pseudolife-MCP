@@ -29,10 +29,12 @@ EXCEPTIONS = {
         'del-unescaped': 'Its tokens witness has the named retrieval telemetry bank-state difference; the control baseline is not clean.',
         'serde-json-writer': 'Survived the clean extractor witness on Linux 2026-10-11; JSON float witnesses have the named telemetry difference.',
         'no-backoff': 'Lease-held mutation did not complete recovery and produced a scenario error (Linux 2026-10-11); an error is not a caught source control.',
-        'static-json-whitespace': 'Survived static-build on Linux 2026-10-11; no active source branch with this name remains in the current candidate.',
         'route-405-as-404': 'Survived the clean pair-budget and security-open witnesses on Linux 2026-10-11; tokens/tokenless witnesses have the named telemetry difference.',
         'golden-float-token': 'Its json-float-shortest-ties witness has the named retrieval telemetry bank-state difference; the control baseline is not clean.',
     },
+    'w1a_golden': {name: 'Existing timeline/live-only scenario has no golden replay; both arms execute live.'
+                   for name in ('lease-held', 'reaper', 'stamped', 'null-embedding',
+                                'unconstrained-dims', 'db-lost')},
     'cli_mutants': {
         'linux': {
             'audit-drive-relative-admitted': 'Windows drive-relative path mutation has no Linux witness; escaped on Linux 2026-10-11.',
@@ -63,6 +65,7 @@ DAEMON_CONTROLS = {
     'static-no-csp': ['static-build'],
     'static-traversal-open': ['static-paths'],
     'static-wrong-type': ['static-build'],
+    'static-json-whitespace': ['static-paths'],
     'static-string-prefix': ['static-paths'],
     'body-limit-inclusive': ['body-limits'],
     'text-limit-control': ['body-text-window'],

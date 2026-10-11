@@ -240,7 +240,7 @@ jobs:
             w1c_timeout: 42
             job_timeout: 66
           # Linux 2026-10-11, live + oracle capture + replay:
-          # audit 112s, backup 34s, W1-A 435s, daemon controls 180s,
+          # audit 112s, backup 34s, W1-A 435s, daemon controls 189s,
           # graph controls 394s. Linux step budgets are about twice these.
           # Windows budgets are provisional until the first hosted run;
           # each new job stays inside the existing ~56-minute slowest job.
