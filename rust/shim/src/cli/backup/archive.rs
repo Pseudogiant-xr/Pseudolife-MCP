@@ -154,7 +154,7 @@ fn reparse_tag(path: &Path) -> Option<u32> {
         FILE_ATTRIBUTE_TAG_INFO, FileAttributeTagInfo, GetFileInformationByHandleEx,
     };
     let file = fs::OpenOptions::new()
-        .access_mode(0x80)
+        .access_mode(0)
         .share_mode(7)
         .custom_flags(0x00200000 | 0x02000000)
         .open(path)
