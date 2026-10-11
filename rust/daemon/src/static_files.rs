@@ -277,9 +277,13 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
         if !contained(&child, &root) && !crate::mutants::active("static-traversal-open") {
             return Ok(forbidden());
         }
+        target = child;
     }
     if !metadata(&target)?.is_some_and(|m| m.is_file()) {
-        let index = root.join("index.html");
+        let index = resolve_path(&root.join("index.html"), &mut HashSet::new())?;
+        if !contained(&index, &root) && !crate::mutants::active("static-traversal-open") {
+            return Ok(forbidden());
+        }
         if metadata(&index)?.is_some_and(|m| m.is_file()) {
             return Ok(Served {
                 status: 200,
@@ -419,6 +423,114 @@ mod tests {
         );
         assert!(serve(&root, "/ui/a\0b").is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_index_uses_resolved_file_and_type() {
+        let root = tree("directory-resolved");
+        std::fs::write(root.join("notice.txt"), b"notice").unwrap();
+        std::fs::remove_file(root.join("assets/sub/index.html")).unwrap();
+        std::os::unix::fs::symlink("../../notice.txt", root.join("assets/sub/index.html")).unwrap();
+        let s = serve(&root, "/ui/assets/sub").unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!((s.status, s.body.as_slice()), (200, b"notice".as_slice()));
+        assert_eq!(s.content_type, "text/plain; charset=utf-8");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_index_refuses_index_resolving_outside_root() {
+        let root = tree("directory-outside");
+        let outside = root.with_extension("outside");
+        std::fs::write(&outside, b"marker").unwrap();
+        std::fs::remove_file(root.join("assets/sub/index.html")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("assets/sub/index.html")).unwrap();
+        let direct = serve(&root, "/ui/assets/sub/index.html").unwrap();
+        let directory = serve(&root, "/ui/assets/sub").unwrap();
+        let trailing = serve(&root, "/ui/assets/sub/").unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_file(outside).unwrap();
+        for s in [direct, directory, trailing] {
+            assert_eq!(
+                (s.status, s.body.as_slice()),
+                (403, b"forbidden".as_slice())
+            );
+            assert_eq!(s.content_type, "text/plain");
+            assert_eq!(s.cache, "no-store");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn static_index_loop_returns_resolution_error() {
+        let root = tree("index-loop");
+        std::fs::remove_file(root.join("index.html")).unwrap();
+        std::os::unix::fs::symlink("index.html", root.join("index.html")).unwrap();
+        let direct = serve(&root, "/ui/");
+        let fallback = serve(&root, "/ui/unknown/route");
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(direct.is_err());
+        assert!(fallback.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spa_fallback_refuses_index_resolving_outside_root() {
+        let root = tree("fallback-outside");
+        let outside = root.with_extension("outside");
+        std::fs::write(&outside, b"marker").unwrap();
+        std::fs::remove_file(root.join("index.html")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("index.html")).unwrap();
+        let direct = serve(&root, "/ui/").unwrap();
+        let fallback = serve(&root, "/ui/unknown/route").unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_file(outside).unwrap();
+        assert_eq!(
+            (direct.status, direct.body.as_slice()),
+            (403, b"forbidden".as_slice())
+        );
+        assert_eq!(
+            (
+                fallback.status,
+                fallback.body,
+                fallback.content_type,
+                fallback.cache
+            ),
+            (
+                direct.status,
+                direct.body,
+                direct.content_type,
+                direct.cache
+            )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spa_fallback_serves_index_link_within_root() {
+        let root = tree("fallback-inside");
+        std::fs::rename(root.join("index.html"), root.join("shell.html")).unwrap();
+        std::os::unix::fs::symlink("shell.html", root.join("index.html")).unwrap();
+        let s = serve(&root, "/ui/unknown/route").unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!((s.status, s.body.as_slice()), (200, b"<html>".as_slice()));
+        assert_eq!(s.content_type, "text/html; charset=utf-8");
+        assert_eq!(s.cache, "no-store");
+    }
+
+    #[test]
+    fn spa_fallback_without_index_is_not_found() {
+        let root = tree("fallback-missing");
+        std::fs::remove_file(root.join("index.html")).unwrap();
+        let s = serve(&root, "/ui/unknown/route").unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            (s.status, s.body.as_slice()),
+            (404, b"not found".as_slice())
+        );
+        assert_eq!(s.content_type, "text/plain");
+        assert_eq!(s.cache, "no-store");
     }
 
     #[cfg(unix)]
