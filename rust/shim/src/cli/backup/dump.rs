@@ -26,8 +26,11 @@ fn ignorable_code(code: Option<i32>) -> bool {
 
 #[cfg(windows)]
 fn ignorable_code(code: Option<i32>) -> bool {
-    // ERROR_NOT_READY, ERROR_INVALID_NAME, ERROR_CANT_RESOLVE_FILENAME.
-    matches!(code, Some(21 | 123 | 1921))
+    // pathlib's ignored winerrors plus CPython's ENOENT/ENOTDIR/EBADF map.
+    matches!(
+        code,
+        Some(2 | 3 | 6 | 15 | 18 | 21 | 53 | 67 | 123 | 161 | 206 | 267 | 1921)
+    )
 }
 
 pub(super) struct DiscoveryError {
@@ -42,17 +45,33 @@ impl DiscoveryError {
         }
     }
     pub(super) fn diagnostic(&self) -> String {
-        let class = match self.error.kind() {
+        let mut class = match self.error.kind() {
             io::ErrorKind::PermissionDenied => "PermissionError",
             io::ErrorKind::NotFound => "FileNotFoundError",
             io::ErrorKind::NotADirectory => "NotADirectoryError",
             _ => "OSError",
         };
         let code = self.error.raw_os_error().unwrap_or(0);
+        if cfg!(windows) {
+            // CPython maps the Win32 code to errno before selecting a subclass;
+            // sharing violations, for example, are PermissionError there.
+            class = match code {
+                2 | 3 | 15 | 18 | 53 | 67 | 123 | 161 | 206 => "FileNotFoundError",
+                5 | 19 | 21 | 32 | 33 | 65 | 108 | 4390 => "PermissionError",
+                80 | 183 => "FileExistsError",
+                267 => "NotADirectoryError",
+                _ => "OSError",
+            };
+        }
         let message = self.error.to_string();
         let message = message
             .strip_suffix(&format!(" (os error {code})"))
             .unwrap_or(&message);
+        let message = if cfg!(windows) {
+            message.trim_end_matches(|c: char| c.is_whitespace() || c == '.')
+        } else {
+            message
+        };
         let label = if cfg!(windows) { "WinError" } else { "Errno" };
         format!(
             "{class}: [{label} {code}] {message}: {}\n",
@@ -220,4 +239,31 @@ pub(super) fn write(dsn: &str, pg_dump: &Path, bdir: &Path, ts: &str) -> Result<
     }
     fs::rename(&partial, &target).map_err(|error| error.to_string())?;
     Ok(target)
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn discovery_errors_use_python_winerror_formatting() {
+        let error = DiscoveryError::new(
+            Path::new(r"C:\fixture\installation"),
+            io::Error::from_raw_os_error(5),
+        );
+        assert_eq!(
+            error.diagnostic(),
+            "PermissionError: [WinError 5] Access is denied: 'C:\\\\fixture\\\\installation'\n"
+        );
+        let sharing = DiscoveryError::new(Path::new("fixture"), io::Error::from_raw_os_error(32));
+        assert!(
+            sharing
+                .diagnostic()
+                .starts_with("PermissionError: [WinError 32] ")
+        );
+        assert!(!sharing.diagnostic().contains(".: "));
+        for code in [6, 21, 123, 267, 1921] {
+            assert!(ignorable(&io::Error::from_raw_os_error(code)));
+        }
+    }
 }

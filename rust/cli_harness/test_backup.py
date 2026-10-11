@@ -37,3 +37,100 @@ def test_discovery_traceback_only_removes_interpreter_frames():
         before = copy.deepcopy(obs)
         discovery_traceback(obs)
         assert obs == before
+
+
+def _native_backup():
+    from .runner import _default_candidate
+    import pytest
+    candidate = _default_candidate()
+    if not candidate.is_file():
+        pytest.skip("build the CLI harness candidate before native backup proofs")
+    return str(candidate)
+
+
+def test_help_uses_the_terminal_when_columns_is_unusable():
+    import errno
+    import os
+    import struct
+    import subprocess
+    import sys
+    import pytest
+    if sys.platform != "linux":
+        pytest.skip("POSIX PTY proof")
+    import fcntl
+    import pty
+    import termios
+    native = _native_backup()
+
+    def help_output(command, columns):
+        master, slave = pty.openpty()
+        try:
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 100, 0, 0))
+            env = dict(os.environ)
+            env.pop("COLUMNS", None)
+            if columns is not None:
+                env["COLUMNS"] = columns
+            result = subprocess.run([*command, "backup", "-h"], env=env,
+                                    stdout=slave, stderr=subprocess.PIPE, timeout=10)
+            os.close(slave)
+            slave = None
+            output = bytearray()
+            while True:
+                try:
+                    chunk = os.read(master, 4096)
+                except OSError as exc:
+                    if exc.errno != errno.EIO:
+                        raise
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+            return result.returncode, bytes(output), result.stderr
+        finally:
+            os.close(master)
+            if slave is not None:
+                os.close(slave)
+
+    for columns in [None, "invalid", "0", "-1"]:
+        want = help_output([sys.executable, "-m", "pseudolife_memory.cli"], columns)
+        assert want[0] == 0
+        assert help_output([native], columns) == want
+
+
+def test_nss_errors_keep_numeric_ownership_and_empty_names(tmp_path):
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import tarfile
+    import pytest
+    if sys.platform != "linux" or not shutil.which("cc"):
+        pytest.skip("Linux NSS interposition proof requires a C compiler")
+    native = _native_backup()
+    source = tmp_path / "nss.c"
+    source.write_text('''#include <pwd.h>
+#include <grp.h>
+#include <errno.h>
+int getpwuid_r(uid_t id, struct passwd *p, char *b, size_t n, struct passwd **r) { *r=0; return EIO; }
+int getgrgid_r(gid_t id, struct group *p, char *b, size_t n, struct group **r) { *r=0; return EIO; }
+struct passwd *getpwuid(uid_t id) { errno=EIO; return 0; }
+struct group *getgrgid(gid_t id) { errno=EIO; return 0; }
+''', encoding="utf-8")
+    library = tmp_path / "nss.so"
+    subprocess.run(["cc", "-shared", "-fPIC", str(source), "-o", str(library)], check=True)
+    bank = tmp_path / "bank"
+    bank.mkdir()
+    (bank / "state").write_bytes(b"state")
+    env = {key: value for key, value in os.environ.items() if "DATABASE_URL" not in key}
+    env.update(LD_PRELOAD=str(library), PSEUDOLIFE_MCP_DATA_DIR=str(bank))
+    for label, command in [("oracle", [sys.executable, "-m", "pseudolife_memory.cli"]),
+                           ("native", [native])]:
+        out = tmp_path / label
+        result = subprocess.run([*command, "backup", "--data-dir", str(bank), "--out", str(out)],
+                                env=env, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        with tarfile.open(next(out.glob("*.tar.gz"))) as archive:
+            member = archive.getmember("state")
+            assert (member.uid, member.gid) == (os.getuid(), os.getgid())
+            assert (member.uname, member.gname) == ("", "")
+            assert archive.extractfile(member).read() == b"state"

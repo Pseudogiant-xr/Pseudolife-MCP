@@ -28,8 +28,34 @@ pub(super) fn width() -> usize {
             Some(digits.parse::<usize>().unwrap_or(usize::MAX))
         })
         .filter(|value| *value > 0)
+        .or_else(terminal_width)
         .unwrap_or(80)
         .saturating_sub(2)
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn terminal_width() -> Option<usize> {
+    // shutil.get_terminal_size queries sys.__stdout__, whose descriptor is 1.
+    let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+    // SAFETY: ioctl writes one winsize to this live, correctly sized buffer.
+    let result = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) };
+    (result == 0 && size.ws_col > 0).then_some(usize::from(size.ws_col))
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn terminal_width() -> Option<usize> {
+    use windows_sys::Win32::System::Console::{
+        CONSOLE_SCREEN_BUFFER_INFO, GetConsoleScreenBufferInfo, GetStdHandle, STD_OUTPUT_HANDLE,
+    };
+    let mut info: CONSOLE_SCREEN_BUFFER_INFO = unsafe { std::mem::zeroed() };
+    // SAFETY: the process standard handle is queried with a live output buffer.
+    if unsafe { GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &mut info) } == 0 {
+        return None;
+    }
+    let width = i32::from(info.srWindow.Right) - i32::from(info.srWindow.Left) + 1;
+    (width > 0).then_some(width as usize)
 }
 
 fn option(raw: &str) -> Result<Option<&'static str>, String> {
@@ -59,12 +85,16 @@ fn option(raw: &str) -> Result<Option<&'static str>, String> {
 }
 
 fn optional(raw: &str) -> bool {
+    let normalized = decimal_digits(raw);
+    // CPython's regex `$` also matches before one final newline; its `\d`
+    // follows Python 3.11's Unicode database, rather than Rust's newer one.
+    let number = normalized.strip_suffix('\n').unwrap_or(&normalized);
     raw.starts_with('-')
         && raw != "-"
         && !raw.contains(' ')
-        && !regex::Regex::new(r"^-(?:\d+|\d*\.\d+)$")
+        && !regex::Regex::new(r"^-(?:[0-9]+|[0-9]*\.[0-9]+)$")
             .unwrap()
-            .is_match(raw)
+            .is_match(number)
 }
 
 pub(super) fn parse(arguments: &[OsString]) -> Option<Parsed> {
@@ -99,7 +129,17 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Parsed> {
         };
         let inline = raw.split_once('=').map(|(_, value)| value);
         if matched == "--help" {
-            if let Some(value) = inline {
+            // argparse classifies a short-option cluster before invoking help.
+            // An unknown letter ends the cluster, but '=' or another option
+            // prefix is an explicit argument to the last recognized '-h'.
+            let explicit = if let Some(tail) = raw.strip_prefix("-h") {
+                let tail = tail.trim_start_matches('h');
+                tail.strip_prefix('=')
+                    .or_else(|| tail.starts_with('-').then_some(tail))
+            } else {
+                inline
+            };
+            if let Some(value) = explicit {
                 return Some(Parsed::Error(format!(
                     "argument -h/--help: ignored explicit argument {}",
                     super::super::mode_repr(value)
@@ -141,7 +181,7 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Parsed> {
     })
 }
 
-fn normalized_number(raw: &str) -> Option<String> {
+fn decimal_digits(raw: &str) -> String {
     // Python 3.11 float accepts decimal Unicode digits and underscores only
     // between digits; compatibility normalization would also accept fractions
     // and superscripts, which Python rejects. These are its Unicode Nd zeros.
@@ -153,9 +193,7 @@ fn normalized_number(raw: &str) -> Option<String> {
         0x11650, 0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x16a60, 0x16ac0,
         0x16b50, 0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e950, 0x1fbf0,
     ];
-    let normalized: String = raw
-        .trim()
-        .chars()
+    raw.chars()
         .map(|c| {
             ZEROS
                 .iter()
@@ -165,7 +203,11 @@ fn normalized_number(raw: &str) -> Option<String> {
                 })
                 .unwrap_or(c)
         })
-        .collect();
+        .collect()
+}
+
+fn normalized_number(raw: &str) -> Option<String> {
+    let normalized = decimal_digits(raw.trim());
     let bytes = normalized.as_bytes();
     if bytes.iter().enumerate().any(|(index, c)| {
         *c == b'_'
@@ -338,6 +380,27 @@ pub(super) fn help(width: usize) -> String {
 /// components rejoined with the native separator, `.` components dropped
 /// (an empty result is `.`), and on POSIX exactly two leading slashes kept.
 pub(super) fn pathlib(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    let normalized = {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        // Prefix components retain their original spelling, so normalize the
+        // UNC or extended prefix as well as the ordinary path components.
+        PathBuf::from(OsString::from_wide(
+            &path
+                .as_os_str()
+                .encode_wide()
+                .map(|unit| {
+                    if unit == u16::from(b'/') {
+                        u16::from(b'\\')
+                    } else {
+                        unit
+                    }
+                })
+                .collect::<Vec<_>>(),
+        ))
+    };
+    #[cfg(windows)]
+    let path = normalized.as_path();
     let mut spelled: PathBuf = path
         .components()
         .filter(|component| !matches!(component, Component::CurDir))
@@ -356,4 +419,22 @@ pub(super) fn pathlib(path: &Path) -> PathBuf {
         }
     }
     spelled
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn pathlib_normalizes_prefix_separators() {
+        for (input, expected) in [
+            ("//server/share/missing", r"\\server\share\missing"),
+            ("//?/C:/bank/./missing", r"\\?\C:\bank\missing"),
+            ("C:/bank/./missing", r"C:\bank\missing"),
+            ("/bank/./missing", r"\bank\missing"),
+            ("", "."),
+        ] {
+            assert_eq!(pathlib(Path::new(input)).as_os_str(), expected);
+        }
+    }
 }

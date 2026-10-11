@@ -124,8 +124,20 @@ fn resolved(path: &Path) -> Option<PathBuf> {
 /// `Path.resolve()` resolves it (a symlink loop), and for unsupported shapes.
 pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
     let out = resolved(bdir)?;
-    if fs::canonicalize(data_dir).ok()? == out {
+    let data = fs::canonicalize(data_dir).ok()?;
+    if data == out {
         return None;
+    }
+    // mkdir creates missing children before tar.add lists them. Containment
+    // must therefore include children that do not exist at preflight time.
+    if let Ok(relative) = out.strip_prefix(&data) {
+        let mut parts = relative.components();
+        if let Some(first) = parts.next()
+            && parts.next().is_some()
+            && !EXCLUDE.contains(&first.as_os_str().to_str()?)
+        {
+            return None;
+        }
     }
     for (name, path) in top_children(data_dir)? {
         if EXCLUDE.contains(&name.as_str()) {
@@ -242,10 +254,9 @@ fn owner_name(id: u32, group: bool) -> io::Result<String> {
             buffer.resize(buffer.len() * 2, 0);
             continue;
         }
-        if code != 0 {
-            return Err(io::Error::from_raw_os_error(code));
-        }
-        if name.is_null() {
+        // pwd/grp report an unsuccessful lookup as KeyError; tarfile keeps
+        // numeric ownership and leaves the corresponding name empty.
+        if code != 0 || name.is_null() {
             return Ok(String::new());
         }
         // SAFETY: successful NSS call returned a NUL-terminated name in buffer.

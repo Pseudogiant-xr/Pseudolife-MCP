@@ -187,6 +187,7 @@ fn invalid_argv_reports_argparse_usage_without_effects() {
         vec!["--out", "-x"],
         vec!["extra"],
         vec!["--keep=oops"],
+        vec!["-h=hh"],
     ] {
         let output = run(home.path(), &arguments);
         assert_eq!(output.status.code(), Some(2));
@@ -236,7 +237,12 @@ fn outputs_that_would_archive_themselves_defer() {
     fs::write(bank.join("config.yaml"), "x").unwrap();
     let bank_text = text(&bank);
     let parent = text(&bank.join("sub").join("..").join("sub"));
-    for out in [bank_text.clone(), text(&bank.join("sub").join("bk"))] {
+    for out in [
+        bank_text.clone(),
+        text(&bank.join("sub").join("bk")),
+        text(&bank.join("new-child").join("bk")),
+        text(&bank.join("sub").join("..").join("new-child").join("bk")),
+    ] {
         assert_deferred(&home, &["--data-dir", &bank_text, "--out", &out]);
     }
     let output = run(home.path(), &["--data-dir", &parent]);
