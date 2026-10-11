@@ -1,9 +1,8 @@
 """CLI-BACKUP-DSN: ``pseudolife-mcp backup`` (explicit DSN and file mode).
 
-Canonical argv: ``backup [--data-dir P] [--out P] [--keep-days N]`` with
-space-separated values, each option at most once, P a canonical path
-(``str(Path(P)) == P``, no ``..``) and N a plain decimal of at least a
-minute; plus ``--help`` at COLUMNS=80. The bank is the explicit
+Argparse argv: ``backup [--data-dir P] [--out P] [--keep-days N]`` with
+inline or separate values, repeated and abbreviated options, pathlib path
+spellings and Python floats; help follows COLUMNS. The bank is the explicit
 ``PSEUDOLIFE_MCP_DATABASE_URL``; without one, a data dir holding no embedded
 bank is archived in file mode. Every case that would need the lite tier's
 embedded instance defers (Rust tests cover the deferrals; this row compares
@@ -13,7 +12,7 @@ Contract per arm: exit code, both streams byte-exact (the timestamp in the
 two new file names is normalized against the arm's own clock window), every
 file under the home, the state archive read back member by member (name,
 type, mode, uid, gid, mtime, size, link target, content hash; uname and gname
-on Windows), the dump decompressed (pg_dump's per-run ``\\restrict`` key
+validated against NSS on Linux, empty on Windows), the dump decompressed (pg_dump's per-run ``\\restrict`` key
 normalized only when the ``\\restrict`` and ``\\unrestrict`` keys agree),
 and the source bank unchanged. Container bytes (tar header layout, gzip
 headers, compression) are free.
@@ -152,6 +151,20 @@ def with_symlink(arm):
     os.utime(link, (FIXED, FIXED), follow_symlinks=False)
 
 
+def discovery_denied(*, metadata_error: bool):
+    def setup(arm):
+        tree(old_backups=False)(arm)
+        installation = arm.home / ".pg0" / "installation"
+        installation.mkdir(parents=True)
+        os.chmod(installation.parent if metadata_error else installation, 0)
+    return setup
+
+
+def restore_pg0_permissions(arm, _obs):
+    for path in [arm.home / ".pg0", arm.home / ".pg0" / "installation"]:
+        os.chmod(path, 0o700)
+
+
 def drop_pg0(arm, _obs):
     shutil.rmtree(arm.home / ".pg0", ignore_errors=True)
 
@@ -179,6 +192,20 @@ def _stamp(data: bytes, window: list[float]) -> bytes:
                    if _in_window(m.group(2), window) else m.group(0), data)
 
 
+def _owner_name(identifier: int, actual: str, *, group: bool) -> str:
+    # Names depend on the host's NSS database; validate them before replacing
+    # them with a portable token in observations and recorded goldens.
+    import grp
+    import pwd
+    try:
+        expected = grp.getgrgid(identifier).gr_name if group else pwd.getpwuid(identifier).pw_name
+    except KeyError:
+        expected = ""
+    if actual != expected:
+        raise ValueError(f"tar owner name does not match NSS for numeric id {identifier}")
+    return "<gid-name>" if group and expected else "<uid-name>" if expected else ""
+
+
 def _tar_view(data: bytes) -> bytes:
     members = []
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
@@ -187,8 +214,8 @@ def _tar_view(data: bytes) -> bytes:
             members.append({
                 "name": member.name, "type": member.type.decode(), "mode": oct(member.mode),
                 "uid": member.uid, "gid": member.gid,
-                "uname": member.uname if WINDOWS else "<free>",
-                "gname": member.gname if WINDOWS else "<free>",
+                "uname": member.uname if WINDOWS else _owner_name(member.uid, member.uname, group=False),
+                "gname": member.gname if WINDOWS else _owner_name(member.gid, member.gname, group=True),
                 "mtime": repr(member.mtime), "size": member.size,
                 "linkname": member.linkname, "sha256": hashlib.sha256(content).hexdigest(),
             })
@@ -253,6 +280,25 @@ def backup_stdout_closed(obs: dict) -> None:
         obs["stderr"] = base64.b64encode(_SHUTDOWN_FLUSH.sub(b"", stderr)).decode()
 
 
+# Python's unhandled discovery OSError includes interpreter frames. Keep the
+# final exception line exact; discard only a complete preceding frame block.
+_DISCOVERY_TRACEBACK = re.compile(
+    rb'\ATraceback \(most recent call last\):\r?\n'
+    rb'(?:  File "[^\r\n]+", line [0-9]+, in [^\r\n]+\r?\n'
+    rb'(?:    [^\r\n]*\r?\n)*)+'
+    rb'(?P<error>(?:PermissionError|OSError|FileNotFoundError|NotADirectoryError): '
+    rb'\[(?:Errno|WinError) [0-9]+\] [^\r\n]+\r?\n)\Z')
+
+
+@normalize.rule("backup-discovery-traceback")
+def discovery_traceback(obs: dict) -> None:
+    if obs["exit"] == 1:
+        stderr = base64.b64decode(obs["stderr"])
+        match = _DISCOVERY_TRACEBACK.fullmatch(stderr)
+        if match:
+            obs["stderr"] = base64.b64encode(match["error"]).decode()
+
+
 # ---------------------------------------------------------------- cases
 
 RULES = ("backup-files",)
@@ -274,6 +320,29 @@ def cases() -> list[Case]:
     no_pg_dump = {"PATH": f"{{HOME}}{sep}no-bin"}
     return [
         Case("help", ["backup", "--help"]),
+        *[Case(f"help-columns-{width}", ["backup", "-h"], env={"COLUMNS": str(width)})
+          for width in (20, 40, 60, 100, 120, "1_00", "１００", "999999999999999999999999999999")],
+        Case("file-mode-argparse-equals-repeat-abbrev",
+             ["backup", "--data-dir=absent", f"--data={{HOME}}{sep}bank", "--keep=+1e1", "--keep-days=.5"],
+             setup=tree(), rules=RULES),
+        Case("file-mode-parent-paths",
+             ["backup", "--data-dir", f"{{HOME}}{sep}bank{sep}notes-ü{sep}..",
+              "--out", f"{{HOME}}{sep}bank{sep}empty{sep}..{sep}backups"],
+             setup=tree(), rules=RULES),
+        Case("file-mode-pathlib-spelling",
+             ["backup", "--data-dir", f"{{HOME}}{sep}bank{sep}.{sep}", "--keep-days", "1_0"],
+             setup=tree(), rules=RULES),
+        *[Case(f"argparse-{label}", ["backup", *argv]) for label, argv in [
+            ("missing-value", ["--out"]), ("unknown", ["--unknown"]),
+            ("invalid-float", ["--keep=oops"]), ("help-inline-error", ["--help=value"]),
+            ("help-after-unknown", ["--unknown", "-h"]),
+            ("negative-exponent-value", ["--keep-days", "-1e3"]),
+        ]],
+        *[Case(f"file-mode-keep-{label}", ["backup", *data, f"--keep-days={value}"],
+               setup=tree(), rules=RULES) for label, value in [
+            ("zero", "0"), ("negative", "-1"), ("nan", "nan"),
+            ("infinity", "Infinity"), ("unicode", "١_٠.٥"),
+        ]],
         Case("missing-absolute", ["backup", "--data-dir", f"{{HOME}}{sep}absent-µ"]),
         Case("missing-relative", ["backup", "--data-dir", "absent-µ"]),
         Case("file-mode", ["backup", *data], setup=tree(), rules=RULES),
@@ -295,6 +364,12 @@ def cases() -> list[Case]:
              setup=lambda arm: (arm.home / "bank").mkdir(), rules=RULES),
         Case("file-mode-stdout-closed", ["backup", *data], setup=tree(), stdout_closed=True,
              rules=RULES + ("backup-stdout-closed",)),
+        *[Case(f"discovery-permission-{kind}", ["backup", *data],
+               env={"PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://unused", **no_pg_dump},
+               setup=discovery_denied(metadata_error=kind == "metadata"),
+               after=restore_pg0_permissions, platforms=("linux",), programs=("pg_dump",),
+               rules=("backup-discovery-traceback",))
+          for kind in ("metadata", "read-dir")],
         # DSN cases look pg_dump up (the home's ~/.pg0 bundle, then PATH):
         # core's preflight proves PATH finds none outside the home, except
         # in dsn-path, which runs this host's bundled pg_dump from its PATH.

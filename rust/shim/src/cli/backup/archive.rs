@@ -101,12 +101,16 @@ fn resolved(path: &Path) -> Option<PathBuf> {
         match fs::canonicalize(cursor) {
             Ok(mut base) => {
                 for part in tail.iter().rev() {
-                    base.push(part);
+                    if part == ".." {
+                        base.pop();
+                    } else {
+                        base.push(part);
+                    }
                 }
                 return Some(base);
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                tail.push(cursor.file_name()?.to_owned());
+                tail.push(cursor.components().next_back()?.as_os_str().to_owned());
                 cursor = cursor.parent()?;
             }
             Err(_) => return None,
@@ -185,6 +189,88 @@ fn owner(_meta: &Metadata) -> (u64, u64) {
     (0, 0)
 }
 
+/// tarfile resolves uid/gid with pwd/grp on Unix and leaves both names empty
+/// when the id has no NSS record; those modules are absent on Windows.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn owner_name(id: u32, group: bool) -> io::Result<String> {
+    use std::{ffi::CStr, ptr};
+    let mut buffer = vec![0u8; 1024];
+    loop {
+        // SAFETY: both structs are plain C data, initialized by the reentrant
+        // NSS calls; the result pointer and name point into this live buffer.
+        let (code, name) = unsafe {
+            if group {
+                let mut record: libc::group = std::mem::zeroed();
+                let mut result = ptr::null_mut();
+                let code = libc::getgrgid_r(
+                    id,
+                    &mut record,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                );
+                (
+                    code,
+                    if result.is_null() {
+                        ptr::null()
+                    } else {
+                        record.gr_name as *const libc::c_char
+                    },
+                )
+            } else {
+                let mut record: libc::passwd = std::mem::zeroed();
+                let mut result = ptr::null_mut();
+                let code = libc::getpwuid_r(
+                    id,
+                    &mut record,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                );
+                (
+                    code,
+                    if result.is_null() {
+                        ptr::null()
+                    } else {
+                        record.pw_name as *const libc::c_char
+                    },
+                )
+            }
+        };
+        if code == libc::ERANGE {
+            buffer.resize(buffer.len() * 2, 0);
+            continue;
+        }
+        if code != 0 {
+            return Err(io::Error::from_raw_os_error(code));
+        }
+        if name.is_null() {
+            return Ok(String::new());
+        }
+        // SAFETY: successful NSS call returned a NUL-terminated name in buffer.
+        return unsafe { CStr::from_ptr(name) }
+            .to_str()
+            .map(str::to_owned)
+            .map_err(|_| io::Error::other("owner name is not UTF-8"));
+    }
+}
+
+fn owner_names(uid: u64, gid: u64) -> io::Result<(String, String)> {
+    #[cfg(unix)]
+    {
+        Ok((
+            owner_name(uid as u32, false)?,
+            owner_name(gid as u32, true)?,
+        ))
+    }
+    #[cfg(windows)]
+    {
+        let _ = (uid, gid);
+        Ok((String::new(), String::new()))
+    }
+}
+
 /// Python `str(float)`: shortest round-trip digits, `.0` on integral values.
 fn float_text(value: f64) -> io::Result<String> {
     crate::float_repr::finite_float(value)
@@ -246,7 +332,13 @@ fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<
     };
     let mtime = super::seconds(member.meta.modified()?);
     let (uid, gid) = owner(member.meta);
+    let (uname, gname) = owner_names(uid, gid)?;
     let mut records = Vec::new();
+    for (key, value) in [("uname", &uname), ("gname", &gname)] {
+        if !value.is_ascii() || value.len() > 32 {
+            records.extend(pax_record(key, value));
+        }
+    }
     if !member.name.is_ascii() || member.name.len() > 100 {
         records.extend(pax_record("path", &member.name));
     }
@@ -274,6 +366,9 @@ fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<
     header.set_mode(mode(member.path, member.meta));
     header.set_uid(uid);
     header.set_gid(gid);
+    let ustar = header.as_ustar_mut().expect("ustar header");
+    ascii_field(&mut ustar.uname, &uname);
+    ascii_field(&mut ustar.gname, &gname);
     header.set_size(size);
     header.set_mtime(mtime.round_ties_even().max(0.0) as u64);
     header.set_cksum();
@@ -368,6 +463,15 @@ pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn unassigned_owner_ids_have_empty_names() {
+        assert_eq!(
+            owner_names(u64::from(u32::MAX), u64::from(u32::MAX)).unwrap(),
+            (String::new(), String::new())
+        );
+    }
 
     #[test]
     fn python_float_shortest_ties() {

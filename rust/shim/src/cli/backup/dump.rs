@@ -14,7 +14,7 @@ const EXE: &str = if cfg!(windows) {
 };
 
 /// A stat error Python 3.11's `Path.is_dir()`/`exists()` treats as "no";
-/// any other error raises there, so it defers here.
+/// any other error raises there and is reported here.
 fn ignorable(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::NotFound || ignorable_code(error.raw_os_error())
 }
@@ -30,30 +30,67 @@ fn ignorable_code(code: Option<i32>) -> bool {
     matches!(code, Some(21 | 123 | 1921))
 }
 
-fn is_dir(path: &Path) -> Option<bool> {
-    match fs::metadata(path) {
-        Ok(meta) => Some(meta.is_dir()),
-        Err(error) if ignorable(&error) => Some(false),
-        Err(_) => None,
+pub(super) struct DiscoveryError {
+    path: PathBuf,
+    error: io::Error,
+}
+impl DiscoveryError {
+    fn new(path: &Path, error: io::Error) -> Self {
+        Self {
+            path: path.to_owned(),
+            error,
+        }
+    }
+    pub(super) fn diagnostic(&self) -> String {
+        let class = match self.error.kind() {
+            io::ErrorKind::PermissionDenied => "PermissionError",
+            io::ErrorKind::NotFound => "FileNotFoundError",
+            io::ErrorKind::NotADirectory => "NotADirectoryError",
+            _ => "OSError",
+        };
+        let code = self.error.raw_os_error().unwrap_or(0);
+        let message = self.error.to_string();
+        let message = message
+            .strip_suffix(&format!(" (os error {code})"))
+            .unwrap_or(&message);
+        let label = if cfg!(windows) { "WinError" } else { "Errno" };
+        format!(
+            "{class}: [{label} {code}] {message}: {}\n",
+            super::super::mode_repr(&self.path.to_string_lossy())
+        )
     }
 }
 
-fn exists(path: &Path) -> Option<bool> {
+fn is_dir(path: &Path) -> Result<bool, DiscoveryError> {
     match fs::metadata(path) {
-        Ok(_) => Some(true),
-        Err(error) if ignorable(&error) => Some(false),
-        Err(_) => None,
+        Ok(meta) => Ok(meta.is_dir()),
+        Err(error) if ignorable(&error) => Ok(false),
+        Err(error) => Err(DiscoveryError::new(path, error)),
     }
 }
 
-/// The lite tier's bundled pg_dump (newest version directory first), then
-/// PATH. `None` defers: Python would raise while looking.
-pub(super) fn find(home: &Path) -> Option<Option<PathBuf>> {
+fn exists(path: &Path) -> Result<bool, DiscoveryError> {
+    match fs::metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if ignorable(&error) => Ok(false),
+        Err(error) => Err(DiscoveryError::new(path, error)),
+    }
+}
+
+/// The lite tier's bundled pg_dump (newest version directory first), then PATH.
+/// Unexpected filesystem errors propagate with the path Python reports.
+pub(super) fn find(home: &Path) -> Result<Option<PathBuf>, DiscoveryError> {
     let install_root = home.join(".pg0").join("installation");
     if is_dir(&install_root)? {
         let mut versions = Vec::new();
-        for entry in fs::read_dir(&install_root).ok()? {
-            versions.push(entry.ok()?.path());
+        let entries = fs::read_dir(&install_root)
+            .map_err(|error| DiscoveryError::new(&install_root, error))?;
+        for entry in entries {
+            versions.push(
+                entry
+                    .map_err(|error| DiscoveryError::new(&install_root, error))?
+                    .path(),
+            );
         }
         versions.sort_by_key(|path| {
             super::path_sort_key(&path.file_name().unwrap_or_default().to_string_lossy())
@@ -61,11 +98,11 @@ pub(super) fn find(home: &Path) -> Option<Option<PathBuf>> {
         for version in versions.into_iter().rev() {
             let candidate = version.join("bin").join(EXE);
             if exists(&candidate)? {
-                return Some(Some(candidate));
+                return Ok(Some(candidate));
             }
         }
     }
-    Some(which())
+    Ok(which())
 }
 
 /// Python 3.11 `shutil.which("pg_dump")`: PATH split on the separator as

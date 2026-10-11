@@ -106,7 +106,7 @@ fn captured_public_help_precedes_bank_resolution() {
 }
 
 #[test]
-fn help_at_another_width_defers() {
+fn help_accepts_default_and_wide_columns() {
     let home = Home::new("width");
     for columns in [Some("120"), None] {
         let mut command = command(home.path());
@@ -115,11 +115,56 @@ fn help_at_another_width_defers() {
             None => command.env_remove("COLUMNS"),
         };
         let output = command.arg("--help").output().unwrap();
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty());
-        assert_eq!(output.stderr, cli::native_text(DEFERRED));
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("Back up the memory bank")
+        );
     }
     assert!(home.listing().is_empty());
+}
+
+#[test]
+fn argparse_spellings_and_parent_paths_archive_the_selected_tree() {
+    let home = Home::new("argv");
+    let bank = home.path().join("bank");
+    fs::create_dir_all(bank.join("sub")).unwrap();
+    fs::write(bank.join("state.json"), "state").unwrap();
+    let separator = std::path::MAIN_SEPARATOR;
+    let parent = format!("bank{separator}sub{separator}..{separator}.");
+    for arguments in [
+        vec![format!("--data-dir={parent}"), "--out=backup".into()],
+        vec![
+            "--data-dir=absent".into(),
+            "--data".into(),
+            parent.clone(),
+            "--o".into(),
+            "backup".into(),
+        ],
+        vec![
+            "--data-dir".into(),
+            parent,
+            "--out".into(),
+            format!("bank{separator}sub{separator}..{separator}backups"),
+            "--keep=1e3".into(),
+        ],
+    ] {
+        let output = command(home.path()).args(arguments).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        assert!(output.stderr.is_empty());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let state = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("state archive: "))
+            .unwrap();
+        assert!(
+            members(&home.path().join(state))
+                .iter()
+                .any(|(name, data)| name == "state.json" && data == b"state")
+        );
+    }
 }
 
 #[test]
@@ -135,56 +180,23 @@ fn missing_canonical_paths_are_refused_verbatim() {
 }
 
 #[test]
-fn noncanonical_argv_defers_without_effects() {
-    let home = Home::new("argv");
-    fs::create_dir(home.path().join("bank")).unwrap();
-    let bank = text(&home.path().join("bank"));
-    let separator = std::path::MAIN_SEPARATOR;
-    let dotted = format!("{bank}{separator}.{separator}missing-µ");
-    let doubled = format!("{bank}{separator}{separator}missing-µ");
-    let trailing = format!("{bank}{separator}");
-    let joined = format!("--data-dir={bank}");
+fn invalid_argv_reports_argparse_usage_without_effects() {
+    let home = Home::new("invalid-argv");
     for arguments in [
-        vec!["--data-dir", dotted.as_str()],
-        vec!["--data-dir", doubled.as_str()],
-        vec!["--data-dir", trailing.as_str()],
-        vec![joined.as_str()],
-        vec!["--data", bank.as_str()],
-        vec!["--data-dir", bank.as_str(), "--data-dir", bank.as_str()],
-        vec!["--data-dir", bank.as_str(), "--keep-days", "1e3"],
-        vec!["--data-dir", bank.as_str(), "--keep-days", "-1"],
-        vec!["--data-dir", bank.as_str(), "--keep-days", ".5"],
-        vec!["--data-dir", bank.as_str(), "--keep-days", "0"],
-        vec!["--data-dir", bank.as_str(), "--keep-days", "0.0006"],
-        vec!["--data-dir", bank.as_str(), "--out"],
-        vec!["--data-dir", bank.as_str(), "--out", "-x"],
-        vec!["--data-dir", bank.as_str(), "extra"],
-        vec!["-h"],
+        vec!["--out"],
+        vec!["--out", "-x"],
+        vec!["extra"],
+        vec!["--keep=oops"],
     ] {
-        assert_deferred(&home, &arguments);
-    }
-}
-
-#[cfg(not(windows))]
-#[test]
-fn leading_double_slash_defers() {
-    let home = Home::new("root");
-    let argument = format!("/{}/missing", home.path().display());
-    assert_deferred(&home, &["--data-dir", &argument]);
-}
-
-#[cfg(windows)]
-#[test]
-fn extended_unc_and_slash_spellings_defer_without_effects() {
-    let home = Home::new("prefix");
-    let display = home.path().display();
-    for argument in [
-        format!("{display}/missing-µ"),
-        format!("\\\\?\\{display}\\missing-µ"),
-        String::from("\\\\localhost\\absent-share-µ\\missing"),
-        String::from("C:relative-µ"),
-    ] {
-        assert_deferred(&home, &["--data-dir", &argument]);
+        let output = run(home.path(), &arguments);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("pseudolife-mcp backup: error:")
+        );
+        assert!(home.listing().is_empty());
     }
 }
 
@@ -224,14 +236,11 @@ fn outputs_that_would_archive_themselves_defer() {
     fs::write(bank.join("config.yaml"), "x").unwrap();
     let bank_text = text(&bank);
     let parent = text(&bank.join("sub").join("..").join("sub"));
-    for out in [
-        bank_text.clone(),
-        text(&bank.join("sub").join("bk")),
-        parent.clone(),
-    ] {
+    for out in [bank_text.clone(), text(&bank.join("sub").join("bk"))] {
         assert_deferred(&home, &["--data-dir", &bank_text, "--out", &out]);
     }
-    assert_deferred(&home, &["--data-dir", &parent]);
+    let output = run(home.path(), &["--data-dir", &parent]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
 
 #[test]
@@ -389,4 +398,66 @@ fn file_mode_archives_state_and_rotates_only_its_own_state_files() {
         .map(|(n, d)| (n.as_str(), d.as_str()))
         .collect();
     assert_eq!(names, expected);
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_archive_records_resolved_owner_names() {
+    let home = Home::new("owners");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    fs::write(bank.join("state.json"), "state").unwrap();
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let archive = fs::read_dir(bank.join("backups"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(
+        fs::File::open(archive).unwrap(),
+    ));
+    for entry in tar.entries().unwrap() {
+        let entry = entry.unwrap();
+        assert!(!entry.header().username().unwrap().unwrap().is_empty());
+        assert!(!entry.header().groupname().unwrap().unwrap().is_empty());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn discovery_permission_errors_preserve_python_diagnostic_and_effects() {
+    use std::os::unix::fs::PermissionsExt;
+    for metadata_error in [false, true] {
+        let home = Home::new("discovery");
+        let bank = home.path().join("bank");
+        let installation = home.path().join(".pg0").join("installation");
+        fs::create_dir_all(&installation).unwrap();
+        fs::create_dir(&bank).unwrap();
+        let denied = if metadata_error {
+            installation.parent().unwrap()
+        } else {
+            &installation
+        };
+        fs::set_permissions(denied, fs::Permissions::from_mode(0o0)).unwrap();
+        let output = command(home.path())
+            .env("PSEUDOLIFE_MCP_DATABASE_URL", "postgresql://unused")
+            .args(["--data-dir", &text(&bank)])
+            .output()
+            .unwrap();
+        fs::set_permissions(denied, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stderr,
+            format!(
+                "PermissionError: [Errno 13] Permission denied: '{}'\n",
+                installation.display()
+            )
+            .as_bytes()
+        );
+        assert!(bank.join("backups").is_dir());
+        assert_eq!(fs::read_dir(bank.join("backups")).unwrap().count(), 0);
+    }
 }

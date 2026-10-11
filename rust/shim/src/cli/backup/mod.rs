@@ -1,9 +1,9 @@
 //! `backup`: pg_dump of an explicit DSN plus the state archive, with rotation.
 //!
-//! Oracle: `pseudolife_memory/backup_cli.py`. Only canonical argv and path
-//! spellings are admitted, and every case that needs the lite tier's embedded
-//! instance defers before any effect.
+//! Oracle: `pseudolife_memory/backup_cli.py`. Cases requiring the lite
+//! tier's embedded instance defer before any effect.
 mod archive;
+mod args;
 mod dump;
 
 use std::{
@@ -17,85 +17,6 @@ use std::{
 const HELP: &str = include_str!("../backup_help.txt");
 const DUMP_PREFIX: &str = "pseudolife_lite_memory-";
 const STATE_PREFIX: &str = "pseudolife_lite_state-";
-
-/// True when Python's `str(Path(value)) == value`, so a path can be printed
-/// verbatim and joined like pathlib joins it. Every other spelling defers.
-#[cfg(not(windows))]
-fn canonical(value: &str) -> bool {
-    let rest = value.strip_prefix('/').unwrap_or(value);
-    value == "/"
-        || (!rest.is_empty()
-            && !rest.starts_with('-')
-            && rest.split('/').all(|part| !part.is_empty() && part != "."))
-}
-
-#[cfg(windows)]
-fn canonical(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    let rest = if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && &bytes[1..3] == b":\\" {
-        if bytes.len() == 3 {
-            return true;
-        }
-        &value[3..]
-    } else {
-        value
-    };
-    !rest.is_empty()
-        && !rest.starts_with('-')
-        && !rest.contains(['/', ':'])
-        && rest.split('\\').all(|part| !part.is_empty() && part != ".")
-}
-
-fn has_parent_component(path: &Path) -> bool {
-    path.components()
-        .any(|part| matches!(part, std::path::Component::ParentDir))
-}
-
-struct Args {
-    data_dir: Option<String>,
-    out: Option<String>,
-    keep_days: f64,
-}
-
-fn parse(arguments: &[OsString]) -> Option<Args> {
-    let mut args = Args {
-        data_dir: None,
-        out: None,
-        keep_days: 7.0,
-    };
-    let mut keep_days_seen = false;
-    let mut values = arguments.iter();
-    while let Some(option) = values.next() {
-        let value = values.next()?.to_str()?;
-        match option.to_str()? {
-            "--data-dir" if args.data_dir.is_none() && canonical(value) => {
-                args.data_dir = Some(value.to_owned());
-            }
-            "--out" if args.out.is_none() && canonical(value) => args.out = Some(value.to_owned()),
-            "--keep-days" if !keep_days_seen => {
-                let (whole, fraction) = value.split_once('.').unwrap_or((value, "0"));
-                if whole.is_empty()
-                    || fraction.is_empty()
-                    || !whole
-                        .bytes()
-                        .chain(fraction.bytes())
-                        .all(|b| b.is_ascii_digit())
-                {
-                    return None;
-                }
-                // Under a minute, rotation races this run's own new files against
-                // the platform clock (Python 3.11 reads the coarse clock on Windows).
-                args.keep_days = value
-                    .parse()
-                    .ok()
-                    .filter(|days: &f64| days.is_finite() && days * 86400.0 >= 60.0)?;
-                keep_days_seen = true;
-            }
-            _ => return None,
-        }
-    }
-    Some(args)
-}
 
 /// `Path.home()` as Python 3.11 resolves it; unusual environments defer.
 fn home() -> Option<PathBuf> {
@@ -143,13 +64,13 @@ fn lite_default() -> Option<PathBuf> {
 /// `_default_data_dir`, deferring wherever Python could pick the lite tier.
 fn default_data_dir() -> Option<PathBuf> {
     if let Some(raw) = nonempty_env("PSEUDOLIFE_MCP_DATA_DIR")? {
-        return canonical(&raw).then(|| PathBuf::from(raw));
+        return Some(args::pathlib(Path::new(&raw)));
     }
     if !matches!(lite_default()?.try_exists(), Ok(false)) {
         return None;
     }
     let cwd = std::env::current_dir().ok()?;
-    canonical(cwd.to_str()?).then(|| cwd.join("data"))
+    Some(cwd.join("data"))
 }
 
 fn write_stream(stdout: bool, text: &str) -> io::Result<()> {
@@ -182,26 +103,30 @@ fn rotation_names_supported(bdir: &Path) -> Option<()> {
     Some(())
 }
 
-fn help() -> u8 {
-    if io::stdout()
-        .lock()
-        .write_all(&super::text_bytes(HELP))
-        .is_ok()
-    {
-        0
-    } else {
-        1
-    }
-}
-
 /// `None` defers to the dispatcher before any effect.
 pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
-    if arguments == [OsString::from("--help")] {
-        return (std::env::var_os("COLUMNS") == Some(OsString::from("80"))).then(help);
-    }
-    let args = parse(&arguments)?;
+    let args = match args::parse(&arguments)? {
+        args::Parsed::Args(args) => args,
+        args::Parsed::Help => {
+            return Some(if write_stream(true, &args::help(args::width())).is_ok() {
+                0
+            } else {
+                1
+            });
+        }
+        args::Parsed::Error(message) => {
+            let _ = write_stream(
+                false,
+                &format!(
+                    "{}pseudolife-mcp backup: error: {message}\n",
+                    args::usage(args::width())
+                ),
+            );
+            return Some(2);
+        }
+    };
     let data_dir = match &args.data_dir {
-        Some(value) => PathBuf::from(value),
+        Some(value) => value.clone(),
         None => default_data_dir()?,
     };
     match data_dir.try_exists() {
@@ -228,12 +153,9 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
         return None;
     }
     let bdir = match &args.out {
-        Some(out) => PathBuf::from(out),
+        Some(out) => out.clone(),
         None => data_dir.join("backups"),
     };
-    if has_parent_component(&data_dir) || has_parent_component(&bdir) {
-        return None;
-    }
     match fs::metadata(&bdir) {
         Ok(meta) if !meta.is_dir() => return None,
         Err(error) if error.kind() != io::ErrorKind::NotFound => return None,
@@ -246,7 +168,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     archive::admit(&data_dir, &bdir)?;
     rotation_names_supported(&bdir)?;
     let pg_dump = match &dsn {
-        Some(_) => Some(dump::find(&home()?)?),
+        Some(_) => Some(dump::find(&home()?)),
         None => None,
     };
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
@@ -266,8 +188,12 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     if let Err(error) = fs::create_dir_all(&bdir) {
         return Some(failed(&error.to_string()));
     }
+    if let Some(Err(error)) = &pg_dump {
+        let _ = write_stream(false, &error.diagnostic());
+        return Some(1);
+    }
     let dump = match (&dsn, pg_dump) {
-        (Some(dsn), Some(Some(pg_dump))) => match dump::write(dsn, &pg_dump, &bdir, &ts) {
+        (Some(dsn), Some(Ok(Some(pg_dump)))) => match dump::write(dsn, &pg_dump, &bdir, &ts) {
             Ok(path) => Some(path),
             Err(message) => return Some(failed(&message)),
         },
