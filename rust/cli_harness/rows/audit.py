@@ -916,7 +916,7 @@ MUTANTS = [
     Mutant("audit-drive-relative-admitted", "audit", "shim/src/cli/board_audit/args.rs",
            "    if cfg!(windows) && value.contains(':') {",
            "    if cfg!(windows) && value.contains(':') && false {",
-           ("defer-input-drive-relative",)),
+           ("defer-input-drive-relative",), platforms=("windows",)),
     Mutant("audit-verify-stdout-closed-exit-1", "audit", "shim/src/cli/board_audit/mod.rs",
            "        Err(()) => deferred(),", "        Err(()) => 1,",
            ("defer-input-stdout-closed", "defer-bank-verify-stdout-closed")),
