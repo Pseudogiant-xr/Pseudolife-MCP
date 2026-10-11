@@ -828,3 +828,9 @@ function python {
         assert actual == expected
         assert ("--golden" in call) == golden
         assert call[call.index("--candidate") + 1] == "fixture-candidate"
+
+
+def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():
+    job = workflow()["jobs"]["parity-checks"]
+    assert job["timeout-minutes"] == (
+        "${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}")

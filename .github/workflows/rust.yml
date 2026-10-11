@@ -241,7 +241,7 @@ jobs:
     # 105m55s/104m04s, with about 50m outside W1-C. Master run
     # 38076979343 (2026-10-10, Windows) confirms ~46m remaining.
     # W1-C now runs in parallel; allow twice the conservative 50m remainder.
-    timeout-minutes: ${{ matrix.job_timeout || 100 }}
+    timeout-minutes: ${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}
     steps:
       - uses: actions/checkout@v4
         with:
