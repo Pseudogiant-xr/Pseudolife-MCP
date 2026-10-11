@@ -181,6 +181,7 @@ async fn verify_in(session: &mut pg::Session, expect: Option<super::args::Head>)
         let seq = map["seq"].as_i64().expect("bigint seq");
         let row = chain::Row {
             value: Value::Object(map),
+            pending_payload: None,
             seq,
             created_at,
         };
@@ -344,6 +345,14 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
     let mut text = String::new();
     for (map, _) in rows {
         let Some(line) = export_line(map) else {
+            // Python has already emitted preceding stdout rows. A failed
+            // file export still removes the run's exclusive destination.
+            if output.file.is_none() {
+                let ending = write_lines(output, Outcome::Lines(text));
+                if !matches!(ending, Ending::Exit(0)) {
+                    return ending;
+                }
+            }
             return Ending::Exit(super::failed());
         };
         text.push_str(&line);
@@ -359,11 +368,11 @@ fn write_strerror(error: &std::io::Error) -> Option<String> {
     let code = error.raw_os_error()?;
     if cfg!(windows) {
         return match code {
-            2 | 3 => Some("No such file or directory".into()),
+            2 | 3 | 206 => Some("No such file or directory".into()),
             5 | 32 => Some("Permission denied".into()),
             80 | 183 => Some("File exists".into()),
             112 => Some("No space left on device".into()),
-            123 | 206 => Some("Invalid argument".into()),
+            123 => Some("Invalid argument".into()),
             267 => Some("Not a directory".into()),
             _ => None,
         };
@@ -478,6 +487,10 @@ mod tests {
             );
             assert_eq!(
                 write_strerror(&std::io::Error::from_raw_os_error(3)).as_deref(),
+                Some("No such file or directory")
+            );
+            assert_eq!(
+                write_strerror(&std::io::Error::from_raw_os_error(206)).as_deref(),
                 Some("No such file or directory")
             );
             // ERROR_IO_DEVICE: the C runtime's errno for it is not pinned.

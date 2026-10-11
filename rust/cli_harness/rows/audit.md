@@ -96,6 +96,11 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
   output names are harness cases; unit tests pin the strerror mapping.
   The closed-descriptor case was measured by hand on
   Linux (see the declared divergence).
+- Review regression cases cover links before surrogate encoding, root `--`,
+  short help clusters, Python's head-conversion errors and integer digit limit,
+  minute-precision local ISO deferral, output symlink loops, and the stdout
+  prefix before a later invalid stored payload. Leading-dot Windows paths and
+  long output names remain Windows: pending CI.
 
 ## Proposed PARITY split
 

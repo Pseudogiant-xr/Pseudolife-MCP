@@ -33,6 +33,10 @@ fn usage(action: &str) -> String {
 }
 
 fn help(action: &str, token: &str) -> Option<Action> {
+    // A short -h cluster invokes help before consuming its remaining characters.
+    if token.starts_with("-h") && !token.starts_with("--") && !token.starts_with("-h=") {
+        return Some(Action::Help(super::help::text(action)));
+    }
     if let Some((_, value)) = token.split_once('=') {
         return error(
             action,
@@ -66,6 +70,9 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
     let mut root_unknown = Vec::new();
     let mut action_index = 0;
     while let Some(token) = tokens.get(action_index) {
+        if *token == "--" {
+            break;
+        }
         let option = token.split_once('=').map_or(*token, |(key, _)| key);
         if option == "-h"
             || option.starts_with("-h") && !option.starts_with("--")
@@ -169,11 +176,10 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
             },
         };
         // argparse converts every occurrence, including a value overwritten later.
-        if name == "--expect-head" && head(value).is_none() {
-            return error(
-                action,
-                "argument --expect-head: expected SEQ:HASH as verify prints them",
-            );
+        if name == "--expect-head"
+            && let Err(message) = head(value)
+        {
+            return error(action, format!("argument --expect-head: {message}"));
         }
         if matches!(name, "--since" | "--until") && time(value).is_none() && !deferred_time(value) {
             return error(
@@ -215,7 +221,7 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
     }
     match action {
         "verify" => {
-            let expect = get("--expect-head").and_then(head);
+            let expect = get("--expect-head").and_then(|value| head(value).ok());
             match get("--input").filter(|v| !v.is_empty()) {
                 Some(input) => Some(Action::VerifyInput {
                     input: path(input),
@@ -270,7 +276,10 @@ fn option_token(value: &str, allowed: &[&str]) -> bool {
 pub(super) fn path(value: &str) -> String {
     if cfg!(windows) {
         let value = value.replace('/', "\\");
-        let normalized: std::path::PathBuf = std::path::Path::new(&value).components().collect();
+        let normalized: std::path::PathBuf = std::path::Path::new(&value)
+            .components()
+            .filter(|component| *component != std::path::Component::CurDir)
+            .collect();
         return if normalized.as_os_str().is_empty() {
             ".".into()
         } else {
@@ -296,20 +305,42 @@ pub(super) fn path(value: &str) -> String {
     }
 }
 
-fn head(value: &str) -> Option<Head> {
-    let (seq, digest) = value.split_once(':')?;
+fn head(value: &str) -> Result<Head, String> {
+    let shape_error = || "expected SEQ:HASH as verify prints them".to_owned();
+    let (seq, digest) = value.split_once(':').ok_or_else(shape_error)?;
+    if seq.is_empty() || !seq.chars().all(python_digit) {
+        return Err(shape_error());
+    }
+    if seq.chars().count() > 4300 || seq.chars().any(|c| decimal_digit(c).is_none()) {
+        return Err(format!(
+            "invalid _head value: {}",
+            super::super::pyjson::py_value_repr(&super::super::pyjson::J::Str(value.into()))
+        ));
+    }
     let seq: String = seq
         .chars()
         .map(|c| decimal_digit(c).and_then(|digit| char::from_digit(digit, 10)))
-        .collect::<Option<_>>()?;
+        .collect::<Option<_>>()
+        .expect("decimal digits checked");
     if seq.is_empty()
         || seq.bytes().all(|c| c == b'0')
         || digest.len() != 64
         || !digest.bytes().all(|c| matches!(c,b'0'..=b'9'|b'a'..=b'f'))
     {
-        return None;
+        return Err(shape_error());
     }
-    Some((seq.trim_start_matches('0').to_owned(), digest.to_owned()))
+    Ok((seq.trim_start_matches('0').to_owned(), digest.to_owned()))
+}
+
+// CPython 3.11 str.isdigit includes these Unicode 14 digit characters
+// in addition to decimal digits; int() rejects them after that shape check.
+fn python_digit(c: char) -> bool {
+    decimal_digit(c).is_some()
+        || matches!(c as u32,
+        178..=179 | 185 | 4969..=4977 | 6618 | 8304 | 8308..=8313 |
+        8320..=8329 | 9312..=9320 | 9332..=9340 | 9352..=9360 | 9450 |
+        9461..=9469 | 9471 | 10102..=10110 | 10112..=10120 | 10122..=10130 |
+        68160..=68163 | 69216..=69224 | 69714..=69722 | 127232..=127242)
 }
 
 fn time(value: &str) -> Option<f64> {
@@ -345,7 +376,10 @@ fn deferred_time(value: &str) -> bool {
         || chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
         || [
             "%Y-%m-%dT%H:%M:%S%.f",
+            "%Y-%m-%dT%H:%M",
+            "%Y-%m-%dT%H",
             "%Y-%m-%d %H:%M:%S%.f",
+            "%Y-%m-%d %H:%M",
             "%Y%m%dT%H%M%S%.f",
         ]
         .iter()
@@ -441,14 +475,13 @@ mod tests {
             Some(Action::Error(_))
         ));
         let digest = "a".repeat(64);
-        assert_eq!(
-            head(&format!("00012:{digest}")),
-            Some(("12".into(), digest))
-        );
+        assert_eq!(head(&format!("00012:{digest}")), Ok(("12".into(), digest)));
     }
     #[test]
     fn pathlib_paths_keep_parent_components() {
-        if !cfg!(windows) {
+        if cfg!(windows) {
+            assert_eq!(path("./missing//archive.jsonl/"), "missing\\archive.jsonl");
+        } else {
             assert_eq!(path("./a//../b/"), "a/../b");
             assert_eq!(path("//a/./b"), "//a/b");
             assert_eq!(path("///a/"), "/a");

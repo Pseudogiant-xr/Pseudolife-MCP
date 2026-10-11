@@ -64,8 +64,11 @@ fn run_inner(arguments: Vec<OsString>) -> u8 {
                         if matches!(
                             error.kind(),
                             io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-                        ) || cfg!(windows)
-                            && matches!(error.raw_os_error(), Some(21 | 123 | 1921)) => {}
+                        ) || cfg!(unix) && error.raw_os_error() == Some(9)
+                            || cfg!(target_os = "linux") && error.raw_os_error() == Some(40)
+                            || cfg!(target_os = "macos") && error.raw_os_error() == Some(62)
+                            || cfg!(windows)
+                                && matches!(error.raw_os_error(), Some(21 | 123 | 206 | 1921)) => {}
                     Err(_) => return failed(),
                 }
             }
@@ -182,7 +185,7 @@ fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
         if archive::blank(&line) {
             continue;
         }
-        let (value, seq, created_at) = match archive::row(&line) {
+        let (value, seq, created_at, pending_payload) = match archive::row(&line) {
             Ok(row) => row,
             Err(archive::Error::Deferred) => return deferred(),
             Err(archive::Error::Encoding) => return failed(),
@@ -200,6 +203,7 @@ fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
         };
         match walker.push(chain::Row {
             value,
+            pending_payload,
             seq,
             created_at,
         }) {

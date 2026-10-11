@@ -20,9 +20,10 @@ pub(super) enum Failure {
 pub(super) use Failure::Deferred;
 
 pub(super) struct Row {
-    /// The exported row: columns by name, `payload` parsed (archive) or the
-    /// stored text (bank), `body`/`body_salt` absent only in a pre-v46 export.
+    /// Columns by name; a parsed archive payload waits separately until hashing.
+    /// `body`/`body_salt` are absent only in a pre-v46 export.
     pub value: Value,
+    pub pending_payload: Option<J>,
     pub seq: i64,
     pub created_at: f64,
 }
@@ -182,11 +183,12 @@ impl Walker {
     }
 
     /// One row in chain order; `Ok(Some(report))` is the first break.
-    pub(super) fn push(&mut self, row: Row) -> Result<Option<Json>, Failure> {
-        let value = &row.value;
-        let text = |key: &str| value[key].as_str().unwrap_or_default().to_owned();
+    pub(super) fn push(&mut self, mut row: Row) -> Result<Option<Json>, Failure> {
         let seq = row.seq;
-        let prev_hash = text("prev_hash");
+        let prev_hash = row.value["prev_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
         match &self.prev {
             None => {
                 if seq == 1 && prev_hash != GENESIS {
@@ -202,6 +204,13 @@ impl Walker {
                 }
             }
         }
+        if let Some(payload) = row.pending_payload.take() {
+            let mut text = String::new();
+            codec::python_compact(&payload, false, true, &mut text).ok_or(Failure::Python)?;
+            row.value["payload"] = Value::String(text);
+        }
+        let value = &row.value;
+        let text = |key: &str| value[key].as_str().unwrap_or_default().to_owned();
         let hash = text("hash");
         if codec::hash(value, row.created_at).map_err(|_| Deferred)? != hash {
             return Ok(Some(broken(seq, "hash_mismatch")));

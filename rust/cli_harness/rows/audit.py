@@ -254,7 +254,7 @@ def seed_invalid_payload(conn) -> dict:
     with store.storage._txn():
         event = store._event("register", {})
         event["payload"] = "{"
-        store._append([event], T0)
+        store._append([store._event("register", {}), event], T0)
     return {}
 
 
@@ -394,6 +394,11 @@ def _send_index(rows, message_id) -> int:
 
 def archive(variant: str) -> bytes:
     """An export of a seeded bank, unchanged or edited one way."""
+    if variant == "surrogate-before-link":
+        row = export_rows("rich")[0]
+        row["prev_hash"] = "1" * 64
+        row["payload"] = {"odd": "\ud800"}
+        return _lines([row])
     if variant == "head-19-digits":
         from pseudolife_memory.storage.coordination import (  # noqa: PLC0415
             audit_hash, verify_audit_chain)
@@ -643,13 +648,15 @@ def _files(arm, files) -> None:
 
 
 def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
-              env=None, note="", platforms=("windows", "linux")):
+              env=None, note="", platforms=("windows", "linux"), prepare=None):
     """A read action against one seeded bank, which must stay unchanged."""
     original = ["board-audit", *argv]
 
     def setup(arm):
         name = ensure(kind)
         _files(arm, files)
+        if prepare is not None:
+            prepare(arm)
         _resolve_argv(case, original)
         arm.state["name"] = name
         _stash(arm)
@@ -760,6 +767,20 @@ def _pruned(key):
 def cases() -> list[core.Case]:
     rich_head = _Lazy(lambda: head("rich"))
     out = [
+        archive_case("input-surrogate-before-link", "surrogate-before-link"),
+        file_case("root-delimiter", ["--", "verify"]),
+        file_case("short-help-joined-tail", ["verify", "-hello=x"]),
+        file_case("input-head-nondecimal-digit", ["verify", "--expect-head", "²:" + "a" * 64]),
+        file_case("input-head-digit-limit", ["verify", "--expect-head", "0" * 4301 + "1:" + "a" * 64]),
+        file_case("input-windows-leading-dot", ["verify", "--input", "./missing//archive.jsonl/"],
+                  platforms=("windows",), note="Windows: pending CI"),
+        read_case("export-output-loop", "rich", ["export", "--out", _home("loop")],
+                  platforms=("linux",), prepare=lambda arm: (arm.home / "loop").symlink_to("loop")),
+        read_case("export-windows-long-name", "rich", ["export", "--out", _home("x" * 260)],
+                  platforms=("windows",), note="Windows: pending CI"),
+        file_case("defer-export-local-minute", ["export", "--since", "2026-10-10T12:00"],
+                  rules=("rust-deferral",)),
+        read_case("export-invalid-payload-prefix", "invalid_payload", ["export"]),
         # verify --input: every event family the seeded chain carries
         archive_case("input-rich", "rich"),
         archive_case("input-rich-expect-head", "rich", "--expect-head", rich_head),

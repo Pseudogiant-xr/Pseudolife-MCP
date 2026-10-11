@@ -28,7 +28,7 @@ const COLUMNS: &[&str] = &[
     "hash",
 ];
 
-pub(super) fn row(text: &str) -> Result<(Value, i64, f64), Error> {
+pub(super) fn row(text: &str) -> Result<(Value, i64, f64, Option<pyjson::J>), Error> {
     let parsed = pyjson::loads_unique(text, codec::ARCHIVE_DEPTH).map_err(|error| match error {
         None => Error::Duplicate,
         Some(pyjson::Refused::NotJson) => Error::NotJson,
@@ -99,15 +99,15 @@ pub(super) fn row(text: &str) -> Result<(Value, i64, f64), Error> {
         return Err(Error::Deferred);
     }
     let payload = payload.expect("required payload column was checked");
-    let text = if let pyjson::J::Str(text) = payload {
-        text
+    let pending = if let pyjson::J::Str(text) = payload {
+        value["payload"] = Value::String(text);
+        None
     } else {
-        let mut text = String::new();
-        codec::python_compact(&payload, false, true, &mut text).ok_or(Error::Encoding)?;
-        text
+        // Python checks links before hashing a parsed payload. Its UTF-8
+        // encoding can fail, so defer canonicalization until that point.
+        Some(payload)
     };
-    value["payload"] = Value::String(text);
-    Ok((value, seq, created_at))
+    Ok((value, seq, created_at, pending))
 }
 
 pub(super) fn blank(text: &str) -> bool {
