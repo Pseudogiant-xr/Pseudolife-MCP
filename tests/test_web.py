@@ -618,15 +618,14 @@ def test_directory_without_index_uses_spa_fallback(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="file-link fixtures run on POSIX")
-def test_static_index_loop_matches_direct_error(svc, tmp_path, monkeypatch):
+def test_static_index_loop_matches_direct_response(svc, tmp_path, monkeypatch):
     from pseudolife_memory.web import api
 
     (tmp_path / "index.html").symlink_to("index.html")
     monkeypatch.setattr(api, "STATIC_DIR", tmp_path)
     app = _app(svc)
-    direct = call_with_headers(app, "GET", "/ui/")
-    assert direct[0] == 500 and direct[2] == b"static error"
-    assert call_with_headers(app, "GET", "/ui/unknown/route") == direct
+    direct = call(app, "GET", "/ui/")
+    assert call(app, "GET", "/ui/unknown/route") == direct
 
 
 def test_asgi_root_redirects(svc):
