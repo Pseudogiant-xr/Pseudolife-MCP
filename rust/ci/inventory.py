@@ -185,25 +185,18 @@ def check(workflow):
                     for name in W1A if name in supported for mode in ('live', 'golden')]
     assert SUITES['h5-w1a'] == expected_w1a, 'W1-A recording/replay selection dropped or changed'
     scoped = EXCEPTIONS['w1a_selections']
-    exception_id = 'windows-map-order-unsettled-bank-init'
-    assert set(scoped) == {exception_id}, 'map-order exception scope changed'
-    entry = scoped[exception_id]
-    assert set(entry) == {'platform', 'mode', 'scenario', 'reason'} \
-        and (entry['platform'], entry['mode'], entry['scenario']) == ('windows', 'both', 'map-order'), \
-        'map-order exception scope changed'
+    assert not scoped, 'retired unsettled-bank exception restored'
     from run_coverage import suite_actions
     for platform in ('linux', 'windows'):
         actions, omitted_scenarios, omitted_selections = suite_actions('h5-w1a', platform)
-        protected = [('live', 'map-order-reversed'), ('golden', 'map-order-reversed')]
-        if platform == 'linux':
-            protected.extend([('live', 'map-order'), ('golden', 'map-order')])
+        protected_names = ('encodings', 'map-order', 'map-order-reversed')
+        protected = [(mode, name) for name in protected_names for mode in ('live', 'golden')]
         actual_protected = Counter((a['mode'], a['scenario']) for a in actions
-                                   if a['scenario'] in ('map-order', 'map-order-reversed'))
-        assert actual_protected == Counter(protected), 'protected map-order selections dropped or changed'
-        expected = [a for a in expected_w1a if a['scenario'] not in EXCEPTIONS['w1a_platform'][platform]
-                    and not (platform == 'windows' and a['scenario'] == 'map-order')]
-        assert actions == expected, 'map-order exception scope changed in executable selection'
-        assert omitted_selections == (scoped if platform == 'windows' else {}), 'map-order exception scope changed in receipt'
+                                   if a['scenario'] in protected_names)
+        assert actual_protected == Counter(protected), 'protected settled-auth selections dropped or changed'
+        expected = [a for a in expected_w1a if a['scenario'] not in EXCEPTIONS['w1a_platform'][platform]]
+        assert actions == expected, 'W1-A executable selection changed'
+        assert not omitted_selections, 'retired unsettled-bank exception in receipt'
         assert omitted_scenarios == EXCEPTIONS['w1a_platform'][platform]
     assert SUITES['h5-background'] == [dict(kind='daemon', scenario=name, mode='live')
                                      for name in BACKGROUND], 'accepted daemon scenario lost live background execution'
