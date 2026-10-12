@@ -150,3 +150,13 @@ Master lock is retained for Cargo regeneration. Module declarations retain MCP a
 NEEDS OPUS: shared bounded refusal cleanup replaces the older MCP detached body drain; review transport deadline policy at landing. Bound identity and tool-body integration remain deferred.
 
 Validation and independent Codex high review are recorded in the private W2P report; initial failures and final reruns are listed separately. Windows evidence is cross compilation, not runtime. Frozen oracle goldens are not re-recorded.
+
+### W2P completed evidence
+
+At `9b29830f5`, Linux fmt, all-targets clippy with warnings denied, tests and mutant build exit 0 (188 tests, including the distilled committed MCP goldens). Daemon and stdio Windows GNU check and clippy exit 0; no Windows runtime claim. Independent Codex high review found that the initial shared-body adaptation accidentally deleted MCP declarations. A compile RED (62 errors) was observed, those declarations were restored while keeping the counted reader, and the final Cargo checks pass.
+
+Authenticated live MCP: 261 responses, 16 cases, 4 differences, all from master's bounded refusal cleanup adding `Connection: close`; 38 unserved tools are checked. Alternate config: 10 responses, 0 differences. Tokenless future-policy corpus: 30 responses, 8 differences under the deliberately retained 501 guard. No golden or comparator was changed. NEEDS OPUS: shared HTTP refusal/connection policy at landing, plus existing tokenless Host/Origin, bound-identity and tool-body integration deferrals.
+
+Four authenticated mutation controls produced 40, 34, 236 and 7 total differences respectively. Because the ordinary live baseline has four differences, the private verification also checks that each control has changed or additional differences beyond that baseline: 36, 30, 232 and 3 respectively. The tokenless bare-host control remains unreachable through the 501 mount and is deferred, not counted as caught.
+
+The MCP runner now uses master disposable-name ownership and default-template safeguards. Owned fixture processes and banks were cleaned by the runners. Private W2P `g/` contains Cargo evidence, live/alternate/tokenless results, all control results and the review. Conflict detail: Cargo.lock keeps master resolution and adds the union through Cargo; main.rs retains MCP and maintenance modules; http.rs retains named-principal MCP dispatch, tokenless 501 and shared counted body ownership.
