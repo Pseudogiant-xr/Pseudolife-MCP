@@ -377,6 +377,19 @@ def workflow():
     return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
 
+
+def test_h5_step_budgets_fit_their_jobs():
+    shards = {shard["suite"]: shard for shard in workflow()["jobs"]["parity-checks"]["strategy"]["matrix"]["include"]
+              if shard["suite"] in H5_SUITES}
+    assert set(shards) == set(H5_SUITES)
+    for name, shard in shards.items():
+        assert 0 < shard["h5_timeout"] < shard["job_timeout"], name
+        assert 0 < shard["h5_windows_timeout"] < shard["job_timeout"], name
+    # Hosted ubuntu 2026-10-12: the audit step ran about 5 minutes and hit a
+    # 4-minute budget three times with every compared case matching.
+    assert shards["h5-audit"]["h5_timeout"] >= 10
+
+
 def test_shards_cover_both_systems_and_build_once():
     jobs = workflow()["jobs"]
     for name in ("rust", "candidate", "parity-checks", "parity"):

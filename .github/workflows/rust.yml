@@ -246,8 +246,12 @@ jobs:
           # graph controls 394s. Linux step budgets are about twice these.
           # Windows budgets are provisional until the first hosted run;
           # each new job stays inside the existing ~56-minute slowest job.
+          # Hosted ubuntu 2026-10-12: the audit step's live phase alone took
+          # 201s and the step hit its 4-minute budget on three runs (PRs
+          # #661 and #737) with every compared case matching; 10 minutes
+          # is about twice the observed ~5-minute step.
           - suite: h5-audit
-            h5_timeout: 4
+            h5_timeout: 10
             h5_windows_timeout: 20
             job_timeout: 30
           - suite: h5-backup
