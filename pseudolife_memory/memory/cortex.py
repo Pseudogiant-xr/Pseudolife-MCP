@@ -217,6 +217,13 @@ def direct_backed(rec: "CortexRecord | None") -> bool:
         for t in _DIRECT_TIERS)
 
 
+def _clean_prov(provenance: Iterable[str]) -> set[str]:
+    """Incoming provenance without empty entries or ``dream:*`` tokens: only
+    the ``dream`` flag of a write may add a mark (a caller-chosen source tag
+    such as ``"dream:user"`` must not forge one)."""
+    return {p for p in provenance if p and not p.startswith("dream:")}
+
+
 def _mark_tier(rec: "CortexRecord", sup: str | None, dream: bool) -> None:
     """Call BEFORE adding ``sup`` to ``rec.support``."""
     if sup not in _DIRECT_TIERS:
@@ -501,7 +508,7 @@ class CortexStore:
         vt = txt if valid_time is None else float(valid_time)
         stamp = dict(hlc=hlc, tx_time=txt, valid_time=vt,
                      writer_id=writer_id, session_id=session_id)
-        prov = {p for p in provenance if p}
+        prov = _clean_prov(provenance)
         sup = _norm_support(support)
         lab = dict(authority=authority, distortion_tolerance=distortion_tolerance)
         emb = embedding.detach().to("cpu", torch.float32).clone()
@@ -866,7 +873,7 @@ class CortexStore:
                     # member-channel echo corroborates the total but is not a
                     # scalar re-assertion through write_fact's stamped path.
                     cur.last_confirmed = t
-                    cur.provenance |= {p for p in provenance if p}
+                    cur.provenance |= _clean_prov(provenance)
                     if sup:
                         _mark_tier(cur, sup, dream)
                         cur.support.add(sup)
@@ -874,7 +881,7 @@ class CortexStore:
                         1.0, max(self._reinforce(cur.confidence), float(confidence)))
                     return WriteResult("confirmed", cur)
                 return self._contend(cur, slot, emb, confidence,
-                                     {p for p in provenance if p}, t, sup,
+                                     _clean_prov(provenance), t, sup,
                                      "member_add_blocked_aggregate",
                                      cur.slot_embedding,
                                      writer_id=writer_id,
@@ -906,7 +913,7 @@ class CortexStore:
                     # identical to the value it contends with (the
                     # aggregate guard's own rule).
                     cur.last_confirmed = t
-                    cur.provenance |= {p for p in provenance if p}
+                    cur.provenance |= _clean_prov(provenance)
                     if sup:
                         _mark_tier(cur, sup, dream)
                         cur.support.add(sup)
@@ -915,7 +922,7 @@ class CortexStore:
                                  float(confidence)))
                     return WriteResult("confirmed", cur)
                 return self._contend(cur, slot, emb, confidence,
-                                     {p for p in provenance if p}, t, sup,
+                                     _clean_prov(provenance), t, sup,
                                      "member_add_blocked_assistant"
                                      if assistant_blocked
                                      else "member_add_blocked_tier"
@@ -966,7 +973,14 @@ class CortexStore:
             if same_norm or cos >= MEMBER_DEDUP_COSINE:
                 self.dirty_slots.add(key)
                 m.last_confirmed = t
-                m.provenance |= {p for p in provenance if p}
+                m.provenance |= _clean_prov(provenance)
+                # Mirror the scalar confirm: the confirming tier accumulates
+                # and a direct write clears the dream mark. A dream confirm
+                # raises the tier only on an exact (normalised) match, never
+                # on a near-duplicate.
+                if sup and (same_norm or not dream):
+                    _mark_tier(m, sup, dream)
+                    m.support.add(sup)
                 m.confidence = min(1.0, max(m.confidence, float(confidence)))
                 return WriteResult("member_confirmed", m)
         if sup == "assistant" and any(m.origin != "assistant" for m in members):
@@ -978,7 +992,7 @@ class CortexStore:
             # members to protect and falls through to the insert below.
             self.dirty_slots.add(key)
             return self._contend(None, slot, emb, confidence,
-                                 {p for p in provenance if p}, t, sup,
+                                 _clean_prov(provenance), t, sup,
                                  "member_add_blocked_assistant",
                                  None, writer_id=writer_id,
                                  session_id=session_id,
@@ -1000,7 +1014,7 @@ class CortexStore:
             return WriteResult("member_capped", rejected)
         self.dirty_slots.add(key)
         rec = self._insert_member(slot, emb, confidence,
-                                  {p for p in provenance if p}, t, hlc=hlc,
+                                  _clean_prov(provenance), t, hlc=hlc,
                                   writer_id=writer_id, session_id=session_id,
                                   support=support)
         if dream and sup in _DIRECT_TIERS:
@@ -1436,9 +1450,15 @@ class CortexStore:
         contender = self.records[c_idx]
         if accept and self._members.get(key):
             return WriteResult("refused", contender)
-        self.dirty_slots.add(key)
         cur_idx = self._current.get(key)
         cur = self.records[cur_idx] if cur_idx is not None else None
+        if accept and dream and self.protect_provenance and direct_backed(cur):
+            # A dream promotion never replaces a direct user/action value.
+            # Checked here, under the store's lock, because the quarantine
+            # route that chose to promote ran under an earlier lock hold: a
+            # direct write may have landed in between. Nothing is mutated.
+            return WriteResult("refused_direct", contender)
+        self.dirty_slots.add(key)
         if accept:
             if cur is not None:
                 cur.status = "superseded"

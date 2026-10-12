@@ -62,6 +62,11 @@ class Claim(_ClaimRequired, total=False):
     # TURN and never a tier promotion (support is never taken from claim
     # text). Same parse-boundary whitelist rule as op/stance.
     speaker: str
+    # True when the model's value was not a JSON string (a number, a
+    # boolean, a list or an object) and the parser turned it into text. The
+    # value is kept; the dream treats the claim as unbacked for its tier,
+    # since its text is the parser's, not the note's.
+    value_coerced: bool
 
 
 # The only two speaker labels a claim may carry. NOTE what the dream does
@@ -1348,7 +1353,8 @@ class OpenAICompatExtractor:
                 continue
             entity = str(c.get("entity", "")).strip()
             attribute = str(c.get("attribute", "")).strip()
-            value = str(c.get("value", "")).strip()
+            raw_value = c.get("value", "")
+            value = str(raw_value).strip()
             if not (entity and attribute and value):
                 continue
             try:
@@ -1357,6 +1363,8 @@ class OpenAICompatExtractor:
                 conf = 0.7
             claim = Claim(entity=entity, attribute=attribute, value=value,
                           confidence=conf, origin="agent")
+            if not isinstance(raw_value, str):
+                claim["value_coerced"] = True
             if c.get("op") in ("add", "remove"):
                 claim["op"] = c["op"]
             # v29 stance: strings only, stripped, capped at 48 chars;

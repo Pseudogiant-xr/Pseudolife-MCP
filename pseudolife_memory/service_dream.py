@@ -1910,13 +1910,16 @@ class DreamOps:
                 # (_citation_backs); a citation that fails counts as no
                 # backing note, for the tier and the quarantine alike.
                 # Only a string value can be checked against its note: a
-                # None, number, bool, list or dict value is unbacked here
-                # (it is still stored exactly as before, at agent tier).
+                # None, number, bool, list or dict value is unbacked here,
+                # and so is one the extractor's parser coerced to text
+                # (value_coerced). Either is still stored exactly as before,
+                # at agent tier.
                 tier_entry = src_entry
                 if (src_entry is not None
                         and _origin_from_source(src_entry.get("source"))
                         not in (None, "agent")
                         and (not isinstance(c.get("value"), str)
+                             or c.get("value_coerced")
                              or not _citation_backs(
                                  c["value"],
                                  src_entry.get("text", ""),

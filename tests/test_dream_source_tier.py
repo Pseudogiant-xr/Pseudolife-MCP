@@ -573,6 +573,137 @@ def test_dream_add_converts_a_dream_consolidated_scalar(svc):
     assert sorted(m["value"] for m in cur["members"]) == ["emacs", "vim"]
 
 
+# ── only the dream flag ever writes a dream:<tier> mark
+
+def _user_editor(value):
+    return _claim(value, entity="user", attribute="editor")
+
+
+def test_a_source_tag_cannot_forge_a_dream_mark_on_a_direct_write(svc):
+    """Auto-promote copies the store's source tag into provenance: a source
+    of "dream:user" must not make a direct user fact look dream-written."""
+    svc.config.memory.cortex.auto_promote = True
+    svc.store("my editor is vim", source="dream:user", origin="user")
+    cur = svc.cortex_lookup("user", "editor")
+    assert cur["value"] == "vim" and "dream:user" not in cur["provenance"]
+    # Only the dream may write from here on (auto-promote is a direct write).
+    svc.config.memory.cortex.auto_promote = False
+    svc.store("my editor is helix now", source="user")
+    svc.dream_run(StubExtractor([_user_editor("helix")]))
+    assert svc.cortex_lookup("user", "editor")["value"] == "vim"
+
+
+def test_a_source_tag_cannot_add_a_dream_mark_to_a_direct_fact(svc):
+    svc.config.memory.cortex.auto_promote = True
+    svc.cortex_write("user", "editor", "vim", support="user")
+    svc.store("my editor is vim", source="dream:user")
+    assert "dream:user" not in svc.cortex_lookup(
+        "user", "editor")["provenance"]
+    svc.config.memory.cortex.auto_promote = False
+    svc.store("my editor is helix now", source="user")
+    svc.dream_run(StubExtractor([_user_editor("helix")]))
+    assert svc.cortex_lookup("user", "editor")["value"] == "vim"
+
+
+def test_direct_writes_strip_dream_marks_from_provenance(svc):
+    svc.cortex_write("editor-pref", "editor", "vim", support="agent",
+                     provenance=["dream:user", "seed"])
+    svc.set_add("tools", "list", "git", origin="agent",
+                provenance=["dream:action"])
+    assert svc.cortex_lookup("editor-pref", "editor")["provenance"] == [
+        "seed"]
+    assert svc.cortex_lookup("tools", "list")["members"][0][
+        "provenance"] == []
+
+
+def test_a_direct_write_between_route_and_promote_is_not_replaced(svc):
+    """The route decides under the lock and releases it; resolve must check
+    again, or a direct write landing in between is replaced."""
+    svc.config.memory.dream.quarantine_low_trust = True
+    svc.store("my preferred editor is emacs", source="agent")
+    svc.dream_run(StubExtractor([_claim("emacs")]))
+    route = svc._quarantine_route
+
+    def racing_route(*a, **kw):
+        out = route(*a, **kw)
+        if out[0] == "promote":
+            svc.cortex_write("editor-pref", "editor", "vim", support="user")
+        return out
+
+    svc._quarantine_route = racing_route
+    svc.store("yes, my preferred editor is emacs", source="user")
+    out = svc.dream_run(StubExtractor([_claim("emacs")]))
+    assert out.get("quarantine_promoted", 0) == 0
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["value"] == "vim" and cur["origin"] == "user"
+
+
+def test_a_direct_exact_member_confirm_clears_the_dream_mark(svc):
+    svc.store("my editor list now includes vim", source="user")
+    svc.dream_run(StubExtractor([_claim("vim", op="add")]))
+    svc.set_add("editor-pref", "editor", "vim", origin="user")
+    member = svc.cortex_lookup("editor-pref", "editor")["members"][0]
+    assert "dream:user" not in member["provenance"]
+    svc.store("vim is no longer an editor I use", source="user")
+    svc.dream_run(StubExtractor([_claim("vim", op="remove")]))
+    assert [m["value"] for m in svc.cortex_lookup(
+        "editor-pref", "editor")["members"]] == ["vim"]
+
+
+def test_a_direct_exact_member_confirm_adds_its_support(svc):
+    svc.set_add("editor-pref", "editor", "vim", origin="agent")
+    svc.set_add("editor-pref", "editor", "vim", origin="user")
+    member = svc.cortex_lookup("editor-pref", "editor")["members"][0]
+    assert member["origin"] == "user"
+
+
+def test_a_dream_near_duplicate_member_confirm_keeps_the_tier(svc):
+    """A dream add matched to an existing member only by similarity (not
+    the same text) confirms it without raising its tier, like a scalar
+    compression echo."""
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="agent")
+    svc.store("the quillon larder menu has kaya toasts", source="user")
+    svc.dream_run(StubExtractor([_claim("kaya toasts", op="add",
+                                        entity="the-quillon-larder",
+                                        attribute="menu")]))
+    members = svc.cortex_lookup("the-quillon-larder", "menu")["members"]
+    assert [(m["value"], m["origin"]) for m in members] == [
+        ("kaya toast", "agent")]
+
+
+@pytest.mark.parametrize("value,origin", [(32, "agent"), ("32", "user")])
+def test_a_coerced_value_from_the_shipped_parser_is_unbacked(svc, value,
+                                                             origin):
+    """The shipped extractor turns a JSON number into text; the dream must
+    still know it was not a string and keep the claim at agent tier."""
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+    from tests.dream_helpers import chat_payload, stub_server
+    raw = {"entity": "editor-pref", "attribute": "editor", "value": value,
+           "confidence": 0.9, "source": 1}
+    svc.store("my editor font is 32", source="user")
+    with stub_server(lambda: (200, chat_payload([raw]))) as url:
+        svc.dream_run(OpenAICompatExtractor(url, "m"))
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["value"] == "32" and cur["origin"] == origin
+
+
+def test_a_quoted_park_promoted_by_the_user_still_updates(svc):
+    """A quoted user note parks at user tier (low-trust); a second user note
+    promotes it; the promoted value is dream-written, so a third user note
+    still updates it."""
+    svc.config.memory.dream.quarantine_low_trust = True
+    svc.store("she said my preferred editor is emacs", source="user",
+              authority="quoted")
+    assert svc.dream_run(StubExtractor([_claim("emacs")])).get(
+        "quarantine_parked") == 1
+    svc.store("yes, my preferred editor is emacs", source="user")
+    assert svc.dream_run(StubExtractor([_claim("emacs")])).get(
+        "quarantine_promoted") == 1
+    svc.store("I switched my preferred editor to helix", source="user")
+    svc.dream_run(StubExtractor([_claim("helix")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "helix"
+
+
 def test_direct_write_guard_follows_protect_provenance(svc):
     svc.config.memory.cortex.protect_provenance = False
     _direct(svc)

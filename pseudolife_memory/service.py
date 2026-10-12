@@ -4505,6 +4505,10 @@ class MemoryService(DreamOps, MaintainerOps):
             if res.action == "refused":
                 return {"resolved": False, "reason": "slot_holds_set",
                         "entity": entity, "attribute": attribute}
+            if res.action == "refused_direct":
+                # dream=True only: the current value is a direct write.
+                return {"resolved": False, "reason": "direct_write",
+                        "entity": entity, "attribute": attribute}
             self._save_cortex()
             cur = self._cortex.lookup(entity, attribute)
             return {
