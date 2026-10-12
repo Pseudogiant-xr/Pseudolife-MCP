@@ -2,7 +2,6 @@
   "audit": [
     "audit-body-reason-swap",
     "audit-broken-exit-3",
-    "audit-drive-relative-admitted",
     "audit-duplicate-eager",
     "audit-exists-token",
     "audit-export-agent-filter-dropped",
@@ -14,7 +13,13 @@
     "audit-siblings-dropped",
     "audit-start-cut-dropped",
     "audit-vacuum-warnings-dropped",
-    "audit-verify-stdout-closed-exit-1"
+    "audit-verify-stdout-closed-exit-1",
+    "audit-iso-conversion-admitted",
+    "audit-repeat-first-wins",
+    "audit-create-message",
+    "audit-read-message",
+    "audit-payload-depth-capped",
+    "audit-decode-one-byte"
   ],
   "backup": [
     "backup-archives-backups-dir",
@@ -28,7 +33,10 @@
     "backup-rotation-order",
     "backup-skipped-wording",
     "backup-stdout-failure-exit",
-    "backup-top-order-windows"
+    "backup-top-order-windows",
+    "backup-hardlink-identity",
+    "backup-raw-member-name",
+    "backup-omits-fifo"
   ],
   "connect": [
     "connect-backup-stamp-millis",

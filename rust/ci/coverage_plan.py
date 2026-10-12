@@ -48,7 +48,6 @@ EXCEPTIONS = {
     },
     'cli_mutants': {
         'linux': {
-            'audit-drive-relative-admitted': 'Windows drive-relative path mutation has no Linux witness; escaped on Linux 2026-10-11.',
             'connect-config-not-private': 'Survived Linux 2026-10-11; the file is already created with private POSIX mode before make_private.',
             'connect-remote-keeps-spawn': 'Survived Linux 2026-10-11; the existing dry-run-remote fixture does not observe the changed empty NO_SPAWN branch.',
             'tl-script-lf': 'Survived Linux 2026-10-11 with its container witness; text_bytes already uses LF on POSIX.',
@@ -125,6 +124,8 @@ PLATFORM_EXCLUSIONS = {
     },
     'windows': {
         'backup-member-mode-posix': 'Registered only by the POSIX backup source branch.',
+        'backup-omits-fifo': 'Declared Linux-only FIFO member witness.',
+        'backup-raw-member-name': 'Declared Linux-only raw-byte member name witness.',
         'pair-mode-not-owner-only': 'Registered only by the POSIX pairing source branch.',
     },
 }

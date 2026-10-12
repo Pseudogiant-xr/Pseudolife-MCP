@@ -850,7 +850,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        shard: [audit-0, audit-1, backup-0, backup-1, connect-0, connect-1, connect-2, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, mail-0, mail-1, maintainer-0, maintainer-1, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2]
+        shard: [audit-0, audit-1, audit-2, backup-0, backup-1, connect-0, connect-1, connect-2, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, mail-0, mail-1, maintainer-0, maintainer-1, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
