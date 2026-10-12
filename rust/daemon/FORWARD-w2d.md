@@ -220,3 +220,7 @@ Validation and independent Codex high review are recorded in the private W2P rep
 - Initial compile failures in expanded Params fixtures and the initial fixed-name admission failure are retained separately from these passes.
 
 Conflict detail: `bank.rs` keeps master zero-timestamp hydration and mixed JSON tags with atomic access counts; `main.rs` unions read/release modules; `search.rs` keeps D ranking, master surprise precision and adapted master tests; `service.rs` hydrates both cortex and background sessions and preserves cancellable warmup; `spec.md` keeps the precise master memory-shape policy and D contracts; `divergences.md` keeps master graph declarations plus D's declared omissions.
+
+### Cleanup follow-up
+
+Final inventory found the three cell/live/mutant seed templates remained: the slice changed the disposable regex but left pgdisposable.PREFIX at w1a, so existing() did not enumerate its own templates. The prior runner-cleanup statement is superseded for seed templates. Set PL_HARNESS_SLICE before importing the helper; an isolated namespace regression is watched fail then pass, and an actual disposable PostgreSQL create/enumerate/drop cell passes. The three timestamped 166-entry templates from this task are dropped explicitly; final W2 inventory is empty and no owned fixture server remains. Production Rust, comparisons and recorded results are unchanged.

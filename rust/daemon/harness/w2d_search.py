@@ -47,6 +47,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
+os.environ["PL_HARNESS_SLICE"] = "w2d"
 import pgdisposable as pg  # noqa: E402
 from run import DB_DECLARED, bearer, call, settled, wait_settled  # noqa: E402,F401
 
