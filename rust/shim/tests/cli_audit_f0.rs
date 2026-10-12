@@ -103,17 +103,20 @@ fn empty_archive_verifies_without_python_or_bank_attachment() {
 }
 
 #[test]
-fn unsupported_archives_cannot_claim_an_intact_chain() {
+fn invalid_archives_fail_with_reader_diagnostics() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
-    for content in [b"{\n".as_slice(), b"\xff"] {
+    for (content, diagnostic) in [
+        (b"{\n".as_slice(), "line 1 is not JSON"),
+        (b"\xff", "is not UTF-8 JSON lines"),
+    ] {
         let output = archive(&home, content);
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
         assert!(
             String::from_utf8(output.stderr)
                 .unwrap()
-                .contains("deferred")
+                .contains(diagnostic)
         );
     }
     fs::remove_dir_all(&home).unwrap();
@@ -135,7 +138,7 @@ fn blank_lines_and_decoded_duplicates_follow_archive_reader_order() {
 }
 
 #[test]
-fn missing_input_and_incomplete_argv_defer_without_creating_a_bank() {
+fn missing_input_and_incomplete_argv_fail_without_creating_a_bank() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     let missing = command(&home)
@@ -152,19 +155,19 @@ fn missing_input_and_incomplete_argv_defer_without_creating_a_bank() {
             .contains("cannot read")
     );
     let incomplete = command(&home).args(["verify", "--input"]).output().unwrap();
-    assert_eq!(incomplete.status.code(), Some(1));
+    assert_eq!(incomplete.status.code(), Some(2));
     assert!(incomplete.stdout.is_empty());
     assert!(
         String::from_utf8(incomplete.stderr)
             .unwrap()
-            .contains("deferred")
+            .contains("argument --input: expected one argument")
     );
     assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
     fs::remove_dir_all(&home).unwrap();
 }
 
 #[test]
-fn joined_input_option_defers_even_for_an_empty_archive() {
+fn joined_input_option_verifies_an_empty_archive() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     let path = home.join("archive.jsonl");
@@ -175,17 +178,14 @@ fn joined_input_option_defers_even_for_an_empty_archive() {
     assert_eq!(fs::read(&path).unwrap(), b"");
     assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
     fs::remove_dir_all(&home).unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("deferred")
-    );
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["events"], 0);
 }
 
 #[test]
-fn option_looking_input_tokens_defer_even_when_literal_empty_files_exist() {
+fn option_looking_input_tokens_need_an_attached_value() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     let names = [
@@ -214,18 +214,18 @@ fn option_looking_input_tokens_defer_even_when_literal_empty_files_exist() {
     assert_eq!(fs::read_dir(&home).unwrap().count(), names.len());
     fs::remove_dir_all(&home).unwrap();
     for output in outputs {
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
         assert!(
             String::from_utf8(output.stderr)
                 .unwrap()
-                .contains("deferred")
+                .contains("argument --input: expected one argument")
         );
     }
 }
 
 #[test]
-fn negative_and_space_prefixed_input_tokens_defer() {
+fn negative_and_space_prefixed_input_tokens_are_literal_paths() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     let names = ["-1", "-1.5", "-.5", "-١.٥", "--bogus name"];
@@ -248,13 +248,10 @@ fn negative_and_space_prefixed_input_tokens_defer() {
     assert_eq!(fs::read_dir(&home).unwrap().count(), names.len());
     fs::remove_dir_all(&home).unwrap();
     for output in outputs {
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty());
-        assert!(
-            String::from_utf8(output.stderr)
-                .unwrap()
-                .contains("deferred")
-        );
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["events"], 0);
     }
 }
 
@@ -286,15 +283,7 @@ fn single_dash_input_verifies_literal_empty_file() {
 fn remaining_audit_operations_stay_explicitly_deferred() {
     let home = std::env::temp_dir().join(format!("audit-f0-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
-    for args in [
-        vec![],
-        vec!["export"],
-        vec!["stats"],
-        vec!["redact"],
-        vec!["verify"],
-        vec!["verify", "--expect-head", "1:hash"],
-        vec!["--help"],
-    ] {
+    for args in [vec!["export"], vec!["stats"], vec!["verify"]] {
         let output = command(&home).args(args).output().unwrap();
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
@@ -303,6 +292,43 @@ fn remaining_audit_operations_stay_explicitly_deferred() {
                 .unwrap()
                 .contains("deferred")
         );
+    }
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
+    fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
+fn argument_errors_and_help_do_not_attach_to_a_bank() {
+    let home = std::env::temp_dir().join(format!("audit-args-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    for (args, code, diagnostic) in [
+        (vec![], 2, "the following arguments are required: action"),
+        (
+            vec!["redact"],
+            2,
+            "the following arguments are required: --message-id, --reason",
+        ),
+        (
+            vec!["verify", "--expect-head", "1:hash"],
+            2,
+            "expected SEQ:HASH as verify prints them",
+        ),
+        (
+            vec!["verify", "--help"],
+            0,
+            "verify an unfiltered export file instead of the bank",
+        ),
+    ] {
+        let output = command(&home).args(args).output().unwrap();
+        assert_eq!(output.status.code(), Some(code));
+        let stream = if code == 0 {
+            assert!(output.stderr.is_empty());
+            output.stdout
+        } else {
+            assert!(output.stdout.is_empty());
+            output.stderr
+        };
+        assert!(String::from_utf8(stream).unwrap().contains(diagnostic));
     }
     assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
     fs::remove_dir_all(&home).unwrap();
