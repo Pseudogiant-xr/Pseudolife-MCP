@@ -401,7 +401,8 @@ impl crate::background::Duties for Service {
             let mut sessions = ready.sessions.lock().await;
             let entries: Vec<_> = ready
                 .bank
-                .read().unwrap()
+                .read()
+                .unwrap()
                 .entries
                 .iter()
                 .filter_map(|e| {

@@ -9,20 +9,20 @@ mod background_sessions;
 mod bank;
 mod config;
 mod contradiction;
+mod dream;
 mod embed;
 mod embedding_math;
 #[cfg_attr(not(feature = "harness"), allow(dead_code))]
 mod episodes;
+mod graph_read;
 #[cfg(feature = "harness")]
 mod harness_route;
-mod dream;
-mod graph_read;
 mod health;
 mod heap_trim;
 mod http;
 mod labels;
-mod meta_filter;
 mod maintenance;
+mod meta_filter;
 mod mutants;
 mod onnx_artifacts;
 mod onnx_runtime;
