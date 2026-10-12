@@ -383,6 +383,21 @@ pub(super) fn help(width: usize) -> String {
 /// pathlib's spelling of a path, as Python's diagnostics print it:
 /// components rejoined with the native separator, `.` components dropped
 /// (an empty result is `.`), and on POSIX exactly two leading slashes kept.
+pub(super) fn join(base: &Path, name: &str) -> PathBuf {
+    #[cfg(windows)]
+    if matches!(base.components().next(), Some(Component::Prefix(prefix)) if prefix.kind().is_verbatim())
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let mut raw = base.as_os_str().to_os_string();
+        if !matches!(base.as_os_str().encode_wide().last(), Some(47 | 92)) {
+            raw.push("\\");
+        }
+        raw.push(name);
+        return pathlib(&PathBuf::from(raw));
+    }
+    pathlib(&base.join(name))
+}
+
 pub(super) fn pathlib(path: &Path) -> PathBuf {
     #[cfg(windows)]
     let normalized = {
@@ -453,6 +468,18 @@ pub(super) fn pathlib(path: &Path) -> PathBuf {
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
+
+    #[test]
+    fn joins_match_pathlib_without_collapsing_verbatim_parents() {
+        for (base, expected) in [
+            (".", "state.tar.gz"),
+            ("C:", "C:state.tar.gz"),
+            (r"C:\bank", r"C:\bank\state.tar.gz"),
+            (r"\\?\C:\bank\sub\..", r"\\?\C:\bank\sub\..\state.tar.gz"),
+        ] {
+            assert_eq!(join(Path::new(base), "state.tar.gz").as_os_str(), expected);
+        }
+    }
 
     #[test]
     fn pathlib_normalizes_prefix_separators() {

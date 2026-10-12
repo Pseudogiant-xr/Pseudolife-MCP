@@ -2,6 +2,8 @@
 import base64
 import copy
 
+import pytest
+
 from . import compare
 from .rows.backup import discovery_traceback
 
@@ -13,8 +15,13 @@ def observation(stderr, **changes):
     return result
 
 
-def test_discovery_traceback_only_removes_interpreter_frames():
-    final = b"PermissionError: [Errno 13] Permission denied: '/fixture/.pg0/installation'\n"
+@pytest.mark.parametrize("class_name,code,message", [
+    ("PermissionError", 13, "Permission denied"),
+    ("TimeoutError", 110, "Connection timed out"),
+    ("InterruptedError", 4, "Interrupted system call"),
+])
+def test_discovery_traceback_only_removes_interpreter_frames(class_name, code, message):
+    final = f"{class_name}: [Errno {code}] {message}: '/fixture/.pg0/installation'\n".encode()
     traceback = (b'Traceback (most recent call last):\n'
                  b'  File "backup_cli.py", line 106, in _find_pg_dump\n'
                  b'    for vdir in sorted(install_root.iterdir(), reverse=True):\n'
@@ -23,8 +30,8 @@ def test_discovery_traceback_only_removes_interpreter_frames():
     got = observation(final)
     rules = ("backup-discovery-traceback",)
     assert not compare.diff(want, got, rules)
-    for old, new in [(b"PermissionError", b"OSError"), (b"13", b"12"),
-                     (b"Permission denied", b"different message"),
+    for old, new in [(class_name.encode(), b"OSError"), (str(code).encode(), b"12"),
+                     (message.encode(), b"different message"),
                      (b"installation", b"other")]:
         assert compare.diff(want, observation(final.replace(old, new)), rules)
     assert compare.diff(want, observation(final, exit=2), rules)
@@ -133,4 +140,55 @@ struct group *getgrgid(gid_t id) { errno=EIO; return 0; }
             member = archive.getmember("state")
             assert (member.uid, member.gid) == (os.getuid(), os.getgid())
             assert (member.uname, member.gname) == ("", "")
+            assert archive.extractfile(member).read() == b"state"
+
+
+def test_non_utf8_nss_names_roundtrip_through_binary_pax(tmp_path):
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import tarfile
+    import pytest
+    if sys.platform != "linux" or not shutil.which("cc"):
+        pytest.skip("Linux NSS interposition proof requires a C compiler")
+    native = _native_backup()
+    source = tmp_path / "nss-raw.c"
+    source.write_text('''#include <pwd.h>
+#include <grp.h>
+#include <errno.h>
+#include <string.h>
+static char user[] = {'u','s','e','r','-',(char)0xff,0};
+static char group[] = {'g','r','o','u','p','-',(char)0xfe,0};
+static char *members[] = {0};
+int getpwuid_r(uid_t id, struct passwd *p, char *b, size_t n, struct passwd **r) {
+    if (n < sizeof user) { *r=0; return ERANGE; }
+    memset(p,0,sizeof *p); memcpy(b,user,sizeof user); p->pw_name=b; p->pw_uid=id; *r=p; return 0;
+}
+int getgrgid_r(gid_t id, struct group *p, char *b, size_t n, struct group **r) {
+    if (n < sizeof group) { *r=0; return ERANGE; }
+    memset(p,0,sizeof *p); memcpy(b,group,sizeof group); p->gr_name=b; p->gr_gid=id; p->gr_mem=members; *r=p; return 0;
+}
+struct passwd *getpwuid(uid_t id) { static struct passwd p; memset(&p,0,sizeof p); p.pw_name=user; p.pw_uid=id; return &p; }
+struct group *getgrgid(gid_t id) { static struct group p; memset(&p,0,sizeof p); p.gr_name=group; p.gr_gid=id; p.gr_mem=members; return &p; }
+''', encoding="utf-8")
+    library = tmp_path / "nss-raw.so"
+    subprocess.run(["cc", "-shared", "-fPIC", str(source), "-o", str(library)], check=True)
+    bank = tmp_path / "bank"
+    bank.mkdir()
+    (bank / "state").write_bytes(b"state")
+    env = {key: value for key, value in os.environ.items() if "DATABASE_URL" not in key}
+    env.update(LD_PRELOAD=str(library), PSEUDOLIFE_MCP_DATA_DIR=str(bank))
+    for label, command in [("oracle", [sys.executable, "-m", "pseudolife_memory.cli"]),
+                           ("native", [native])]:
+        out = tmp_path / label
+        result = subprocess.run([*command, "backup", "--data-dir", str(bank), "--out", str(out)],
+                                env=env, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        with tarfile.open(next(out.glob("*.tar.gz"))) as archive:
+            member = archive.getmember("state")
+            assert (member.uid, member.gid) == (os.getuid(), os.getgid())
+            assert member.uname.encode("utf-8", "surrogateescape") == b"user-\xff"
+            assert member.gname.encode("utf-8", "surrogateescape") == b"group-\xfe"
+            assert member.pax_headers["hdrcharset"] == "BINARY"
             assert archive.extractfile(member).read() == b"state"

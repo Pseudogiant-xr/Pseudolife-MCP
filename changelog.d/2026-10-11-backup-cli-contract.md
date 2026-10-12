@@ -4,6 +4,7 @@
   paths, including repeated options and parent components, and formats help
   for the terminal width. Output containment checks still prevent archives
   from including their own partial files.
-- State archives retain Unix owner and group names alongside numeric IDs.
+- State archives retain Unix owner and group names, including non-UTF-8 NSS
+  names through binary PAX records, alongside numeric IDs.
   PostgreSQL client discovery failures preserve Python's final OS diagnostic
   and output-directory creation; native output omits interpreter frames.

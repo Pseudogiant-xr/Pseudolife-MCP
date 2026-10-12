@@ -154,7 +154,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     }
     let bdir = match &args.out {
         Some(out) => out.clone(),
-        None => data_dir.join("backups"),
+        None => args::join(&data_dir, "backups"),
     };
     match fs::metadata(&bdir) {
         Ok(meta) if !meta.is_dir() => return None,
@@ -294,7 +294,7 @@ fn rotate(bdir: &Path, keep_days: f64, include_dumps: bool) -> io::Result<Vec<Pa
         }
         names.sort_by_key(|name| path_sort_key(name));
         for name in names {
-            let path = bdir.join(&name);
+            let path = args::join(bdir, &name);
             if seconds(fs::metadata(&path)?.modified()?) < cutoff {
                 fs::remove_file(&path)?;
                 pruned.push(path);

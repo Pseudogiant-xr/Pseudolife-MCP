@@ -127,6 +127,14 @@ def tree(root_rel: str = "bank", old_backups: bool = True, bdir_rel: str | None 
     return setup
 
 
+def working_directory(setup, relative):
+    def prepare(arm):
+        setup(arm)
+        arm.cwd = arm.home / relative
+        arm.cwd.mkdir(parents=True, exist_ok=True)
+    return prepare
+
+
 def with_pg0(inner=None):
     """Hard-link the real bundled pg_dump into the arm home's ~/.pg0."""
     def setup(arm):
@@ -286,7 +294,7 @@ _DISCOVERY_TRACEBACK = re.compile(
     rb'\ATraceback \(most recent call last\):\r?\n'
     rb'(?:  File "[^\r\n]+", line [0-9]+, in [^\r\n]+\r?\n'
     rb'(?:    [^\r\n]*\r?\n)*)+'
-    rb'(?P<error>(?:PermissionError|OSError|FileNotFoundError|NotADirectoryError): '
+    rb'(?P<error>(?:PermissionError|OSError|FileNotFoundError|NotADirectoryError|TimeoutError|InterruptedError): '
     rb'\[(?:Errno|WinError) [0-9]+\] [^\r\n]+\r?\n)\Z')
 
 
@@ -360,6 +368,10 @@ def cases() -> list[Case]:
              env={"PSEUDOLIFE_MCP_DATA_DIR": f"{{HOME}}{sep}bank"},
              setup=tree(), rules=RULES),
         Case("file-mode-cwd-data", ["backup"], setup=tree("cwd/data"), rules=RULES),
+        Case("file-mode-data-dir-dot", ["backup", "--data-dir", "."],
+             setup=working_directory(tree(), "bank"), rules=RULES),
+        Case("file-mode-out-dot", ["backup", *data, "--out", "."],
+             setup=working_directory(tree(bdir_rel="elsewhere"), "elsewhere"), rules=RULES),
         Case("file-mode-out-absolute-keep-half-day",
              ["backup", *data, "--out", f"{{HOME}}{sep}elsewhere", "--keep-days", "0.5"],
              setup=tree(bdir_rel="elsewhere"), rules=RULES),

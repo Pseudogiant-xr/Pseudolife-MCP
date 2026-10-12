@@ -96,27 +96,45 @@ fn resolved(path: &Path) -> Option<PathBuf> {
         links: &mut std::collections::HashSet<PathBuf>,
     ) -> Option<PathBuf> {
         use std::path::Component;
+        #[cfg(windows)]
+        let mut crossed_reparse = false;
         for component in path.components() {
             match component {
                 Component::CurDir => {}
                 Component::ParentDir => {
+                    #[cfg(windows)]
+                    if crossed_reparse {
+                        return None;
+                    }
                     base.pop();
                 }
-                Component::Prefix(_) | Component::RootDir => base.push(component.as_os_str()),
+                Component::Prefix(_) => base.push(component.as_os_str()),
+                Component::RootDir => {
+                    base.push(component.as_os_str());
+                    base = fs::canonicalize(&base).ok()?;
+                }
                 Component::Normal(_) => {
                     base.push(component.as_os_str());
                     match fs::symlink_metadata(&base) {
-                        Ok(meta) if meta.is_symlink() => {
-                            let link = base.clone();
-                            if !links.insert(link.clone()) {
-                                return None;
+                        Ok(meta) => {
+                            #[cfg(windows)]
+                            {
+                                use std::os::windows::fs::MetadataExt;
+                                crossed_reparse |= meta.file_attributes() & 0x400 != 0;
                             }
-                            let target = fs::read_link(&base).ok()?;
-                            base.pop();
-                            base = walk(base, &target, links)?;
-                            links.remove(&link);
+                            if meta.is_symlink() {
+                                let link = base.clone();
+                                if !links.insert(link.clone()) {
+                                    return None;
+                                }
+                                let target = fs::read_link(&base).ok()?;
+                                base.pop();
+                                base = walk(base, &target, links)?;
+                                links.remove(&link);
+                            } else {
+                                base = fs::canonicalize(&base).ok()?;
+                            }
                         }
-                        Ok(_) => base = fs::canonicalize(&base).ok()?,
                         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                         Err(_) => return None,
                     }
@@ -125,8 +143,15 @@ fn resolved(path: &Path) -> Option<PathBuf> {
         }
         Some(base)
     }
-    let base = std::env::current_dir().ok()?;
-    walk(base, path, &mut std::collections::HashSet::new())
+    #[cfg(windows)]
+    // Win32 resolves ordinary dot components before following reparse points;
+    // verbatim paths keep them, and a parent after a reparse point defers above.
+    let absolute = std::path::absolute(path).ok()?;
+    #[cfg(windows)]
+    let path = absolute.as_path();
+    let base = fs::canonicalize(std::env::current_dir().ok()?).ok()?;
+    let result = walk(base, path, &mut std::collections::HashSet::new())?;
+    result.is_absolute().then_some(result)
 }
 
 /// Admit the data dir's tree before any effect. Defers when the output dir
@@ -216,7 +241,7 @@ fn owner(_meta: &Metadata) -> (u64, u64) {
 /// when the id has no NSS record; those modules are absent on Windows.
 #[cfg(unix)]
 #[allow(unsafe_code)]
-fn owner_name(id: u32, group: bool) -> io::Result<String> {
+fn owner_name(id: u32, group: bool) -> io::Result<Vec<u8>> {
     use std::{ffi::CStr, ptr};
     let mut buffer = vec![0u8; 1024];
     loop {
@@ -268,17 +293,14 @@ fn owner_name(id: u32, group: bool) -> io::Result<String> {
         // pwd/grp report an unsuccessful lookup as KeyError; tarfile keeps
         // numeric ownership and leaves the corresponding name empty.
         if code != 0 || name.is_null() {
-            return Ok(String::new());
+            return Ok(Vec::new());
         }
         // SAFETY: successful NSS call returned a NUL-terminated name in buffer.
-        return unsafe { CStr::from_ptr(name) }
-            .to_str()
-            .map(str::to_owned)
-            .map_err(|_| io::Error::other("owner name is not UTF-8"));
+        return Ok(unsafe { CStr::from_ptr(name) }.to_bytes().to_vec());
     }
 }
 
-fn owner_names(uid: u64, gid: u64) -> io::Result<(String, String)> {
+fn owner_names(uid: u64, gid: u64) -> io::Result<(Vec<u8>, Vec<u8>)> {
     #[cfg(unix)]
     {
         Ok((
@@ -289,7 +311,7 @@ fn owner_names(uid: u64, gid: u64) -> io::Result<(String, String)> {
     #[cfg(windows)]
     {
         let _ = (uid, gid);
-        Ok((String::new(), String::new()))
+        Ok((Vec::new(), Vec::new()))
     }
 }
 
@@ -298,13 +320,17 @@ fn float_text(value: f64) -> io::Result<String> {
     crate::float_repr::finite_float(value)
 }
 
-fn pax_record(key: &str, value: &str) -> Vec<u8> {
-    let payload = format!(" {key}={value}\n");
+fn pax_record(key: &str, value: &[u8]) -> Vec<u8> {
+    let mut payload = format!(" {key}=").into_bytes();
+    payload.extend_from_slice(value);
+    payload.push(b'\n');
     let mut length = payload.len() + 1;
     while length != payload.len() + length.to_string().len() {
         length = payload.len() + length.to_string().len();
     }
-    format!("{length}{payload}").into_bytes()
+    let mut record = length.to_string().into_bytes();
+    record.extend(payload);
+    record
 }
 
 fn ascii_field(field: &mut [u8], text: &str) {
@@ -356,20 +382,23 @@ fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<
     let (uid, gid) = owner(member.meta);
     let (uname, gname) = owner_names(uid, gid)?;
     let mut records = Vec::new();
+    if std::str::from_utf8(&uname).is_err() || std::str::from_utf8(&gname).is_err() {
+        records.extend(pax_record("hdrcharset", b"BINARY"));
+    }
     for (key, value) in [("uname", &uname), ("gname", &gname)] {
         if !value.is_ascii() || value.len() > 32 {
             records.extend(pax_record(key, value));
         }
     }
     if !member.name.is_ascii() || member.name.len() > 100 {
-        records.extend(pax_record("path", &member.name));
+        records.extend(pax_record("path", member.name.as_bytes()));
     }
     if let Some(link) = &member.link
         && (!link.is_ascii() || link.len() > 100)
     {
-        records.extend(pax_record("linkpath", link));
+        records.extend(pax_record("linkpath", link.as_bytes()));
     }
-    records.extend(pax_record("mtime", &float_text(mtime)?));
+    records.extend(pax_record("mtime", float_text(mtime)?.as_bytes()));
     if !records.is_empty() {
         let mut pax = Header::new_ustar();
         ascii_field(&mut pax.as_old_mut().name, "././@PaxHeader");
@@ -389,8 +418,8 @@ fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<
     header.set_uid(uid);
     header.set_gid(gid);
     let ustar = header.as_ustar_mut().expect("ustar header");
-    ascii_field(&mut ustar.uname, &uname);
-    ascii_field(&mut ustar.gname, &gname);
+    ascii_field(&mut ustar.uname, &String::from_utf8_lossy(&uname));
+    ascii_field(&mut ustar.gname, &String::from_utf8_lossy(&gname));
     header.set_size(size);
     header.set_mtime(mtime.round_ties_even().max(0.0) as u64);
     header.set_cksum();
@@ -458,8 +487,8 @@ fn add<W: io::Write>(tar: &mut Builder<W>, path: &Path, arcname: &str) -> io::Re
 }
 
 pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBuf> {
-    let target = bdir.join(format!("{}{ts}.tar.gz", super::STATE_PREFIX));
-    let partial = bdir.join(format!("{}{ts}.tar.gz.part", super::STATE_PREFIX));
+    let target = super::args::join(bdir, &format!("{}{ts}.tar.gz", super::STATE_PREFIX));
+    let partial = super::args::join(bdir, &format!("{}{ts}.tar.gz.part", super::STATE_PREFIX));
     let written = (|| -> io::Result<()> {
         let gz = GzEncoder::new(fs::File::create(&partial)?, Compression::best());
         let mut tar = Builder::new(gz);
@@ -491,7 +520,7 @@ mod tests {
     fn unassigned_owner_ids_have_empty_names() {
         assert_eq!(
             owner_names(u64::from(u32::MAX), u64::from(u32::MAX)).unwrap(),
-            (String::new(), String::new())
+            (Vec::new(), Vec::new())
         );
     }
 

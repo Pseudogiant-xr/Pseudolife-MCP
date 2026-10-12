@@ -440,14 +440,95 @@ fn unix_archive_records_resolved_owner_names() {
         .unwrap()
         .unwrap()
         .path();
-    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(
-        fs::File::open(archive).unwrap(),
-    ));
-    for entry in tar.entries().unwrap() {
-        let entry = entry.unwrap();
-        assert!(!entry.header().username().unwrap().unwrap().is_empty());
-        assert!(!entry.header().groupname().unwrap().unwrap().is_empty());
+    let python = std::env::var_os("PSEUDOLIFE_MCP_PYTHON").unwrap_or_else(|| "python3".into());
+    let output = Command::new(python)
+        .args([
+            "-c",
+            r#"
+import grp, pwd, sys, tarfile
+with tarfile.open(sys.argv[1]) as archive:
+    for member in archive.getmembers():
+        try:
+            uname = pwd.getpwuid(member.uid).pw_name
+        except KeyError:
+            uname = ''
+        try:
+            gname = grp.getgrgid(member.gid).gr_name
+        except KeyError:
+            gname = ''
+        assert (member.uname, member.gname) == (uname, gname)
+"#,
+            &text(&archive),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_relative_outputs_cannot_hide_inside_the_source() {
+    use std::path::{Component, Prefix};
+    for label in ["dot", "nested-dot", "new-child", "drive-relative"] {
+        let home = Home::new(label);
+        let bank = home.path().join("bank");
+        fs::create_dir_all(bank.join("sub/deeper")).unwrap();
+        fs::write(bank.join("state"), "state").unwrap();
+        let (cwd, out) = match label {
+            "dot" => (bank.clone(), ".".to_owned()),
+            "nested-dot" => (bank.join("sub/deeper"), ".".to_owned()),
+            "new-child" => (bank.clone(), "new-child\\bk".to_owned()),
+            _ => {
+                let drive = match bank.components().next().unwrap() {
+                    Component::Prefix(prefix) => match prefix.kind() {
+                        Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive,
+                        _ => panic!("fixture requires a local drive"),
+                    },
+                    _ => panic!("fixture requires an absolute path"),
+                };
+                (bank.clone(), format!("{}:new-child\\bk", char::from(drive)))
+            }
+        };
+        let data = if label == "dot" {
+            ".".to_owned()
+        } else {
+            text(&bank)
+        };
+        let before = home.listing();
+        let output = command(home.path())
+            .current_dir(cwd)
+            .args(["--data-dir", &data, "--out", &out])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{label}: {output:?}");
+        assert_eq!(output.stderr, cli::native_text(DEFERRED));
+        assert!(output.stdout.is_empty());
+        assert_eq!(home.listing(), before);
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_junction_parent_paths_cannot_bypass_output_containment() {
+    let home = Home::new("junction-parent");
+    let bank = home.path().join("bank");
+    fs::create_dir_all(bank.join("sub")).unwrap();
+    fs::create_dir_all(home.path().join("x/y")).unwrap();
+    let link = home.path().join("j");
+    let output = Command::new("cmd")
+        .args([
+            "/C",
+            "mklink",
+            "/J",
+            &text(&link),
+            &text(&home.path().join("x/y")),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let out = link.join("..").join("bank/sub/bk");
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    fs::remove_dir(link).unwrap();
 }
 
 #[cfg(unix)]

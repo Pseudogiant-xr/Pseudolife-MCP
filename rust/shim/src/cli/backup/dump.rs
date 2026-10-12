@@ -64,6 +64,8 @@ impl DiscoveryError {
             io::ErrorKind::PermissionDenied => "PermissionError",
             io::ErrorKind::NotFound => "FileNotFoundError",
             io::ErrorKind::NotADirectory => "NotADirectoryError",
+            io::ErrorKind::TimedOut => "TimeoutError",
+            io::ErrorKind::Interrupted => "InterruptedError",
             _ => "OSError",
         };
         let code = self.error.raw_os_error().unwrap_or(0);
@@ -202,8 +204,8 @@ fn python_strip(text: &str) -> &str {
 
 /// Stream `pg_dump --no-owner --no-acl` through gzip into `<ts>.sql.gz`.
 pub(super) fn write(dsn: &str, pg_dump: &Path, bdir: &Path, ts: &str) -> Result<PathBuf, String> {
-    let target = bdir.join(format!("{}{ts}.sql.gz", super::DUMP_PREFIX));
-    let partial = bdir.join(format!("{}{ts}.sql.gz.part", super::DUMP_PREFIX));
+    let target = super::args::join(bdir, &format!("{}{ts}.sql.gz", super::DUMP_PREFIX));
+    let partial = super::args::join(bdir, &format!("{}{ts}.sql.gz.part", super::DUMP_PREFIX));
     // Python starts pg_dump before its cleanup scope: a spawn failure leaves
     // any existing partial file alone.
     let mut child = Command::new(pg_dump)
@@ -279,6 +281,24 @@ mod windows_tests {
 
 #[cfg(test)]
 mod error_map_tests {
+    #[cfg(unix)]
+    #[test]
+    fn timeout_and_interrupt_keep_python_exception_classes() {
+        for (code, class) in [
+            (libc::ETIMEDOUT, "TimeoutError"),
+            (libc::EINTR, "InterruptedError"),
+        ] {
+            let message = super::DiscoveryError::new(
+                std::path::Path::new("fixture"),
+                std::io::Error::from_raw_os_error(code),
+            )
+            .diagnostic();
+            assert!(
+                message.starts_with(&format!("{class}: [Errno {code}] ")),
+                "{message}"
+            );
+        }
+    }
     use super::*;
 
     #[test]
