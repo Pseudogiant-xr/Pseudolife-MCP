@@ -71,6 +71,16 @@ case-insensitive glob matching, allowing unrelated Unicode filenames.
 Windows TZ, symlink, junction, Unicode rotation and UNC fixtures require
 fresh CI after the merge resolution.
 
+The Windows zero-retention archive-creation case has a named H5 selection
+exception for live and replay (including recording). CPython 3.11.9 with its
+0.015625-second clock kept/deleted 254/46 of 300 freshly written 64-byte
+archive-named files, and 229/71 of 300 1-MiB files. Sequential live arms and
+record/replay processes can therefore disagree despite identical semantics.
+Linux keeps the file-mode zero-retention case in all modes. Both OSes compare
+zero-option grammar/help; native old/equal/new mtime boundary tests and the
+mandatory Windows same-tick Python/native clock probe cover retention.
+The comparator is unchanged.
+
 Declared divergences: Python tracebacks after an effect (permissions, a full
 disk, a pg_dump that cannot start)
 become `backup failed: <error>`; output encodings other than UTF-8, as for

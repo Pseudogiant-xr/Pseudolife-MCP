@@ -59,6 +59,13 @@ EXCEPTIONS = {
             'tl-keep-staged-on-failure': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
         },
     },
+    'cli_case_selections': {
+        'windows-backup-zero-retention-clock-race': {
+            'platform': 'windows', 'mode': 'both', 'row': 'backup',
+            'case': 'file-mode-keep-zero',
+            'reason': 'CPython 3.11.9 Windows reference measurement (2026-10-12, GetSystemTimeAsFileTime, 0.015625s resolution): 300 zero-retention writes of 64 bytes kept 254/deleted 46; 300 writes of 1 MiB kept 229/deleted 71. Independent live/golden archives can cross different clock ticks even after the clock API repair (run 38221206535: live55/55, golden54/55). Linux zero retention stays live/record/golden; both OSes retain zero-option grammar/help, and mandatory native injected old/equal/new mtime and Windows same-tick API tests cover retention without normalizing observations.',
+        },
+    },
     'audit_golden': 'Only the stable cases in audit_golden_cases.json replay across processes (29 measured on Linux 2026-10-11; 23 after #730 ported six deferral cases, whose successors are not yet measured for cross-process stability); the rest carry fresh IDs, hashes or redaction state. Every audit case runs live.',
 }
 
