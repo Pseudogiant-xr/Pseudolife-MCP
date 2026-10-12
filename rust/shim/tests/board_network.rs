@@ -82,6 +82,9 @@ async fn board_context_mismatch_omits_identity_and_blocks_coordination_tool() {
 #[tokio::test(flavor = "current_thread")]
 async fn board_registration_retries_after_transient_startup_failure_and_announces_once() {
     let fixture = Fixture::new(1);
+    let (answer, mut attached) =
+        Answer::json(200, json!({"generation":1,"pending_count":1})).gated();
+    fixture.answer("attach", answer);
     let home = Home::new();
     let runtime = runtime(&fixture, false);
     let board = Board::attach_options(runtime.clone(), options(&runtime, &home, "1")).await;
@@ -90,7 +93,9 @@ async fn board_registration_retries_after_transient_startup_failure_and_announce
         _ => panic!("retry must fail closed"),
     };
     assert_eq!(error.message, policy::PENDING);
-    tokio::time::timeout(Duration::from_secs(3), async {
+    let timing = pseudolife_stdio::board::Timing::default();
+    let observation = timing.retry_delays[0] + timing.retry_attempt + timing.startup;
+    tokio::time::timeout(observation, async {
         loop {
             if fixture.count("/attach") > 0 {
                 break;
@@ -107,6 +112,25 @@ async fn board_registration_retries_after_transient_startup_failure_and_announce
     else {
         panic!("forward")
     };
+    attached.wait().await;
+    assert!(!call.operation.headers.contains_key("x-pl-agent"));
+    attached.release();
+    // Hosted Windows run 37988825676 (2026-10-09) reached /attach before the
+    // adapter was published. Receipt is not completion: wait for validated
+    // forwarding identity before asserting the one-shot recovery hint.
+    let call = tokio::time::timeout(observation, async {
+        loop {
+            if let Ok(Preparation::Forward(call)) =
+                board.prepare_call("memory_recall", None, &json!({})).await
+                && call.operation.headers.contains_key("x-pl-agent")
+            {
+                break call;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("recovered attachment did not publish validated identity");
     let mut result = rmcp::model::CallToolResult::success(vec![]);
     let hint = board.finish_call(&call, &mut result).await.unwrap();
     assert!(hint.starts_with(policy::REGISTERED));

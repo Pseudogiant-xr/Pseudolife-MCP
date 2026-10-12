@@ -269,6 +269,18 @@ impl Embedder {
         }) {
             bail!("deferred: unsupported ONNX embedding input");
         }
+        eprintln!(
+            "embedding-readiness: {}",
+            serde_json::json!({
+                "pooling": match pooling { Pooling::Mean => "mean", Pooling::Last => "last-token" },
+                "padding": if matches!(tokenizer.get_padding().map(|p| &p.direction), Some(PaddingDirection::Left)) {
+                    "left"
+                } else {
+                    "right"
+                },
+                "normalize": always_normalize,
+            })
+        );
         Ok(Self {
             config: config.clone(),
             tokenizer,

@@ -1,11 +1,31 @@
 """Controls for the lease row's bounded clock comparison."""
 
 import base64
+import json
 
 import pytest
 
 from . import compare
 from .rows.lease import T0  # registers the row's named rules
+
+
+@pytest.mark.parametrize("want,got", [(False, 0), (True, 1), (1, 1.0)])
+@pytest.mark.parametrize("nested", [False, True])
+def test_lease_request_json_scalar_types(want, got, nested):
+    def request(value):
+        body = json.dumps({"capabilities": {"resumable": [value] if nested else value}})
+        return {"exit": 0, "stdout": "", "stderr": "", "files": {}, "requests": [
+            {"method": "POST", "target": "/api/register", "body": body,
+             "headers": [["Content-Length", str(len(body.encode()))]]}]}
+    assert compare.diff(request(want), request(got), ("lease-http-json",))
+
+
+def test_lease_request_json_checks_byte_length_separately():
+    request = {"method": "POST", "target": "/api/register", "body": '{"label":"ü"}',
+               "headers": [["Content-Length", str(len('{"label":"ü"}'))]]}
+    obs = {"exit": 0, "stdout": "", "stderr": "", "files": {}, "requests": [request]}
+    with pytest.raises(ValueError, match="Content-Length"):
+        compare.diff(obs, obs, ("lease-http-json",))
 
 
 def observation(hour, field, age):
