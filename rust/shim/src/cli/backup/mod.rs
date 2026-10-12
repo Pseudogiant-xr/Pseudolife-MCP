@@ -326,10 +326,48 @@ fn seconds(time: SystemTime) -> f64 {
     whole as f64 + fraction as f64 * 1e-9
 }
 
+#[cfg(not(windows))]
+fn now_seconds() -> f64 {
+    seconds(SystemTime::now())
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn now_seconds() -> f64 {
+    use windows_sys::Win32::{
+        Foundation::FILETIME, System::SystemInformation::GetSystemTimeAsFileTime,
+    };
+    let mut time = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    // SAFETY: the API writes one FILETIME into the valid output pointer.
+    // CPython 3.11 uses this coarse clock, rather than Rust's precise clock.
+    unsafe { GetSystemTimeAsFileTime(&mut time) };
+    let ticks = (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+    let nanos = i128::from(ticks) * 100 - 11_644_473_600_000_000_000;
+    clock_seconds(nanos)
+}
+
+/// `_PyTime_AsSecondsDouble` converts the whole nanosecond count at once;
+/// `st_mtime` instead adds the fractional part after converting whole seconds.
+#[cfg(any(windows, test))]
+fn clock_seconds(nanos: i128) -> f64 {
+    if nanos % 1_000_000_000 == 0 {
+        (nanos / 1_000_000_000) as f64
+    } else {
+        nanos as f64 / 1e9
+    }
+}
+
 /// `_rotate`: this tool's own files older than `keep_days`, dumps only when
 /// this run produced one.
 fn rotate(bdir: &Path, keep_days: f64, include_dumps: bool) -> io::Result<Vec<PathBuf>> {
-    let cutoff = seconds(SystemTime::now()) - keep_days * 86400.0;
+    let cutoff = now_seconds() - keep_days * 86400.0;
+    rotate_before(bdir, cutoff, include_dumps)
+}
+
+fn rotate_before(bdir: &Path, cutoff: f64, include_dumps: bool) -> io::Result<Vec<PathBuf>> {
     let mut patterns = vec![(STATE_PREFIX, ".tar.gz")];
     if include_dumps {
         patterns.insert(0, (DUMP_PREFIX, ".sql.gz"));
@@ -360,6 +398,110 @@ fn rotate(bdir: &Path, keep_days: f64, include_dumps: bool) -> io::Result<Vec<Pa
 #[cfg(test)]
 mod glob_tests {
     use super::*;
+
+    #[test]
+    fn clock_float_rounding_matches_python_time() {
+        let nanos = 1_790_000_000_123_450_200_i128;
+        assert_eq!(clock_seconds(nanos), 1_790_000_000.123_45);
+        assert_eq!(clock_seconds(-1), -1e-9);
+        assert_eq!(clock_seconds(-1_000_000_000), -1.0);
+        assert_eq!(clock_seconds(1_790_000_000_000_000_000), 1_790_000_000.0);
+    }
+
+    #[test]
+    fn rotation_keeps_files_equal_to_the_python_clock_cutoff() {
+        use std::time::Duration;
+        let root = std::env::temp_dir().join(format!(
+            "pseudolife-backup-clock-boundary-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir(&root).unwrap();
+        let clock = 1_790_000_000_123_450_200_u64;
+        let mut paths = Vec::new();
+        for (label, nanos) in [
+            ("older", clock - 1_000_000_000),
+            ("equal", clock - 200),
+            ("newer", clock + 1_000_000_000),
+        ] {
+            let path = root.join(format!("{STATE_PREFIX}{label}.tar.gz"));
+            fs::write(&path, b"state").unwrap();
+            fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_times(
+                    fs::FileTimes::new()
+                        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_nanos(nanos)),
+                )
+                .unwrap();
+            paths.push(path);
+        }
+        // CPython's clock float equals this file's independently rounded mtime.
+        let cutoff = clock_seconds(i128::from(clock));
+        let equal_mtime = seconds(fs::metadata(&paths[1]).unwrap().modified().unwrap());
+        let removed = rotate_before(&root, cutoff, false).unwrap();
+        let retained = paths[1..].iter().all(|path| path.exists());
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(equal_mtime, cutoff);
+        assert_eq!(removed, paths[..1]);
+        assert!(retained, "equal or newer archive was deleted");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_clock_matches_python_within_the_same_clock_tick() {
+        use std::{
+            io::{BufRead, BufReader},
+            process::{Command, Stdio},
+        };
+        let python = std::env::var_os("PSEUDOLIFE_MCP_PYTHON").unwrap_or_else(|| "python".into());
+        let mut child = Command::new(python)
+            .args([
+                "-u",
+                "-c",
+                "import sys,time\nprint(time.get_clock_info('time').implementation,flush=True)\nfor line in sys.stdin: print(repr(time.time()),flush=True)",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut output = BufReader::new(child.stdout.take().unwrap());
+        let mut implementation = String::new();
+        output.read_line(&mut implementation).unwrap();
+        let mut input = child.stdin.take().unwrap();
+        let mut stable = 0;
+        let mut mismatch = None;
+        {
+            let mut sample = || {
+                writeln!(input, "now").unwrap();
+                let mut value = String::new();
+                output.read_line(&mut value).unwrap();
+                value.trim().parse::<f64>().unwrap()
+            };
+            for _ in 0..100 {
+                let before = sample();
+                let native = now_seconds();
+                let after = sample();
+                if before == after {
+                    stable += 1;
+                    if native != before {
+                        mismatch = Some((before, native));
+                    }
+                    if stable == 5 {
+                        break;
+                    }
+                }
+            }
+        }
+        drop(input);
+        assert!(child.wait().unwrap().success());
+        assert_eq!(implementation.trim(), "GetSystemTimeAsFileTime()");
+        assert_eq!(stable, 5, "no sufficient same-tick clock observations");
+        assert_eq!(
+            mismatch, None,
+            "native clock differs within a Python clock tick"
+        );
+    }
 
     #[test]
     fn windows_rotation_glob_uses_python_regex_unicode_case_matching() {

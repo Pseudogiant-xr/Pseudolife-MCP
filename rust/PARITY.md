@@ -65,7 +65,8 @@ and checks kind, mode, numeric ownership, content, link targets and hard-link
 identity. Linux device headers are checked against `/dev/null`; extraction
 requires mknod permission in CI and reports an unverified result when that
 permission is unavailable locally. Windows timestamps use the CRT's TZ
-interpretation; rotation compares UTC epoch times and uses Python's Unicode
+interpretation; the Windows rotation clock and float conversion match CPython 3.11.
+Rotation compares UTC epoch times and uses Python's Unicode
 case-insensitive glob matching, allowing unrelated Unicode filenames.
 Windows TZ, symlink, junction, Unicode rotation and UNC fixtures require
 fresh CI after the merge resolution.

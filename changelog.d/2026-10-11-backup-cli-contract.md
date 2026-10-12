@@ -12,3 +12,6 @@
   and output-directory creation; native output omits interpreter frames.
   Discovery paths with non-UTF-8 bytes and terminal widths beyond Python's
   integer conversion limit defer before effects.
+- Windows backup rotation uses Python 3.11's system-clock precision, so
+  zero-day retention does not treat a newly written archive as older merely
+  because the native clock reports a finer timestamp.
