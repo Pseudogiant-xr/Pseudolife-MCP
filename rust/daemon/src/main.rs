@@ -237,7 +237,13 @@ fn main() {
             service.clone(),
             store.clone(),
         ));
-        let app = Arc::new(http::App::new(service.clone(), tokens, store, static_dir, board));
+        let app = Arc::new(http::App::new(
+            service.clone(),
+            tokens,
+            store,
+            static_dir,
+            board,
+        ));
         let router = axum::Router::new().fallback(http::handle).with_state(app);
         let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {
             Ok(l) => l,
