@@ -15,7 +15,7 @@ _HELP_MODES = (
     "connect", "invite", "test-login", "pair", "expose", "move", "update",
     "backup", "export", "import", "wait-mail", "lease", "maintainer",
 )
-_HEAVY = ("torch", "sentence_transformers", "numpy", "transformers", "chromadb", "mcp")
+_HEAVY = ("torch", "sentence_transformers", "numpy", "transformers", "chromadb", "mcp", "pgvector")
 _PROBE = """
 import contextlib
 import io
