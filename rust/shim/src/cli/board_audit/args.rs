@@ -1,14 +1,16 @@
-//! Canonical board-audit argv only. Abbreviations, `--opt=value`, repeated
-//! options, `-`-prefixed values, help and every other argparse rule defer.
+//! The audit command's argparse option grammar and pathlib display spelling.
+use super::super::lease::args::decimal_digit;
 use std::ffi::OsString;
 
-pub(super) type Head = (i64, String);
+pub(super) type Head = (String, String);
 
 pub(super) enum Action {
     VerifyInput { input: String, expect: Option<Head> },
     VerifyBank { expect: Option<Head> },
     Export(Export),
     Redact { message_id: String, reason: String },
+    Error(String),
+    Help(&'static str),
 }
 
 pub(super) struct Export {
@@ -20,12 +22,76 @@ pub(super) struct Export {
     pub out: Option<String>,
 }
 
-/// `None` is a deferral: the shape is outside the native candidate.
+fn usage(action: &str) -> String {
+    format!(
+        "{}\n",
+        super::help::text(action)
+            .split("\n\n")
+            .next()
+            .expect("usage")
+    )
+}
+
+fn help(action: &str, token: &str) -> Option<Action> {
+    // A short -h cluster invokes help before consuming its remaining characters.
+    if token.starts_with("-h") && !token.starts_with("--") && !token.starts_with("-h=") {
+        return Some(Action::Help(super::help::text(action)));
+    }
+    if let Some((_, value)) = token.split_once('=') {
+        return error(
+            action,
+            format!(
+                "argument -h/--help: ignored explicit argument {}",
+                super::super::pyjson::py_value_repr(&super::super::pyjson::J::Str(value.into()))
+            ),
+        );
+    }
+    Some(Action::Help(super::help::text(action)))
+}
+
+fn error(action: &str, message: impl std::fmt::Display) -> Option<Action> {
+    let suffix = if action.is_empty() {
+        String::new()
+    } else {
+        format!(" {action}")
+    };
+    Some(Action::Error(format!(
+        "{}pseudolife-mcp board-audit{suffix}: error: {message}",
+        usage(action)
+    )))
+}
+
+/// `None` retains the separately deferred stats/transport domains.
 pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
-    let (action, rest) = arguments.split_first()?;
-    let action = action.to_str()?;
+    let tokens = arguments
+        .iter()
+        .map(|v| v.to_str())
+        .collect::<Option<Vec<_>>>()?;
+    let mut root_unknown = Vec::new();
+    let mut action_index = 0;
+    while let Some(token) = tokens.get(action_index) {
+        if *token == "--" {
+            break;
+        }
+        let option = token.split_once('=').map_or(*token, |(key, _)| key);
+        if option == "-h"
+            || option.starts_with("-h") && !option.starts_with("--")
+            || option.starts_with("--") && "--help".starts_with(option)
+        {
+            return help("", token);
+        }
+        if !option_token(token, &[]) || *token == "--" {
+            break;
+        }
+        root_unknown.push(*token);
+        action_index += 1;
+    }
+    let Some(action) = tokens.get(action_index).copied() else {
+        return error("", "the following arguments are required: action");
+    };
+    let rest = &tokens[action_index + 1..];
     let allowed: &[&str] = match action {
-        "verify" => &["--input", "--expect-head"],
+        "verify" => &["--expect-head", "--input"],
         "export" => &[
             "--project",
             "--task",
@@ -35,132 +101,281 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
             "--out",
         ],
         "redact" => &["--message-id", "--reason"],
-        _ => return None,
+        "stats" => &[
+            "--since",
+            "--until",
+            "--input",
+            "--durations",
+            "--out",
+            "--append",
+        ],
+        _ => {
+            return error(
+                "",
+                format!(
+                    "argument action: invalid choice: {} (choose from 'export', 'verify', 'redact', 'stats')",
+                    super::super::pyjson::py_value_repr(&super::super::pyjson::J::Str(
+                        action.into()
+                    ))
+                ),
+            );
+        }
     };
-    if rest.len() % 2 != 0 {
-        return None;
-    }
     let mut seen: Vec<(&str, &str)> = Vec::new();
-    for pair in rest.chunks(2) {
-        let option = pair[0].to_str()?;
-        let value = pair[1].to_str()?;
-        if !allowed.contains(&option) || seen.iter().any(|(name, _)| *name == option) {
+    let mut unknown = root_unknown;
+    let mut index = 0;
+    while index < rest.len() {
+        let token = rest[index];
+        index += 1;
+        if token == "--" {
+            unknown.extend_from_slice(&rest[index - 1..]);
+            break;
+        }
+        let (option, joined) = token
+            .split_once('=')
+            .map_or((token, None), |(k, v)| (k, Some(v)));
+        let mut matches: Vec<_> = allowed.iter().copied().filter(|v| *v == option).collect();
+        if matches.is_empty() && option.starts_with("--") {
+            matches = allowed
+                .iter()
+                .copied()
+                .filter(|v| v.starts_with(option))
+                .collect();
+        }
+        if option == "-h"
+            || option.starts_with("-h") && !option.starts_with("--")
+            || option.starts_with("--") && "--help".starts_with(option)
+        {
+            return help(action, token);
+        }
+        if matches.len() > 1 {
+            return error(
+                action,
+                format!(
+                    "ambiguous option: {option} could match {}",
+                    matches.join(", ")
+                ),
+            );
+        }
+        let Some(name) = matches.first().copied() else {
+            unknown.push(token);
+            continue;
+        };
+        let value = match joined {
+            Some(value) => value,
+            None => match rest
+                .get(index)
+                .copied()
+                .filter(|v| !option_token(v, allowed))
+            {
+                Some(value) => {
+                    index += 1;
+                    value
+                }
+                None => return error(action, format!("argument {name}: expected one argument")),
+            },
+        };
+        // argparse converts every occurrence, including a value overwritten later.
+        if name == "--expect-head"
+            && let Err(message) = head(value)
+        {
+            return error(action, format!("argument --expect-head: {message}"));
+        }
+        if matches!(name, "--since" | "--until") && time(value).is_none() {
+            if epoch(value).is_some() {
+                return error(
+                    action,
+                    format!("argument {name}: expected epoch seconds or an ISO 8601 date/time"),
+                );
+            }
+            // Python admits more ISO spellings than the native converter.
+            // Defer every non-numeric failure, including overwritten options.
             return None;
         }
-        seen.push((option, value));
+        if let Some(slot) = seen.iter_mut().find(|(key, _)| *key == name) {
+            slot.1 = value;
+        } else {
+            seen.push((name, value));
+        }
     }
     let get = |name: &str| seen.iter().find(|(key, _)| *key == name).map(|(_, v)| *v);
+    if action == "redact" {
+        let missing: Vec<_> = allowed
+            .iter()
+            .copied()
+            .filter(|name| get(name).is_none())
+            .collect();
+        if !missing.is_empty() {
+            return error(
+                action,
+                format!(
+                    "the following arguments are required: {}",
+                    missing.join(", ")
+                ),
+            );
+        }
+    }
+    if !unknown.is_empty() {
+        return error("", format!("unrecognized arguments: {}", unknown.join(" ")));
+    }
+    if ["--since", "--until"]
+        .iter()
+        .any(|name| get(name).is_some_and(|value| time(value).is_none()))
+    {
+        return None;
+    }
     match action {
         "verify" => {
-            let expect = optional(get("--expect-head"), head)?;
-            match get("--input") {
-                Some(input) if path_value(input) => Some(Action::VerifyInput {
-                    input: input.to_owned(),
+            let expect = get("--expect-head").and_then(|value| head(value).ok());
+            match get("--input").filter(|v| !v.is_empty()) {
+                Some(input) => Some(Action::VerifyInput {
+                    input: path(input),
                     expect,
                 }),
-                Some(_) => None,
                 None => Some(Action::VerifyBank { expect }),
             }
         }
         "export" => Some(Action::Export(Export {
-            project: optional(get("--project"), text_value)?,
-            task: optional(get("--task"), text_value)?,
-            agent: optional(get("--agent"), text_value)?,
-            since: optional(get("--since"), time)?,
-            until: optional(get("--until"), time)?,
-            out: match get("--out") {
-                Some(out) if path_value(out) => Some(out.to_owned()),
-                Some(_) => return None,
-                None => None,
-            },
+            project: get("--project").map(str::to_owned),
+            task: get("--task").map(str::to_owned),
+            agent: get("--agent").map(str::to_owned),
+            since: get("--since").and_then(time),
+            until: get("--until").and_then(time),
+            out: get("--out").filter(|v| !v.is_empty()).map(path),
         })),
+        "stats" => None,
         _ => Some(Action::Redact {
-            message_id: text_value(get("--message-id")?)?,
-            reason: text_value(get("--reason")?)?,
+            message_id: get("--message-id")?.to_owned(),
+            reason: get("--reason")?.to_owned(),
         }),
     }
 }
 
-/// An absent option, or a present one whose value admits (`None` defers).
-fn optional<T>(value: Option<&str>, admit: fn(&str) -> Option<T>) -> Option<Option<T>> {
-    match value {
-        None => Some(None),
-        Some(value) => admit(value).map(Some),
+fn option_token(value: &str, allowed: &[&str]) -> bool {
+    if !value.starts_with('-') || value == "-" {
+        return false;
+    }
+    let option = value.split_once('=').map_or(value, |(key, _)| key);
+    if value.starts_with("-h")
+        || option.starts_with("--")
+            && allowed
+                .iter()
+                .copied()
+                .chain(["--help"])
+                .any(|name| name.starts_with(option))
+    {
+        return true;
+    }
+    // argparse's negative-number regex uses Unicode digits and `$` permits
+    // one final newline; unknown tokens containing a space are positional.
+    let number = value[1..].strip_suffix('\n').unwrap_or(&value[1..]);
+    let digits = |v: &str| v.chars().all(|c| decimal_digit(c).is_some());
+    let negative = !number.is_empty() && digits(number)
+        || number
+            .split_once('.')
+            .is_some_and(|(a, b)| digits(a) && !b.is_empty() && digits(b));
+    !negative && !value.contains(' ')
+}
+
+/// Path's lexical normalization; it never resolves symlinks or `..`.
+pub(super) fn path(value: &str) -> String {
+    if cfg!(windows) {
+        let value = value.replace('/', "\\");
+        let normalized: std::path::PathBuf = std::path::Path::new(&value)
+            .components()
+            .filter(|component| *component != std::path::Component::CurDir)
+            .collect();
+        return if normalized.as_os_str().is_empty() {
+            ".".into()
+        } else {
+            normalized.to_string_lossy().into_owned()
+        };
+    }
+    let root = if value.starts_with("//") && !value.starts_with("///") {
+        "//"
+    } else if value.starts_with('/') {
+        "/"
+    } else {
+        ""
+    };
+    let parts: Vec<_> = value
+        .split('/')
+        .filter(|v| !v.is_empty() && *v != ".")
+        .collect();
+    let result = format!("{root}{}", parts.join("/"));
+    if result.is_empty() {
+        ".".into()
+    } else {
+        result
     }
 }
 
-/// argparse reads a `-`-prefixed token as an option (or a negative number);
-/// none of those spellings is ported.
-fn text_value(value: &str) -> Option<String> {
-    (!value.starts_with('-')).then(|| value.to_owned())
+fn head(value: &str) -> Result<Head, String> {
+    let shape_error = || "expected SEQ:HASH as verify prints them".to_owned();
+    let (seq, digest) = value.split_once(':').ok_or_else(shape_error)?;
+    if seq.is_empty() || !seq.chars().all(python_digit) {
+        return Err(shape_error());
+    }
+    if seq.chars().count() > 4300 || seq.chars().any(|c| decimal_digit(c).is_none()) {
+        return Err(format!(
+            "invalid _head value: {}",
+            super::super::pyjson::py_value_repr(&super::super::pyjson::J::Str(value.into()))
+        ));
+    }
+    let seq: String = seq
+        .chars()
+        .map(|c| decimal_digit(c).and_then(|digit| char::from_digit(digit, 10)))
+        .collect::<Option<_>>()
+        .expect("decimal digits checked");
+    if seq.is_empty()
+        || seq.bytes().all(|c| c == b'0')
+        || digest.len() != 64
+        || !digest.bytes().all(|c| matches!(c,b'0'..=b'9'|b'a'..=b'f'))
+    {
+        return Err(shape_error());
+    }
+    Ok((seq.trim_start_matches('0').to_owned(), digest.to_owned()))
 }
 
-/// A file argument that `pathlib.Path` prints back unchanged, so diagnostics
-/// naming it are byte-equal: no `.` component, no repeated or trailing
-/// separator and, on Windows, no `/` (pathlib rewrites it to `\`).
-fn path_value(value: &str) -> bool {
-    if value.is_empty() || (value.starts_with('-') && value != "-") {
-        return false;
+// CPython 3.11 str.isdigit includes these Unicode 14 digit characters
+// in addition to decimal digits; int() rejects them after that shape check.
+fn python_digit(c: char) -> bool {
+    decimal_digit(c).is_some()
+        || matches!(c as u32,
+        178..=179 | 185 | 4969..=4977 | 6618 | 8304 | 8308..=8313 |
+        8320..=8329 | 9312..=9320 | 9332..=9340 | 9352..=9360 | 9450 |
+        9461..=9469 | 9471 | 10102..=10110 | 10112..=10120 | 10122..=10130 |
+        68160..=68163 | 69216..=69224 | 69714..=69722 | 127232..=127242)
+}
+
+fn time(value: &str) -> Option<f64> {
+    match epoch(value) {
+        Some(number) => number.is_finite().then_some(number),
+        None => iso(value),
     }
-    let separators: &[char] = if cfg!(windows) { &['\\'] } else { &['/'] };
-    if cfg!(windows) && value.contains('/') {
-        return false;
-    }
-    // A colon is admitted only as the drive of a drive-absolute path
-    // (`X:\...`): pathlib rewrites drive-relative spellings (`C:.\a` prints
-    // as `C:a`), and every other colon placement is left to the oracle.
-    if cfg!(windows) && value.contains(':') {
-        let bytes = value.as_bytes();
-        if bytes.len() < 3
-            || !bytes[0].is_ascii_alphabetic()
-            || bytes[1] != b':'
-            || bytes[2] != b'\\'
-            || value[2..].contains(':')
-        {
-            return false;
+}
+
+fn epoch(value: &str) -> Option<f64> {
+    let chars: Vec<_> = value.trim().chars().collect();
+    let mut normalized = String::new();
+    for (index, c) in chars.iter().copied().enumerate() {
+        if c == '_' {
+            if index == 0
+                || index + 1 == chars.len()
+                || decimal_digit(chars[index - 1]).is_none()
+                || decimal_digit(chars[index + 1]).is_none()
+            {
+                return None;
+            }
+        } else {
+            normalized.push(
+                decimal_digit(c)
+                    .and_then(|digit| char::from_digit(digit, 10))
+                    .unwrap_or(c),
+            );
         }
     }
-    let mut parts = value.split(separators);
-    let first = parts.next().unwrap_or_default();
-    let rest: Vec<_> = parts.collect();
-    if first == "." {
-        return false;
-    }
-    // A leading separator (an absolute POSIX or drive-rooted path) is fine
-    // once; every later component must be a real name.
-    rest.iter().all(|part| !part.is_empty() && *part != ".")
-}
-
-/// `SEQ:HASH` as verify prints them: a positive decimal without leading zeros.
-fn head(value: &str) -> Option<Head> {
-    let (seq, digest) = value.split_once(':')?;
-    if seq.is_empty()
-        || seq.starts_with('0')
-        || !seq.bytes().all(|c| c.is_ascii_digit())
-        || digest.len() != 64
-        || !digest
-            .bytes()
-            .all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
-    {
-        return None;
-    }
-    Some((seq.parse().ok()?, digest.to_owned()))
-}
-
-/// Epoch seconds as plain decimal digits, or an ISO 8601 date-time with an
-/// explicit `+HH:MM`/`-HH:MM` offset (never a local-time reading).
-fn time(value: &str) -> Option<f64> {
-    let decimal = |text: &str| !text.is_empty() && text.bytes().all(|c| c.is_ascii_digit());
-    if let Some((whole, fraction)) = value.split_once('.')
-        && decimal(whole)
-        && decimal(fraction)
-    {
-        return value.parse::<f64>().ok().filter(|v| v.is_finite());
-    }
-    if decimal(value) {
-        return value.parse::<f64>().ok().filter(|v| v.is_finite());
-    }
-    iso(value)
+    normalized.parse().ok()
 }
 
 fn iso(value: &str) -> Option<f64> {
@@ -238,116 +453,33 @@ fn iso(value: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn argv(items: &[&str]) -> Vec<OsString> {
         items.iter().map(OsString::from).collect()
     }
-
     #[test]
-    fn canonical_shapes_and_deferrals() {
+    fn joined_abbreviated_and_repeated_options() {
+        assert!(
+            matches!(parse(&argv(&["verify", "--input=bad", "--in", "./good//"])),
+            Some(Action::VerifyInput { input, .. }) if input == "good")
+        );
         assert!(matches!(
-            parse(&argv(&["verify"])),
-            Some(Action::VerifyBank { expect: None })
+            parse(&argv(&["verify", "--input"])),
+            Some(Action::Error(_))
         ));
-        let head = format!("12:{}", "a".repeat(64));
-        assert!(matches!(
-            parse(&argv(&[
-                "verify",
-                "--expect-head",
-                &head,
-                "--input",
-                "x.jsonl"
-            ])),
-            Some(Action::VerifyInput {
-                expect: Some((12, _)),
-                ..
-            })
-        ));
-        for deferred in [
-            vec!["verify", "--input"],
-            vec!["verify", "--input", "a", "--input", "b"],
-            vec!["verify", "--input=a"],
-            vec!["verify", "--in", "a"],
-            vec!["verify", "--expect-head", "012:x"],
-            vec!["export", "--since", "-5"],
-            vec!["export", "--since", "1e3"],
-            vec!["export", "--since", " 5"],
-            vec!["export", "--since", "2026-01-01T00:00:00"],
-            vec!["export", "--agent", "-x"],
-            vec!["redact", "--message-id", "a"],
-            vec!["stats"],
-            vec!["--help"],
-        ] {
-            assert!(parse(&argv(&deferred)).is_none(), "{deferred:?}");
-        }
-    }
-
-    #[test]
-    fn only_pathlib_stable_paths_are_admitted() {
-        assert!(path_value("archive.jsonl"));
-        assert!(path_value("-"));
-        assert!(!path_value("./a"));
-        assert!(!path_value("a//b"));
-        if cfg!(windows) {
-            assert!(path_value("C:\\x\\a.jsonl"));
-            for spelling in [
-                "C:.\\a",
-                "C:a",
-                "C:",
-                "a\\b:c",
-                "C:\\a:b",
-                "C:/a",
-                "\\\\host\\s",
-            ] {
-                assert!(!path_value(spelling), "{spelling}");
-            }
-        } else {
-            assert!(path_value("/tmp/a:b"));
-            assert!(!path_value("a/"));
-        }
-    }
-
-    #[test]
-    fn iso_offsets_are_absolute() {
-        assert_eq!(time("1970-01-01T00:33:20+00:00"), Some(2000.0));
-        assert_eq!(time("1970-01-01T01:33:20+01:00"), Some(2000.0));
-        assert_eq!(time("2024-02-29T00:00:00-00:30"), Some(1709166600.0));
-        assert_eq!(time("2023-02-29T00:00:00+00:00"), None);
-        assert_eq!(time("2000.5"), Some(2000.5));
-    }
-
-    #[test]
-    fn canonical_heads_reach_the_sql_bigint_boundary() {
         let digest = "a".repeat(64);
-        for seq in [1_000_000_000_000_000_000, i64::MAX] {
-            assert_eq!(
-                head(&format!("{seq}:{digest}")),
-                Some((seq, digest.clone()))
-            );
-        }
-        assert!(head(&format!("9223372036854775808:{digest}")).is_none());
-        assert!(head(&format!("01000000000000000000:{digest}")).is_none());
+        assert_eq!(head(&format!("00012:{digest}")), Ok(("12".into(), digest)));
     }
-
     #[test]
-    fn fractional_iso_seconds_keep_the_explicit_offset() {
-        // datetime.fromisoformat(...).timestamp(), CPython 3.11, 2026-10-10.
-        for (value, expected) in [
-            ("1970-01-01T00:00:59.999999+00:01", -0.000001),
-            ("2300-01-01T00:00:00.000001+00:00", 10413792000.000002),
-            ("2026-10-10T00:00:00.500000+00:00", 1791590400.5),
-            ("1970-01-01T00:33:20.5+00:00", 2000.5),
-            ("1970-01-01T02:03:20.000001+01:30", 2000.000001),
-            ("1970-01-01T00:33:20.123456789+00:00", 2000.123456),
-        ] {
-            assert_eq!(time(value), Some(expected), "{value}");
+    fn pathlib_paths_keep_parent_components() {
+        if cfg!(windows) {
+            assert_eq!(path("./missing//archive.jsonl/"), "missing\\archive.jsonl");
+        } else {
+            assert_eq!(path("./a//../b/"), "a/../b");
+            assert_eq!(path("//a/./b"), "//a/b");
+            assert_eq!(path("///a/"), "/a");
         }
-        for value in [
-            "1970-01-01T00:33:20.+00:00",
-            "1970-01-01T00:33:20.5",
-            "1970-01-01T00:33:20.5+24:00",
-        ] {
-            assert_eq!(time(value), None, "{value}");
-        }
+        assert_eq!(time("-5"), Some(-5.0));
+        assert_eq!(time("1.7e9"), Some(1.7e9));
+        assert_eq!(time("1970-01-01T00:00:59.999999+00:01"), Some(-0.000001));
     }
 }
