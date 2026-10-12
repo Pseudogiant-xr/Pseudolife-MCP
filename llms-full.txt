@@ -2004,17 +2004,24 @@ set paths: a dream add parks rather than convert such a scalar into a set
 (`member_add_blocked_direct`), and a dream retraction of a member a direct
 user- or action-tier write added is dropped (`member_remove_refused`); a
 retraction aimed at a scalar slot finds no member and changes nothing.
-Members added by `memory_set_add`, which passes no origin, are agent tier
-and stay unguarded. A quarantine promotion checks again when it promotes,
+Members added by `memory_set_add`, which passes no origin, carry no tier
+(empty support, empty origin) and are not guarded against a dream
+retraction; an assistant-origin retraction of one is still refused. A
+quarantine promotion checks again when it promotes,
 so a direct write that lands in between is not replaced. A value the dream
 itself consolidated from a user note still updates from a later backed
 user note, so changed preferences keep flowing. The record tells the two
 apart by a `dream:<tier>` provenance mark the dream adds when it is the
 write that first gives a fact that tier; a direct write at the tier clears
-it, so a direct confirmation, an exact member confirmation included,
-protects the value from then on (facts written before the mark existed
-count as direct). Only the dream writes a mark: a `dream:` token in a
-caller's provenance or `source` tag is dropped. A dream restatement
+it, so a direct confirmation (of a member too, by exact or near-duplicate
+value) protects the value from then on. A scalar converted into a set keeps
+every support tier and its marks. Only the dream writes a mark: a `dream:`
+token in a caller's provenance or `source` tag is dropped. Facts written
+before this release carry no mark and count as direct, with one exception:
+before this release a store with `source="dream:user"` and auto-promote on
+could leave a literal `dream:user` token in a fact's provenance, and such a
+stored token is indistinguishable from a mark, so it is honoured as one
+after a reload. A dream restatement
 that is a shorter form of the current value (a compression echo) confirms
 it without raising its tier; only an exact restatement can. With
 `protect_provenance` off, these rules are off as well.

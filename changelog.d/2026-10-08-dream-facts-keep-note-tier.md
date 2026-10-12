@@ -31,13 +31,18 @@
   than convert such a scalar into a set (`member_add_blocked_direct`), and a
   dream retraction of a member a direct user- or action-tier write added is
   dropped (`member_remove_refused`). Members added by `memory_set_add`, which
-  passes no origin, are agent tier and stay unguarded. A value the dream
-  itself consolidated from a user note still updates from a later backed user
-  note. The dream marks the tiers it adds (`dream:<tier>` in the fact's
-  provenance) and a direct write at that tier, an exact member confirmation
-  included, clears the mark; only the dream writes a mark (a `dream:` token
-  in a caller's provenance or source tag is dropped), and facts written
-  before this release count as direct.
+  passes no origin, carry no tier and are not guarded against a dream
+  retraction (an assistant-origin retraction of one is still refused). A
+  scalar converted into a set keeps every support tier and its marks. A value
+  the dream itself consolidated from a user note still updates from a later
+  backed user note. The dream marks the tiers it adds (`dream:<tier>` in the fact's
+  provenance) and a direct write at that tier, a member confirmation by
+  exact or near-duplicate value included, clears the mark; only the dream
+  writes a mark (a `dream:` token in a caller's provenance or source tag is
+  dropped). Facts written before this release count as direct, except that a
+  literal `dream:` token already stored in a fact's provenance (possible
+  before this release from a store with such a source tag and auto-promote
+  on) is indistinguishable from a mark and is honoured as one.
 - A dream restatement that is a shorter form of the current value (a
   compression echo) still confirms it, but no longer raises its tier: only a
   restatement equal to the stored value after normalisation can.
