@@ -454,6 +454,34 @@ def test_encodings_bank_gap_keeps_auth_control_on_both_platforms(monkeypatch, tm
     assert len(auth) == 1 and auth[0][auth[0].index('--only') + 1] == 'encodings'
 
 
+@pytest.mark.parametrize('field, value', [('platform', 'linux'), ('mode', 'live'),
+                                         ('scenario', 'map-order-reversed')])
+def test_inventory_rejects_broadened_map_order_golden_exception(monkeypatch, field, value):
+    from coverage_plan import EXCEPTIONS
+    from inventory import check
+    entry = dict(platform='windows', mode='golden', scenario='map-order', reason='observed bank initialization gap')
+    entry[field] = value
+    monkeypatch.setitem(EXCEPTIONS, 'w1a_selections', {'windows-map-order-golden-unsettled-bank-init': entry})
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    with pytest.raises(AssertionError, match='map-order golden exception scope'):
+        check(workflow)
+
+
+@pytest.mark.parametrize('platform', ['linux', 'windows'])
+def test_map_order_exception_only_omits_windows_golden(monkeypatch, tmp_path, platform):
+    import run_coverage
+    invoked = []
+    monkeypatch.setattr(run_coverage, 'os', SimpleNamespace(name='nt' if platform == 'windows' else 'posix',
+                                                          environ=run_coverage.os.environ))
+    monkeypatch.setattr(sys, 'argv', ['run_coverage.py', '--suite', 'h5-w1a', '--out-dir', str(tmp_path)])
+    monkeypatch.setattr(run_coverage.subprocess, 'run', lambda argv, **kw: invoked.append(argv) or SimpleNamespace(returncode=0))
+    assert run_coverage.main() == 0
+    selected = [(argv[2], argv[argv.index('--only') + 1]) for argv in invoked]
+    assert ('live', 'map-order') in selected
+    assert (('golden', 'map-order') in selected) == (platform == 'linux')
+    assert ('live', 'map-order-reversed') in selected and ('golden', 'map-order-reversed') in selected
+
+
 @pytest.mark.parametrize('job, name', [('parity-checks', 'Ported rows and daemon controls'),
                                       ('source-mutants', 'CLI source mutants')])
 @pytest.mark.parametrize('suffix', ['; exit 0', '; python -c "raise SystemExit(0)"'])

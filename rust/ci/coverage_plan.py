@@ -40,6 +40,12 @@ EXCEPTIONS = {
         'linux': {},
         'windows': {},
     },
+    'w1a_selections': {
+        'windows-map-order-golden-unsettled-bank-init': {
+            'platform': 'windows', 'mode': 'golden', 'scenario': 'map-order',
+            'reason': 'Hosted run 38187846311: the one HTTP response matches, but the Python golden has 479 columns, 356 constraints and 19 sequences against an empty Rust catalog. The auth-only scenario has settle=False and snapshots unsettled initialization. Both live selections and Linux golden remain selected.',
+        },
+    },
     'cli_mutants': {
         'linux': {
             'audit-drive-relative-admitted': 'Windows drive-relative path mutation has no Linux witness; escaped on Linux 2026-10-11.',

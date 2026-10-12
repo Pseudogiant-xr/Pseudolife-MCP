@@ -184,6 +184,21 @@ def check(workflow):
     expected_w1a = [dict(kind='daemon', scenario=name, mode=mode, record=mode == 'live')
                     for name in W1A if name in supported for mode in ('live', 'golden')]
     assert SUITES['h5-w1a'] == expected_w1a, 'W1-A recording/replay selection dropped or changed'
+    scoped = EXCEPTIONS['w1a_selections']
+    exception_id = 'windows-map-order-golden-unsettled-bank-init'
+    assert set(scoped) == {exception_id}, 'map-order golden exception scope changed'
+    entry = scoped[exception_id]
+    assert set(entry) == {'platform', 'mode', 'scenario', 'reason'} \
+        and (entry['platform'], entry['mode'], entry['scenario']) == ('windows', 'golden', 'map-order'), \
+        'map-order golden exception scope changed'
+    from run_coverage import suite_actions
+    for platform in ('linux', 'windows'):
+        actions, omitted_scenarios, omitted_selections = suite_actions('h5-w1a', platform)
+        expected = [a for a in expected_w1a if a['scenario'] not in EXCEPTIONS['w1a_platform'][platform]
+                    and not (platform == 'windows' and a['mode'] == 'golden' and a['scenario'] == 'map-order')]
+        assert actions == expected, 'map-order golden exception scope changed in executable selection'
+        assert omitted_selections == (scoped if platform == 'windows' else {}), 'map-order golden exception scope changed in receipt'
+        assert omitted_scenarios == EXCEPTIONS['w1a_platform'][platform]
     assert SUITES['h5-background'] == [dict(kind='daemon', scenario=name, mode='live')
                                      for name in BACKGROUND], 'accepted daemon scenario lost live background execution'
     existing = set()

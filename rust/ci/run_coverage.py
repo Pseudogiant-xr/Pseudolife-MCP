@@ -62,6 +62,17 @@ def command(action, binaries, debug, output):
     return argv + ['--out', str(output)]
 
 
+def suite_actions(suite, platform):
+    omitted_scenarios = EXCEPTIONS['w1a_platform'][platform] if suite == 'h5-w1a' else {}
+    omitted_selections = {name: entry for name, entry in EXCEPTIONS['w1a_selections'].items()
+                          if suite == 'h5-w1a' and entry['platform'] == platform}
+    actions = [action for action in SUITES[suite]
+               if action.get('scenario') not in omitted_scenarios
+               and not any((action.get('scenario'), action['mode']) == (entry['scenario'], entry['mode'])
+                           for entry in omitted_selections.values())]
+    return actions, omitted_scenarios, omitted_selections
+
+
 def main():
     parser = argparse.ArgumentParser()
     selector = parser.add_mutually_exclusive_group(required=True)
@@ -76,6 +87,7 @@ def main():
     os.environ['PL_HARNESS_SCRATCH'] = str(args.out_dir.resolve() / 'scratch')
     platform = 'windows' if os.name == 'nt' else 'linux'
     omitted_scenarios = {}
+    omitted_selections = {}
     if args.source_shard:
         row, selected = SOURCE_SHARDS[args.source_shard]
         ids = select_controls(row, selected, platform)
@@ -84,10 +96,8 @@ def main():
         selection = 'source-' + args.source_shard
         environment = source_environment(row, platform, Path.home(), os.environ)
     else:
-        selection, actions = args.suite, SUITES[args.suite]
-        if args.suite == 'h5-w1a':
-            omitted_scenarios = EXCEPTIONS['w1a_platform'][platform]
-            actions = [action for action in actions if action['scenario'] not in omitted_scenarios]
+        selection = args.suite
+        actions, omitted_scenarios, omitted_selections = suite_actions(selection, platform)
         environment = dict(os.environ)
     receipts = []
     for index, action in enumerate(actions):
@@ -108,6 +118,7 @@ def main():
         (args.out_dir / f'{selection}-timings.json').write_text(
             json.dumps(dict(platform=platform, receipts=receipts, exceptions=EXCEPTIONS,
                             omitted_controls=omitted, omitted_scenarios=omitted_scenarios,
+                            omitted_selections=omitted_selections,
                             unobserved_controls=UNOBSERVED_CONTROLS), indent=2),
             encoding='utf-8')
         if code and not args.keep_going:
