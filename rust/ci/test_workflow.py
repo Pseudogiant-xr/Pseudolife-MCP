@@ -491,19 +491,21 @@ def test_daemon_artifact_is_built_once_and_shared_with_graph():
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
 @pytest.mark.parametrize("dependency", ["parity-checks", "source-mutants"])
-def test_required_parity_gate_fails_closed(result, dependency):
+@pytest.mark.parametrize("event", ["pull_request", "push", "schedule", "workflow_dispatch"])
+def test_required_parity_gate_fails_closed(result, dependency, event):
     gate = workflow()["jobs"]["parity"]
     assert gate["needs"] == ["rust", "candidate", "parity-checks", "source-mutants"]
     assert gate["if"].startswith("always() &&")
     step = gate["steps"][0]
-    assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}"}
+    assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}", "GATE_EVENT": "${{ github.event_name }}"}
     import os
     needs = {name: {"result": "success"} for name in gate["needs"]}
     needs[dependency]["result"] = result
     executed = subprocess.run(["pwsh", "-NoProfile", "-Command", step["run"]],
-                              env=dict(os.environ, GATE_RESULTS=json.dumps(needs)),
+                              env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
                               capture_output=True, text=True)
-    assert executed.returncode == (0 if result == "success" else 1), executed.stderr
+    accepted = result == "success" or (event == "pull_request" and dependency == "source-mutants" and result == "skipped")
+    assert executed.returncode == (0 if accepted else 1), executed.stderr
 
 
 @pytest.mark.parametrize("name", ["CLI lease differential harness", "Daemon background pruning golden"])

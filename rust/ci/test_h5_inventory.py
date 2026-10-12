@@ -43,6 +43,49 @@ def test_ported_row_and_mutant_ci_inventory():
     check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
 
 
+@pytest.mark.parametrize('event', ['push', 'schedule'])
+def test_inventory_rejects_missing_source_event(event):
+    from inventory import check
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    workflow[True].pop(event, None)
+    with pytest.raises(AssertionError, match='source events'):
+        check(workflow)
+
+
+def test_inventory_rejects_aggregate_accepting_skipped_source_on_push():
+    import os
+    import subprocess
+    from inventory import check
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    gate = workflow['jobs']['parity']['steps'][0]
+    gate['run'] = """
+$results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
+foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
+  if ($results[$job].result -cne 'success' -and $results[$job].result -cne 'skipped') {
+    exit 1
+  }
+}
+"""
+    needs = {job: {'result': 'success'} for job in workflow['jobs']['parity']['needs']}
+    needs['source-mutants']['result'] = 'skipped'
+    executed = subprocess.run(['pwsh', '-NoProfile', '-Command', gate['run']],
+                              env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT='push'),
+                              capture_output=True, text=True)
+    assert executed.returncode == 0, executed.stderr
+    with pytest.raises(AssertionError, match='Parity event gate'):
+        check(workflow)
+
+
+@pytest.mark.parametrize('event', ['push', 'schedule'])
+def test_inventory_rejects_source_filter_dropping_event(event):
+    from inventory import check
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    workflow['jobs']['source-mutants']['if'] = workflow['jobs']['source-mutants']['if'].replace(
+        f"github.event_name == '{event}' || ", '')
+    with pytest.raises(AssertionError, match='source event selection'):
+        check(workflow)
+
+
 def test_inventory_reads_utf8_sources_under_windows_default_encoding(monkeypatch):
     from inventory import check
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))

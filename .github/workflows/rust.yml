@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [master]
+  schedule:
+    - cron: '23 3 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -836,7 +838,10 @@ jobs:
           if-no-files-found: warn
 
   source-mutants:
-    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs
+    # queued behind the 20-job concurrency cap, with a largest matrix queue
+    # of 24m25s. Catch CLI source survivors after merge on master/nightly.
+    if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')
     name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
     # These shards compile their own source copies and consume no rust-job
     # artifact; the final Parity gate still requires both Rust jobs.
@@ -960,7 +965,8 @@ jobs:
           docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
           python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
-    # Preserve the required check names; a skipped/cancelled dependency is a failure.
+    # Only a PR may skip the after-merge CLI source matrix. Master/nightly
+    # (and ordinary manual CI) require its success, never a skip or failure.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
     name: Parity / ${{ matrix.os }}
     needs: [rust, candidate, parity-checks, source-mutants]
@@ -975,13 +981,19 @@ jobs:
         shell: pwsh
         env:
           GATE_RESULTS: ${{ toJSON(needs) }}
+          GATE_EVENT: ${{ github.event_name }}
         run: |
           $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
-          foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
+          foreach ($job in @('rust', 'candidate', 'parity-checks')) {
             if ($results[$job].result -cne 'success') {
               Write-Error "$job did not succeed"
               exit 1
             }
+          }
+          $sourceResult = $results['source-mutants'].result
+          if ($sourceResult -cne 'success' -and -not ($env:GATE_EVENT -ceq 'pull_request' -and $sourceResult -ceq 'skipped')) {
+            Write-Error "source-mutants did not succeed outside the PR skip exception"
+            exit 1
           }
 
   capture-windows:

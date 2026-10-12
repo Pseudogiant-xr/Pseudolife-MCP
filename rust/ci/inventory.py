@@ -11,6 +11,21 @@ from test_workflow import commands
 
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
+SOURCE_EVENTS = "github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
+PARITY_EVENT_GATE = """
+$results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
+foreach ($job in @('rust', 'candidate', 'parity-checks')) {
+  if ($results[$job].result -cne 'success') {
+    Write-Error "$job did not succeed"
+    exit 1
+  }
+}
+$sourceResult = $results['source-mutants'].result
+if ($sourceResult -cne 'success' -and -not ($env:GATE_EVENT -ceq 'pull_request' -and $sourceResult -ceq 'skipped')) {
+  Write-Error "source-mutants did not succeed outside the PR skip exception"
+  exit 1
+}
+"""
 
 
 def cli_controls():
@@ -85,6 +100,8 @@ def check(workflow):
                for exceptions in EXCEPTIONS['cli_mutants'].values()), 'unknown source-control exception'
     jobs = workflow["jobs"]
     parity = jobs["parity-checks"]
+    ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'"
+    assert parity['if'] == ordinary_ci, 'H5 PR event selection changed'
     matrix = parity["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS and "exclude" not in matrix
     assert set(SUITES) <= set(matrix["suite"]), "missing H5 suite"
@@ -118,8 +135,23 @@ def check(workflow):
     assert set(source["strategy"]["matrix"]["shard"]) == set(SOURCE_SHARDS), "source mutant shard dropped"
     assert "exclude" not in source["strategy"]["matrix"]
     assert not source.get("continue-on-error")
-    assert "source-mutants" in jobs["parity"]["needs"]
-    assert source["if"] == "github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'"
+    events = workflow.get('on', workflow.get(True))
+    assert events.get('push') == {'branches': ['master']} \
+        and events.get('schedule') == [{'cron': '23 3 * * *'}], 'source events dropped or changed'
+    assert 'pull_request' in events and 'workflow_dispatch' in events, 'source events dropped or changed'
+    assert source['if'] == SOURCE_EVENTS, 'source event selection changed'
+    gate = jobs['parity']
+    assert gate['needs'] == ['rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
+    assert gate['if'] == f'always() && ({ordinary_ci})' and not gate.get('continue-on-error'), 'Parity event gate can skip failures'
+    assert len(gate['steps']) == 1, 'Parity event gate steps changed'
+    required = gate['steps'][0]
+    assert required.get('shell') == 'pwsh' and not required.get('if') \
+        and not required.get('continue-on-error'), 'Parity event gate can skip failures'
+    assert required['env'] == {'GATE_RESULTS': '${{ toJSON(needs) }}',
+                              'GATE_EVENT': '${{ github.event_name }}'}, 'Parity event gate inputs changed'
+    actual = [line.strip() for line in required['run'].splitlines() if line.strip()]
+    expected = [line.strip() for line in PARITY_EVENT_GATE.splitlines() if line.strip()]
+    assert actual == expected, 'Parity event gate accepts an unsupported result'
     invocation = next(s for s in source["steps"] if s.get("name") == "CLI source mutants")
     assert not invocation.get("if") and not invocation.get("continue-on-error")
     assert commands(invocation["run"])[0][:6] == ["python", "rust/ci/run_coverage.py", "--source-shard", "${{", "matrix.shard", "}}"]
