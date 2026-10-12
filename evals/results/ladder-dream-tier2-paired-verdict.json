@@ -1,0 +1,157 @@
+{
+  "what": "chip-5 (PR #245 label pair) extraction-ladder paired arms: pre-#245 tree vs master, same harness, same corpus, same extractor endpoint; prediction = verdict-identical on an unlabelled corpus",
+  "mode": "identity",
+  "generated_at": "2026-10-13T00:13:04",
+  "tag": "dream-tier2",
+  "post_arm": "post",
+  "pre": {
+    "worktree": "ladder-pre-0181",
+    "sha": "4894f2c6c0557a52dfb75dd3f7c3716c52697ff0",
+    "sha_source": "artifact",
+    "worktree_head_at_compare": "4894f2c6c0557a52dfb75dd3f7c3716c52697ff0"
+  },
+  "post": {
+    "worktree": "dream-tier-forward",
+    "sha": "8a4e5cc3e53a76f6ca99cc51792827475e9658e8",
+    "sha_source": "artifact",
+    "worktree_head_at_compare": "8a4e5cc3e53a76f6ca99cc51792827475e9658e8"
+  },
+  "compared": [
+    "gold_recoverable",
+    "stale_leak",
+    "tokens_per_query",
+    "consolidation.pulled",
+    "consolidation.claims",
+    "consolidation.inserted",
+    "consolidation.superseded",
+    "consolidation.literal_flagged",
+    "consolidation.literal_dropped"
+  ],
+  "not_compared": [
+    "extract_seconds",
+    "search_latency_ms"
+  ],
+  "rungs": {
+    "floor": {
+      "status": {
+        "pre": "ok",
+        "post": "ok"
+      },
+      "metrics": {
+        "gold_recoverable": {
+          "pre": 0.1,
+          "post": 0.1
+        },
+        "stale_leak": {
+          "pre": 0.1,
+          "post": 0.1
+        },
+        "tokens_per_query": {
+          "pre": 3.4,
+          "post": 3.4
+        }
+      },
+      "consolidation": {
+        "pulled": {
+          "pre": 26,
+          "post": 26
+        },
+        "claims": {
+          "pre": 2,
+          "post": 2
+        },
+        "inserted": {
+          "pre": 2,
+          "post": 2
+        },
+        "superseded": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_flagged": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_dropped": {
+          "pre": 0,
+          "post": 0
+        }
+      },
+      "timing": {
+        "extract_seconds": {
+          "pre": 0.5,
+          "post": 0.5
+        },
+        "search_latency_ms": {
+          "pre": 52.7,
+          "post": 48.9
+        }
+      },
+      "differences": {},
+      "identical": true,
+      "pre_file": "evals/results/floor-dream-tier2-pre.json",
+      "post_file": "evals/results/floor-dream-tier2-post.json"
+    },
+    "qwen-27b": {
+      "status": {
+        "pre": "ok",
+        "post": "ok"
+      },
+      "metrics": {
+        "gold_recoverable": {
+          "pre": 1.0,
+          "post": 1.0
+        },
+        "stale_leak": {
+          "pre": 0.0,
+          "post": 0.0
+        },
+        "tokens_per_query": {
+          "pre": 13.5,
+          "post": 13.5
+        }
+      },
+      "consolidation": {
+        "pulled": {
+          "pre": 26,
+          "post": 26
+        },
+        "claims": {
+          "pre": 16,
+          "post": 16
+        },
+        "inserted": {
+          "pre": 16,
+          "post": 16
+        },
+        "superseded": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_flagged": {
+          "pre": 0,
+          "post": 0
+        },
+        "literal_dropped": {
+          "pre": 0,
+          "post": 0
+        }
+      },
+      "timing": {
+        "extract_seconds": {
+          "pre": 37.5,
+          "post": 38.3
+        },
+        "search_latency_ms": {
+          "pre": 52.9,
+          "post": 58.8
+        }
+      },
+      "differences": {},
+      "identical": true,
+      "pre_file": "evals/results/qwen-27b-dream-tier2-pre.json",
+      "post_file": "evals/results/qwen-27b-dream-tier2-post.json"
+    }
+  },
+  "gate": "PASS"
+}
