@@ -107,3 +107,9 @@ Both contradiction and dream module declarations are retained. Pure slot/contrad
 Existing Unicode-runtime exception remains; no DB access is added by this slice.
 
 Validation and independent Codex high review are recorded in the private W2P report; initial failures and final reruns are listed separately. Windows evidence is cross compilation, not runtime. Frozen oracle goldens are not re-recorded.
+
+### W2P completed evidence
+
+At `95ca36dbb`, Linux fmt, all-targets clippy with warnings denied, tests and mutant-capable build exit 0 (182 passed, 1 ignored). Daemon and stdio Windows GNU check and clippy exit 0; these are compile checks, not runtime. The current Python full-docs oracle writes a private scratch corpus, and the existing ignored Rust corpus test checks all 54,723 cases: zero declared skips, zero mismatches, exit 0. The polarity and negation-threshold controls each fail their named frozen-golden test with exit 101 and mismatches; restored source passes each test with exit 0. Source originals are restored. Frozen goldens are not rewritten.
+
+The independent Codex high review finds no authored-resolution issues. main.rs retains both the contradiction and dream module declarations; pure-function implementations, their frozen corpus and shared py_strip remain unchanged. This slice owns no DB client or mutation path, and no standalone HTTP/database harness is claimed. The existing Unicode-runtime exception remains. Private W2P `e-slots/` holds Cargo, oracle, corpus, control and review evidence.
