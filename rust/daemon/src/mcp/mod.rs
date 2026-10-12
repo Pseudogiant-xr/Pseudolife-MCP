@@ -34,6 +34,276 @@ const PING_EVERY: Duration = Duration::from_secs(15);
 /// Python keeps every terminated transport for the process lifetime.
 const TERMINATED_KEPT: usize = 10_000;
 /// `transport_security.DEFAULT_MAX_REQUEST_BODY_SIZE`, enforced by the SDK's
+/// `RequestBodyLimitMiddleware` around the whole MCP app.
+const BODY_LIMIT: usize = 4 * 1024 * 1024;
+
+const PARSE_ERROR: i64 = -32700;
+const INVALID_REQUEST: i64 = -32600;
+const METHOD_NOT_FOUND: i64 = -32601;
+const INVALID_PARAMS: i64 = -32602;
+
+pub struct McpState {
+    default_tier: Tier,
+    tier_map: HashMap<String, Tier>,
+    overrides: Overrides,
+    /// Tokenless installs keep the SDK's DNS-rebinding allowlist on.
+    auth_configured: bool,
+    sessions: Mutex<Sessions>,
+}
+
+/// One registered transport. `ready` is the SDK runner's initialization
+/// gate: until an `initialize` succeeds or `notifications/initialized`
+/// arrives, every request but `ping` is refused.
+#[derive(Default)]
+struct Entry {
+    stream: Option<mpsc::UnboundedSender<Bytes>>,
+    ready: bool,
+}
+
+#[derive(Default)]
+struct Sessions {
+    live: HashMap<String, Entry>,
+    terminated: HashSet<String>,
+    terminated_order: VecDeque<String>,
+}
+
+enum Lookup {
+    Live,
+    Terminated,
+    Unknown,
+}
+
+impl McpState {
+    pub fn from_env(auth_configured: bool) -> Self {
+        Self::new(
+            tiers::normalize_tier(
+                std::env::var("PSEUDOLIFE_MCP_TOOLSET").ok().as_deref(),
+                "PSEUDOLIFE_MCP_TOOLSET",
+            ),
+            tiers::parse_tier_map(std::env::var("PSEUDOLIFE_MCP_TIER_MAP").ok().as_deref()),
+            auth_configured,
+        )
+    }
+
+    fn new(default_tier: Tier, tier_map: HashMap<String, Tier>, auth_configured: bool) -> Self {
+        Self {
+            default_tier,
+            tier_map,
+            overrides: Overrides::new(tiers::OVERRIDE_TTL),
+            auth_configured,
+            sessions: Mutex::new(Sessions::default()),
+        }
+    }
+
+    /// `_stored_tier_of`: the stored principal row's tier, for the request's
+    /// own bearer only (a client-asserted X-PL-Writer naming a stored
+    /// principal does not take its tier).
+    fn stored_tier_for(
+        &self,
+        store: &crate::auth::PrincipalStore,
+        principal: &str,
+        key: &str,
+    ) -> Option<Tier> {
+        if key.is_empty() || key != principal {
+            return None;
+        }
+        store.tier_of(key).as_deref().and_then(Tier::parse)
+    }
+
+    /// `_resolve_principal_tier` for a request.
+    fn resolve_tier(
+        &self,
+        store: &crate::auth::PrincipalStore,
+        principal: &str,
+        key: Option<&str>,
+    ) -> Tier {
+        tiers::resolve(
+            key,
+            &self.overrides,
+            &self.tier_map,
+            self.default_tier,
+            |k| self.stored_tier_for(store, principal, k),
+        )
+    }
+
+    fn lookup(&self, sid: &str) -> Lookup {
+        let s = self.sessions.lock().expect("sessions lock");
+        if s.live.contains_key(sid) {
+            Lookup::Live
+        } else if s.terminated.contains(sid) {
+            Lookup::Terminated
+        } else {
+            Lookup::Unknown
+        }
+    }
+
+    /// The SDK manager registers a transport for every request that arrives
+    /// without a session id, whatever happens to that request afterwards.
+    fn register(&self, sid: &str) {
+        let mut s = self.sessions.lock().expect("sessions lock");
+        s.live.entry(sid.to_string()).or_default();
+    }
+
+    /// Opens the initialization gate. A session terminated meanwhile (a
+    /// DELETE racing this request) stays terminated.
+    fn mark_ready(&self, sid: &str) {
+        let mut s = self.sessions.lock().expect("sessions lock");
+        if let Some(e) = s.live.get_mut(sid) {
+            e.ready = true;
+        }
+    }
+
+    fn is_ready(&self, sid: &str) -> bool {
+        let s = self.sessions.lock().expect("sessions lock");
+        s.live.get(sid).is_some_and(|e| e.ready)
+    }
+
+    fn terminate(&self, sid: &str) {
+        let mut s = self.sessions.lock().expect("sessions lock");
+        // Dropping the sender ends the session's standalone stream.
+        s.live.remove(sid);
+        if s.terminated.insert(sid.to_string()) {
+            s.terminated_order.push_back(sid.to_string());
+            while s.terminated_order.len() > TERMINATED_KEPT {
+                if let Some(old) = s.terminated_order.pop_front() {
+                    s.terminated.remove(&old);
+                }
+            }
+        }
+    }
+
+    /// Server-initiated message to the session's standalone stream, if open.
+    fn notify(&self, sid: &str, message: &Value) {
+        let s = self.sessions.lock().expect("sessions lock");
+        if let Some(Entry {
+            stream: Some(tx), ..
+        }) = s.live.get(sid)
+        {
+            let _ = tx.send(sse_event(&message.to_string()));
+        }
+    }
+}
+
+fn sse_event(data: &str) -> Bytes {
+    Bytes::from(format!("event: message\r\ndata: {data}\r\n\r\n"))
+}
+
+fn sse_ping() -> Bytes {
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.6f+00:00");
+    Bytes::from(format!(": ping - {now}\r\n\r\n"))
+}
+
+fn latin1(h: &HeaderMap, name: &str) -> Option<String> {
+    identity::header(h, name)
+}
+
+/// A plain Starlette `Response(text, status)`: no content type.
+fn plain(status: u16, text: &'static str) -> Response {
+    let mut r = Response::new(Body::from(text));
+    *r.status_mut() = StatusCode::from_u16(status).unwrap();
+    r
+}
+
+/// `_create_error_response`: a JSON-RPC error with a null id.
+fn rpc_http_error(status: u16, code: i64, message: &str, sid: Option<&str>) -> Response {
+    let body = json!({"jsonrpc": "2.0", "id": null, "error": {"code": code, "message": message}});
+    json_bytes(status, body.to_string().into_bytes(), sid)
+}
+
+fn json_bytes(status: u16, body: Vec<u8>, sid: Option<&str>) -> Response {
+    let mut r = Response::new(Body::from(body));
+    *r.status_mut() = StatusCode::from_u16(status).unwrap();
+    r.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    if let Some(sid) = sid {
+        r.headers_mut()
+            .insert("mcp-session-id", HeaderValue::from_str(sid).unwrap());
+    }
+    r
+}
+
+fn sse_headers(r: &mut Response, sid: &str) {
+    let h = r.headers_mut();
+    h.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-transform"),
+    );
+    h.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+    h.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream"),
+    );
+    if !crate::mutants::active("mcp-sse-no-session") {
+        h.insert("mcp-session-id", HeaderValue::from_str(sid).unwrap());
+    }
+    h.insert("x-accel-buffering", HeaderValue::from_static("no"));
+}
+
+/// `check_accept_headers`: `(has_json, has_sse)` with RFC 7231 wildcards.
+fn accepts(h: &HeaderMap) -> (bool, bool) {
+    let raw = latin1(h, "accept").unwrap_or_default();
+    let types: Vec<String> = raw
+        .split(',')
+        .map(|t| {
+            t.trim()
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_lowercase()
+        })
+        .collect();
+    let any = types.iter().any(|t| t == "*/*");
+    let json = any
+        || types
+            .iter()
+            .any(|t| t == "application/json" || t == "application/*");
+    let sse = any
+        || types
+            .iter()
+            .any(|t| t == "text/event-stream" || t == "text/*");
+    (json, sse)
+}
+
+/// `TransportSecurityMiddleware.validate_request`.
+fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response> {
+    if method == Method::POST {
+        let ok = latin1(h, "content-type")
+            .is_some_and(|c| c.to_lowercase().starts_with("application/json"));
+        if !ok {
+            return Some(plain(400, "Invalid Content-Type header"));
+        }
+    }
+    if state.auth_configured {
+        return None;
+    }
+    let host_ok = latin1(h, "host").is_some_and(|host| {
+        ["127.0.0.1", "localhost", "[::1]"]
+            .iter()
+            .any(|base| host.starts_with(&format!("{base}:")))
+            || (crate::mutants::active("mcp-bare-host") && host == "127.0.0.1")
+    });
+    if !host_ok {
+        return Some(plain(421, "Invalid Host header"));
+    }
+    if let Some(origin) = latin1(h, "origin").filter(|o| !o.is_empty()) {
+        let ok = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
+            .iter()
+            .any(|base| origin.starts_with(&format!("{base}:")));
+        if !ok {
+            return Some(plain(403, "Invalid Origin header"));
+        }
+    }
+    None
+}
+
+/// `RequestBodyLimitMiddleware`: a declared Content-Length over the limit is
+/// refused at once, and a body that grows past it as soon as it does. uvicorn
+/// keeps reading what a client sends after such a refusal, so the client can
+/// finish writing and read the 413; here the rest of the body is drained in
+/// the background (bounded in size and time) for the same reason.
 /// Keep the MCP limit and refusal body while sharing HTTP frame accounting.
 async fn read_body(
     headers: &HeaderMap,
