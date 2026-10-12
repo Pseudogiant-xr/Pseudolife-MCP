@@ -982,8 +982,12 @@ class CortexStore:
                 # Mirror the scalar confirm: the confirming tier accumulates
                 # and a direct write clears the dream mark. A dream confirm
                 # raises the tier only on an exact (normalised) match, never
-                # on a near-duplicate.
-                if sup and (same_norm or not dream):
+                # on a near-duplicate. An assistant corroboration never
+                # accumulates: it would make an untiered member (one
+                # memory_set_add wrote) assistant-owned, which lets the
+                # assistant retract it and extend its set.
+                if (sup and sup != "assistant"
+                        and (same_norm or not dream)):
                     _mark_tier(m, sup, dream)
                     m.support.add(sup)
                 m.confidence = min(1.0, max(m.confidence, float(confidence)))
@@ -1403,7 +1407,7 @@ class CortexStore:
 
     def resolve(self, entity, attribute, accept: bool, now: float | None = None,
                 support: str = "user", hlc: tuple[int, int] | None = None,
-                dream: bool = False):
+                dream: bool = False, expect_value: str | None = None):
         """Resolve the active contender at a slot. ``accept=True`` promotes it to
         current (old current -> superseded; the contender's support gains
         ``support`` — "user" for the explicit MCP resolve, the promoting
@@ -1412,6 +1416,10 @@ class CortexStore:
         text; the caller promotes only when that tier is not below the
         current value's)); ``dream`` marks that tier as dream-written (see
         :func:`direct_backed`), and a direct resolve clears the mark;
+        ``expect_value`` (accept only) refuses the promotion
+        (``"refused_changed"``, nothing mutated) unless the active contender
+        still holds that value, so a caller that validated one contender
+        never promotes a different one parked in between;
         ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
         or ``None`` when there is no active contender.
 
@@ -1457,6 +1465,9 @@ class CortexStore:
             return WriteResult("refused", contender)
         cur_idx = self._current.get(key)
         cur = self.records[cur_idx] if cur_idx is not None else None
+        if (accept and expect_value is not None
+                and _norm_value(contender.value) != _norm_value(expect_value)):
+            return WriteResult("refused_changed", contender)
         if accept and dream and self.protect_provenance and direct_backed(cur):
             # A dream promotion never replaces a direct user/action value.
             # Checked here, under the store's lock, because the quarantine

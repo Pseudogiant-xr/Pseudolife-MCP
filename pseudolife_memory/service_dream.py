@@ -2128,9 +2128,12 @@ class DreamOps:
                             # steerable by note text (2026-08-09 review). A
                             # fixed "agent" here left a user-confirmed value
                             # supersedable by the next agent note.
+                            # expect_value binds the promotion to the
+                            # contender the route validated: a value parked
+                            # in its place since is refused, not promoted.
                             rr = self.cortex_resolve(
                                 ent, attr, accept=True, support=claim_origin,
-                                dream=True)
+                                dream=True, expect_value=c["value"])
                             if rr.get("resolved"):
                                 qt_promoted += 1
                                 res = {"action": "quarantine_promoted"}
@@ -2138,16 +2141,19 @@ class DreamOps:
                                 # Raced away (e.g. the user rejected the
                                 # contender from another connection between
                                 # the route read and this resolve, or a
-                                # direct write landed and the store refused
-                                # the promotion): fail CLOSED — the claim
-                                # still parks, carrying its witness token
-                                # like any other park, and is counted.
+                                # direct write landed, or another value was
+                                # parked in place of the validated one, and
+                                # the store refused the promotion): fail
+                                # CLOSED — the claim parks its own value,
+                                # carrying its witness token like any other
+                                # park, and is counted. Never a plain write:
+                                # the route chose promotion, not a write.
                                 res = self.cortex_write(
                                     ent, attr, c["value"],
                                     provenance=(
                                         ["quarantine:low_trust", q_witness]
                                         if q_low else [q_witness]),
-                                    force_contend=q_low,
+                                    force_contend=True,
                                     **claim_kwargs)
                                 if res["action"] == "contested":
                                     qt_parked += 1

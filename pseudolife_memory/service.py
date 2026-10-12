@@ -4464,7 +4464,8 @@ class MemoryService(DreamOps, MaintainerOps):
 
     def cortex_resolve(self, entity: str, attribute: str, accept: bool,
                        support: str = "user",
-                       dream: bool = False) -> dict[str, Any]:
+                       dream: bool = False,
+                       expect_value: str | None = None) -> dict[str, Any]:
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
         there is nothing parked to resolve, and ``{"resolved": False,
@@ -4498,7 +4499,7 @@ class MemoryService(DreamOps, MaintainerOps):
             res = self._cortex.resolve(entity, attribute, accept,
                                        support=support,
                                        hlc=self._hlc.tick() if accept else None,
-                                       dream=dream)
+                                       dream=dream, expect_value=expect_value)
             if res is None:
                 return {"resolved": False, "reason": "no_contender",
                         "entity": entity, "attribute": attribute}
@@ -4508,6 +4509,10 @@ class MemoryService(DreamOps, MaintainerOps):
             if res.action == "refused_direct":
                 # dream=True only: the current value is a direct write.
                 return {"resolved": False, "reason": "direct_write",
+                        "entity": entity, "attribute": attribute}
+            if res.action == "refused_changed":
+                # expect_value only: another value is parked now.
+                return {"resolved": False, "reason": "contender_changed",
                         "entity": entity, "attribute": attribute}
             self._save_cortex()
             cur = self._cortex.lookup(entity, attribute)

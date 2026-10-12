@@ -716,6 +716,62 @@ def test_a_direct_near_duplicate_member_confirm_protects_the_member(svc):
         "the-quillon-larder", "menu")["members"]] == ["kaya toast"]
 
 
+def test_assistant_corroboration_does_not_own_an_untiered_member(svc):
+    """A memory_set_add member has no tier. An assistant-stated restatement
+    must not make it assistant-owned: the assistant still may not retract
+    it, nor extend the set it belongs to (master's behaviour)."""
+    larder = dict(entity="the-quillon-larder", attribute="menu")
+    svc.set_add("the-quillon-larder", "menu", "kaya toast")
+    svc.store("assistant: the quillon larder menu has kaya toast",
+              source="user")
+    svc.dream_run(StubExtractor([dict(_claim("kaya toast", op="add",
+                                             **larder),
+                                      speaker="assistant")]))
+    member = svc.cortex_lookup("the-quillon-larder", "menu")["members"][0]
+    assert member["origin"] == "" and member["support"] == []
+    svc.store("assistant: the quillon larder menu adds ember-plum tart",
+              source="user")
+    svc.dream_run(StubExtractor([dict(_claim("ember-plum tart", op="add",
+                                             **larder),
+                                      speaker="assistant")]))
+    svc.store("assistant: the quillon larder menu dropped kaya toast",
+              source="user")
+    out = svc.dream_run(StubExtractor([dict(_claim("kaya toast",
+                                                   op="remove", **larder),
+                                            speaker="assistant")]))
+    assert out.get("member_remove_refused") == 1
+    assert [m["value"] for m in svc.cortex_lookup(
+        "the-quillon-larder", "menu")["members"]] == ["kaya toast"]
+
+
+def test_a_promotion_binds_to_the_contender_the_route_validated(svc):
+    """The route validated contender emacs; an agent write that parks nano
+    in its place before the promotion must not get nano promoted at the
+    claim's user tier. The claim parks its own value with its witness."""
+    svc.config.memory.dream.quarantine_low_trust = True
+    _seed_user_fact(svc, "vim")
+    svc.store("my preferred editor is emacs", source="agent")
+    svc.dream_run(StubExtractor([_claim("emacs")]))
+    route = svc._quarantine_route
+
+    def racing_route(*a, **kw):
+        out = route(*a, **kw)
+        if out[0] == "promote":
+            svc.cortex_write("editor-pref", "editor", "nano", support="agent")
+        return out
+
+    svc._quarantine_route = racing_route
+    svc.store("yes, my preferred editor is emacs", source="user")
+    out = svc.dream_run(StubExtractor([_claim("emacs")]))
+    assert out.get("quarantine_promoted", 0) == 0
+    assert out.get("quarantine_parked") == 1
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["value"] == "vim" and cur["origin"] == "user"
+    contenders = svc.cortex_contenders("editor-pref", "editor")["contenders"]
+    assert [c["value"] for c in contenders] == ["emacs"]
+    assert "src:user" in contenders[0]["provenance"]
+
+
 def test_a_dream_near_duplicate_member_confirm_keeps_the_tier(svc):
     """A dream add matched to an existing member only by similarity (not
     the same text) confirms it without raising its tier, like a scalar
