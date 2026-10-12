@@ -1,13 +1,25 @@
-//! UTF-8 CLI streams and scalar argv at Python oracle 3c01bb31abd60178e15dea99adda369b4bbf92fc.
+//! UTF-8 CLI streams and scalar argv at Python oracle 686b3f95c4a4d4e6c2d81e1b76be9901945a8da1.
 use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+mod backup;
+pub mod board_audit;
 mod briefing_hook;
+mod connect;
+mod doctor;
 mod doorbell_seen;
 mod episode;
+mod hook_http;
 mod hook_json;
 pub mod lease;
+pub mod maintainer;
+mod move_cli;
+mod pairing;
+mod pyjson;
+mod test_login;
+mod transfer;
+mod tunnel;
 mod version;
 pub mod wait_mail;
 
@@ -91,6 +103,11 @@ fn mode_repr(mode: &str) -> String {
 /// Handle leaves before daemon attachment; default/shim/channel keep the proxy path.
 pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
+    if mode == "backup"
+        && let Some(code) = backup::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(ExitCode::from(code));
+    }
     if mode == "wait-mail" {
         return Some(ExitCode::from(wait_mail::run(
             std::env::args_os().skip(2).collect(),
@@ -126,6 +143,41 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "doorbell-prompt-seen" {
         return Some(doorbell_seen::run());
+    }
+    if mode == "doctor"
+        && let Some(code) = doctor::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if matches!(mode, "export" | "import")
+        && let Some(code) = transfer::run(mode, std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "test-login"
+        && let Some(code) = test_login::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "connect"
+        && let Some(code) = connect::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if matches!(mode, "invite" | "pair")
+        && let Some(code) = pairing::run(mode)
+    {
+        return Some(code);
+    }
+    if mode == "move"
+        && let Some(code) = move_cli::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(ExitCode::from(code));
+    }
+    if mode == "tunnel"
+        && let Some(code) = tunnel::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
     }
     let (message, code) = if DEFERRED_MODES.contains(&mode) {
         (

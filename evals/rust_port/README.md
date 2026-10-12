@@ -263,8 +263,46 @@ retain the executable identity of all thirty-two cells, while their raw streams
 remain private. Startup stderr still has no allowlist. Concurrent call order is
 authorized only by the separately captured per-platform final-pair contract.
 
-After merging newer Python source, keep the oracle at its recorded pin. Prepare
-an isolated oracle from the current checkout-installed dependency runtime:
+New parity selects its Python source from immutable workflow event commits:
+`pull_request` uses `git merge-base(base.sha, head.sha)`, not the synthetic PR
+merge checkout; `push` uses `after`; manual master capture uses `frozen_head`,
+which must equal the dispatched checkout, with `GITHUB_REF` required to be
+`refs/heads/master`. Both manual `ci` and `wait-mail` modes require `frozen_head`.
+The selection JSON records the ref. No extra dispatch input is needed.
+Each new receipt records `oracle_head`; source receipts also retain the event
+selection and actual source/schema. A stale historical pin is information only
+and cannot freeze the port. Source/import binding and behavior comparisons
+remain required. Historical receipts, inventories and frozen contracts retain
+their recorded SHAs and are never rewritten as current evidence. Active EOF
+parity keeps successful silent completion, terminal responses, frame coverage
+and the existing final-pair ordering policy. Startup keeps required exit/frame
+outcomes, health requests, diagnostic presence and refusal traffic controls;
+current Python and Rust stderr bytes remain fully compared. Historical EOF
+streams and startup identity templates are retained as informational comparisons.
+
+PR parity intentionally uses the merge-base Python behavior as its baseline.
+A Python-only behavior change therefore passes PR parity against the unchanged
+Rust port and is first caught by the master push run, which selects the new
+Python commit. A PR changing Python behavior and its Rust port together fails
+PR parity until its base includes the Python change. This is the intended
+ordering for changes to `pseudolife_memory/`.
+
+The workflow binds `PSEUDOLIFE_PORT_ORACLE_SELECTION` before preparing metadata,
+running harness tests or creating the isolated oracle. For an explicit local
+proof, save the actual event payload and select it first (no moving-master
+fallback):
+
+```sh
+python -m evals.rust_port.oracle_selection --event-name pull_request --event-path /private/event.json --checkout-head FULL_CHECKOUT_SHA --out /private/selection.json
+export PSEUDOLIFE_PORT_ORACLE_SELECTION="$(cat /private/selection.json)"
+```
+
+The historical selected pin was master `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`
+(the #637 squash commit, Python 0.17.0, schema 55).
+
+Historical selected-pin evidence: Selected-pin validation and exact-head CI are recorded by [the re-pin CI run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37807737497) at `1f33ef7c12eaa5250ad2e62d46b5fb2bfc177195`: both Parity jobs passed, including the unchanged differential judges. [Independent publication review](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/642) approved the frozen tree `d1e2a8395ad955b39594ca4c7639aa31594ecdf0` with no findings; the actual re-pin merge is `cebbf63f6970636c5c3da48853f220d9ddbe14ab`.
+
+Then prepare an isolated oracle from the checkout-installed dependency runtime:
 
 ```sh
 python -m evals.rust_port.phase1_oracle --destination /private/new-phase1-oracle
@@ -275,11 +313,11 @@ export PATH="$PWD/../runtime/bin:$PATH"
 
 On Windows the interpreter is `../runtime/Scripts/python.exe`; prepend its
 directory to `PATH` so the existing lease CLI resolves from that runtime. Preparation
-creates a detached clone at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, overlays
+creates a detached clone at the selected event oracle SHA, overlays
 only the current harness instruments, and installs that oracle editable without
 dependencies in a private runtime. It checks both source bytes and imported
 package/version identity. The candidate is the current absolute binary path;
-the immutable test functions execute from the pinned source. Dependency paths
+the immutable test functions execute from the selected source. Dependency paths
 come from the caller's installed `[dev,lite]` runtime. The destination must be new.
 
 
@@ -423,3 +461,39 @@ runtime, helper and image bindings remain attached to `5220b5ee`; a docs/results
 carrier does not change the executed head. PORT-STATE.md records counts,
 source ratio, numeric tables and remaining hosted/review gates. Version
 remains deferred.
+
+`lease_operator_cases.json` is an additive Phase 4 **unrun fixture plan** for
+native offline break. Its first whole-command cell uses an existing guarded
+disposable PG bank with no matching lease, compares exact raw streams and all
+unchanged rows/files, and starts no daemon. Held-row cells then require the
+identical `fixed-clock-replay` seam in both arms and exact fences, payload TEXT,
+audit hashes, expiry and queue changes. Named embedded refusal and native PG
+diagnostics have rejecting controls; the retained container transport compares
+its actual argv and inherited streams. Use the existing `cli_process` fixture
+and `harness.run_cli` capture, preserving raw observations before policy. This
+plan supplies no execution receipt or acceptance claim.
+
+Manual `rust.yml` dispatch with `mode=wait-mail` captures one to three named
+Windows wait-mail pairs using the frozen master head's Python oracle and a fresh
+native release image; ordinary CI remains the default dispatch mode. Set
+`case_list` to comma-separated `wait-mail-long-ring-watermark`,
+`wait-mail-bad-ring-reason`, `wait-mail-unicode-delivery` or
+`wait-mail-positive-long-ring-watermark` IDs and `frozen_head`
+to the full commit ID of the dispatched master head. Start with the long-ring
+case after this workflow and selector land. The selector uses whole CLI arms,
+disposable homes, existing comparison policies and rejecting output controls,
+without a daemon or PostgreSQL. A run-specific artifact retains raw pairs,
+source/image build bindings, logs and cleanup; download and hash it before
+using it as evidence. Capture does not promote acceptance or establish
+installed-image timing. An OS selector is a later increment; this lane runs
+only on Windows.
+
+`wait-mail-positive-long-ring-watermark` seeds a valid twelve-digit ring
+watermark (`123456789012`), digest watermark 12, unseen marker 0 and `peer\n`
+body. It targets exit 0 with those exact five stdout bytes, `.seen` advanced
+to `12\n` and one delivery ledger line. Only the existing named delivery
+HH:MM:SS and ledger epoch fields use the per-arm invocation-window policy;
+all other bytes remain exact. The ring watermark is a sequence value, not
+a scheduled timestamp. The separate thirteen-digit `wait-mail-long-ring-watermark`
+case remains a malformed-marker timeout probe. Source preparation supplies
+no hosted execution or acceptance result for the new case.

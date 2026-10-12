@@ -484,9 +484,8 @@ async fn handle(
     state: Arc<State>,
     mut request: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
-    if percent_encoding::percent_decode_str(request.uri().path()).decode_utf8_lossy()
-        != "/api/maintainer/sent"
-    {
+    let path = percent_encoding::percent_decode_str(request.uri().path()).decode_utf8_lossy();
+    if !["/api/maintainer/sent", "/api/stats"].contains(&path.as_ref()) {
         return Ok(response(501, maintainer_sent::DEFERRED_BODY.to_vec()));
     }
     let c = &state.config;
@@ -518,6 +517,10 @@ async fn handle(
     let method = request.method().as_str().to_ascii_uppercase();
     if !["GET", "POST"].contains(&method.as_str()) {
         return Ok(error(405, "method_not_allowed"));
+    }
+    if path == "/api/stats" {
+        // Only the refusal prelude is native; stats dispatch remains deferred.
+        return Ok(response(501, maintainer_sent::DEFERRED_BODY.to_vec()));
     }
     let count = limit(request.uri().query());
     if method == "POST" {
@@ -753,6 +756,115 @@ mod tests {
             pg::Error::Shutdown,
         ] {
             assert_eq!(policy_refusal(&error), None);
+        }
+    }
+
+    async fn stats_response(token: Option<&str>, request: &[u8]) -> Vec<u8> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let state = Arc::new(State {
+            config: Config {
+                token: token.map(str::to_owned),
+                tokens: vec![],
+                enabled: false,
+                allowed: vec![],
+                rp_id: String::new(),
+                origin: String::new(),
+                dsn: None,
+            },
+            session: Mutex::new(None),
+            snapshot_session: Mutex::new(None),
+            snapshot: Mutex::new(Snapshot::default()),
+        });
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let service = service_fn(move |r| handle(state.clone(), r));
+            hyper::server::conn::http1::Builder::new()
+                .serve_connection(TokioIo::new(stream), service)
+                .await
+                .unwrap();
+        });
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        client.write_all(request).await.unwrap();
+        let mut response = vec![];
+        tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut response))
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+        response
+    }
+
+    #[tokio::test]
+    async fn stats_refusals_precede_body_and_keep_admission_deferred() {
+        for (token, method, path, headers, status, body) in [
+            (
+                Some("synthetic-token"),
+                "GET",
+                "/api/stats",
+                "",
+                401,
+                "{\"error\": \"unauthorized\", \"hint\": \"Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>\"}",
+            ),
+            (
+                Some("synthetic-token"),
+                "POST",
+                "/api/stats",
+                "Content-Length: 999999\r\n",
+                401,
+                "{\"error\": \"unauthorized\", \"hint\": \"Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>\"}",
+            ),
+            (
+                Some("synthetic-token"),
+                "DELETE",
+                "/api/stats",
+                "Authorization: Bearer synthetic-token\r\n",
+                405,
+                "{\"error\": \"method_not_allowed\"}",
+            ),
+            (
+                None,
+                "DELETE",
+                "/api/stats",
+                "Origin: https://example.com\r\n",
+                403,
+                "{\"error\": \"forbidden_origin\", \"hint\": \"tokenless /api serves loopback browsers only; set PSEUDOLIFE_MCP_TOKEN for remote access\"}",
+            ),
+            (
+                Some("synthetic-token"),
+                "POST",
+                "/api/stats",
+                "Authorization: Bearer synthetic-token\r\nContent-Length: 999999\r\n",
+                501,
+                std::str::from_utf8(maintainer_sent::DEFERRED_BODY).unwrap(),
+            ),
+            (
+                None,
+                "GET",
+                "/health",
+                "Origin: https://example.com\r\n",
+                501,
+                std::str::from_utf8(maintainer_sent::DEFERRED_BODY).unwrap(),
+            ),
+            (
+                Some("synthetic-token"),
+                "GET",
+                "/api/stats/",
+                "",
+                501,
+                std::str::from_utf8(maintainer_sent::DEFERRED_BODY).unwrap(),
+            ),
+        ] {
+            let request = format!(
+                "{method} {path} HTTP/1.1\r\nHost: localhost\r\n{headers}Connection: close\r\n\r\n"
+            );
+            let response = stats_response(token, request.as_bytes()).await;
+            let response = String::from_utf8(response).unwrap();
+            assert!(response.starts_with(&format!("HTTP/1.1 {status} ")));
+            assert_eq!(response.split_once("\r\n\r\n").unwrap().1, body);
+            assert!(response.contains("cache-control: no-store\r\n"));
+            assert!(response.contains("x-content-type-options: nosniff\r\n"));
         }
     }
 }

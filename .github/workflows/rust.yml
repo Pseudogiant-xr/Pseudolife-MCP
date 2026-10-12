@@ -4,13 +4,31 @@ on:
   pull_request:
   push:
     branches: [master]
+  schedule:
+    - cron: '23 3 * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Ordinary CI or the bounded wait-mail capture'
+        type: choice
+        options: [ci, wait-mail]
+        default: ci
+        required: true
+      case_list:
+        description: 'Comma-separated supported wait-mail case IDs'
+        type: string
+        default: wait-mail-long-ring-watermark
+        required: false
+      frozen_head:
+        description: 'Required for ci and wait-mail: full reviewed commit ID, equal to the dispatched master head'
+        type: string
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: rust-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || format('rust-{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 env:
@@ -22,6 +40,7 @@ env:
 
 jobs:
   rust:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
     name: Rust / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -47,7 +66,34 @@ jobs:
           "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install the Python SDK fixture dependency
         run: python -m pip install "mcp==2.1.1"
-      - name: Prepare pinned package metadata for the Rust identity contract
+      - name: Check generated daemon schema
+        working-directory: .
+        shell: pwsh
+        run: |
+          python rust/daemon/harness/gen_schema_sql.py --check
+          exit $LASTEXITCODE
+      - name: Check port inventories and producer census
+        working-directory: .
+        shell: pwsh
+        run: |
+          python -m pip install pytest pyyaml "psycopg[binary]" psutil
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py -k 'not committed_census_matches_current_tree'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/producer_census.py --ci-check
+          exit $LASTEXITCODE
+      - name: ported-row-and-mutant-ci-inventory
+        working-directory: .
+        run: python rust/ci/inventory.py
+      - name: Bind the event-selected Python oracle
+        shell: pwsh
+        working-directory: .
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
+          exit $LASTEXITCODE
+      - name: Prepare selected package metadata for the Rust identity contract
         shell: pwsh
         working-directory: .
         run: |
@@ -92,25 +138,146 @@ jobs:
         run: cargo clippy --locked --all-targets --no-default-features -j 4 -- -D warnings
       - name: Nextest without default features
         run: cargo nextest run --locked --all-targets --no-default-features -j 4
+
+      - name: Daemon override build configurations
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND = '1'
+          $daemonDefaultLog = Join-Path $env:RUNNER_TEMP 'daemon-default-override.log'
+          cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonDefaultLog
+          $result = $LASTEXITCODE
+          Get-Content $daemonDefaultLog
+          if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonDefaultLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
+          $daemonReleaseLog = Join-Path $env:RUNNER_TEMP 'daemon-release-override.log'
+          cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked --release --features mutants -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonReleaseLog
+          $result = $LASTEXITCODE
+          Remove-Item env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND
+          Get-Content $daemonReleaseLog
+          if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonReleaseLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
+          cargo +1.94.0 build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --features mutants -j 3
+          exit $LASTEXITCODE
+      - name: Retain debug bind fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-bind-fixture-${{ runner.os }}
+          path: |
+            rust/target/debug/pseudolife-daemon
+            rust/target/debug/pseudolife-daemon.exe
+          if-no-files-found: error
+
+  candidate:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    name: Candidate / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          shared-key: shim-release
       - name: Build candidate
-        run: cargo build --locked --release --bin pseudolife-stdio -j 4
+        run: cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3
+      - name: Retain default static candidate
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $daemonName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $staticName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          Copy-Item -LiteralPath (Join-Path 'rust/target/release' $daemonName) -Destination (Join-Path 'rust/target/release' $staticName)
+      - name: Build embedding candidate
+        run: cargo build --locked --release -p pseudolife-daemon --bins --features mutants,graph-harness,contract-harness,principal-harness -j 3
       - uses: actions/upload-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
           path: |
             rust/target/release/pseudolife-stdio
             rust/target/release/pseudolife-stdio.exe
+            rust/target/release/pseudolife-daemon
+            rust/target/release/pseudolife-daemon.exe
+            rust/target/release/pseudolife-daemon-static
+            rust/target/release/pseudolife-daemon-static.exe
+            rust/target/release/graph-contract
+            rust/target/release/graph-contract.exe
+            rust/target/release/dream-contract
+            rust/target/release/dream-contract.exe
           if-no-files-found: error
 
-  parity:
-    name: Parity / ${{ matrix.os }}
-    needs: rust
+  parity-checks:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
+    needs: [candidate, rust]
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
+        suite: [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
+        # W1-C row sums: master run 38076979343, 2026-10-10, Windows.
+        # Live + golden: doctor 15.3m; pairing 17.6m; connection 20.1m.
+        # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice
+        # the total. Connection also keeps the existing 20m record budget.
+        include:
+          - suite: w1c-doctor
+            w1c_rows: "'doctor'"
+            w1c_timeout: 32
+            job_timeout: 36
+          - suite: w1c-pairing
+            w1c_rows: "'transfer', 'invite', 'pair'"
+            w1c_timeout: 36
+            job_timeout: 40
+          - suite: w1c-connection
+            w1c_rows: "'test_login', 'connect', 'maintainer', 'move', 'tunnel'"
+            w1c_timeout: 42
+            job_timeout: 66
+          # Linux 2026-10-11, live + oracle capture + replay:
+          # audit 112s, backup 34s, W1-A 435s, daemon controls 189s,
+          # graph controls 394s. Linux step budgets are about twice these.
+          # Windows budgets are provisional until the first hosted run;
+          # each new job stays inside the existing ~56-minute slowest job.
+          - suite: h5-audit
+            h5_timeout: 4
+            h5_windows_timeout: 20
+            job_timeout: 30
+          - suite: h5-backup
+            h5_timeout: 2
+            h5_windows_timeout: 10
+            job_timeout: 20
+          - suite: h5-w1a
+            h5_timeout: 15
+            h5_windows_timeout: 40
+            job_timeout: 56
+          # Linux 2026-10-11: six background scenarios, 9 live cases,
+          # 110s combined; 4m allows about twice measured CPU work.
+          - suite: h5-background
+            h5_timeout: 4
+            h5_windows_timeout: 20
+            job_timeout: 30
+          - suite: h5-daemon-mutants
+            h5_timeout: 6
+            h5_windows_timeout: 20
+            job_timeout: 35
+          - suite: h5-graph-mutants
+            h5_timeout: 14
+            h5_windows_timeout: 30
+            job_timeout: 45
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # Hosted Windows cli jobs for PRs #709/#710 (2026-10-10 UTC) took
+    # 105m55s/104m04s, with about 50m outside W1-C. Master run
+    # 38076979343 (2026-10-10, Windows) confirms ~46m remaining.
+    # W1-C now runs in parallel; allow twice the conservative 50m remainder.
+    timeout-minutes: ${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -121,9 +288,11 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - uses: dtolnay/rust-toolchain@stable
+        if: "!startsWith(matrix.suite, 'w1c-')"
         with:
           toolchain: 1.94.0
       - uses: Swatinem/rust-cache@v2
+        if: "!startsWith(matrix.suite, 'w1c-')"
         with:
           workspaces: rust
       - name: Install checkout and test dependencies
@@ -133,11 +302,39 @@ jobs:
           python -m pip install "setuptools>=68" wheel
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
           python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
-      - name: Build candidate
-        timeout-minutes: 10
-        working-directory: rust
-        run: cargo build --locked --release --bin pseudolife-stdio -j 4
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-shim-${{ runner.os }}
+          path: rust/target/release
+      - name: Download debug bind fixture
+        if: matrix.suite == 'cli' || matrix.suite == 'h5-w1a'
+        uses: actions/download-artifact@v4
+        with:
+          name: daemon-bind-fixture-${{ runner.os }}
+          path: rust/target/debug
+      - name: Restore executable permission
+        if: runner.os == 'Linux'
+        run: chmod +x rust/target/release/pseudolife-stdio rust/target/release/pseudolife-daemon rust/target/release/pseudolife-daemon-static
+      - name: Compare sent YAML startup with PyYAML
+        if: matrix.suite == 'cli'
+        shell: pwsh
+        run: |
+          $suffix = if ($IsWindows) { '.exe' } else { '' }
+          $env:PSEUDOLIFE_SENT_YAML_BIN = Join-Path (Get-Location) "rust/target/release/pseudolife-stdio$suffix"
+          python -m pytest rust/daemon/harness/test_sent_yaml.py rust/daemon/harness/test_sent_yaml_mutants.py -q
+          exit $LASTEXITCODE
+      - name: Bind the event-selected Python oracle
+        shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
+          exit $LASTEXITCODE
+      - name: Check CI coverage contract
+        if: matrix.suite == 'eval'
+        run: python -m pytest -q rust/ci
       - name: Run every eval harness test
+        if: matrix.suite == 'eval'
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
@@ -146,14 +343,407 @@ jobs:
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
           python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
           exit $LASTEXITCODE
+      # This fixture creates a small graph locally; no model is downloaded.
+      - name: Offline embedding golden and mutant row
+        if: matrix.suite == 'eval'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          python -m pytest -q rust/daemon/harness/test_embedding.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py embedding --fixture --golden rust/daemon/harness/goldens/embedding-fixture.json --rust-bin (Join-Path 'rust/target/release' $binaryName) --out (Join-Path $env:RUNNER_TEMP 'embedding-fixture.json')
+          exit $LASTEXITCODE
+      - name: CLI differential harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row mail --row hook --row episode --skip-bank --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row mail --row hook --row episode --golden --candidate $candidate -v
+          exit $LASTEXITCODE
+      - name: Prepare disposable PostgreSQL for CLI lease row
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        # pg0's initdb inherits the locale on Linux; template1 then retains
+        # both the recorded graph-read ordering and the test login's vector.
+        env:
+          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
+      - name: CLI lease differential harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python rust/cli_harness --row lease --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-lease.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row lease --golden --candidate $candidate -v
+          exit $LASTEXITCODE
+      # Windows local 2026-10-10: 89-action golden 49s + eight live controls 209s
+      # + recovery/control tests 38s; allow about twice the measured 296s gate.
+      - name: Dream cursor differential harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: w3d
+        run: |
+          $binaryName = if ($IsWindows) { 'dream-contract.exe' } else { 'dream-contract' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          if (-not $IsWindows) { chmod +x $candidate }
+          $env:PL_DREAM_CONTRACT_BINARY = $candidate
+          python -m pytest -q rust/daemon/harness/test_dream_cursors.py rust/daemon/harness/test_dream_cursor_cancel.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/dream_cursors.py golden --ci-fixture --rust-bin $candidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/dream_cursors.py mutants --ci-fixture --rust-bin $candidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PSEUDOLIFE_DAEMON_MUTANT = 'dream-cancel-drop-task'
+          $cancelLog = Join-Path $env:RUNNER_TEMP 'dream-cancel-mutant.log'
+          python -m pytest -q rust/daemon/harness/test_dream_cursor_cancel.py -k admitted_commit_survives_cancel_and_next_pull > $cancelLog 2>&1
+          $cancelExit = $LASTEXITCODE
+          Remove-Item Env:PSEUDOLIFE_DAEMON_MUTANT
+          Get-Content -Tail 20 $cancelLog
+          if ($cancelExit -ne 1 -or -not (Select-String -LiteralPath $cancelLog -Pattern 'AssertionError|_queue.Empty' -Quiet)) {
+            throw 'Cancelled-waiter ownership control was not rejected by the next-operation check'
+          }
+          exit 0
+      - name: Daemon static HTTP parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: http
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $env:PL_STATIC_DEFAULT_BIN = $candidate
+          python -m pytest -q rust/daemon/harness/test_static.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $candidate --only static-build static-paths static-missing static-root-link --out (Join-Path $env:RUNNER_TEMP 'daemon-static-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only static-build static-paths static-missing static-root-link --out (Join-Path $env:RUNNER_TEMP 'daemon-static-golden.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon static parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-static-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-static-*.json
+          if-no-files-found: warn
+      - name: Restore graph store executable permission
+        if: matrix.suite == 'cli' && runner.os == 'Linux'
+        run: chmod +x rust/target/release/graph-contract
+      - name: Graph store differential and recorded oracle
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_GRAPH_REQUIRE_RECORDED_LOCALE: ${{ runner.os == 'Linux' && '1' || '0' }}
+        run: |
+          $binaryName = if ($IsWindows) { 'graph-contract.exe' } else { 'graph-contract' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python rust/daemon/harness/gen_graph_unicode.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/test_graph_store_harness.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py live --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py golden --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-store-golden.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/test_graph_read_compare.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py live --row read --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-read-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/graph_store.py golden --row read --candidate $candidate --out (Join-Path $env:RUNNER_TEMP 'graph-read-golden.json')
+          exit $LASTEXITCODE
+      - name: Daemon background pruning golden
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $env:PL_HARNESS_SLICE = 'w3i'
+          $env:PL_HARNESS_SCRATCH = Join-Path $env:RUNNER_TEMP 'daemon-background-harness'
+          python -m pytest -q -p no:cacheprovider rust/daemon/harness/test_background_harness.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only sweep-pruning --no-refusals
+          exit $LASTEXITCODE
+
+      - name: Daemon body admission parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: http
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python -m pytest -q rust/daemon/harness/test_body_cases.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $candidate --only body-limits body-view-open body-pair-budget body-text-window --out (Join-Path $env:RUNNER_TEMP 'daemon-body-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only body-limits body-view-open body-pair-budget body-text-window --out (Join-Path $env:RUNNER_TEMP 'daemon-body-golden.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon body parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-body-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-body-*.json
+          if-no-files-found: warn
+      - name: Daemon security admission parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: http
+        run: |
+          $defaultName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $mutantName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $defaultName)).Path
+          $mutants = (Resolve-Path (Join-Path 'rust/target/release' $mutantName)).Path
+          $bindFixture = (Resolve-Path (Join-Path 'rust/target/debug' $mutantName)).Path
+          if (-not $IsWindows) { chmod +x $bindFixture }
+          $env:PL_SECURITY_DEFAULT_BIN = $candidate
+          $env:PL_SECURITY_RELEASE_MUTANTS_BIN = $mutants
+          python -m pytest -q rust/daemon/harness/test_security_cases.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte security-refusals --out (Join-Path $env:RUNNER_TEMP 'daemon-security-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py golden --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte --out (Join-Path $env:RUNNER_TEMP 'daemon-security-golden.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py mutants --rust-bin $mutants --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte --mutants security-origin-open security-host-open security-browser-last security-auth-first security-drop-latin1 security-unavailable-401 --out (Join-Path $env:RUNNER_TEMP 'daemon-security-mutants.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon security parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-security-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-security-*.json
+          if-no-files-found: warn
       - name: Retain additive executable node outcomes
-        if: always()
+        if: always() && matrix.suite == 'eval'
         uses: actions/upload-artifact@v4
         with:
           name: rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
+      - name: Principal store differential and golden harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python rust/daemon/harness/principals.py live --rust-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'principal-live.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/principals.py golden --rust-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'principal-golden.json')
+          exit $LASTEXITCODE
+      - name: Retain principal store outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-principals-${{ runner.os }}
+          path: ${{ runner.temp }}/principal-*.json
+          if-no-files-found: error
+      - name: Daemon schema startup parity
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python rust/daemon/harness/schema_ci.py --test-bin-out (Join-Path $env:RUNNER_TEMP 'daemon-storage-test-path.txt') --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon schema parity
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-schema-parity-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-schema-parity.json
+          if-no-files-found: error
+      - name: Retain graph store outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-graph-store-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/graph-store-live.json
+            ${{ runner.temp }}/graph-store-golden.json
+            ${{ runner.temp }}/graph-read-live.json
+            ${{ runner.temp }}/graph-read-golden.json
+          if-no-files-found: error
+      - name: Daemon resident startup parity
+        if: matrix.suite == 'cli'
+        # Windows CI 2026-10-10: about 28s/cell x 25 cells plus clock/guard,
+        # about 13 minutes in total; allow twice that validation duration.
+        timeout-minutes: 26
+        shell: pwsh
+        run: |
+          python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $candidate = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'daemon-storage-test-path.txt') -Raw).Trim()
+          python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'daemon-startup-parity.json')
+          exit $LASTEXITCODE
+      - name: Retain daemon resident startup parity
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-startup-parity-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/daemon-startup-parity.json
+            ${{ runner.temp }}/daemon-startup-parity-clock-retry.json
+            ${{ runner.temp }}/daemon-startup-parity-writer-guard.json
+          if-no-files-found: error
+      - name: Prepare disposable PostgreSQL for W1-C rows
+        if: startsWith(matrix.suite, 'w1c-')
+        # Master run 38076979343, 2026-10-10: Windows setup 12s.
+        # Five-minute floor because this step is network-bound.
+        timeout-minutes: 5
+        shell: pwsh
+        # pg0's initdb inherits the locale on Linux; template1 then retains
+        # both the recorded graph-read ordering and the test login's vector.
+        env:
+          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
+      # The W1-C native leaves: every row runs live (this checkout's Python
+      # oracle beside the candidate, on disposable homes), then against its
+      # goldens. transfer, invite and maintainer use the disposable
+      # PostgreSQL and test login their shard provisioned; test_login
+      # starts its own throwaway clusters from the pg0 bundle and,
+      # on Linux, disposable containers of the image built below. Declared
+      # exceptions (each in its row's .md):
+      # - test_login's Linux golden is recorded on this lane: recording needs
+      #   pg0's initdb and a Linux Docker engine, which the recording host's
+      #   WSL lacks. While goldens/test_login.linux.json is absent, the golden
+      #   pass leaves test_login out and the step after it records the golden
+      #   as an artifact to commit; once it is committed, it replays like
+      #   every other row. Hosted Windows' Docker runs Windows containers
+      #   only, so its container cases skip there.
+      # - Cases marked live-only (Case.golden False) are left out of goldens
+      #   and run in the live pass: transfer keeps help, the no-database
+      #   refusals and the float-tie cases (the whole row is 14 MB of bank
+      #   dumps); invite leaves out the 24 cases that show principals its
+      #   seed stamps with the wall clock and random codes, and one 2.6 MB
+      #   report.
+      - name: Build the test_login container image
+        if: runner.os == 'Linux' && matrix.suite == 'w1c-connection'
+        # Master run 38076979343, 2026-10-10: Linux image build 13s.
+        # Five-minute floor because this step is network-bound.
+        timeout-minutes: 5
+        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
+      - name: CLI W1-C differential harness
+        if: startsWith(matrix.suite, 'w1c-')
+        # Twice the per-shard Windows row sums above (38076979343,
+        # 2026-10-10). #718's old combined 110m budget used PRs #709/#710:
+        # 55m26s/53m37s, after PR #712 exhausted the old 60m limit.
+        timeout-minutes: ${{ matrix.w1c_timeout }}
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          $rows = @(${{ matrix.w1c_rows }})
+          $live = $rows | ForEach-Object { '--row'; $_ }
+          python rust/cli_harness @live --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $platform = if ($IsWindows) { 'windows' } else { 'linux' }
+          $replayed = $rows | Where-Object { $_ -ne 'test_login' -or (Test-Path "rust/cli_harness/goldens/test_login.$platform.json") }
+          $golden = $replayed | ForEach-Object { '--row'; $_ }
+          python rust/cli_harness @golden --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-w1c-golden.json')
+          exit $LASTEXITCODE
+      - name: Record the Linux test_login golden while it is absent
+        id: test_login_linux_golden
+        if: "!cancelled() && runner.os == 'Linux' && matrix.suite == 'w1c-connection' && hashFiles('rust/cli_harness/goldens/test_login.linux.json') == ''"
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          $summary = Join-Path $env:RUNNER_TEMP 'test-login-linux-record.json'
+          python rust/cli_harness --row test_login --record -v --out $summary
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $row = (Get-Content -Raw $summary | ConvertFrom-Json).rows.test_login
+          "test_login Linux golden recorded at oracle $($row.oracle_commit) ($($row.oracle_commit_source)): $($row.recorded) cases executed, $(@($row.skipped).Count) skipped ($(@($row.skipped) -join ', '))" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+      - name: Retain the recorded Linux test_login golden
+        if: "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
+        uses: actions/upload-artifact@v4
+        with:
+          name: test_login-linux-golden
+          path: |
+            rust/cli_harness/goldens/test_login.linux.json
+            ${{ runner.temp }}/test-login-linux-record.json
+          if-no-files-found: error
+      - name: Retain CLI harness summaries
+        if: always() && (matrix.suite == 'cli' || startsWith(matrix.suite, 'w1c-'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-harness-${{ runner.os }}-${{ matrix.suite }}
+          path: ${{ runner.temp }}/cli-harness*.json
+          if-no-files-found: warn
+      - name: Prepare disposable PostgreSQL for H5
+        if: startsWith(matrix.suite, 'h5-')
+        # Linux 2026-10-11: fixture setup under 5s; network-bound floor.
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
+      - name: Install offline W1-A fixture dependencies
+        if: matrix.suite == 'h5-w1a' || matrix.suite == 'h5-background' || matrix.suite == 'h5-daemon-mutants'
+        # Network-bound setup gets the five-minute floor.
+        timeout-minutes: 5
+        run: python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0"
+      - name: Restore H5 fixture executable permissions
+        if: runner.os == 'Linux' && startsWith(matrix.suite, 'h5-')
+        shell: pwsh
+        run: |
+          chmod +x rust/target/release/graph-contract
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Test-Path 'rust/target/debug/pseudolife-daemon') {
+            chmod +x rust/target/debug/pseudolife-daemon
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Ported rows and daemon controls
+        if: startsWith(matrix.suite, 'h5-')
+        # Twice the Linux measurements named beside the matrix entries;
+        # retain the first hosted Windows measurement in the same artifacts.
+        timeout-minutes: ${{ runner.os == 'Linux' && matrix.h5_timeout || matrix.h5_windows_timeout }}
+        shell: pwsh
+        run: |
+          python rust/ci/run_coverage.py --suite ${{ matrix.suite }} --out-dir (Join-Path $env:RUNNER_TEMP 'h5') --keep-going
+          exit $LASTEXITCODE
+      - name: Retain H5 row and control outcomes
+        if: always() && startsWith(matrix.suite, 'h5-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: h5-${{ runner.os }}-${{ matrix.suite }}
+          # Static-path witnesses leave deliberate symlink loops in scratch.
+          # Upload only receipts and oracle captures, without walking scratch.
+          path: |
+            ${{ runner.temp }}/h5/*.json
+            ${{ runner.temp }}/h5/goldens/*.json
+          if-no-files-found: error
       - name: Run unchanged candidates and differential judges
+        if: matrix.suite == 'judges'
         timeout-minutes: 15
         shell: pwsh
         run: |
@@ -234,7 +824,7 @@ jobs:
           & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --public-out $processPublicReceipt --modes help version lease --offline-resource-checked-at $resourceCheckedAt
           exit $LASTEXITCODE
       - name: Retain comparison summary
-        if: always()
+        if: always() && matrix.suite == 'judges'
         uses: actions/upload-artifact@v4
         with:
           name: rust-parity-${{ runner.os }}
@@ -244,4 +834,280 @@ jobs:
             evals/results/rust-cli-argv-*.json
             ${{ runner.temp }}/phase2b-cli-process-public.json
             ${{ runner.temp }}/lease-header-policy.json
+            ${{ runner.temp }}/oracle-selection.json
           if-no-files-found: warn
+
+  source-mutants:
+    # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs
+    # queued behind the 20-job concurrency cap, with a largest matrix queue
+    # of 24m25s. Catch CLI source survivors after merge on master/nightly.
+    if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')
+    name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
+    # These shards compile their own source copies and consume no rust-job
+    # artifact; the final Parity gate still requires both Rust jobs.
+    needs: [candidate]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        shard: [audit-0, audit-1, audit-2, backup-0, backup-1, connect-0, connect-1, connect-2, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, mail-0, mail-1, maintainer-0, maintainer-1, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
+          key: cli-source-mutants
+      - name: Install source harness dependencies
+        # Network-bound setup keeps the existing ten-minute dependency floor.
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          exit $LASTEXITCODE
+      - name: Prepare disposable PostgreSQL for source controls
+        # Linux 2026-10-11: fixture setup under 5s; network-bound floor.
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
+      - name: Install offline episode fixture dependencies
+        if: startsWith(matrix.shard, 'episode-')
+        timeout-minutes: 5
+        run: python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0"
+      - name: Bind the source-control Python oracle
+        shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'h5-source-oracle.json') --github-env $env:GITHUB_ENV
+          exit $LASTEXITCODE
+      - name: Build the test_login source-control image
+        if: runner.os == 'Linux' && startsWith(matrix.shard, 'test_login-')
+        # Master 38076979343: Linux image build 13s; network-bound floor.
+        timeout-minutes: 5
+        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
+      - name: CLI source mutants
+        # Linux 2026-10-11: slowest eight-control selection 81s plus
+        # 65s cold compile; six minutes is about twice that cold bound.
+        # Windows is provisional, with startup headroom inside 56m.
+        timeout-minutes: ${{ runner.os == 'Linux' && 6 || 30 }}
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/source-mutants-target
+        run: |
+          python rust/ci/run_coverage.py --source-shard ${{ matrix.shard }} --out-dir (Join-Path $env:RUNNER_TEMP 'h5-source')
+          exit $LASTEXITCODE
+      - name: Retain source-control witnesses and timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-mutants-${{ runner.os }}-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/h5-source/*.json
+            ${{ runner.temp }}/h5-source-oracle.json
+          if-no-files-found: error
+
+  daemon-image:
+    name: Rust daemon / disposable image
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Select changed image inputs
+        id: image-inputs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python rust/daemon/container_inputs.py --base "$BASE_SHA" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: Check the opt-in container contract
+        run: python rust/daemon/test_container.py
+      - name: Build the CPU image without publishing
+        if: steps.image-inputs.outputs.needed == 'true'
+        run: docker build --progress=plain -f ops/Dockerfile.daemon-rust -t w3j-daemon-rust:prep --build-arg GIT_SHA="$GITHUB_SHA" --build-arg GIT_DIRTY=false --build-arg BUILD_SOURCE=ci .
+      - name: Prove offline health and authenticated CPU query inference
+        if: steps.image-inputs.outputs.needed == 'true'
+        env:
+          W3J_RUST_TOKEN: w3j-disposable-ci-token
+        run: |
+          project="w3j-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            result=$?
+            if [ "$result" -ne 0 ]; then docker compose -p "$project" -f ops/docker-compose.rust.yml logs || true; fi
+            docker compose -p "$project" -f ops/docker-compose.rust.yml down || result=1
+            exit "$result"
+          }
+          trap cleanup EXIT
+          docker compose -p "$project" -f ops/docker-compose.rust.yml up --no-build --wait --wait-timeout 180
+          python rust/daemon/container_probe.py --timeout 180
+          docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
+          python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
+  parity:
+    # Only a PR may skip the after-merge CLI source matrix. Master/nightly
+    # (and ordinary manual CI) require its success, never a skip or failure.
+    if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
+    name: Parity / ${{ matrix.os }}
+    needs: [rust, candidate, parity-checks, source-mutants]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - name: Require every Rust and parity job to pass
+        shell: pwsh
+        env:
+          GATE_RESULTS: ${{ toJSON(needs) }}
+          GATE_EVENT: ${{ github.event_name }}
+        run: |
+          $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
+          foreach ($job in @('rust', 'candidate', 'parity-checks')) {
+            if ($results[$job].result -cne 'success') {
+              Write-Error "$job did not succeed"
+              exit 1
+            }
+          }
+          $sourceResult = $results['source-mutants'].result
+          if ($sourceResult -cne 'success' -and -not ($env:GATE_EVENT -ceq 'pull_request' -and $sourceResult -ceq 'skipped')) {
+            Write-Error "source-mutants did not succeed outside the PR skip exception"
+            exit 1
+          }
+
+  capture-windows:
+    name: Capture / Windows / wait-mail
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      CAPTURE_MODE: ${{ inputs.mode }}
+      CAPTURE_CASE_LIST: ${{ inputs.case_list }}
+      CAPTURE_FROZEN_HEAD: ${{ inputs.frozen_head }}
+    steps:
+      - name: Validate the dispatch selector
+        shell: pwsh
+        run: |
+          if ($env:CAPTURE_MODE -cne 'wait-mail') { throw 'Unsupported mode' }
+          if ($env:CAPTURE_FROZEN_HEAD -cnotmatch '^[0-9a-f]{40}$') { throw 'Full commit ID required' }
+          if ($env:CAPTURE_FROZEN_HEAD -cne $env:GITHUB_SHA) { throw 'Dispatch ref and frozen head must match' }
+          $allowed = @('wait-mail-long-ring-watermark', 'wait-mail-bad-ring-reason', 'wait-mail-unicode-delivery', 'wait-mail-positive-long-ring-watermark')
+          $selected = $env:CAPTURE_CASE_LIST.Split(',')
+          if ($selected.Count -lt 1 -or $selected.Count -gt 3 -or (@($selected | Select-Object -Unique).Count -ne $selected.Count)) { throw 'Invalid case list' }
+          foreach ($caseId in $selected) { if ($allowed -cnotcontains $caseId) { throw 'Unsupported case' } }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - name: Install checkout and test dependencies
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install "setuptools>=68" wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          exit $LASTEXITCODE
+      - name: Bind the frozen-head Python oracle
+        shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
+          exit $LASTEXITCODE
+      - name: Prepare the selected oracle
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $oracleRoot = Join-Path $env:RUNNER_TEMP 'phase1-oracle'
+          python -m evals.rust_port.phase1_oracle --destination $oracleRoot
+          exit $LASTEXITCODE
+      - name: Build and bind the candidate
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/hosted-windows-cargo
+        run: |
+          $receiptRoot = Join-Path $env:RUNNER_TEMP 'hosted-windows-capture'
+          New-Item -ItemType Directory -Path $receiptRoot -ErrorAction Stop | Out-Null
+          $beforeHead = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $beforeHead -cne $env:CAPTURE_FROZEN_HEAD) { throw 'Source head mismatch' }
+          cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-stdio -j 4 *> (Join-Path $receiptRoot 'build.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $candidate = Join-Path $env:CARGO_TARGET_DIR 'release/pseudolife-stdio.exe'
+          $manifest = [ordered]@{
+            head = $beforeHead
+            oracleHead = (ConvertFrom-Json $env:PSEUDOLIFE_PORT_ORACLE_SELECTION).oracle_head
+            tree = (git rev-parse 'HEAD^{tree}')
+            sourceEntries = @(git ls-files -s)
+            candidateSha256 = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+            buildArgv = @('cargo','build','--manifest-path','rust/Cargo.toml','--locked','--release','--bin','pseudolife-stdio','-j','4')
+            rustc = (rustc --version)
+            cargo = (cargo --version)
+            runnerOS = $env:RUNNER_OS
+            runId = $env:GITHUB_RUN_ID
+            runAttempt = $env:GITHUB_RUN_ATTEMPT
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $receiptRoot 'build-binding.json') -Encoding utf8
+      - name: Capture the named disposable cases
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/hosted-windows-cargo
+        run: |
+          $checkoutRoot = (Get-Location).Path
+          $oracleSource = Join-Path $env:RUNNER_TEMP 'phase1-oracle/source'
+          $oraclePython = Join-Path $env:RUNNER_TEMP 'phase1-oracle/runtime/Scripts/python.exe'
+          $candidate = Join-Path $env:CARGO_TARGET_DIR 'release/pseudolife-stdio.exe'
+          $receiptRoot = Join-Path $env:RUNNER_TEMP 'hosted-windows-capture'
+          $env:PATH = (Split-Path $oraclePython) + [IO.Path]::PathSeparator + $env:PATH
+          $bootstrap = @'
+          import pathlib, subprocess, sys
+          from evals.rust_port.provenance import module_command
+          root = pathlib.Path(sys.argv[1]).resolve()
+          command = module_command("evals.rust_port.hosted_wait_mail_capture", root, sys.argv[2:])
+          raise SystemExit(subprocess.run(command, cwd=root).returncode)
+          '@
+          & $oraclePython -c $bootstrap $oracleSource --mode $env:CAPTURE_MODE --case-list $env:CAPTURE_CASE_LIST --frozen-head $env:CAPTURE_FROZEN_HEAD --oracle-root $oracleSource --candidate-root $checkoutRoot --candidate $candidate --out (Join-Path $receiptRoot 'raw-receipt.json') *> (Join-Path $receiptRoot 'capture.log')
+          exit $LASTEXITCODE
+      - name: Retain raw capture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-windows-capture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/hosted-windows-capture/
+            ${{ runner.temp }}/oracle-selection.json
+          if-no-files-found: warn
+          retention-days: 7

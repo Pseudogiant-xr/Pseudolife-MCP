@@ -1,0 +1,1987 @@
+{
+ "operations": [
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "load_relations"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "missing"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "first"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "node-a",
+   "display": "Changed",
+   "etype": "service"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "node-a",
+   "etype": "person"
+  },
+  {
+   "op": "add_alias",
+   "alias_norm": "node-b",
+   "entity_id": 1
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "node-b"
+  },
+  {
+   "op": "entity_id_map"
+  },
+  {
+   "op": "add_alias",
+   "alias_norm": "z-last",
+   "entity_id": 1
+  },
+  {
+   "op": "add_alias",
+   "alias_norm": "first",
+   "entity_id": 2
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "first"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "node-a"
+  },
+  {
+   "op": "upsert_relation",
+   "name": "custom",
+   "description": "new",
+   "transitive": true,
+   "inverse_of": "uses"
+  },
+  {
+   "op": "upsert_relation",
+   "name": "custom",
+   "description": "updated",
+   "src_type": "service"
+  },
+  {
+   "op": "upsert_relation",
+   "name": "uses",
+   "description": "updated builtin",
+   "dst_type": "runtime"
+  },
+  {
+   "op": "load_relations"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.65,
+   "origin": "user"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.1,
+   "origin": "agent"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.95,
+   "origin": "action"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.1
+  },
+  {
+   "op": "supersede_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "supersede_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "confidence": 0.1,
+   "origin": "agent",
+   "revive": false
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "bless_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "action"
+  },
+  {
+   "op": "bless_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "bless_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "supersede_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "source_entry_ids": [
+    2,
+    999
+   ],
+   "revive": false
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "source_entry_ids": [
+    1,
+    2,
+    1
+   ],
+   "origin": "agent",
+   "revive": false
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "source_entry_ids": [
+    1
+   ],
+   "origin": "action"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "other"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "new-other"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "user"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 2,
+   "origin": "action"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 2,
+   "relation": "uses",
+   "dst_id": 3
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 3
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 3,
+   "relation": "uses",
+   "dst_id": 1
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 1,
+   "relation": "uses",
+   "dst_id": 1
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 2,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 2,
+   "relation": "uses",
+   "dst_id": 1
+  },
+  {
+   "op": "merge_entity",
+   "from_id": 1,
+   "into_id": 2
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "node-a"
+  },
+  {
+   "op": "entity_id_map"
+  },
+  {
+   "op": "merge_entity",
+   "from_id": 2,
+   "into_id": 2
+  },
+  {
+   "op": "merge_entity",
+   "from_id": 1,
+   "into_id": 3
+  },
+  {
+   "op": "merge_entity",
+   "from_id": 2,
+   "into_id": 999
+  },
+  {
+   "op": "delete_entity",
+   "entity_id": 2
+  },
+  {
+   "op": "delete_entity",
+   "entity_id": 2
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "node-a",
+   "display": "Node A"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "node-b",
+   "display": "Node B"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "g",
+   "display": "G:"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "alphabeta"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "\u03bf\u03c2",
+   "display": "\u039f\u03a3"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "100%-done",
+   "display": "100%_done"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "",
+   "display": ""
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "aa-i\u0307"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "prefix-\ua7cb"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "prefix-\u1c89"
+  },
+  {
+   "op": "ensure_entity",
+   "canonical": "prefix-\ua7cc"
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "find_entity",
+   "name_norm": "g"
+  },
+  {
+   "op": "add_alias",
+   "alias_norm": "bad",
+   "entity_id": 999
+  },
+  {
+   "op": "upsert_relation",
+   "name": "bad-relation",
+   "description": "invalid",
+   "inverse_of": "missing"
+  },
+  {
+   "op": "upsert_edge",
+   "src_id": 999,
+   "relation": "uses",
+   "dst_id": 2
+  },
+  {
+   "op": "load_graph"
+  },
+  {
+   "op": "load_relations"
+  },
+  {
+   "op": "norm_name",
+   "raw": " -- Depends///__On:::  "
+  },
+  {
+   "op": "norm_name",
+   "raw": "\t/A_B\\C.D:E/\u00a0"
+  },
+  {
+   "op": "norm_name",
+   "raw": "\u001cAlpha\u001d\u001eBeta\u001f"
+  },
+  {
+   "op": "norm_name",
+   "raw": "-./_: "
+  },
+  {
+   "op": "norm_name",
+   "raw": "\u00a0\u0393\u03a3.A\u03a3:\u0301B.. --"
+  },
+  {
+   "op": "norm_name",
+   "raw": "  \u0130 / \u00d6 -- .. CAF\u00c9 : "
+  },
+  {
+   "op": "norm_name",
+   "raw": "A\u0085B\u2028C\u2029D"
+  },
+  {
+   "op": "norm_name",
+   "raw": "a\u2007\u202fB"
+  },
+  {
+   "op": "norm_name",
+   "raw": "  --___"
+  },
+  {
+   "op": "norm_name",
+   "raw": "A...//\\\\:::__B---C"
+  },
+  {
+   "op": "norm_name",
+   "raw": "AA_\u0130"
+  },
+  {
+   "op": "norm_name",
+   "raw": "\u03a3\u0345"
+  },
+  {
+   "op": "norm_name",
+   "raw": "A\u03a3\u0345 A"
+  },
+  {
+   "op": "norm_name",
+   "raw": ""
+  }
+ ],
+ "cases": [
+  {
+   "index": 0,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": 1.0
+      },
+      {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     ],
+     "aliases": {
+      "1": [
+       "first"
+      ]
+     },
+     "edges": []
+    }
+   },
+   "state_sha256": "4260972ec30f82bb854c537c6864f257f7d0078b493976038bcd46d8793506a8",
+   "diffs": []
+  },
+  {
+   "index": 1,
+   "op": "load_relations",
+   "response": {
+    "value": [
+     {
+      "name": "avoids",
+      "description": "src (a task-type) should avoid dead-end dst (negative lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "configures",
+      "description": "src sets configuration for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "depends-on",
+      "description": "src requires dst to function",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "hosts",
+      "description": "src is the host/platform for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "implements",
+      "description": "src (a source file) realizes concept/role dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "part-of",
+      "description": "src is a component of dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "prefers",
+      "description": "src (a task-type) prefers approach/tool dst (positive lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "related-to",
+      "description": "untyped catch-all association",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "runs-on",
+      "description": "src executes on host/platform dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": "hosts",
+      "builtin": true
+     },
+     {
+      "name": "stores-data-in",
+      "description": "src persists its data in dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "uses",
+      "description": "src makes use of dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     }
+    ]
+   },
+   "state_sha256": "4260972ec30f82bb854c537c6864f257f7d0078b493976038bcd46d8793506a8",
+   "diffs": []
+  },
+  {
+   "index": 2,
+   "op": "find_entity",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "4260972ec30f82bb854c537c6864f257f7d0078b493976038bcd46d8793506a8",
+   "diffs": []
+  },
+  {
+   "index": 3,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 1,
+     "canonical": "node-a",
+     "display": "Node A",
+     "etype": null,
+     "created_at": 1.0,
+     "aliases": [
+      "first"
+     ]
+    }
+   },
+   "state_sha256": "4260972ec30f82bb854c537c6864f257f7d0078b493976038bcd46d8793506a8",
+   "diffs": []
+  },
+  {
+   "index": 4,
+   "op": "ensure_entity",
+   "response": {
+    "value": 1
+   },
+   "state_sha256": "88f5b1c98cb99fc300dadc01e48aca334dc8059e33a0b59eebf97106da2a6964",
+   "diffs": []
+  },
+  {
+   "index": 5,
+   "op": "ensure_entity",
+   "response": {
+    "value": 1
+   },
+   "state_sha256": "14e120c8238ee5205c2ec2f9f6f4df16d0a71984b2e82d5e41b829f1a3e16579",
+   "diffs": []
+  },
+  {
+   "index": 6,
+   "op": "add_alias",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "a9ed1804f5f9ad51c02a0ca14f6dcea6bdf008a4cefb6a581426fbce543e6643",
+   "diffs": []
+  },
+  {
+   "index": 7,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 2,
+     "canonical": "node-b",
+     "display": "Node B",
+     "etype": "runtime",
+     "created_at": 1.0,
+     "aliases": []
+    }
+   },
+   "state_sha256": "a9ed1804f5f9ad51c02a0ca14f6dcea6bdf008a4cefb6a581426fbce543e6643",
+   "diffs": []
+  },
+  {
+   "index": 8,
+   "op": "entity_id_map",
+   "response": {
+    "value": {
+     "first": 1,
+     "node-b": 2,
+     "node-c": 3,
+     "node-a": 1
+    }
+   },
+   "state_sha256": "a9ed1804f5f9ad51c02a0ca14f6dcea6bdf008a4cefb6a581426fbce543e6643",
+   "diffs": []
+  },
+  {
+   "index": 9,
+   "op": "add_alias",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "b6a30413a1d2bfd7ac05615f639f25cf40d84417f207c06db4d2c8eaf70cce2c",
+   "diffs": []
+  },
+  {
+   "index": 10,
+   "op": "add_alias",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "7a1ea2106bbdf3409479e6c1f5ab6cc99238ba4cf1a81675a6f045b7b9ae5caa",
+   "diffs": []
+  },
+  {
+   "index": 11,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 2,
+     "canonical": "node-b",
+     "display": "Node B",
+     "etype": "runtime",
+     "created_at": 1.0,
+     "aliases": [
+      "first"
+     ]
+    }
+   },
+   "state_sha256": "7a1ea2106bbdf3409479e6c1f5ab6cc99238ba4cf1a81675a6f045b7b9ae5caa",
+   "diffs": []
+  },
+  {
+   "index": 12,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 1,
+     "canonical": "node-a",
+     "display": "Node A",
+     "etype": "service",
+     "created_at": 1.0,
+     "aliases": [
+      "node-b",
+      "z-last"
+     ]
+    }
+   },
+   "state_sha256": "7a1ea2106bbdf3409479e6c1f5ab6cc99238ba4cf1a81675a6f045b7b9ae5caa",
+   "diffs": []
+  },
+  {
+   "index": 13,
+   "op": "upsert_relation",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "449d3dc4ca49030522a206e2006e5266136ef2e1386fc8d826890bfe03dbd446",
+   "diffs": []
+  },
+  {
+   "index": 14,
+   "op": "upsert_relation",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "0c8388fd9a41023d32ba4a31179f8faf1c8bf435dc869d3c4390ce74a3d1514b",
+   "diffs": []
+  },
+  {
+   "index": 15,
+   "op": "upsert_relation",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "bd0785c9cce5b1afc16dbeff37d4a4760e30e594bfd96326501e4e6a594fe774",
+   "diffs": []
+  },
+  {
+   "index": 16,
+   "op": "load_relations",
+   "response": {
+    "value": [
+     {
+      "name": "avoids",
+      "description": "src (a task-type) should avoid dead-end dst (negative lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "configures",
+      "description": "src sets configuration for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "custom",
+      "description": "updated",
+      "src_type": "service",
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": false
+     },
+     {
+      "name": "depends-on",
+      "description": "src requires dst to function",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "hosts",
+      "description": "src is the host/platform for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "implements",
+      "description": "src (a source file) realizes concept/role dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "part-of",
+      "description": "src is a component of dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "prefers",
+      "description": "src (a task-type) prefers approach/tool dst (positive lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "related-to",
+      "description": "untyped catch-all association",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "runs-on",
+      "description": "src executes on host/platform dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": "hosts",
+      "builtin": true
+     },
+     {
+      "name": "stores-data-in",
+      "description": "src persists its data in dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "uses",
+      "description": "updated builtin",
+      "src_type": null,
+      "dst_type": "runtime",
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     }
+    ]
+   },
+   "state_sha256": "bd0785c9cce5b1afc16dbeff37d4a4760e30e594bfd96326501e4e6a594fe774",
+   "diffs": []
+  },
+  {
+   "index": 17,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.65
+    }
+   },
+   "state_sha256": "a2baec82fb490cf6ef7080369140d0a7b00850a5240ac2b830d4f5f4901bb4f5",
+   "diffs": []
+  },
+  {
+   "index": 18,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.7
+    }
+   },
+   "state_sha256": "4f056d7800e694331a724f74f4c1f03f6b822cd5e59da754df1a98742eb187cf",
+   "diffs": []
+  },
+  {
+   "index": 19,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.95
+    }
+   },
+   "state_sha256": "348a67e549ec1ad244ce7ca4298514a0cdf146b0a92d4a7c8117c52b775d7ff7",
+   "diffs": []
+  },
+  {
+   "index": 20,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "a98e2eb090f6fccf7099d6592c610369fdce4ae3d655bae291048b64f8fac65b",
+   "diffs": []
+  },
+  {
+   "index": 21,
+   "op": "supersede_edge",
+   "response": {
+    "value": true
+   },
+   "state_sha256": "471eb99080a6bf62492f3e723a37e4ef442d30af47e223afae44df4e75c333df",
+   "diffs": []
+  },
+  {
+   "index": 22,
+   "op": "supersede_edge",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "471eb99080a6bf62492f3e723a37e4ef442d30af47e223afae44df4e75c333df",
+   "diffs": []
+  },
+  {
+   "index": 23,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "926269410c7e0da5397c3952627cdff4cec936c8c9000365d749903665fabbcd",
+   "diffs": []
+  },
+  {
+   "index": 24,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": "service",
+       "created_at": 1.0
+      },
+      {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     ],
+     "aliases": {
+      "2": [
+       "first"
+      ],
+      "1": [
+       "node-b",
+       "z-last"
+      ]
+     },
+     "edges": []
+    }
+   },
+   "state_sha256": "926269410c7e0da5397c3952627cdff4cec936c8c9000365d749903665fabbcd",
+   "diffs": []
+  },
+  {
+   "index": 25,
+   "op": "bless_edge",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "926269410c7e0da5397c3952627cdff4cec936c8c9000365d749903665fabbcd",
+   "diffs": []
+  },
+  {
+   "index": 26,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 1,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "a5f640c8c7bc24721fa2cacbc2dc7f66eaf67b337a550bd568c2b0393e03d955",
+   "diffs": []
+  },
+  {
+   "index": 27,
+   "op": "bless_edge",
+   "response": {
+    "value": true
+   },
+   "state_sha256": "f37e8174792049e2515193a199a07422ce9b8cca9d717b64c68d74d4163c869b",
+   "diffs": []
+  },
+  {
+   "index": 28,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 1,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": "service",
+       "created_at": 1.0
+      },
+      {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     ],
+     "aliases": {
+      "2": [
+       "first"
+      ],
+      "1": [
+       "node-b",
+       "z-last"
+      ]
+     },
+     "edges": [
+      {
+       "id": 1,
+       "src_id": 1,
+       "relation": "uses",
+       "dst_id": 2,
+       "confidence": 0.99,
+       "origin": "user",
+       "asserted_at": "<clock:27>"
+      }
+     ]
+    }
+   },
+   "state_sha256": "f37e8174792049e2515193a199a07422ce9b8cca9d717b64c68d74d4163c869b",
+   "diffs": []
+  },
+  {
+   "index": 29,
+   "op": "bless_edge",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "f37e8174792049e2515193a199a07422ce9b8cca9d717b64c68d74d4163c869b",
+   "diffs": []
+  },
+  {
+   "index": 30,
+   "op": "supersede_edge",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "f37e8174792049e2515193a199a07422ce9b8cca9d717b64c68d74d4163c869b",
+   "diffs": []
+  },
+  {
+   "index": 31,
+   "op": "upsert_edge",
+   "response": {
+    "value": null
+   },
+   "state_sha256": "f37e8174792049e2515193a199a07422ce9b8cca9d717b64c68d74d4163c869b",
+   "diffs": []
+  },
+  {
+   "index": 32,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "953fdfc6e039e2d6668901f06678c550b4aac769f7029deb93010decf1ccfd0f",
+   "diffs": []
+  },
+  {
+   "index": 33,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.85
+    }
+   },
+   "state_sha256": "f6f341dd278f46d041733b49e7e011ef8d9e47ae8c05b84cc5ebe2c01409057b",
+   "diffs": []
+  },
+  {
+   "index": 34,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.90000004
+    }
+   },
+   "state_sha256": "ef62237084a0c11b8119bd8b8f89c20b9bc9a711a77784542ab06c118b6803c8",
+   "diffs": []
+  },
+  {
+   "index": 35,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.95000005
+    }
+   },
+   "state_sha256": "614903c7bff371e5a2adeff956130eb64aadd804624b3748db92d5be4f30839f",
+   "diffs": []
+  },
+  {
+   "index": 36,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "854ba47ff1df040157993afee657cd5937552ae5a6a42bc5e51e3ff7d0b1a100",
+   "diffs": []
+  },
+  {
+   "index": 37,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 7,
+     "confidence": 0.99
+    }
+   },
+   "state_sha256": "6f967ad8ce5660ea1586587771ab7c12dc5ddbb90ede352f757df3d3f8408007",
+   "diffs": []
+  },
+  {
+   "index": 38,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 13,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "b67e448db9b668bc1d89cc320acfc98756c96ccfdb38b4aa0f1d2eaec43ecf76",
+   "diffs": []
+  },
+  {
+   "index": 39,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 14,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "1387fc8ca97f650776f2d86b3ab2d5a4c1d7ebc39c17df1b339ba86666c238a0",
+   "diffs": []
+  },
+  {
+   "index": 40,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 15,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "da2f27d3490b845779c970a29bf84851a01cbbead0d29d90807da5c0d1ac8b06",
+   "diffs": []
+  },
+  {
+   "index": 41,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 16,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "2d0689299e1420570987e28756a94351cf08d98b74769026a18620bbfffa4f18",
+   "diffs": []
+  },
+  {
+   "index": 42,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 17,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "cf51924b021784c6f96e4613ab9fa13b4030e613504f58a1c7182558008a74a2",
+   "diffs": []
+  },
+  {
+   "index": 43,
+   "op": "upsert_edge",
+   "response": {
+    "value": {
+     "id": 18,
+     "confidence": 0.8
+    }
+   },
+   "state_sha256": "9617d2db72f2c1e06d1815f35dfaf8091afafc59a0e6b5ef9c9ca6b33ea05c1d",
+   "diffs": []
+  },
+  {
+   "index": 44,
+   "op": "merge_entity",
+   "response": {
+    "value": true
+   },
+   "state_sha256": "8578beefef62d0d0edbecd036c0d1518cdd64869b69b8dc845e02433b2974dc1",
+   "diffs": []
+  },
+  {
+   "index": 45,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 2,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": "runtime",
+       "created_at": 1.0
+      },
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      }
+     ],
+     "aliases": {
+      "2": [
+       "first",
+       "node-a",
+       "node-b",
+       "z-last"
+      ]
+     },
+     "edges": [
+      {
+       "id": 7,
+       "src_id": 3,
+       "relation": "uses",
+       "dst_id": 2,
+       "confidence": 0.99,
+       "origin": "user",
+       "asserted_at": "<clock:37>"
+      },
+      {
+       "id": 13,
+       "src_id": 2,
+       "relation": "uses",
+       "dst_id": 3,
+       "confidence": 0.8,
+       "origin": null,
+       "asserted_at": "<clock:38>"
+      },
+      {
+       "id": 17,
+       "src_id": 2,
+       "relation": "uses",
+       "dst_id": 2,
+       "confidence": 0.8,
+       "origin": null,
+       "asserted_at": "<clock:42>"
+      }
+     ]
+    }
+   },
+   "state_sha256": "8578beefef62d0d0edbecd036c0d1518cdd64869b69b8dc845e02433b2974dc1",
+   "diffs": []
+  },
+  {
+   "index": 46,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 2,
+     "canonical": "node-b",
+     "display": "Node B",
+     "etype": "runtime",
+     "created_at": 1.0,
+     "aliases": [
+      "first",
+      "node-a",
+      "node-b",
+      "z-last"
+     ]
+    }
+   },
+   "state_sha256": "8578beefef62d0d0edbecd036c0d1518cdd64869b69b8dc845e02433b2974dc1",
+   "diffs": []
+  },
+  {
+   "index": 47,
+   "op": "entity_id_map",
+   "response": {
+    "value": {
+     "first": 2,
+     "node-a": 2,
+     "node-b": 2,
+     "z-last": 2,
+     "node-c": 3
+    }
+   },
+   "state_sha256": "8578beefef62d0d0edbecd036c0d1518cdd64869b69b8dc845e02433b2974dc1",
+   "diffs": []
+  },
+  {
+   "index": 48,
+   "op": "merge_entity",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "8578beefef62d0d0edbecd036c0d1518cdd64869b69b8dc845e02433b2974dc1",
+   "diffs": []
+  },
+  {
+   "index": 49,
+   "op": "merge_entity",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "8578beefef62d0d0edbecd036c0d1518cdd64869b69b8dc845e02433b2974dc1",
+   "diffs": []
+  },
+  {
+   "index": 50,
+   "op": "merge_entity",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "8578beefef62d0d0edbecd036c0d1518cdd64869b69b8dc845e02433b2974dc1",
+   "diffs": []
+  },
+  {
+   "index": 51,
+   "op": "delete_entity",
+   "response": {
+    "value": true
+   },
+   "state_sha256": "478fe31c9b90adc6dd064912bcc7bf9ed883965c0d6913dbbf59551187e69b34",
+   "diffs": []
+  },
+  {
+   "index": 52,
+   "op": "delete_entity",
+   "response": {
+    "value": false
+   },
+   "state_sha256": "478fe31c9b90adc6dd064912bcc7bf9ed883965c0d6913dbbf59551187e69b34",
+   "diffs": []
+  },
+  {
+   "index": 53,
+   "op": "ensure_entity",
+   "response": {
+    "value": 6
+   },
+   "state_sha256": "e32004fe1f31bf250299edb09320372336b784eb643a3abaadfdcb37bdbcb55d",
+   "diffs": []
+  },
+  {
+   "index": 54,
+   "op": "ensure_entity",
+   "response": {
+    "value": 7
+   },
+   "state_sha256": "250f24fd2e9b7233e7ebcf9aa24c3c5477bf1189ae2d09c1cdcc621ffc2fdcef",
+   "diffs": []
+  },
+  {
+   "index": 55,
+   "op": "ensure_entity",
+   "response": {
+    "value": 8
+   },
+   "state_sha256": "5ca91f825702bd1f3fb58fbde483453170cdda1e93d012915bd414a6bf816777",
+   "diffs": []
+  },
+  {
+   "index": 56,
+   "op": "ensure_entity",
+   "response": {
+    "value": 9
+   },
+   "state_sha256": "f1b9aad351cf8b2e79e21a9b496aabd557652e053baead933fe804199e87686f",
+   "diffs": []
+  },
+  {
+   "index": 57,
+   "op": "ensure_entity",
+   "response": {
+    "value": 10
+   },
+   "state_sha256": "3e7afb38f108cd51a3fb56b327f4190bc2d225fc8770d111ef85fc22c62c29ae",
+   "diffs": []
+  },
+  {
+   "index": 58,
+   "op": "ensure_entity",
+   "response": {
+    "value": 11
+   },
+   "state_sha256": "de28a12ea2f99d2cfad2ec922394a071b8f7f9a073ec9fee18e46f4a5b4d7d4d",
+   "diffs": []
+  },
+  {
+   "index": 59,
+   "op": "ensure_entity",
+   "response": {
+    "value": 12
+   },
+   "state_sha256": "2f6cb5a386db5ca52ef77d34a3858164f4c2f23a5c18e9395d9137c8ead4bd19",
+   "diffs": []
+  },
+  {
+   "index": 60,
+   "op": "ensure_entity",
+   "response": {
+    "value": 13
+   },
+   "state_sha256": "31d787ffdfea46476db5709e4ce5dfed7740c761dc851a76af8dad01d4f6f3cf",
+   "diffs": []
+  },
+  {
+   "index": 61,
+   "op": "ensure_entity",
+   "response": {
+    "value": 14
+   },
+   "state_sha256": "698c14369ca76312a8544f646cfdeaf7343f83592d1a3587a549d8f4b1eaf190",
+   "diffs": []
+  },
+  {
+   "index": 62,
+   "op": "ensure_entity",
+   "response": {
+    "value": 15
+   },
+   "state_sha256": "4142a1dbb82454f0e9ff7d7d8be8a02ee91250a1e81b297ffcef3fbadd0b7a93",
+   "diffs": []
+  },
+  {
+   "index": 63,
+   "op": "ensure_entity",
+   "response": {
+    "value": 16
+   },
+   "state_sha256": "bc938b54739be48351409b611003bd1de81181c73c382430c34f2cddc32d7d60",
+   "diffs": []
+  },
+  {
+   "index": 64,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      },
+      {
+       "id": 6,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": "<clock:53>"
+      },
+      {
+       "id": 7,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": null,
+       "created_at": "<clock:54>"
+      },
+      {
+       "id": 8,
+       "canonical": "g",
+       "display": "G:",
+       "etype": null,
+       "created_at": "<clock:55>"
+      },
+      {
+       "id": 9,
+       "canonical": "alphabeta",
+       "display": "alphabeta",
+       "etype": null,
+       "created_at": "<clock:56>"
+      },
+      {
+       "id": 10,
+       "canonical": "\u03bf\u03c2",
+       "display": "\u039f\u03a3",
+       "etype": null,
+       "created_at": "<clock:57>"
+      },
+      {
+       "id": 11,
+       "canonical": "100%-done",
+       "display": "100%_done",
+       "etype": null,
+       "created_at": "<clock:58>"
+      },
+      {
+       "id": 12,
+       "canonical": "",
+       "display": "",
+       "etype": null,
+       "created_at": "<clock:59>"
+      },
+      {
+       "id": 13,
+       "canonical": "aa-i\u0307",
+       "display": "aa-i\u0307",
+       "etype": null,
+       "created_at": "<clock:60>"
+      },
+      {
+       "id": 14,
+       "canonical": "prefix-\ua7cb",
+       "display": "prefix-\ua7cb",
+       "etype": null,
+       "created_at": "<clock:61>"
+      },
+      {
+       "id": 15,
+       "canonical": "prefix-\u1c89",
+       "display": "prefix-\u1c89",
+       "etype": null,
+       "created_at": "<clock:62>"
+      },
+      {
+       "id": 16,
+       "canonical": "prefix-\ua7cc",
+       "display": "prefix-\ua7cc",
+       "etype": null,
+       "created_at": "<clock:63>"
+      }
+     ],
+     "aliases": {},
+     "edges": []
+    }
+   },
+   "state_sha256": "bc938b54739be48351409b611003bd1de81181c73c382430c34f2cddc32d7d60",
+   "diffs": []
+  },
+  {
+   "index": 65,
+   "op": "find_entity",
+   "response": {
+    "value": {
+     "id": 8,
+     "canonical": "g",
+     "display": "G:",
+     "etype": null,
+     "created_at": "<clock:55>",
+     "aliases": []
+    }
+   },
+   "state_sha256": "bc938b54739be48351409b611003bd1de81181c73c382430c34f2cddc32d7d60",
+   "diffs": []
+  },
+  {
+   "index": 66,
+   "op": "add_alias",
+   "response": {
+    "sqlstate": "23503"
+   },
+   "state_sha256": "bc938b54739be48351409b611003bd1de81181c73c382430c34f2cddc32d7d60",
+   "diffs": []
+  },
+  {
+   "index": 67,
+   "op": "upsert_relation",
+   "response": {
+    "sqlstate": "23503"
+   },
+   "state_sha256": "bc938b54739be48351409b611003bd1de81181c73c382430c34f2cddc32d7d60",
+   "diffs": []
+  },
+  {
+   "index": 68,
+   "op": "upsert_edge",
+   "response": {
+    "sqlstate": "23503"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 69,
+   "op": "load_graph",
+   "response": {
+    "value": {
+     "entities": [
+      {
+       "id": 3,
+       "canonical": "node-c",
+       "display": "Node C",
+       "etype": null,
+       "created_at": 1.0
+      },
+      {
+       "id": 6,
+       "canonical": "node-a",
+       "display": "Node A",
+       "etype": null,
+       "created_at": "<clock:53>"
+      },
+      {
+       "id": 7,
+       "canonical": "node-b",
+       "display": "Node B",
+       "etype": null,
+       "created_at": "<clock:54>"
+      },
+      {
+       "id": 8,
+       "canonical": "g",
+       "display": "G:",
+       "etype": null,
+       "created_at": "<clock:55>"
+      },
+      {
+       "id": 9,
+       "canonical": "alphabeta",
+       "display": "alphabeta",
+       "etype": null,
+       "created_at": "<clock:56>"
+      },
+      {
+       "id": 10,
+       "canonical": "\u03bf\u03c2",
+       "display": "\u039f\u03a3",
+       "etype": null,
+       "created_at": "<clock:57>"
+      },
+      {
+       "id": 11,
+       "canonical": "100%-done",
+       "display": "100%_done",
+       "etype": null,
+       "created_at": "<clock:58>"
+      },
+      {
+       "id": 12,
+       "canonical": "",
+       "display": "",
+       "etype": null,
+       "created_at": "<clock:59>"
+      },
+      {
+       "id": 13,
+       "canonical": "aa-i\u0307",
+       "display": "aa-i\u0307",
+       "etype": null,
+       "created_at": "<clock:60>"
+      },
+      {
+       "id": 14,
+       "canonical": "prefix-\ua7cb",
+       "display": "prefix-\ua7cb",
+       "etype": null,
+       "created_at": "<clock:61>"
+      },
+      {
+       "id": 15,
+       "canonical": "prefix-\u1c89",
+       "display": "prefix-\u1c89",
+       "etype": null,
+       "created_at": "<clock:62>"
+      },
+      {
+       "id": 16,
+       "canonical": "prefix-\ua7cc",
+       "display": "prefix-\ua7cc",
+       "etype": null,
+       "created_at": "<clock:63>"
+      }
+     ],
+     "aliases": {},
+     "edges": []
+    }
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 70,
+   "op": "load_relations",
+   "response": {
+    "value": [
+     {
+      "name": "avoids",
+      "description": "src (a task-type) should avoid dead-end dst (negative lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "configures",
+      "description": "src sets configuration for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "custom",
+      "description": "updated",
+      "src_type": "service",
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": false
+     },
+     {
+      "name": "depends-on",
+      "description": "src requires dst to function",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "hosts",
+      "description": "src is the host/platform for dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "implements",
+      "description": "src (a source file) realizes concept/role dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "part-of",
+      "description": "src is a component of dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": true,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "prefers",
+      "description": "src (a task-type) prefers approach/tool dst (positive lesson)",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "related-to",
+      "description": "untyped catch-all association",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "runs-on",
+      "description": "src executes on host/platform dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": "hosts",
+      "builtin": true
+     },
+     {
+      "name": "stores-data-in",
+      "description": "src persists its data in dst",
+      "src_type": null,
+      "dst_type": null,
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     },
+     {
+      "name": "uses",
+      "description": "updated builtin",
+      "src_type": null,
+      "dst_type": "runtime",
+      "transitive": false,
+      "inverse_of": null,
+      "builtin": true
+     }
+    ]
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 71,
+   "op": "norm_name",
+   "response": {
+    "value": "depends-on"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 72,
+   "op": "norm_name",
+   "response": {
+    "value": "a-b-c-d-e"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 73,
+   "op": "norm_name",
+   "response": {
+    "value": "alpha-beta"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 74,
+   "op": "norm_name",
+   "response": {
+    "value": ""
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 75,
+   "op": "norm_name",
+   "response": {
+    "value": "\u03b3\u03c3-a\u03c3-\u0301b"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 76,
+   "op": "norm_name",
+   "response": {
+    "value": "i\u0307-\u00f6-caf\u00e9"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 77,
+   "op": "norm_name",
+   "response": {
+    "value": "a-b-c-d"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 78,
+   "op": "norm_name",
+   "response": {
+    "value": "a-b"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 79,
+   "op": "norm_name",
+   "response": {
+    "value": ""
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 80,
+   "op": "norm_name",
+   "response": {
+    "value": "a-b-c"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 81,
+   "op": "norm_name",
+   "response": {
+    "value": "aa-i\u0307"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 82,
+   "op": "norm_name",
+   "response": {
+    "value": "\u03c3\u0345"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 83,
+   "op": "norm_name",
+   "response": {
+    "value": "a\u03c2\u0345-a"
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  },
+  {
+   "index": 84,
+   "op": "norm_name",
+   "response": {
+    "value": ""
+   },
+   "state_sha256": "4159a65441a5fa584394c037e5ced7172e1985b6ece526f7346cd8fedb2ce148",
+   "diffs": []
+  }
+ ],
+ "normalizers": "ClockState in graph_store.py; operation-specific windows; JSON object order free"
+}

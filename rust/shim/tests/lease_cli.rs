@@ -234,11 +234,11 @@ fn seven_days_is_a_run_expectation_and_operator_actions_remain_deferred() {
             Some(2)
         );
     }
-    for action in ["break", "delegate", "hold"] {
-        assert_eq!(
-            home.call(&["lease", action, "resource"]).status.code(),
-            Some(1)
-        );
+    for arguments in [
+        vec!["lease", "break", "resource"],
+        vec!["lease", "delegate", "resource", "fixture-agent"],
+    ] {
+        assert_eq!(home.call(&arguments).status.code(), Some(1));
     }
 }
 

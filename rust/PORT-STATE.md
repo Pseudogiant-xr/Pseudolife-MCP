@@ -1,5 +1,94 @@
 # Rust port state
 
+## Backup explicit-DSN and file mode
+
+CLI-BACKUP-DSN is ported: explicit-DSN dumps and file-mode state archives,
+with rotation, match the Python oracle in the `backup` harness row on
+Windows (16 cases) and Linux (17, under WSL); CI runs the Rust contract
+tests on both. The lite tier
+(CLI-BACKUP-LITE) defers by name until embedded_pg is native. Scope,
+contract, free items and deferrals: PARITY.md "Backup explicit-DSN and file
+mode".
+
+## Stream D historical doorbell evidence (2026-10-08)
+
+The [historical cell receipt](../evals/results/rust-stream-d-historical-cells-20261009.json)
+records 17 completed Python/native pairs, 34 genuine arms and 72 original
+rejecting controls. Two version2-positive pairs belong to source
+`e1226d2ec30a55a6e44b09b2b12fcbd500173c41`; the Linux empty-HOME pair and
+both-OS ordinary, missing and five invalid-prompt pairs per OS belong to
+`ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1`. Each retains its actual image,
+producing-receipt and raw SHA256 against immutable oracle
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`. Linux ec697 image reuse preserves
+the actual Stream E producing receipt, rather than relabelling its origin.
+
+The Windows symlink fixture retains WinError1314: capability SKIP with native
+RED, zero completed arms and zero controls. Its assertions are not waived.
+Candidate-only controls remain distinct from the empty-HOME pair's four
+controls per arm. PID sampling, denied Windows event observation, Linux
+inaccessible processes, the empty-HOME lead's missed first-output deadline,
+and the zero-cell Windows wrapper quoting failure remain recorded separately.
+The invalid-prompt main's timely direct read and coordinator's later
+minute-precision observation are distinct evidence.
+
+These cells establish bounded historical doorbell behavior, not dedicated
+briefing payload, HTTP wire, persistent-turn, original hook routing or durable
+state coverage. Capable-host symlink, distinct-UID, remaining corpus/features
+and measurement gaps remain open. The final oracle307 integration target is
+`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`; the historical receipt predates
+that pin and retains oracle3c attribution. Current acceptance/publication
+remains `HELD_PENDING_COORDINATOR_ORACLE307`. No parity row is promoted and
+no current-head execution is inferred.
+
+## Selected master oracle re-pin
+
+The maintainer's 2026-10-08 policy makes the oracle follow master after each
+batch of production merges; production changes are never held for the port.
+The selected target is master `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1` (the #637
+squash commit, Python 0.17.0, schema 55), with 425 test files and 191 scoped
+functions. Fresh both-OS runtime validation, exact-head CI and independent review
+remain pending; historical receipts keep their identities. Rust merges remain
+paused until this re-pin merges after green Parity, including the differential
+judge. Streams may retain captures against their frozen images without treating
+them as new-pin acceptance.
+
+## Recorded episode producer correspondence (2026-10-09)
+
+The completed Windows and Linux scripted cells are consolidated in the
+[episode evidence receipt](../docs/evidence/rust-stream-c-episode-20261009.json).
+Each OS records 14 of 16 prepared IDs, 16 pairs, 32 CLI arms, 52 HTTP requests
+and 104 synthetic comparator rejects; redirect sinks received zero requests.
+The two source-vote IDs remain UNRUN through the real daemon and persisted
+title path (eight arm cells). Execution of the prepared owner/controller is
+also UNRUN.
+
+The fixture source is `e9987bb3350970a37db153164c73ec28fac96833`, tree
+`a8867c79c2de1ecab07129e0f8480a399c208de2`. Actual images were built at
+`c2525de993b198f22bc0427da8e7d9fc5cbbda4b`, tree
+`2c56d25e80fc322f5a1d75cb905cadf46c024902`; 71 compiled components matched
+the fixture source. These are historical images, not fresh e998 builds or
+whole-source equivalence. The oracle source remains
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493`, distinct from declared pin
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`; no re-pin follows from this receipt.
+Parent interpreters were Python 3.11.9 on Windows and 3.11.17 on Linux;
+their hashes and dependency observations are retained separately from the
+unmeasured child import origins.
+
+The two earlier Windows wire REDs, Linux health preflight RED and both
+source-vote static/source-check REDs remain separately bound to their originals.
+Later scoped matches do not relabel those failures. The receipt projects only
+named evidence fields, omits identifying/raw runtime payloads, describes that
+transformation and binds every pair and failure to its exact original SHA256.
+
+The original inventory remains ten Python in-process nodes, A=2/B=0/C=0,
+eight bounded correspondences and zero original Rust executions. Historical
+closure counters and the 73-ID wire admission ledger remain unchanged. Cold
+connection attempts and real CLI negative executions are unmeasured; synthetic
+rejects mutate captured records. Scripted captures do not prove a real daemon,
+persisted titles, complete raw-wire equality or whole-mode acceptance. Final
+oracle attribution, owner bindings, final-head both-OS proof, review and hosted
+gates remain open; both episode modes remain deferred.
+
 ## Episode integration with accepted lease master
 
 Accepted master `59a8624eecd336686acac3846b75334e643b94d6` is merged forward,
@@ -346,6 +435,37 @@ self-checks run during preparation; historical-input replay uses the current
 checker without launching native processes. Native execution, both-OS recapture,
 positive paired measurements and current-head hosted checks remain pending.
 Historical private receipts cited below cannot certify this candidate.
+
+## Retained wait-mail evidence (2026-10-09)
+
+The completed ring-admission cells are now indexed in
+[`evidence/wait-mail-ring219.json`](evidence/wait-mail-ring219.json), with raw
+receipt hashes, source/oracle pins, image identities and separate failed attempts.
+They remain historical at `33f55402`; this evidence-only carrier adds no runtime
+or acceptance claim.
+
+Windows and Linux each retain three whole-CLI pairs: long-ring watermark and
+bad ring reason exit 3 in both arms; Unicode delivery exits 0. Each pair rejected
+four candidate-output controls. Both OSes retain 119 seven-file workflow passes;
+the focused 38 reduction and 41 contract passes overlap that group. Images remain
+labelled built `57c720ef`, with 79 Windows and 82 Linux canonical compile inputs
+matching the carrier. Source-only inventory retains 41 original test functions
+and 19 candidate-contract rows; it is not original-test execution.
+
+The prior hosted CI still records five failures and 112 passes per OS. Linux's
+first workflow attempt remains 26 failures and 93 passes; its separate recovery
+passed 119 after the parent source guard received existing oracle Git metadata.
+The repeated 93 passes are not extra coverage. Preparation failures and delayed
+root observations also remain in the receipt.
+
+Full flushed-body interruption before marker advance, the Windows exact stat
+refusal site, an ordinary full response with producer/ledger clocks, and runtime
+platform producer capability remain open. The ec697 long-ring provenance refresh
+and hosted transport proof remain unrun; the final307 oracle target is unconfirmed.
+`wait-mail`, `CLI-MAIL` and the complete acceptance matrix remain deferred.
+The original long-ring exit 3/3 observation remains an acceptance RED/blocker,
+separate from its historical comparator pass; accepted-master provenance and
+the hosted long-ring proof are still outstanding.
 
 ## Historical wait-mail leaf candidate and captures
 
@@ -968,8 +1088,8 @@ are directly recountable source sizes, with no native/Python ratio or parity
 claim. The earlier local `doorbell-line-ratio-counts.json` remains private
 historical evidence for the removed compatibility model.
 
-The version branch targets the current Python oracle at master
-`3c01bb31abd60178e15dea99adda369b4bbf92fc` (0.17.0, schema 55). Scoped CLI-VERSION is ported: the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) executed merged master `df2dbf8a`, tree `28823784`, after #608 and #600 merged. Its exact source/image identities remain separate from this documentation carrier, whose independent review and hosted checks remain required. Historical `5220b5ee` and earlier receipts retain their identities and failures.
+The selected oracle targets master
+`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1` (0.17.0, schema 55); the #637 squash target is selected and new-pin acceptance remains pending. Scoped CLI-VERSION is ported: the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) executed merged master `df2dbf8a`, tree `28823784`, after #608 and #600 merged. Its exact source/image identities remain separate from this documentation carrier, whose independent review and hosted checks remain required. Historical `5220b5ee` and earlier receipts retain their identities and failures.
 Historical phase 1 close-out evidence retains
 `f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54).
 The historical phase 1 pin is `0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53);
@@ -982,7 +1102,7 @@ Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
 Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
-The prepared version-branch manifests enumerate 423 test files, all 191 current-pin function mappings in the nine scoped files and 18 routed nodes (10 public stdio and 8 CLI). The historical `74b5998c` ten-stdio attempt passes five and fails five in both arms with shared HTTP 500 fixture errors; it does not isolate a Rust failure. Only an unchanged Python idle-gap diagnostic established missing offline model files; the other four shared failures were not independently diagnosed. Published `95d5402d` hosted Parity passes all 18 candidate nodes per OS; historical `5220b5ee` CLI captures cover the subsequent console/warm changes; final merged-master `df2dbf8a` proof now supplies scoped CLI-VERSION acceptance below. The evidence carrier retains its own review/check gates. Historical ac0c64a1 outcomes do not prove acceptance. Phase 1 source at a3e95642 is integrated and #560 is merged; its eight-node full-suite receipts retain their own source and ELF bindings.
+The selected re-pin manifests enumerate 425 test files, all 191 current-pin function mappings in the nine scoped files and 18 routed nodes (10 public stdio and 8 CLI). The historical `74b5998c` ten-stdio attempt passes five and fails five in both arms with shared HTTP 500 fixture errors; it does not isolate a Rust failure. Only an unchanged Python idle-gap diagnostic established missing offline model files; the other four shared failures were not independently diagnosed. Published `95d5402d` hosted Parity passes all 18 candidate nodes per OS; historical `5220b5ee` CLI captures cover the subsequent console/warm changes; final merged-master `df2dbf8a` proof now supplies scoped CLI-VERSION acceptance below. The evidence carrier retains its own review/check gates. Historical ac0c64a1 outcomes do not prove acceptance. Phase 1 source at a3e95642 is integrated and #560 is merged; its eight-node full-suite receipts retain their own source and ELF bindings.
 
 Historical version candidate and shared CLI fixture evidence at `62e4f590` includes independent code approval and local release evidence on both platforms: 26 passing public cases and 104 rejected controls per OS, plus 240 paired timing samples and eight untimed controls across bare/installed layouts. Windows installed timing regressed beyond the observed floors; the full measurements retain that result. The [version evidence packet](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2b-version-62e4f590/README.md) preserves exact code/oracle/runtime/binary/helper identities and cleanup. Required hosted CI and independent review/checks of the evidence/documentation successor remain pending; CLI-VERSION stays deferred. Earlier 0.16.1 captures remain historical prototypes. Raw comparison receipts stay private and hosted artifacts use allowlisted projections.
 
@@ -1095,8 +1215,10 @@ deferred. The earlier run and local measurement records above remain historical.
 - The historical phase 1 window ended at 2026-10-04 12:30 AEDT (01:30 UTC).
   The close-out window ends at 2026-10-05 13:00 AEDT (02:00 UTC);
   incomplete acceptance retains explicit pending evidence and a draft PR.
-- The phase 0b brief re-pins the oracle to master at phase start. The port makes
-  no DDL changes, adds no tables and repurposes no columns. Upstream schema bumps
+- The oracle follows master at phase starts and after batches of production
+  merges. Production changes are never held for the port; the root prepares
+  the re-pin and fresh validation. The port makes no DDL changes, adds no
+  tables and repurposes no columns. Upstream schema bumps
   follow CLAUDE.md's seven-place checklist and a new phase pin.
 - Daemon captures and baselines run on Linux; current phase 0b receipts were
   captured on WSL2, while production runs in a Linux container. Shim and CLI
@@ -1565,10 +1687,10 @@ documentation-head review, suites and current CI/checks remain separate;
 implementation-head CI does not establish that the docs successor was tested.
 
 
-## Historical prepared version integration at the current Python pin
+## Historical prepared version integration at the then-current Python pin
 
 The version identity checkpoint `9e7ba302` is integrated with the Phase 1
-source at `a3e95642`. The current Python oracle is `3c01bb31`, package 0.17.0,
+source at `a3e95642`. The then-current Python oracle was `3c01bb31`, package 0.17.0,
 schema 55. Mapping retains 18 routes: ten stdio and eight CLI, including the
 three version admissions. The 191 scoped functions remain classified as ten
 candidate, one oracle and 180 internal. In the historical prepared state, the
@@ -2206,3 +2328,34 @@ Comments/blanks count; assets, dispatch and tests do not. Against the historical
 147-line OS-lock helper gives 2037/2,036=1.00049. The Python denominator
 includes deferred actions. These are source size counts, not runtime or parity
 measurements.
+
+
+## Phase 4 lease hold preparation
+
+The new branch prepares native hold and the full action parser/help surface
+against the pending Phase 2d base. Hold follows an external PID without
+signalling it; its asynchronous mirror preserves local ownership under the
+named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
+The historical hold checkpoint retained break/delegate/designate exit-1
+deferrals. Subsequent operator preparation supersedes those implementation
+deferrals; acceptance of all four actions remains deferred.
+At that checkpoint, no Phase 4 execution, hosted acceptance or new timing
+claim was made; previous runtime receipts retain their original identities.
+Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
+pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.
+
+## Phase 4 offline break source preparation
+
+Accepted master `59a8624eecd336686acac3846b75334e643b94d6` is merged ordinarily
+into the hold/shared-PG branch. External-DSN break and retained container-host
+transport are prepared in source; reviewed PG admission/TLS and hold ownership
+remain unchanged. The named `phase4-embedded-pg-deferred` refusal and
+`native-pg-diagnostics` are described in [PARITY](PARITY.md#phase-4-offline-break-source-preparation).
+At this historical checkpoint, whole-command streams, SQL rows, audit chains,
+rollback, container cancellation and identical-clock replay were unrun. No runtime
+image or acceptance receipt was claimed; the earlier PG and Phase 2d proofs remain historical.
+At this historical break checkpoint, delegate/designate implementation remained
+deferred. Their source is now prepared as described in
+[PARITY](PARITY.md#phase-4-delegate-source-preparation); hold, break, delegate and
+the designate alias are implemented, while all lease mode acceptance remains
+deferred.

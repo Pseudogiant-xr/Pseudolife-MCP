@@ -5,15 +5,60 @@ mod args;
 use std::{
     cmp::Ordering,
     ffi::OsString,
-    fs::{self, File, Metadata, OpenOptions},
+    fs::{File, Metadata, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering as AtomicOrdering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(not(test))]
+use std::fs;
+#[cfg(test)]
+mod fs {
+    pub use std::fs::*;
+    use std::{
+        cell::RefCell,
+        io,
+        path::{Path, PathBuf},
+    };
+    std::thread_local! {
+        static DENY: RefCell<Option<(PathBuf, usize, usize)>> = const { RefCell::new(None) };
+    }
+    pub fn deny_once(path: &Path) {
+        DENY.with(|slot| *slot.borrow_mut() = Some((path.to_path_buf(), 1, 0)));
+    }
+    pub fn clear_denial() -> usize {
+        DENY.with(|slot| slot.borrow_mut().take().map_or(0, |(_, _, calls)| calls))
+    }
+    pub fn metadata(path: impl AsRef<Path>) -> io::Result<std::fs::Metadata> {
+        let denied = DENY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let Some((target, left, calls)) = slot.as_mut() else {
+                return false;
+            };
+            if target.as_path() != path.as_ref() {
+                return false;
+            }
+            *calls += 1;
+            let deny = *left > 0;
+            *left = left.saturating_sub(1);
+            deny
+        });
+        if denied {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "test metadata denial",
+            ))
+        } else {
+            std::fs::metadata(path)
+        }
+    }
+}
+
 const HELP: &str = include_str!("wait_mail_help.txt");
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+const INTERRUPT_SLICE: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Integer(String);
@@ -116,8 +161,10 @@ fn digest_path(session: &OsString) -> Option<PathBuf> {
                 .map(PathBuf::from)
                 .or_else(dirs::home_dir)
                 .unwrap_or_default()
-                .join(".pseudolife-mcp/digests")
+                .join(".pseudolife-mcp")
+                .join("digests")
         });
+    let root = args::pathlib(&root);
     let root = crate::credentials::expand_user(&root).ok()?;
     let key = crate::board::identity::hex_hash(session.to_str()?.as_bytes());
     let direct = root.join(format!("{key}.txt"));
@@ -171,8 +218,66 @@ fn read_digest(path: &Path) -> io::Result<(Integer, Vec<u8>)> {
     }
     Ok((watermark, body))
 }
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn interruptible_read(path: &Path) -> io::Result<Vec<u8>> {
+    interruptible_read_with(path, || INTERRUPTED.load(AtomicOrdering::Relaxed))
+}
+#[cfg(target_os = "linux")]
+fn interruptible_read_with(
+    path: &Path,
+    mut interrupted: impl FnMut() -> bool,
+) -> io::Result<Vec<u8>> {
+    use rustix::{
+        event::{PollFd, PollFlags, Timespec, poll},
+        fs::{Mode, OFlags, open},
+        io::{Errno, read},
+    };
+    let file = loop {
+        if interrupted() {
+            return Err(Errno::INTR.into());
+        }
+        // SIGINT can arrive after a flag check but before open/read starts.
+        // Nonblocking IO closes that lost-interrupt window for replaced FIFOs.
+        match open(
+            path,
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+        ) {
+            Err(Errno::INTR) if !interrupted() => continue,
+            result => break result.map_err(io::Error::from)?,
+        }
+    };
+    let mut result = Vec::new();
+    let mut buffer = [0u8; 8192];
+    // Reuse the wait loop's interruptible-sleep cadence, including when a
+    // signal has already run its handler before readiness polling starts.
+    let timeout = Timespec::try_from(INTERRUPT_SLICE).unwrap();
+    loop {
+        if interrupted() {
+            return Err(Errno::INTR.into());
+        }
+        let mut ready = [PollFd::new(&file, PollFlags::IN)];
+        match poll(&mut ready, Some(&timeout)) {
+            Ok(0) => continue,
+            Ok(_) => (),
+            Err(Errno::INTR) if !interrupted() => continue,
+            Err(error) => return Err(error.into()),
+        }
+        match read(&file, &mut buffer) {
+            Ok(0) => return Ok(result),
+            Ok(size) => result.extend_from_slice(&buffer[..size]),
+            Err(Errno::AGAIN) => (),
+            Err(Errno::INTR) if !interrupted() => (),
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+#[cfg(all(unix, not(target_os = "linux")))]
+fn interruptible_read(path: &Path) -> io::Result<Vec<u8>> {
+    // Keep blocking FIFO rendezvous on other Unix targets: an unconnected
+    // nonblocking FIFO can report readiness and EOF there before any writer.
+    // The lost-interrupt window before open/read remains until a portable
+    // strategy can distinguish that initial state from a writer closing.
     use rustix::{
         fs::{Mode, OFlags, open},
         io::{Errno, read},
@@ -209,18 +314,24 @@ fn read_ring(path: &Path) -> io::Result<Option<(Integer, String)>> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
-    let record = raw
-        .strip_suffix(b"\n")
-        .ok_or_else(|| corrupt_record("ring"))?;
-    let split = record
+    // Match wait_mail_cli._read_ring and the Stop hook's ring_past_seen:
+    // only the first two lines matter; malformed markers mean no ring.
+    let mut lines = raw.split(|byte| *byte == b'\n');
+    let head: Vec<u8> = lines
+        .next()
+        .unwrap_or_default()
         .iter()
-        .position(|b| *b == b'\n')
-        .ok_or_else(|| corrupt_record("ring"))?;
-    let watermark = Integer::parse(&record[..split]).ok_or_else(|| corrupt_record("ring"))?;
-    let reason = &record[split + 1..];
-    if reason.contains(&b'\n') || reason.contains(&b'\r') {
-        return Err(corrupt_record("ring"));
+        .copied()
+        .filter(|byte| !matches!(byte, b'\r' | b' '))
+        .collect();
+    if head.len() > 12 {
+        return Ok(None);
     }
+    let Some(watermark) = Integer::parse(&head) else {
+        return Ok(None);
+    };
+    let reason = lines.next().unwrap_or_default();
+    let reason = reason.strip_suffix(b"\r").unwrap_or(reason);
     if !reason.starts_with(b"rung ")
         || !reason[5..]
             .iter()
@@ -524,9 +635,15 @@ impl Listener {
                 .saturating_duration_since(Instant::now())
                 .as_secs_f64()
                 .min(60.0);
+        self.write_expiry(expiry);
+    }
+    fn write_expiry(&self, expiry: f64) {
+        let Ok(expiry) = crate::float_repr::finite_float(expiry) else {
+            return;
+        };
         let _ = atomic_write(
             &self.path,
-            format!("{}\n{expiry:?}\n", self.token).as_bytes(),
+            format!("{}\n{expiry}\n", self.token).as_bytes(),
             true,
         );
     }
@@ -667,7 +784,7 @@ fn wait(digest: &Path, timeout: f64, interval: f64) -> WaitResult {
             std::thread::sleep(
                 sleep_deadline
                     .saturating_duration_since(Instant::now())
-                    .min(Duration::from_millis(20)),
+                    .min(INTERRUPT_SLICE),
             );
         }
     }
@@ -698,7 +815,7 @@ impl InterruptGuard {
         {
             // SAFETY: initialized sigaction values, static atomic-only handler,
             // and restoration of this process's prior disposition. No SA_RESTART:
-            // a blocked digest open/read must return EINTR for owned cleanup.
+            // digest I/O can return EINTR promptly for owned cleanup.
             let previous = unsafe {
                 let mut action: libc::sigaction = std::mem::zeroed();
                 let mut previous: libc::sigaction = std::mem::zeroed();
@@ -993,6 +1110,218 @@ mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fifo_read_observes_interrupt_before_open_or_read() {
+        use std::process::{Command, Stdio};
+        const CHILD: &str = "PSEUDOLIFE_TEST_FIFO_INTERRUPT";
+        const AFTER: &str = "PSEUDOLIFE_TEST_FIFO_INTERRUPT_AFTER";
+        if let Some(path) = std::env::var_os(CHILD) {
+            let after: usize = std::env::var(AFTER).unwrap().parse().unwrap();
+            // Deliver the interrupt after the caller's first flag check.
+            let mut checks = 0;
+            let error = interruptible_read_with(Path::new(&path), || {
+                checks += 1;
+                checks > after
+            })
+            .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+            return;
+        }
+        let home =
+            std::env::temp_dir().join(format!("wait-mail-interrupt-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let fifo = home.join("digest");
+        rustix::fs::mkfifoat(
+            rustix::fs::CWD,
+            &fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .unwrap();
+        let mut results = Vec::new();
+        for after in [1, 2] {
+            // No writer blocks open; a connected, silent writer blocks read.
+            let writer = (after == 2).then(|| {
+                rustix::fs::open(
+                    &fifo,
+                    rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NONBLOCK,
+                    rustix::fs::Mode::empty(),
+                )
+                .unwrap()
+            });
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "cli::wait_mail::tests::fifo_read_observes_interrupt_before_open_or_read",
+                ])
+                .env_clear()
+                .env(CHILD, &fifo)
+                .env(AFTER, after.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut forced = false;
+            while child.try_wait().unwrap().is_none() {
+                if Instant::now() >= deadline {
+                    child.kill().unwrap();
+                    forced = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let output = child.wait_with_output().unwrap();
+            drop(writer);
+            results.push((after, forced, output));
+        }
+        fs::remove_dir_all(home).unwrap();
+        for (after, forced, output) in results {
+            assert!(
+                !forced,
+                "an interrupt before a blocking FIFO syscall was lost (after={after})"
+            );
+            assert!(output.status.success(), "{output:?}");
+            assert!(String::from_utf8_lossy(&output.stdout).contains("running 1 test"));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fifo_read_waits_for_a_writer_and_keeps_all_bytes_until_eof() {
+        use std::process::{Command, Stdio};
+        const CHILD: &str = "PSEUDOLIFE_TEST_FIFO_EOF";
+        const DELAYED: &str = "PSEUDOLIFE_TEST_FIFO_EOF_DELAYED";
+        const RELEASED: &str = "released delayed writer after the reader returned";
+        if let Some(path) = std::env::var_os(CHILD) {
+            let mode = std::env::var(DELAYED).unwrap();
+            let after_close = mode == "1";
+            let delayed_connection = mode == "2";
+            let path = PathBuf::from(path);
+            let writer_path = path.clone();
+            let bytes = vec![b'p'; 10000];
+            let sent = bytes.clone();
+            let (release, startup) = std::sync::mpsc::channel();
+            let writer = std::thread::spawn(move || {
+                if after_close || delayed_connection {
+                    startup.recv().unwrap();
+                }
+                OpenOptions::new()
+                    .write(true)
+                    .open(writer_path)?
+                    .write_all(&sent)
+            });
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut checks = 0;
+            let result = interruptible_read_with(&path, || {
+                checks += 1;
+                // Check three follows a readiness wait with no writer connected.
+                // Release only then, so an early EOF fails complete delivery.
+                if delayed_connection && checks == 3 {
+                    release.send(()).unwrap();
+                }
+                (after_close && checks > 1) || Instant::now() >= deadline
+            });
+            if after_close {
+                assert_eq!(
+                    result.as_ref().unwrap_err().kind(),
+                    io::ErrorKind::Interrupted
+                );
+                release.send(()).unwrap();
+                println!("{RELEASED}");
+                io::stdout().flush().unwrap();
+            }
+            let written = writer.join().unwrap();
+            written.unwrap();
+            assert_eq!(result.unwrap(), bytes);
+            return;
+        }
+        let home = std::env::temp_dir().join(format!("wait-mail-read-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let fifo = home.join("digest");
+        rustix::fs::mkfifoat(
+            rustix::fs::CWD,
+            &fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .unwrap();
+        let mut results = Vec::new();
+        for mode in ["0", "1", "2"] {
+            // Contain a writer that starts only after the reader has closed.
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "cli::wait_mail::tests::fifo_read_waits_for_a_writer_and_keeps_all_bytes_until_eof",
+                    "--nocapture",
+                ])
+                .env_clear()
+                .env(CHILD, &fifo)
+                .env(DELAYED, mode)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut forced = false;
+            while child.try_wait().unwrap().is_none() {
+                if Instant::now() >= deadline {
+                    child.kill().unwrap();
+                    forced = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let output = child.wait_with_output().unwrap();
+            results.push((mode, forced, output));
+        }
+        fs::remove_dir_all(home).unwrap();
+        for (mode, forced, output) in results {
+            assert_eq!(forced, mode == "1", "mode={mode}: {output:?}");
+            let text = String::from_utf8_lossy(&output.stdout);
+            assert!(text.contains("running 1 test"), "{output:?}");
+            if mode == "1" {
+                assert!(text.contains(RELEASED), "{output:?}");
+            } else {
+                assert!(output.status.success(), "{output:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_error_refuses_arming_and_retries_during_wait() {
+        let home = std::env::temp_dir().join(format!("wait-mail-stat-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        let digest = home.join(format!("{}.txt", "a".repeat(64)));
+        fs::write(&digest, b"1\npeer\n").unwrap();
+        fs::write(digest.with_extension("ring"), b"1\nrung anyone\n").unwrap();
+        fs::deny_once(&digest);
+        assert_eq!(
+            run(vec![
+                OsString::from("--digest"),
+                digest.clone().into_os_string(),
+                OsString::from("--timeout"),
+                OsString::from("1"),
+                OsString::from("--interval"),
+                OsString::from("0.01")
+            ]),
+            2
+        );
+        assert_eq!(fs::clear_denial(), 1);
+        assert_eq!(fs::read_dir(&home).unwrap().count(), 2);
+        fs::deny_once(&digest);
+        let result = wait(&digest, 1.0, 0.01);
+        assert!(fs::clear_denial() >= 2);
+        match result {
+            WaitResult::Mail(watermark, body, _) => {
+                assert_eq!(watermark.text(), "1");
+                assert_eq!(body, b"peer\n");
+            }
+            _ => panic!("metadata retry did not reach mail"),
+        }
+        assert_eq!(fs::read_dir(&home).unwrap().count(), 2);
+        fs::remove_dir_all(home).unwrap();
+    }
+
     #[derive(Debug, Default)]
     struct RecordedOutput {
         written: Vec<u8>,
@@ -1127,6 +1456,29 @@ mod tests {
         let mut output = Vec::new();
         write_output(&mut output, b"peer\n").unwrap();
         assert_eq!(output, b"peer\n");
+    }
+    #[test]
+    fn python_float_shortest_ties() {
+        let home = std::env::temp_dir().join(format!("wait-mail-float-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&home).unwrap();
+        // Python writer: pseudolife_memory/wake_liveness.py:68.
+        let armed = Listener::new(&home.join("digest.md"), 60.0);
+        let mut wrong = Vec::new();
+        for (bits, expected) in [
+            (0x430c6bf526340002, "1000000000000000.2"),
+            (0xc308130f222a4572, "-847044394961070.2"),
+            (0x42d526daef896bc8, "93026504287663.12"),
+        ] {
+            armed.write_expiry(f64::from_bits(bits));
+            let actual = fs::read_to_string(&armed.path).unwrap();
+            let expected = format!("{}\n{expected}\n", armed.token);
+            if actual != expected {
+                wrong.push(format!("{bits:016x}: {actual:?} != {expected:?}"));
+            }
+        }
+        drop(armed);
+        fs::remove_dir_all(home).unwrap();
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
     #[test]
     fn temporary_collisions_keep_existing_files_and_directories() {
@@ -1267,11 +1619,11 @@ mod tests {
             assert!(read_ring(&path).unwrap().is_none());
         }
         fs::write(&path, b"1234567890123\nrung anyone\n").unwrap();
-        assert_eq!(read_ring(&path).unwrap().unwrap().0.text(), "1234567890123");
+        assert!(read_ring(&path).unwrap().is_none());
         fs::write(&path, b" 1 2 \r\nrung \r\nextra").unwrap();
         assert_eq!(
-            read_ring(&path).unwrap_err().kind(),
-            io::ErrorKind::InvalidData
+            read_ring(&path).unwrap(),
+            Some((Integer::parse(b"12").unwrap(), "rung ".into()))
         );
         fs::write(&path, b"12\nrung anyone\n").unwrap();
         #[cfg(unix)]

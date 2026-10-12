@@ -1,7 +1,25 @@
 # Porting contract
 
-The current version-branch behavioural oracle target is Python 0.17.0 at
-`3c01bb31abd60178e15dea99adda369b4bbf92fc`, using PostgreSQL schema 55. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
+New parity uses the PR's actual merge base as its Python behavioral oracle.
+Push validation selects the event's `after` commit; manual master captures select
+their exact `frozen_head`. Each receipt records its selected SHA and observed
+schema; a stale historical pin is informational. The harness still binds clean
+selected source, original assertions, runtime imports and actual behavior.
+Historical receipts and reviewed inventory snapshots retain their own pins.
+See [event selection and isolated preparation](../evals/rust_port/README.md#phase-1-stdio-judge).
+
+PR parity intentionally uses the merge-base Python behavior as its baseline.
+A Python-only behavior change therefore passes PR parity against the unchanged
+Rust port and is first caught by the master push run, which selects the new
+Python commit. A PR changing Python behavior and its Rust port together fails
+PR parity until its base includes the Python change. This is the intended
+ordering for changes to `pseudolife_memory/`.
+
+The previous master target was Python 0.17.0 at
+`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`, schema 55. Scoped CLI-VERSION is ported at merged master `df2dbf8a`, tree `28823784`; the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) retains the full executed identities. Other CLI modes keep their own gates; this evidence carrier requires its own review and hosted checks.
+
+Historical selected-pin evidence: Selected-pin validation and exact-head CI are recorded by [the re-pin CI run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37807737497) at `1f33ef7c12eaa5250ad2e62d46b5fb2bfc177195`: both Parity jobs passed, including the unchanged differential judges. [Independent publication review](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/642) approved the frozen tree `d1e2a8395ad955b39594ca4c7639aa31594ecdf0` with no findings; the actual re-pin merge is `cebbf63f6970636c5c3da48853f220d9ddbe14ab`.
+
 Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
@@ -248,17 +266,19 @@ and historical failures remain evidence rather than candidate expectations.
   Opening a new mark before printing can leave an empty mark. First control:
   `public_help_closed_output_has_native_failure_contract`.
 
-The hook HTTP client uses the oracle-pinned **`Python-urllib/3.11` User-Agent**.
-Python's urllib default `Accept-Encoding: identity` and `Connection: close`
-are explicitly dropped by the native transport; no full raw-header equality is
-claimed. **`http-forbidden-input-refused`** rejects bearer C0 control characters,
+The hook HTTP client (`cli/hook_http.rs`, since 2026-10-09) sends urllib's
+request fields: Host as written, the oracle-pinned **`Python-urllib/3.11`
+User-Agent**, `Accept-Encoding: identity`, `Connection: close` and an optional
+Authorization, with no Accept; the CLI harness compares every request field
+exactly by case-insensitive name. **`http-forbidden-input-refused`** rejects bearer C0 control characters,
 DEL and folded values before sending an authenticated payload request. Ordinary
 Latin-1 bearer values retain their encoded bytes; other non-Latin-1 values keep
 the existing refusal. Raw historical Python bearer diagnostics remain retained.
 
-**`hook-absent-accept-wildcard`** permits only absent-oracle Accept versus native
-exactly `*/*` for the 53 recorded hook IDs enumerated in PARITY.md. No other
-Accept difference or unrecorded ID receives this disposition. **`http-field-name-case-insensitive`** associates HTTP field names
+**`hook-absent-accept-wildcard`** permitted only absent-oracle Accept versus
+native exactly `*/*` for the 53 recorded hook IDs enumerated in PARITY.md; the
+2026-10-09 transport sends no Accept, so the disposition is retired for
+current hook captures and stays a historical ledger. **`http-field-name-case-insensitive`** associates HTTP field names
 by lowercase ASCII spelling; distinct-name ordering is free, while same-name value
 order, multiplicity and bytes stay exact. The port-owned comparison helper
 retains raw observations and provides no other header, body or framing waiver.
@@ -563,8 +583,14 @@ credential defaults from the caller's installed client configuration.
 
 Read and write the recorded phase-start schema (55 at the current Phase 1
 pin; historical close-out evidence keeps schema 54) without
-DDL changes, new tables or repurposed columns. Re-pin the oracle to master at
-each phase start; any upstream schema bump follows CLAUDE.md's seven-place
+DDL changes, new tables or repurposed columns. The oracle pin follows master,
+never the reverse: a production change is never held for the port. Re-pin to
+a selected master commit at each phase start and after each batch of production
+merges. Re-pinning is a routine root task: enumerate the selected source and
+counts, regenerate manifests, preserve historical identities, then obtain fresh
+platform-scoped parity and independent review before Rust merges resume. Production
+merges with source-pin-only Parity failures require the maintainer's explicit
+gate exception. Any upstream schema bump follows CLAUDE.md's seven-place
 checklist and is never made by the port itself. Use bound parameters, explicit transaction ownership and
 oracle-equivalent isolation/locking behaviour. Preserve HLC ordering, contender
 selection, audit-chain bytes, mail cursors, lease fencing and FIFO queue rules.
@@ -655,9 +681,28 @@ its seven startup and six concurrent candidate cells require executable bindings
 
 ## Measurement and acceptance
 
+### OS-sensitive surfaces
+
+Both-OS executable proof is required for paths, process spawn and kill, file
+locks, stdio, signals, line endings and the Windows console. Other behavior
+requires Linux proof; hosted Windows CI still compiles and tests the candidate.
+Apply this scope to every open and future cell, including mixed cells containing
+an OS-sensitive surface. This replaces general both-OS proof requirements;
+historical receipts retain their recorded platform, source and scope.
+
+### Review tiers within a PR
+
+Every PR still receives one full independent review. Concurrency,
+authentication, schema, lifecycle, delete paths and dream writes receive full
+review at every freeze. Pure, formatting and read-only cells covered by goldens
+may use sampled cell review, about one in five, within that full PR review.
+This does not replace the independent review of the complete PR or turn source
+preparation into golden coverage. A nightly mutation test is to check that the
+harness rejects injected faults; its job remains design-only until implemented.
+
 Daemon oracle captures and baselines run on Linux; the current phase 0b receipts
 were captured on WSL2, while the production daemon runs in a Linux container.
-Shim and CLI captures run on Windows and Linux. Every capture receipt
+Shim and CLI captures follow the OS-sensitive scope above. Every capture receipt
 records its platform; a missing platform is a validation failure. Historical
 PR #540 captures retain their original commit and platform and cannot stand in
 for the phase 0b pin.
@@ -914,6 +959,97 @@ Only check/list/run are implemented in this candidate. `hold`, `break`,
 the candidate loses those actions until Phase 4. Final hosted acceptance and
 independent review remain pending, so neither CLI-LEASE-core nor full mode
 is marked ported. Date/TZ/UTF-8/JSON and traceback scope above remains in force.
+
+
+## Phase 4 lease hold preparation
+
+The new branch prepares native hold and the full action parser/help surface
+against the pending Phase 2d base. Hold follows an external PID without
+signalling it; its asynchronous mirror preserves local ownership under the
+named [hold-mirror-best-effort rule](PARITY.md#phase-4-lease-hold-preparation).
+The historical hold checkpoint retained break/delegate/designate exit-1
+deferrals. Subsequent operator preparation supersedes those implementation
+deferrals; acceptance of all four actions remains deferred.
+At that checkpoint, no Phase 4 execution, hosted acceptance or new timing
+claim was made; previous runtime receipts retain their original identities.
+Windows format/Clippy/targeted cargo tests and box/hosted execution gates remain
+pending. Neither scoped core nor full CLI-LEASE is promoted by source preparation.
+
+## Shared PostgreSQL client preparation
+
+`shim/src/pg/` uses tokio-postgres 0.7.18 and tokio-postgres-rustls 0.14.0
+with the existing Rustls 0.23.45/AWS-LC stack. This avoids a second OpenSSL
+client stack, an ORM and generated queries. The dedicated `Session` has a
+10-second connection timeout, sets `lock_timeout` to five seconds and selects
+the public search path. Callers borrow its client for queries and transactions
+and must observe commit errors; there is no pool or automatic reconnect. Closing
+sends PostgreSQL Terminate; cancellation drops only this connection.
+
+The DSN grammar is pinned to the single TCP-host URIs written by
+`ops/install-autostart.ps1`, both compose files and the DSN examples in
+`docs/guide/configuration.md`, plus libpq keyword quoting for those same fields.
+Only host, port, user, password, dbname, sslmode and sslrootcert are admitted.
+Unknown configured options and unsupported modes refuse by option name with
+exit 1. Diagnostics omit DSNs, credentials, file paths and driver messages.
+
+`disable` sends no SSLRequest; `prefer` follows the accepted negotiation rule
+below, retaining root checks on its TLS attempt and allowing one fresh plaintext
+retry. Every strict mode requires `S` and a successful TLS handshake. Invalid
+SSLRequest responses refuse before startup/authentication. `prefer` and `require`
+without roots use encryption without CA authentication. An explicit root file,
+or the platform default `root.crt` when no explicit file is selected, enables CA
+verification, including libpq's default-root upgrade for `require`. The custom
+`verify-ca` verifier checks chain, validity and server-auth usage while omitting
+hostname verification. TLS 1.2/1.3 handshake signatures remain verified in every
+encrypted mode. `verify-full` uses Rustls chain and hostname verification.
+
+The named `pg-tls-webpki-hostnames` rule restricts verify-full to matching SAN
+`dNSName`/`iPAddress`. The native refusal identifies the rule and explains that
+libpq accepts matching legacy CN-only/IP-in-dNSName certificates. A disposable
+libpq 18 comparison retains both raw mismatches; they are intentional under this
+rule. No bespoke hostname verifier is added and `verify-ca` is unchanged. The
+`pg_client` fixture checks SAN-based positive/negative cases, both named legacy
+refusals, default roots, ambient refusals and graceful closure. It does not prove
+real database transactions.
+
+The named `pg-dsn-explicit-tls` scope refuses ambient client certificate/key and
+CRL files, PGSSL*/PGTLS* variables and libpq connection/session PG* controls by
+name. Only the platform default root file participates implicitly. The pure
+resolution module retains configured DSN, existing embedded data, then container
+order, and pins the container's own `python -m pseudolife_memory.cli` argv.
+At the shared-client checkpoint, embedded start/stop, container process dispatch
+and native operator SQL were unimplemented. Fixed-clock operator comparisons
+remain a later gate.
+
+Windows transport tests use only owned loopback fake PostgreSQL peers and
+disposable fixture CA files; no bank, daemon or trust store is changed. Linux,
+real-server TLS, full transaction/audit/state comparison, independent review and
+hosted acceptance remain pending. The Phase 2d and hold checkpoint receipts
+retain their original runtime identities.
+
+## Offline break source preparation
+
+The [break preparation](PARITY.md#phase-4-offline-break-source-preparation) adds
+external-DSN transactions and the existing container-host deployment transport.
+The shared client's reviewed TLS policy is unchanged. The embedded lifecycle
+has the named `phase4-embedded-pg-deferred` refusal, and generic failures use
+`native-pg-diagnostics` without driver details or copied interpreter classes.
+Regex 1.13.1 implements the producer's existing secret-shaped-text business
+guard; unsupported look-around is expressed as explicit ASCII boundary and
+tokenize/tokenise checks, preserving match iteration. This dependency does not
+introduce a Python parser or runtime bridge. Audit payloads retain sorted UTF-8
+JSON and timestamp decimal spelling because both are hashed durable state.
+
+At the original source checkpoint `ef0f9a4b`, only locked offline dependency
+metadata and source formatting had been checked; compilation and runtime cells
+were unrun. Its additive fixture plan started with `lease break fixture-missing`
+on an owned disposable bank, whose missing-row result creates no audit/time
+fields. Subsequent mutations require the identical clock seam in both arms,
+all-row/byte comparison and rejecting controls. Delegate/designate were then
+unimplemented; subsequent implementation
+and scoped execution are recorded in [PARITY](PARITY.md#phase-4-delegate-source-preparation).
+Container cancellation, ambiguous COMMIT and full mode acceptance remain
+pending; prior transport measurements retain their original runtime identities.
 
 ## Maintainer sent JSONB read domain
 

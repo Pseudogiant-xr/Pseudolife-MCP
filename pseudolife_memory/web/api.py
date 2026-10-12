@@ -214,10 +214,18 @@ def _serve_static(rel_path: str) -> tuple[int, bytes, str]:
     except ValueError:
         return 403, b"forbidden", "text/plain"
     if target.is_dir():
-        target = target / "index.html"
+        target = (target / "index.html").resolve()
+        try:
+            target.relative_to(STATIC_DIR.resolve())
+        except ValueError:
+            return 403, b"forbidden", "text/plain"
     if not target.is_file():
         # SPA fallback: unknown sub-route -> index.html (hash router handles it).
-        index = STATIC_DIR / "index.html"
+        index = (STATIC_DIR / "index.html").resolve()
+        try:
+            index.relative_to(STATIC_DIR.resolve())
+        except ValueError:
+            return 403, b"forbidden", "text/plain"
         if index.is_file():
             return 200, index.read_bytes(), "text/html; charset=utf-8"
         return 404, b"not found", "text/plain"

@@ -13,10 +13,24 @@ fn script(home: &Home, body: &str) -> std::path::PathBuf {
     let path = home
         .0
         .join(if cfg!(windows) { "codex.cmd" } else { "codex" });
+    #[cfg(windows)]
     std::fs::write(&path, body).unwrap();
+    // Linux refuses to exec a file anyone holds open for writing (ETXTBSY),
+    // and a child another test forks while this process writes the script
+    // keeps a duplicate of the descriptor until its own exec. A shell writes
+    // it instead, so no descriptor of this process ever names the file.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        assert!(
+            std::process::Command::new("/bin/sh")
+                .args(["-c", "printf '%s' \"$2\" > \"$1\"", "sh"])
+                .arg(&path)
+                .arg(body)
+                .status()
+                .unwrap()
+                .success()
+        );
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
     path
@@ -94,8 +108,10 @@ async fn board_doorbell_native_acceptance_preserves_one_pending_notice_until_exa
     );
     bell.watch(BANK, adapter.clone(), false).await;
     bell.observe(BANK, &offered_view()).await;
+    let pending = PendingNotice::new(&directory, BANK).unwrap();
     tokio::time::timeout(Duration::from_secs(3), async {
-        while !output.exists() {
+        // File creation precedes echo's write; acceptance follows queue exit.
+        while !pending.path.with_extension("bell-accepted").exists() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -106,7 +122,6 @@ async fn board_doorbell_native_acceptance_preserves_one_pending_notice_until_exa
         format!("queue --thread {BANK}")
     );
     bell.close().await;
-    let pending = PendingNotice::new(&directory, BANK).unwrap();
     let bytes = state::read(&pending.path, 8192).unwrap();
     let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(record["text"].as_str().unwrap().starts_with(

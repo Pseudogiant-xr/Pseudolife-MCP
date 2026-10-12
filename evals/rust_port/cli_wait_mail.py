@@ -36,6 +36,7 @@ def cases():
         ("bad-digest", b"bad", b"peer\n", b"12\nrung anyone\n", b"0\n"),
         ("bad-ring-reason", b"12", b"peer\n", b"12\nrung anyone!\n", b"0\n"),
         ("long-ring-watermark", b"12", b"peer\n", b"1234567890123\nrung anyone\n", b"0\n"),
+        ("positive-long-ring-watermark", b"12", b"peer\n", b"123456789012\nrung anyone\n", b"0\n"),
         ("missing-ring", b"12", b"peer\n", None, b"0\n"),
         ("no-body", b"12", b"", b"12\nrung anyone\n", b"0\n"),
     ]:

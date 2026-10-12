@@ -10,15 +10,29 @@ use std::{
     time::Duration,
 };
 use tokio_tungstenite::tungstenite::Message;
+type HostGate = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
 async fn host_url(
     uncertain: bool,
     delay: Duration,
+) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
+    host_url_gated(uncertain, delay, None, None).await
+}
+async fn host_url_gated(
+    uncertain: bool,
+    delay: Duration,
+    initialization: Option<HostGate>,
+    verification: Option<HostGate>,
 ) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
     let log = Arc::new(Mutex::new(vec![]));
     let recorded = log.clone();
     let task = tokio::spawn(async move {
+        let mut initialization = initialization;
+        let mut verification = verification;
         let (stream, _) = listener.accept().await.unwrap();
         let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
         while let Some(Ok(Message::Text(text))) = socket.next().await {
@@ -30,7 +44,18 @@ async fn host_url(
             if method == "initialized" {
                 continue;
             }
-            tokio::time::sleep(delay).await;
+            let gate = match method {
+                "initialize" => initialization.take(),
+                "thread/loaded/list" => verification.take(),
+                _ => None,
+            };
+            if let Some((entered, released)) = gate {
+                let _ = entered.send(());
+                let _ = released.await;
+            }
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
             let result = match method {
                 "initialize" => json!({}),
                 "initialized" => continue,
@@ -87,19 +112,72 @@ async fn board_bridge_registry_verification_has_independent_startup_budget() {
     let runtime = runtime(&fixture, true);
     let mut options = options(&runtime, &home, "1");
     options.wake = true;
-    options.timing.startup = Duration::from_millis(300);
-    let (url, log, server) = host_url(false, Duration::from_millis(170)).await;
+    let startup = Duration::from_secs(3);
+    let phase_delay = Duration::from_millis(1700);
+    // Connect, verification and registration each fit; neither adjacent pair
+    // can share one startup budget.
+    assert!(phase_delay < startup && phase_delay * 2 > startup);
+    options.timing.startup = startup;
+    let (answer, mut registration) = Answer::json(
+        200,
+        json!({"agent_id":"fixture-agent","credential":"fixture-agent-key"}),
+    )
+    .gated();
+    fixture.answer("register", answer);
+    let (connect_entered, connect_seen) = tokio::sync::oneshot::channel();
+    let (connect_release, connect_released) = tokio::sync::oneshot::channel();
+    let (verify_entered, verify_seen) = tokio::sync::oneshot::channel();
+    let (verify_release, verify_released) = tokio::sync::oneshot::channel();
+    let (url, log, server) = host_url_gated(
+        false,
+        Duration::ZERO,
+        Some((connect_entered, connect_released)),
+        Some((verify_entered, verify_released)),
+    )
+    .await;
     options.delivery_url = Some(url);
     options.delivery_token = Some("fictional-host-token".into());
     let board = pseudolife_stdio::board::Board::attach_options(runtime, options).await;
-    let pseudolife_stdio::board::Preparation::Forward(call) = board
-        .prepare_call("memory_stats", None, &json!({"threadId":BANK}))
+    // Freeze only the measured phases. A blocking task disables Tokio's idle
+    // auto-advance while real sockets and Windows private-file setup complete;
+    // its wall-clock watchdog also bounds a missing fixture event.
+    let (clock_guard, clock_release) = std::sync::mpsc::channel::<()>();
+    let clock_task = tokio::task::spawn_blocking(move || {
+        let _ = clock_release.recv_timeout(Duration::from_secs(15));
+    });
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
+    let owned = board.clone();
+    let prepare = tokio::spawn(async move {
+        owned
+            .prepare_call("memory_stats", None, &json!({"threadId":BANK}))
+            .await
+    });
+    tokio::time::timeout(startup, connect_seen)
         .await
         .unwrap()
+        .unwrap();
+    tokio::time::advance(phase_delay).await;
+    connect_release.send(()).unwrap();
+    tokio::time::timeout(startup, verify_seen)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::advance(phase_delay).await;
+    verify_release.send(()).unwrap();
+    registration.wait().await;
+    tokio::time::advance(phase_delay).await;
+    registration.release();
+    let pseudolife_stdio::board::Preparation::Forward(call) = prepare.await.unwrap().unwrap()
     else {
         panic!("forward");
     };
     assert!(call.operation.headers.contains_key("x-pl-agent-key"));
+    assert!(started.elapsed() > startup);
+    assert_eq!(started.elapsed(), phase_delay * 3);
+    tokio::time::resume();
+    drop(clock_guard);
+    clock_task.await.unwrap();
     {
         let requests = fixture.requests.lock().unwrap();
         let register = requests

@@ -30,12 +30,15 @@ def expected_stderr(contract, case, url, credential_file=None):
     return text.encode("utf-8")
 
 
-def startup_difference(result, contract, case, url, credential_file, records):
+def startup_difference(result, contract, case, url, credential_file, records, *, compare_stderr=True):
     expected = next(item for item in contract["cases"] if item["case"] == case)
     differences = []
-    if base64.b64decode(result["stderr_b64"], validate=True) != expected_stderr(
-            contract, case, url, credential_file):
+    observed_stderr = base64.b64decode(result["stderr_b64"], validate=True)
+    required_stderr = expected_stderr(contract, case, url, credential_file)
+    if compare_stderr and observed_stderr != required_stderr:
         differences.append({"path": "/stderr", "reason": "startup_stderr_bytes"})
+    if not compare_stderr and bool(observed_stderr) != bool(required_stderr):
+        differences.append({"path": "/stderr", "reason": "startup_required_diagnostic_presence"})
     if result["exit_code"] != expected["exit_code"]:
         differences.append({"path": "/exit_code", "reason": "startup_exit"})
     if len(result["stdout_frames_b64"]) != expected["stdout_frame_count"]:
@@ -48,12 +51,12 @@ def startup_difference(result, contract, case, url, credential_file, records):
     return differences
 
 
-def startup(root, command, contract):
+def startup(root, command, contract, *, selected_source=None):
     from evals.rust_baseline.daemon import private_directory
     from pseudolife_memory import __version__
     from pseudolife_memory.credentials import _write_token_file
 
-    cells, differences = [], []
+    cells, differences, historical_comparisons = [], [], []
     for expected in contract["cases"]:
         case = expected["case"]
         fixture = None
@@ -98,8 +101,14 @@ def startup(root, command, contract):
                                      exercise=exercise, env_extra=extras, boundary_errors=arm == "candidate")
                     records = fixture.records[before:] if fixture else []
                     result.update(arm=arm, era=ERAS[0], case=case, upstream_requests=records)
-                    contract_differences.extend({"case": case, "arm": arm, **difference} for difference in
-                                       startup_difference(result, contract, case, url, credential_file, records))
+                    frozen = startup_difference(result, contract, case, url, credential_file, records)
+                    required = (startup_difference(result, contract, case, url, credential_file, records,
+                                                   compare_stderr=False)
+                                if selected_source is not None else frozen)
+                    if selected_source is not None:
+                        historical_comparisons.append({"case": case, "arm": arm, "informational_only": True,
+                                                       "differences": frozen})
+                    contract_differences.extend({"case": case, "arm": arm, **difference} for difference in required)
                     pair.append(result)
                 differences.extend(retain_stderr(contract_differences, *pair))
                 differences.extend({"case": case, **difference} for difference in judge_with_evidence(*pair, StdioPolicy()))
@@ -111,6 +120,8 @@ def startup(root, command, contract):
                 result["fixture_cleanup"] = cleanup
             cells.extend(pair)
     return {"cells": cells, "differences": differences,
+            "historical_comparisons": historical_comparisons,
+            **({"oracle_head": selected_source["oracle_head"]} if selected_source is not None else {}),
             "policy": "stdio-raw-compared",
             "limitation": "Storage-free startup; remote fixture is an unspecified IPv4 origin, no external host contacted. No updater is executed."}
 
@@ -167,14 +178,15 @@ def concurrent_difference(result):
     return []
 
 
-def run(root, command):
+def run(root, command, *, selected_source=None):
     from evals.rust_baseline.daemon import private_directory
     directory = Path(__file__).parent
     contract_path = directory / "stdio_startup_contract.json"
     orders_path = directory / "stdio_concurrent_orders.json"
     contract = json.loads(contract_path.read_text())
     evidence = json.loads(orders_path.read_text())
-    startup_result = startup(root, command, contract)
+    startup_result = (startup(root, command, contract, selected_source=selected_source)
+                      if selected_source is not None else startup(root, command, contract))
     cells, differences = [], list(startup_result["differences"])
     for era in ERAS:
         for release_order in ("AB", "BA", "together"):

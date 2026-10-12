@@ -1,4 +1,4 @@
-"""Generate lease help from the pinned Python parser, without a bank or daemon."""
+"""Generate lease help from the selected Python parser, without a bank or daemon."""
 from __future__ import annotations
 
 import json
@@ -7,11 +7,13 @@ from pathlib import Path
 import subprocess
 import sys
 
+from .oracle_selection import selected_oracle
 
-ORACLE_HEAD = "3c01bb31abd60178e15dea99adda369b4bbf92fc"
+
+ORACLE_HEAD = "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1"
 ASSET_DIRECTORY = "rust/shim/src/cli/lease/assets"
 ASSETS = tuple(f"{action}_{kind}.txt"
-               for action in ("top", "run", "check", "list")
+               for action in ("top", "run", "hold", "check", "list", "break", "delegate")
                for kind in ("help", "usage"))
 ORACLE_SOURCES = ("__init__.py", "lease_cli.py", "os_lock.py", "daemon_exec.py")
 
@@ -22,19 +24,20 @@ def committed_bytes(root: Path, revision: str, relative: str) -> bytes:
 
 
 def pinned_help(root: Path, scratch: Path) -> dict[str, str]:
-    """Execute the genuine parser from Git's pin using only disposable source."""
+    """Execute the genuine parser from the selected commit using only disposable source."""
     package = scratch / "pseudolife_memory"
+    oracle_head = selected_oracle(root)["oracle_head"]
     package.mkdir(parents=True)
     for name in ORACLE_SOURCES:
         (package / name).write_bytes(committed_bytes(
-            root, ORACLE_HEAD, f"pseudolife_memory/{name}"))
+            root, oracle_head, f"pseudolife_memory/{name}"))
     script = """
 import json
 import sys
 sys.path.insert(0, sys.argv[1])
 from pseudolife_memory.lease_cli import _parsers
 top, run, others = _parsers()
-parsers = {"top": top, "run": run, "check": others["check"], "list": others["list"]}
+parsers = {"top": top, "run": run, **others}
 print(json.dumps({f"{action}_{kind}.txt": getattr(parser, f"format_{kind}")()
                   for action, parser in parsers.items() for kind in ("help", "usage")}))
 """

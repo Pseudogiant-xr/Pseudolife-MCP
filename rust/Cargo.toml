@@ -1,5 +1,5 @@
 [workspace]
-members = ["shim"]
+members = ["shim", "daemon"]
 resolver = "2"
 
 [workspace.package]
@@ -27,7 +27,7 @@ dirs = "6.0.0"
 uuid = { version = "1.27.0", features = ["v4"] }
 rustix = { version = "1.1.5", features = ["fs", "process"] }
 libc = "=0.2.190"
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_UI_Shell", "Win32_Globalization", "Win32_System_WindowsProgramming"] }
 unicode-normalization = "0.1.25"
 chrono = "0.4.45"
 unicode-casefold = "=0.2.0"
@@ -38,7 +38,9 @@ tokio-postgres-rustls = { version = "=0.14.0", features = ["aws-lc-rs"] }
 rustls = { version = "=0.23.45", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
 rustls-pemfile = "2"
 percent-encoding = "2"
-hyper = { version = "=1.11.1", features = ["server", "http1"] }
+regex = "=1.13.1"
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
+hyper = { version = "=1.11.1", features = ["server", "client", "http1"] }
 hyper-util = { version = "=0.1.21", features = ["tokio"] }
 http-body-util = "=0.1.5"
 bytes = "=1.12.1"
@@ -46,3 +48,7 @@ yaml-rust2 = { version = "=0.13.0", default-features = false }
 regex-lite = "=0.1.9"
 serde_stacker = "=0.1.14"
 stacker = "=0.1.25"
+zip = { version = "=4.6.1", default-features = false, features = ["deflate-flate2"] }
+toml = { version = "=0.8.2", default-features = false, features = ["parse"] }
+flate2 = { version = "=1.1.9", default-features = false, features = ["rust_backend"] }
+tar = { version = "=0.4.46", default-features = false }

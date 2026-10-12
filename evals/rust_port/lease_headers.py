@@ -206,17 +206,20 @@ def observe(command, case, directory, oracle_package, home=None):
 
 def run(root, candidate, out, selected=None):
     from .provenance import require_instrument_binding
+    from .oracle_selection import selected_oracle
+    selection = selected_oracle(root)
     binding = require_instrument_binding(root, {
         "evals/rust_port/lease_headers.py": [Path(__file__)],
         "evals/rust_port/lease_help.py": [committed_bytes],
         "evals/rust_port/lease_policy_preparation.py": [forbidden_header, refusal_response],
         "evals/rust_port/provenance.py": [require_instrument_binding],
+        "evals/rust_port/oracle_selection.py": [selected_oracle],
     })
     directory = Path(tempfile.mkdtemp(prefix="lease-header-corpus-"))
     package = directory / "oracle" / "pseudolife_memory"
     package.mkdir(parents=True)
     for name in (*ORACLE_SOURCES, "credentials.py"):
-        (package / name).write_bytes(committed_bytes(root, ORACLE_HEAD, "pseudolife_memory/" + name))
+        (package / name).write_bytes(committed_bytes(root, selection["oracle_head"], "pseudolife_memory/" + name))
     script = ("import sys; sys.path.insert(0,sys.argv[1]); "
               "from pseudolife_memory.lease_cli import main; raise SystemExit(main(sys.argv[3:]))")
     oracle_command = [sys.executable, "-I", "-c", script, str(package.parent)]
@@ -251,7 +254,8 @@ def run(root, candidate, out, selected=None):
                   "passed": passed, "controls_rejected": rejected}
         records.append(record)
         print(json.dumps({"id": case["id"], "passed": passed, "controls_rejected": sum(rejected)}), flush=True)
-    receipt = {"binding": binding, "oracle_head": ORACLE_HEAD, "platform": platform.platform(),
+    receipt = {"binding": binding, "oracle_head": selection["oracle_head"], "oracle_selection": selection,
+               "platform": platform.platform(),
                "python": sys.version, "candidate_sha256": hashlib.sha256(candidate.read_bytes()).hexdigest(),
                "normalizations": [], "scratch": str(directory), "cases": records}
     out.write_text(json.dumps(receipt, indent=2, ensure_ascii=True) + "\n")

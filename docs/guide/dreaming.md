@@ -382,9 +382,12 @@ menu):
   - `claude-opus-5`: the previous default, until 2026-09-29. The 2026-08-02 judged
     comparison that chose Opus over Sonnet (best measured extraction quality) ran on it
     (`evals/results/dreamer-choice-verdict.json`).
-  - `claude-sonnet-5`: balanced.
-  - `claude-haiku-4-5`: fastest, lightest on plan usage.
-  - `claude-fable-5`: the most capable tier.
+  - `claude-sonnet-5-5`: balanced.
+  - `claude-sonnet-5`: the earlier Sonnet.
+  - `claude-haiku-5-5`: fastest, lightest on plan usage.
+  - `claude-haiku-4-5`: the earlier Haiku.
+  - `claude-fable-5-1`: the most capable tier.
+  - `claude-fable-5`: the earlier Fable.
 - OpenAI:
   - `gpt-5.6-terra`: the default, balanced.
   - `gpt-5.6-sol`: flagship.
@@ -432,8 +435,9 @@ steps:
      and fails, rather than reporting success, if no listener appears.
    The shim also honors a concrete `claude-*` model named per request, so
    the Console's **Dreamer** card switches the dreamer live — one click
-   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5` /
-   `claude-haiku-4-5` / `claude-fable-5` (or any `claude-*` name typed in),
+   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5-5` /
+   `claude-sonnet-5` / `claude-haiku-5-5` / `claude-haiku-4-5` /
+   `claude-fable-5-1` / `claude-fable-5` (or any `claude-*` name typed in),
    no shim restart and
    no settings-source flip; alias names like the compose default
    `extractor` keep the launch model.

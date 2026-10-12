@@ -61,6 +61,7 @@ def postgres():
 
 def main():
     from .phase1 import main as judge
+    from .oracle_selection import selected_oracle
     # Forward the judge's public arguments unchanged. This extra receipt is
     # written after the owned PostgreSQL instance has actually stopped.
     if "--out" not in sys.argv:
@@ -72,7 +73,8 @@ def main():
             result = judge()
     finally:
         if cleanup is not None:
-            write_new(output.with_suffix(".postgres.json"), cleanup)
+            write_new(output.with_suffix(".postgres.json"),
+                      {"oracle_head": selected_oracle()["oracle_head"], **cleanup})
     return result
 
 

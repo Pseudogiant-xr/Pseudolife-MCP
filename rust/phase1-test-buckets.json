@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "oracle_commit": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "oracle_commit": "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1",
   "database_schema": 55,
   "policy": "Each file has one bucket. Candidate files route only listed concrete nodes; every other node remains oracle-only. Internal equivalents marked pending establish no Rust parity.",
   "counts": {
-    "internal": 353,
+    "internal": 355,
     "oracle": 68,
     "candidate": 2
   },
@@ -298,6 +298,12 @@
       "bucket": "internal",
       "equivalent": "pending",
       "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_coordination_recovery.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
     },
     {
       "path": "tests/test_codex_coordination_setup.py",
@@ -2077,6 +2083,12 @@
       "bucket": "internal",
       "equivalent": "pending",
       "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_service_dsn_log.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
     },
     {
       "path": "tests/test_service_lock_discipline.py",

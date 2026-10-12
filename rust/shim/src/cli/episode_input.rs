@@ -72,7 +72,8 @@ pub(super) fn parse(text: &str) -> Option<Hook> {
             quoted = !quoted;
         }
     }
-    serde_json::from_str(text).ok()
+    let encoded = super::super::doorbell_seen::json::protect_keys(text);
+    serde_json::from_str(&encoded).ok()
 }
 
 impl<'de> Deserialize<'de> for Hook {
@@ -90,8 +91,9 @@ impl<'de> Deserialize<'de> for Hook {
                 };
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_str() {
-                        "session_id" => hook.key = Some(map.next_value::<Text>()?),
-                        "cwd" => hook.cwd = map.next_value::<Option<Text>>()?,
+                        // parse prefixes every key before serde sees ignored Values.
+                        "\0session_id" => hook.key = Some(map.next_value::<Text>()?),
+                        "\0cwd" => hook.cwd = map.next_value::<Option<Text>>()?,
                         _ => {
                             map.next_value::<serde_json::Value>()?;
                         }
@@ -133,6 +135,19 @@ pub(super) fn quoted(points: &[u32]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn private_number_keys_in_ignored_episode_fields_are_admitted() {
+        // episode_cli.py:36,63: json.loads admits these ignored nested objects.
+        for token in ["not a number", "123"] {
+            let text = format!(
+                r#"{{"session_id":"sess-1","cwd":"/project","other":[{{"$serde_json::private::Number":"{token}"}}]}}"#
+            );
+            let hook = super::parse(&text).unwrap();
+            assert_eq!(super::quoted(&hook.key.unwrap().0), "\"sess-1\"");
+            assert_eq!(super::quoted(&hook.cwd.unwrap().0), "\"/project\"");
+        }
+    }
+
     #[test]
     fn admitted_strings_keep_exact_ascii_json_and_filesystem_units() {
         let hook =

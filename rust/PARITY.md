@@ -1,6 +1,107 @@
 # Behaviour parity register
 
-Current version-branch oracle target: Python 0.17.0 at `3c01bb31abd60178e15dea99adda369b4bbf92fc`, schema 55. Published `95d5402d` passed all 14 checks. Frozen `5220b5ee` now has both-OS named-console and warm-protocol CLI proofs; successor hosted checks and independent review remain pending, so version stays deferred.
+## Backup explicit-DSN and file mode (CLI-BACKUP-DSN)
+
+The native backup leaf (`shim/src/cli/backup/`) implements `backup_cli.py`
+for the explicit `PSEUDOLIFE_MCP_DATABASE_URL` and for file mode (no DSN and
+no embedded bank). Canonical argv: `backup [--data-dir P] [--out P]
+[--keep-days N]`, space-separated values, each option at most once, `P` a
+canonical path (`str(Path(P)) == P`, relative or absolute, no `..` for a run)
+and `N` a plain decimal of at least one minute; plus `--help` at
+`COLUMNS=80`. A missing canonical data dir (including `..` spellings) is
+refused verbatim before anything else.
+
+Contract, checked per answered case by `python rust/cli_harness --row backup`
+against the live Python oracle on disposable homes and a disposable bank, on
+Windows and on Linux (the POSIX symlink member case runs on Linux only):
+exit code; both streams byte-exact apart from the run timestamp in the two
+new file names (validated against the arm's own clock window; two files that
+normalize to one name stay distinct); every file under the home; the state
+archive read back member by member (name, type, mode, uid, gid, mtime as a
+float, size, link target, device major/minor, content hash; uname and gname too on Windows); the
+dump decompressed, with pg_dump's per-run `\restrict` key normalized only
+when the `\restrict` and `\unrestrict` keys agree; and the source bank's rows
+and catalog unchanged. Free: tar header layout, PAX record layout, gzip
+headers and compression bytes. pg_dump is found as Python 3.11 finds it: the
+newest `~/.pg0` bundle, then `shutil.which` (PATH split as text with quoted
+and empty entries kept, `None` for an empty PATH, Windows' current-directory
+rule and `PATHEXT`, macOS `CS_PATH`). Each member copies exactly its stat
+size; a file that shrinks while archived fails the backup. A closed stdout
+exits 120, as CPython's shutdown flush does (declared substitution
+`backup-stdout-closed`: no interpreter trailer).
+
+The member-kind case declares `backup-restoration`: both arms must report a
+Python-extracted archive with no missing or mismatched members, preserved
+hardlink identity and omitted sockets. Restoration observations are compared
+without substitution; matching failures in both arms still fail the gate.
+
+Deferred by name, before any effect: anything that could need the lite tier's
+embedded instance (no DSN and `<data>/embedded_pg/PG_VERSION` present, or no
+`--data-dir`/`PSEUDOLIFE_MCP_DATA_DIR` while the lite default dir exists);
+non-canonical spellings and argv shapes; `..` components in a run; an output
+dir that resolves (symlinks and junctions followed) to the data dir or below
+one of its archived children; a top-level child `Path.resolve()` would refuse
+(a symlink loop); a `--keep-days` under one minute (rotation would race this
+run's new files against the platform clock: Python 3.11 reads the coarse
+system clock on Windows); directory reparse points that escape the source
+tree or form a traversal cycle; Windows directory symlinks without an
+existing absolute directory target shorter than 260 UTF-16 units, or file symlinks to directories (Python
+extraction infers rather than preserves their directory flag); Windows names or link targets that Python's
+UTF-8/surrogateescape archive writer cannot round-trip; unexpected stat errors
+under `~/.pg0`; raw matching rotation names that cannot be printed through
+UTF-8 stdout; and on Windows an existing target with this second's timestamp.
+
+Members include hard links, POSIX FIFOs and device nodes, raw POSIX filename
+and link-target bytes, Windows symlinks and internal directory junctions.
+Sockets are omitted, as Python's tarfile omits them. PAX `hdrcharset=BINARY`
+keeps raw bytes lossless, and member order follows Python's Unicode code
+points including filesystem surrogateescape characters. The member round-trip
+case extracts each arm's actual archive with Python and checks kind, mode,
+numeric ownership, content, link targets and hard-link identity. Linux device
+headers are checked against `/dev/null`; device extraction also has a Linux
+fixture that requires mknod permission in CI and reports an unverified result
+when that permission is unavailable locally. Windows timestamps use the CRT's
+TZ interpretation; rotation compares UTC epoch times and uses Python's Unicode
+case-insensitive glob matching, allowing unrelated Unicode filenames.
+Windows TZ, symlink, junction and Unicode rotation fixtures: pending CI.
+
+Declared divergences: archive uname/gname on POSIX are empty (Python
+looks them up; ownership on restore falls back to uid/gid); Python tracebacks
+after an effect (permissions, a full disk, a pg_dump that cannot start)
+become `backup failed: <error>`; output encodings other than UTF-8, as for
+every CLI leaf.
+
+## Stream D retained cell scope (2026-10-08)
+
+The [historical cell receipt](../evals/results/rust-stream-d-historical-cells-20261009.json)
+binds completed doorbell cells to their exact e122/ec697 sources, per-OS
+images, actual producing receipts and immutable oracle3c. The 17 pairs,
+34 genuine arms and 72 original rejected controls are historical evidence;
+Windows symlink-parent remains capability SKIP/native RED with zero arms and
+controls. Raw artifacts remain retained by hash, with per-case file effects
+and the original control scopes projected without machine identifiers.
+
+Selected exits, empty streams and shared-file bytes remain exact. The positive
+cell checks the nonce-plus-LF receipt and ASCII-zero lock; ordinary prompt
+retains pending bytes, absent prompt-seen receipt and ASCII-zero lock; missing
+and invalid prompts retain pending bytes and create neither receipt nor lock.
+Empty-HOME preserves file/link/directory state with four controls per arm.
+No new outcome rule, substitution or diagnostic normalization is introduced.
+Hook JSON parsed-object equality, unpinned stderr diagnostic semantics and
+existing declared timing/identity bounds retain their existing scopes; these
+cells make no additional hook, wire, timing or durable-state coverage claim.
+
+Dedicated briefing payload, original hook routing, persistent-turn cursor and
+output ordering, capable-host Windows symlinks, distinct real/effective UID,
+remaining corpus/features, real-daemon evidence and measurements remain gaps.
+Observer failures/corrections, sampling limits and first-output observations
+remain distinct from runtime verdicts in the receipt. The final oracle307
+integration target is `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`; these
+historical cells retain oracle3c and establish no current-target parity.
+Current acceptance and publication remain `HELD_PENDING_COORDINATOR_ORACLE307`;
+all existing deferred/retired/ported labels are unchanged.
+
+Selected master oracle target: Python 0.17.0 at `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`, schema 55. The #637 squash commit is selected; fresh both-OS validation, exact-head CI and independent review remain pending; earlier receipts retain their original oracle identities. Published `95d5402d` passed all 14 checks. Frozen `5220b5ee` now has both-OS named-console and warm-protocol CLI proofs; successor hosted checks and independent review remain pending, so version stays deferred.
 Historical phase 1 close-out oracle: Python 0.16.1 at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, schema 54.
 Historical phase 1 receipts retain Python 0.16.0 at `0b015f9279a778f996e71ee78510695e5fee7196`, schema 53.
 Historical phase 0b receipts retain Python 0.15.0 at `3691f5cb75487d3fda54a6bde6fab35dcf32c681`.
@@ -25,6 +126,26 @@ unsupported mappings, and record Python-only cases explicitly.
 Source paths naming a Python module without a root refer to `pseudolife_memory/`;
 test names without a root refer to `tests/`. Registrations below are a source
 inventory and still require runtime schema/transcript evidence.
+
+Semantic by default: non-UTF-8 implicit OS usernames are outside the supported producer domain; native fails before connecting with `PostgreSQL connection failed` (exit 1), while Python/libpq preserves the raw username/database bytes through startup and leaves rejection to the server.
+
+## Phase 4 integration of accepted PostgreSQL repair
+
+Phase 4 merges accepted master
+`bde0cf327dff2cb16736d342938fb9e0c19f7569` through ordinary additive history.
+The shared PostgreSQL module is identical to that accepted source, including
+the libpq18 `prefer` negotiation repair; Phase 4 carries no separate repair.
+Strict TLS modes, explicit DSN/ambient refusal and SAN-only hostname policies
+remain unchanged. The local hold helpers retain Phase 4 visibility and board
+failure codes while receiving master's inherited-SIGINT handling.
+
+The `19f14fa0` hold/break and `90fd0082` delegate/designate receipts remain
+historical. In particular, `90fd0082` inherited the `0341ad38` wrong-CA `prefer`
+defect; its durable operator cells used `sslmode=disable`. They do not validate
+this merged client or imply TLS acceptance. New-image execution, every control
+touching the PostgreSQL client, independent review and hosted acceptance remain
+unrun or pending. The `fixed-clock-replay`, `hold-mirror-best-effort` and exact
+minted-field/name-suffix rules below remain in force. No parity row is promoted.
 
 ## Maintainer sent native candidate
 
@@ -143,26 +264,38 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | SHIM-SDK-PREFLIGHT | 1 | Python-only MCP SDK import preflight is retired in the Rust candidate by the maintainer's 2026-10-05 phase 2 decision, section 1; no Rust SDK diagnostic counterpart. `PORTING.md` no-python-before-first-frame | `test_shim.py` SDK guard nodes remain Python oracle tests; the three manifest rows explicitly record the decision | retired-by-decision |
 | SHIM-DAEMON-LAUNCH | 1 | Explicit interpreter or JSON serve argv replaces Python `sys.executable`; missing configuration uses no-spawn waiting with a truthful named explanation. Malformed explicit argv emits `INVALID_SERVE_COMMAND_NOTE` before health and disables fallback spawning. `lifecycle.rs` | `nonboard_spawn_policy.rs`, `nonboard_startup.rs`; Phase 2b b implemented with original isolated-tree targeted proof in `phase2b-fixes-evidence.json`; current integrated-head acceptance pending in PORT-STATE.md | ported-with-substitution |
 | SHIM-UPDATE-SCHEDULING | 1 | Explicit-interpreter unattended-update launch starts after the first successful stdout frame flush; manual version remedy precedes it. This row covers launch/scheduling only; installer-backed client updates remain Phase 5 deferred. `wire_json.rs`, `lifecycle.rs` | `wire_json.rs` callback ordering/failure tests, `nonboard_final_assertions.rs::built_binary_launches_updater_only_after_first_flushed_frame`, remote updater subprocess test; Phase 2b e isolated sentinel proof in `phase2b-fixes-evidence.json`; final integrated-head acceptance pending | ported-with-substitution |
-| SHIM-CLIENT-UPDATES | 5 | Installer-backed unattended client update execution, installed runtime selection and complete client installation parity. `unattended_update.py`, `runtimes.py`, `update_cli.py` | `test_shim_runtimes.py`, `test_client_environment.py`, `test_update_offer.py`; installed-runtime end-to-end acceptance pending | deferred |
+| SHIM-CLIENT-UPDATES | 5 | Installer-backed unattended client update execution, installed runtime selection and complete client installation parity. `unattended_update.py`, `runtimes.py`, `update_cli.py` | `test_shim_runtimes.py`, `test_client_environment.py`, `test_update_offer.py`; installed-runtime end-to-end acceptance pending; [W3-J preparation](CUTOVER.md) tracks remaining acceptance; opt-in image and YAML evidence only | deferred |
 | SHIM-WAKE-REASON | 1 | Pinned CPython 3.11 Unicode 14 alnum/space predicates preserve bounded wake-reason sanitization, including U+001C–001F splitting; repository claim tables remain pinned. `board/liveness.rs`, `board/unicode14.rs` | `board_ring_reason_uses_python_unicode14_predicates`, `board_ring_unicode14_full_range_contract`, `evals/rust_port/unicode14_reason.py`; Phase 2b c implemented with original isolated-tree hash proof in `phase2b-fixes-evidence.json`; final integrated-head parity gates pending | ported |
 | SHIM-AUTH | 1 | Token-file precedence and reload, unsafe/malformed files fail closed, writer/session/agent/bank/principal headers; sanitized uncertain-write failures without replay. `credentials.py`, `writer_context.py`, `shim.py` | `test_shim_transport_recovery.py` mixed; `test_writer_keying.py`, `test_principals.py`, `test_credentials.py`, `test_session_identity.py` I; add wire rotation and malformed byte probes | ported |
 | SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | ported-with-substitution |
 | CLI-DISPATCH | 1/2 | First slice: help aliases/trailing argv and documented unknown-command exit-2 cases with UTF-8 streams, valid Unicode scalar argv and Windows CRLF/Linux LF. Remaining mode/version/encoding contracts are separately deferred below. `cli.py` and help fixture | Five unchanged `cli-main-process` nodes; current 779c588c Windows/native Linux receipts pass 15 cases, 45 controls per OS and five Python/five Rust outcomes; both help 3x10 pairs and floors linked in PORT-STATE.md; all four Rust/Parity jobs passed in run 37245992895, with actual CI CLI outcomes verified at same-tree merge checkout b5f485c9; 6e936887 evidence retained as historical | ported |
-| CLI-LEASE-core | 2 | Native check/list/run candidate: OS lock truth, FIFO/board mirror, child status and scoped output policies. Four Phase 4 actions excluded. This candidate loses those actions until Phase 4. | Reduced b3 both-OS functional/policy receipts, Windows Ctrl-C and committed check/list samples in [bounded evidence](../evals/results/rust-phase2d-lease-b3e36f70/README.md); subsequent cleanup changes require their own validation, final hosted acceptance and independent review pending | deferred |
-| CLI-LEASE | 4 remainder | Complete action set; `hold`, `break`, `delegate` and `designate` explicitly refuse exit 1 with `deferred in this candidate`, without Python/silent fallback. This candidate loses those actions until Phase 4. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; full mode requires every action native plus its own acceptance | deferred |
-| CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
-| CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
-| CLI-DOCTOR | 2 | Read-only diagnostics default, disposable proof explicit, daemon and identity/transport readiness, no incidental mutation. `doctor_cli.py`, `coordination_proof.py`, `wake_liveness.py` | `test_doctor_cli.py`, `test_doctor_coordination.py`, `test_coordination_proof.py`, `test_coordination_probe.py` I/mixed | deferred |
-| CLI-CONNECT | 2 | Origin/credential validation, verify-before-write, all-or-nothing backup/rollback/dry-run; connect re-points existing client registrations and never creates a registration. `connect_cli.py`, `client_config.py`, `client_updates.py` | `test_connect.py`, `test_client_credentials_setup.py`, `test_client_sessions.py`, `test_client_environment.py`, `test_client_install_ux.py` I/mixed | deferred |
-| CLI-AUDIT | 2 | Export/verify/redact/stats, chain/head semantics, reports and body-expiry distinctions. `board_audit_cli.py`, `board_audit_stats.py`, `storage/coordination.py` | `test_board_audit_cli.py`, `test_board_audit_stats.py`, `test_coordination_audit.py`, `test_coordination_report.py` I/mixed | deferred |
-| CLI-BACKUP | 2 | pg_dump + compressed state, no create-on-backup, exclusions and post-success-only own-file rotation. `backup_cli.py` | `test_backup_cli.py`, `test_ops_backup_integrity.py`, `test_bank_dumps.py` I/mixed; add fake pg_dump subprocess fixtures | deferred |
-| CLI-TRANSFER | 2 | ZIP/JSONL manifest; exact exported/excluded table rosters in the transfer appendix; float4/ids/HLC/JSONB/time/sequences; import refuses a non-empty bank (only meta and builtin relations are exempt), dimension/column mismatches and other live connections. Before importing exported metadata, it clears the target's `curation_listing_spelling_v2` key so only the export's value stands. `transfer_cli.py` | `test_transfer_cli.py` direct calls I/DB, including `test_import_leaves_the_curation_spelling_flag_to_the_export`; add real CLI export/import against disposable banks | deferred |
+| CLI-LEASE-core | 2 | Native check/list/run: OS lock truth, FIFO/board acquisition and mirror cleanup, child status and scoped output policies. Phase 4 actions have their own row. | [CLI differential harness](cli_harness/README.md) `--row lease` ([spec](cli_harness/specs/CLI-LEASE-core.md)): 66-case live/golden corpus on Windows and Linux, coordination rows and sequences after every write, seven source mutants caught. Both hosted Parity jobs passed at `d5372952` in [run 37932590137](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37932590137). See [core closure](#cli-lease-core-closure-2026-10-09). | ported-with-substitution |
+| CLI-LEASE | 4 remainder | Native hold, break, delegate and the designate deprecation alias are prepared in source. Operator actions admit external DSN and the retained container transport; embedded PG has a named refusal. `lease_cli.py`, `os_lock.py` | Original lease/coordination tests remain Python baselines; broader whole-command and durable-state acceptance remain pending, and full mode requires every action plus its own acceptance | deferred |
+| CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | [CLI differential harness](cli_harness/README.md) `--row mail` ([spec](cli_harness/specs/CLI-MAIL.md)): every canonical case exact on Windows (40) and Linux (42) apart from three named rules, 8/8 mutants caught, per-OS goldens, run live by both Parity jobs; see [CLI-MAIL closure](#cli-mail-closure-2026-10-09). The wait-mail producer substitutions stand | ported-with-substitution |
+| CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note and cursor, doorbell prompt-arrival receipt. `briefing_cli.py`, `codex_doorbell_state.py` | [CLI differential harness](cli_harness/README.md) `--row hook` ([spec](cli_harness/specs/CLI-HOOK.md)) against a fixture daemon: every canonical case exact on Windows and Linux apart from named rules, requests compared on the wire; see [CLI-HOOK closure](#cli-hook-closure-2026-10-09). The hook and doorbell substitutions stand | ported-with-substitution |
+| CLI-EPISODE | 2 | Episode start/end CLI exit/output and the POSTed body (session key, cwd, title). `episode_cli.py`, `session_title.py` | [CLI differential harness](cli_harness/README.md) `--row episode` ([spec](cli_harness/specs/CLI-EPISODE.md)): 26 wire cases against a fixture daemon plus 7 bank cases against real oracle daemons on disposable banks, exact on Windows and Linux apart from named rules; see [CLI-EPISODE closure](#cli-episode-closure-2026-10-09). Source-vote titles stay out of scope until their producer lands on master | ported-with-substitution |
+| CLI-DOCTOR | 2 | Read-only diagnostics for canonical `doctor`, `--host`, `--timeout`, `--agent-state`: credentials borrowed from Claude Code and Codex registrations, board and maintainer-passkey probes, `/health`, the MCP handshake through the runtime's own shim, each client's wake path, Codex hooks, Git Bash on Windows, PATH resolution, the coordination snapshot and the saved-instance nonce proof, with the Python report's bytes and exit code. Substitution `doctor-runtime-identity` (accepted, maintainer decision 2026-10-09): the identity fields name the native executable, its directory and its version, and the report omits Python's `mcp` SDK key. `doctor_cli.py`, `wake_liveness.py` | `rust/cli_harness/rows/doctor.py` live differential with a stdlib fixture daemon (requests compared in full; shim traffic tagged positively and summarized; each arm's runtime identity bound to the target the harness launched before it is tokenized), caught mutants including a same-basename wrong-path executable; Windows golden `rust/cli_harness/goldens/doctor.windows.json`; spec `rust/cli_harness/rows/doctor.md`; `shim/tests/cli_doctor_contract.rs` in CI | ported |
+| CLI-DOCTOR-PROOF | 2/4 | `doctor --disposable-proof` with a disposable database: builds a fixture bank and drives the daemon in-process. `coordination_proof.py` | Native returns the canonical refusal without a database and defers with one. Blocker: needs the native daemon (W1-A/W2) | deferred |
+| CLI-CONNECT | 2 | Re-pointing existing JSON-file client registrations (Claude Code user scope plus its `settings.json`, Claude Desktop including MSIX, Gemini CLI): plan and dry run, verify-before-write for every credential (token-file check, authenticated request, MCP handshake through the runtime's own shim, board line), all-or-nothing writes with backups and rollback, `--read-token`, `--json`, restart and post-apply checks; never creates a registration. Substitution: the handshake child is the candidate's own shim. `connect_cli.py`, `client_config.py`, `client_updates.py` | `rust/cli_harness/rows/connect.py` live differential with a fixture daemon and a guard that fails any change to real client configs (Windows 69, Linux 67 cases; connect's own requests compared in full, every field by name and the body, as urllib sends them; fixture credentials generated per run and redacted from every observation), caught mutants including same-outcome credential and request-field controls; Windows golden `rust/cli_harness/goldens/connect.windows.json`; spec `rust/cli_harness/rows/connect.md`; `shim/tests/cli_connect_contract.rs` in CI | ported |
+| CLI-CONNECT-CODEX | 2 | Codex registration (`config.toml`) and `connection.json` through Codex's app-server. `connect_cli.py`, `codex_connection.py` | Native defers by name before any effect. Blocker: no TOML writer or Codex app-server JSON-RPC client in the candidate | deferred |
+| CLI-CONNECT-PAIR | 2 | `connect --code` / `--read-code` (pairing during connect). `connect_cli.py`, `pair_cli.py` | Native defers before any effect. Blocker: connect's own pairing flow (redeem the code, then re-point registrations in the same run) is not ported; the standalone `pair` leaf is (CLI-PAIRING) | deferred |
+| CLI-AUDIT | 2 | Argparse options/help, pathlib diagnostics and Python-domain stored payloads; verify (export file or bank, every event family, body and salt checks, retention cuts, `--expect-head`), export (project, task, agent and time filters; JSON lines) and redact (the producer transaction, refusal codes, fan-out siblings, vacuum and its notes) over an explicit `PSEUDOLIFE_MCP_DATABASE_URL`. `board_audit_cli.py`, `storage/coordination.py` | `rust/cli_harness/rows/audit.py` live differential (current option, archive-error and historical-payload evidence is Linux-only until #726 selects h5-audit) on disposable banks seeded through CoordinationStore (per-arm TEMPLATE copies for redact, DB state compared), with caught mutants; spec `rust/cli_harness/rows/audit.md`; `shim/tests/cli_audit_chain.rs` (oracle export files and reports), `cli_audit_f0.rs`, `cli_audit_float_repr.tsv` (CPython repr table) in CI | ported |
+| CLI-AUDIT-STATS | 2 | `board-audit stats`: the coordination report. `board_audit_stats.py` | Native defers. Blockers: the report carries the installed package version, wall-clock `generated_at` and default window, local-time suite durations, and Python rounding that needs its own qualified match | deferred |
+| CLI-AUDIT-TRANSPORT | 2/3 | The lite tier's embedded bank and the daemon-container path (no or empty DSN), and local-time ISO arguments including the documented date-only `--since`. `board_audit_cli.py` | Native defers by name before any effect. Blocker: native embedded_pg and container transport; local-zone time parsing | deferred |
+| CLI-BACKUP-DSN | 2 | Explicit-DSN pg_dump and file-mode state archive, no create-on-backup, exclusions and post-success-only own-file rotation, canonical argv and paths. `backup_cli.py` | `rust/cli_harness/rows/backup.py` live differential (17 cases on Linux, 16 on Windows: `.pg0` and PATH pg_dump, pg_dump missing and failing, rotation, `--out` shapes, sort orders, read-only and dotfile members, closed stdout, POSIX symlink members) with 11 caught Windows mutants; `shim/tests/cli_backup_contract.rs` (help, refusals, deferrals, file mode) in CI; see "Backup explicit-DSN and file mode" | ported |
+| CLI-BACKUP-LITE | 2/3 | Lite-tier backup through the embedded pg0 instance (attach or start for the duration, stop only what it started). `backup_cli.py`, `storage/embedded_pg.py` | `test_backup_cli.py::test_backup_roundtrip_embedded`; native defers by name before any effect. Blocker: needs native embedded_pg (W1-A/W3) | deferred |
+| CLI-MAINTAINER | 4 | Host passkey administration over an explicit `PSEUDOLIFE_MCP_DATABASE_URL`: `enrol-code` (with and without waiting for redeem or burn), `confirm`/`revoke` by id prefix, `reset --yes` and its refusal, `list` (local times as CPython's `time.localtime`), the schema-v54 table check, refusals and exit codes, and each change's chained `maintainer_key` audit event. Scope: defers before any effect on any SQL failure before the change's COMMIT (Python exits 2 with nothing changed), on `list` when stdout refuses it before any byte left, and on any listing of 8192 encoded bytes or more, whatever stdout is; declared limits: a refused POSIX stdout is classed `BrokenPipeError` or `OSError` only, CPython's default block buffering is assumed (`PYTHONUNBUFFERED` changes the oracle's failure path), and a Windows console takes std's UTF-16 console path (unit-tested; the harness pipes stdout); declared rule `maintainer-terminated-class`: when a waiting `enrol-code`'s backend is terminated, the oracle's exact `OperationalError` line at exit 2 is read as `AdminShutdown` (a psycopg read race), and the native arm is not rewritten. `maintainer_cli.py`, `storage/maintainer.py`, `storage/coordination.py` | `rust/cli_harness/rows/maintainer.py` live differential on disposable, deterministically seeded banks (rows and the audit chain compared; codes, secrets, clock values and hashes validated per arm, including the oracle's `audit_hash` recomputed), with caught mutants; Windows golden `rust/cli_harness/goldens/maintainer.windows.json`; spec `rust/cli_harness/rows/maintainer.md`; `shim/tests/cli_maintainer_contract.rs` in CI | ported |
+| CLI-MAINTAINER-TRANSPORT | 4/5 | `maintainer setup` (daemon health, Docker and Tailscale detection, config write and restart), help, `--poll`, the lite tier's embedded bank and the daemon-container re-run (no or empty DSN), and listings whose local times the native zone cannot reproduce (`TZ` set; on Windows outside the current year or near a DST change). `maintainer_cli.py`, `maintainer_setup.py` | `test_maintainer_setup.py` remains the oracle; native defers by name before any effect. Blockers: native embedded_pg and container transport, the interactive setup flow, CPython's C-runtime zone rules | deferred |
+| CLI-TRANSFER-DSN | 2 | Explicit-DSN export (one read-only REPEATABLE READ snapshot, JSONL members byte-equal to Python json.dumps of psycopg values, manifest) and import into a bank already at this build's schema with the full roster, owned by the importing role and holding no NULL v11 stamps, so Python's ensure_schema would change nothing: refusals and their order, row loading, inverse relations, legacy entry states, backfill, sequence advance. `transfer_cli.py` | `rust/cli_harness/rows/transfer.py` live differential (export and import, post-import DB-state equality of rows, sequences and catalog) with caught mutants; spec `rust/cli_harness/rows/transfer.md`; `shim/tests/cli_transfer_contract.rs` in CI | ported |
+| CLI-TRANSFER-LITE | 2/3 | Export and import through the lite tier's embedded pg0 instance. `transfer_cli.py`, `storage/embedded_pg.py` | Native defers by name before any effect. Blocker: needs native embedded_pg (W1-A/W3) | deferred |
+| CLI-TRANSFER-SCHEMA | 4 | Import into a bank that needs `ensure_schema` work (another schema version, missing tables, NULL v11 stamps, another owner). `transfer_cli.py`, `storage/schema.py` | Native defers by name before any effect. Blocker: needs native ensure_schema (W1-A) | deferred |
 | CLI-MODE-OWNERSHIP | 1/2/3/4/5 | All 26 modes have explicit ownership in the CLI checklist: help/version/shim phase 1; tunnel and coordination-recovery phase 2; channel phase 1/2; doorbell-prompt-seen phase 1/2; serve phase 3/4; embedded phase 3/5; update phase 5. `cli.py`, `tunnel_*.py`, `channel.py`, `coordination_recovery.py` | `test_tunnel_cli.py`, `test_tunnel_service.py`, `test_tunnel_bridge.py`, `test_tunnel_profiles.py`, `test_tunnel_runtime.py`, `test_coordination_recovery.py`, `test_channel.py` I/mixed; no supported mode disappears by implication | deferred |
 | HTTP-SECURITY | 3 | Health public/degraded semantics; MCP/REST bearer gates on UTF-8/Latin-1 bytes, fail-closed map, remote bind/trust policy, DNS/Origin/rebinding, JSON/body limits, error status, redirect refusal. `daemon.py`, `web/api.py`, `principals.py`, `utils/no_redirect.py` | `test_daemon_http.py` P/I; `test_web.py`, `test_principals.py`, `test_extractor_no_redirect.py`, `test_shim_transport_recovery.py`, `test_dim_mismatch_health.py` I/mixed | deferred |
-| HTTP-STATIC | 3 | Root redirect, Console v3 assets at /ui/; /ui/next/ is absent at this pin, traversal/security/content types. `web/api.py`, `web/static/`, `frontend/` | `test_web.py` I/mixed; `test_console_build.py`, `test_console_source_guards.py` A; preserve current Console v3 behavior | deferred |
+| HTTP-SECURITY-ADMISSION | 3 | Front-layer REST/MCP bearer refusals, UTF-8/Latin-1 candidates, duplicate headers, tokenless browser gates, fail-closed maps and guarded remote-bind policy. `web/api.py`, `principals.py`, `daemon.py` | [Admission spec](daemon/spec-http-security.md); 75 ordinary corpus cases, four startup refusals, two debug-only remote scenarios and six named source controls. Both OSes: 79 live/startup and 75 golden cases, 65 guarded live-only remote cases, seven unchanged fixture states and six real controls caught with named status witnesses and no scenario errors. MCP SDK rebinding/bound identity and outbound credential redirect refusal remain HTTP-SECURITY/MCP-MOUNT deferrals. | ported |
+| HTTP-STATIC | 3 | Root redirect, Console v3 assets at /ui/; /ui/next/ is absent at this pin, traversal/security/content types. `web/api.py`, `web/static/`, `frontend/` | [Static spec](daemon/spec-http-static.md), daemon harness `static-build`, `static-paths`, `static-missing`, `static-root-link`: live/golden 69 Windows and 82 Linux cases, committed assets by bytes, isolated startup with unreachable storage, six source mutants caught. Named `lexical-outside-root` and `parent-space-refusal` refusal policies cover noncanonical escapes; linked directory and SPA fallback indexes compare both arms directly without substitution. Package static-directory selection remains W3-J; non-build MIME extensions remain declared. | ported-with-substitution |
 | HTTP-READS | 3 | Every GET Console route including configuration, episodes, graph/review/provenance and telemetry reads. `web/routes.py`, `web/config_io.py` | `test_web.py`, `test_coordination_console.py`, `test_coordination_web.py`, `test_web_hardening.py` I/mixed; add HTTP corpus for every GET route | deferred |
-| PG-HYDRATE | 3 | Exact v53 rows/types/defaults/indexes/extension/vector(1024), idempotent startup/restarts, malformed-state refusal and single writer. `storage/schema.py`, `postgres.py`, `sync.py`, `service.py` | `test_schema_version.py`, `test_schema_ddl_shape.py`, `test_schema_healing.py`, `test_pg_storage.py`, `test_pgvector_compat.py`, `test_fail_closed_hydration.py`, `test_hydrate_capacity.py`, `test_storage_connect.py`, `test_writer_lease.py`, `test_disposable_database_guard.py` I/DB; catalog fixture checks can observe Rust directly | deferred |
-| EMBEDDING | 3 | Qwen 1024/MiniLM 384, document/query asymmetry, dtype, cache, dimension refusal, offline load-only validated ONNX artifacts. `memory/embedding.py`, `onnx_artifacts.py`, `utils/config.py` | `test_embedding_backend.py`, `test_embedding_precision.py`, `test_embedding_asymmetry.py`, `test_query_side_encoding.py`, `test_embedding_dim_guard.py`, `test_embedding_cache.py`, `test_embedding_cpu_dtype.py`, `test_onnx_artifacts.py`, `test_onnx_model_provision.py` I/A; real-model subprocess corpus needed | deferred |
+| PG-HYDRATE | 3 | Generated current schema and complete migration ladder; PostgreSQL v8-v55 constructor/restart catalogs and rows (384-d versions require deliberate migration). Complete entry seating, episodes, canonical loader inputs and identity state; required-loader failures abandon, late clock failures retain stores and retry only reseeding. Live-model entry/Cortex dimensions, exact disposable guards and single writer. `storage/schema.py`, `postgres.py`, `sync.py`, `service.py`; seams in `daemon/spec-pg-hydrate.md` and `daemon/spec-startup-state.md` | `daemon/harness/schema_ci.py` 49 banks / 98 stages, seven unchanged version refusals and five mutants; `startup_ci.py` 19 banks / 38 stages, actual-service clock recovery (three attempts / six DB states), guarded writer recovery and eight mutants, both OSes; canonical-store adoption/ticking and reconnect/flush stay with W2-D/E | ported |
+| EMBEDDING | 3 | Qwen 1024/MiniLM 384, document/query asymmetry, dtype, cache, dimension refusal, offline load-only validated ONNX artifacts. `memory/embedding.py`, `onnx_artifacts.py`, `utils/config.py` | `test_embedding_backend.py`, `test_embedding_precision.py`, `test_embedding_asymmetry.py`, `test_query_side_encoding.py`, `test_embedding_dim_guard.py`, `test_embedding_cache.py`, `test_embedding_cpu_dtype.py`, `test_onnx_artifacts.py`, `test_onnx_model_provision.py` I/A; daemon/harness/run.py embedding, both-OS real vectors and offline fixture; accepted scoped substitutions in daemon/spec-embedding.md | ported-with-substitution |
 | RETRIEVAL | 3 | Five pools, exact cosine/tie order, source/episode/tag/band filters, BM25 fusion, recency/retention, supersession pointers, abstention and strict rerank whole-pool budget. `memory/cms.py`, `miras/`, `bm25.py`, `reranker.py`, `abstain.py` | `test_retrieval_golden.py`, `test_retrieval_pool.py`, `test_retrieval_replay.py`, `test_band_cosine.py`, `test_band_ablation_flat.py`, `test_bm25.py`, `test_cortex_bm25.py`, `test_reranker.py`, `test_reranker_margin_gate.py`, `test_abstain.py`, `test_retention_boost.py`, `test_superseded_visibility.py`, `test_meta_filter.py` I; add exact order corpus, floors alone insufficient | deferred |
 | READ-CORE | 3 | memory_get/recent/fact_get/world_search/lesson_search/history/stats/recall/episode summaries, memory_graph, document_search and memory_consolidation_candidates, compact/verbose/explain payloads. `service.py`, `mcp_server.py`, `memory/recall.py`, `context_builder.py`, cortex/world/lessons | `test_mcp_server.py`, `test_recall.py`, `test_constraint_pinning.py`, `test_cortex.py`, `test_world_cortex.py`, `test_lessons_service.py`, `test_episode_service.py` I/mixed; full MCP response corpus needed | deferred |
 | WRITE-CMS | 4 | Store surprise admission, non-destructive possible conflicts, bounded capacity, explicit supersede/reinstate/consolidate/forget/reinforce semantics and audit lineage. `cms.py`, `contradiction.py`, `consolidation.py`, `compaction.py`, `service.py` | `test_service.py`, `test_consolidation.py`, `test_consolidation_atomicity.py`, `test_correction_atomicity.py`, `test_correction_identity.py`, `test_entry_reinstatement.py`, `test_forget_cascade.py`, `test_access_count_semantics.py`, `test_store_retirement.py`, `test_slot_keyed_supersession.py` I; add before/after rows and restart corpus | deferred |
@@ -171,6 +304,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | WRITE-EPISODES | 4 | Daemon-owned session handles, pointers/tombstones, nested episodes, reap/resume/title stamps, isolated caller identity and inferred outcomes. `episodes.py`, `writer_context.py`, `service.py`, `web/session_hook.py` | `test_session_identity.py`, `test_episodes.py`, `test_episode_service.py`, `test_session_title.py`, `test_outcome_inference.py` I/mixed; add two-client restart/reap corpus | deferred |
 | BACKGROUND | 4 | Autosave/errors, clean-exit flush, release check, heap trim, memory headroom, retry initialization and lock separation/cancellation. `daemon.py`, `service.py`, `release_check.py`, `utils/` | `test_loop_health.py`, `test_service_lock_discipline.py`, `test_init_retry_model_reuse.py`, `test_heap_trim.py`, `test_memory_headroom.py`, `test_update_offer.py`, `test_connection_loss_recovery.py` I/mixed; observed subprocess lifecycle and durable restart cases required | deferred |
 | DREAM | 4 | Pull/ack/commit cursors, scheduled quiescence, retry/fallback/extractor protocol/redirection, atomic run rollback, quarantine, literal gate, digests/chronicle. `service_dream.py`, `memory/dream.py`, `dream_token.py` | `test_dream.py`, `test_dream_acknowledgement.py`, `test_dream_ack_storage.py`, `test_dream_runs.py`, `test_dream_stall.py`, `test_dream_quarantine.py`, `test_dream_chronicle.py`, `test_session_digest.py`, `test_extractor_fallback.py`, `test_extractor_no_redirect.py`, `test_literal_gate.py` I/DB; fake sidecar E2E and ladder evidence | deferred |
+| DREAM-CURSORS | 4 | PostgreSQL cursor engine only: NULL-state classification, source eligibility, signed exact input membership, pull/commit, idempotent acknowledgement, deleted members, monotonic display metadata, typed refusal/persistence failures, pull-only transient retry, transaction rollback and cancelled-waiter recovery. `storage/postgres.py:1459-1644`, `service_dream.py:959-1216`, `dream_token.py`; [contract](daemon/spec-w3h-dream-cursors.md). HTTP/MCP and cycle integration remain in DREAM. | `daemon/harness/dream_cursors.py`: live and golden process boundaries with all-row/catalog comparison after 89 actions; `daemon/harness/test_dream_cursor_cancel.py` compares cancelled commit and next pull with Python's committed bank; nine source controls including cancelled ownership; panic recovery checks the next ordinary pull. Canonical PostgreSQL inputs only; file/embedded mode and unpersisted residents deferred. | ported |
 | CURATION-SAFETY | 3/4 | Read-side auto-dismissal refresh can mutate durable metadata; lesson/world duplicate decisions bind immutable evidence, recheck resident and PostgreSQL row-locked records, commit durable changes before publishing resident stores, and fail closed during reconciliation. Folded-dismissal spelling migration and recovery are write contracts. `curation_safety.py` | `test_curation_safety.py` I/DB; process-boundary equivalents and durable recovery evidence pending | deferred |
 | GRAPH-REVIEW | 4 | NetworkX-derived graph/order, communities, aliases/relations, deep dream, safe cleanup, scoped proposals/merge veto/fold direction, review queue/judges/audit. `graph.py`, `memory/graph_*.py`, `review_*.py`, `relation_quality.py`, `service_dream.py` | `test_graph.py`, `test_graph_store.py`, `test_graph_insight.py`, `test_graph_review.py`, `test_graph_consolidation.py`, `test_deep_dream.py`, `test_merge_queue.py`, `test_review_decisions.py`, `test_review_judgment_freshness.py`, `test_queue_judges_service.py`, `test_entity_proposals.py`, `test_edge_proposals.py`, `test_relation_quality.py` I/DB | deferred |
 | BOARD-STORE | 4 | All 15 actions, FIFO durable leases, nonce/request dedup, mailbox authorization/clock/retention/redaction/hash chain, bank identity/recovery. `coordination.py`, `storage/coordination.py`, `private_state.py` | `test_coordination_integration.py`, `test_coordination_storage.py`, `test_coordination_tools.py`, `test_coordination_auth.py`, `test_coordination_audit.py`, `test_coordination_clock.py`, `test_coordination_recovery.py`, `test_coordination_secrets.py`, `test_coordination_multi_ack.py`, `test_coordination_mail_continuity.py` I/DB/mixed | deferred |
@@ -179,26 +313,32 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | HOOKS | 4 | Eight endpoint authorization/method/output/identity contracts; tokenless Host/Origin gate in `_browser_gate`, skipped when a token is configured (not a peer-address gate); plugin 11 handler entries, eight shell scripts plus multiplexed `lifecycle.ps1`; Codex launcher approval identity. `web/api.py`, `session_hook.py`, `plugin_hooks.py`, `plugin/hooks/`, `ops/setup-codex-hooks.py` | `test_web.py`, `test_session_identity.py`, `test_hooks_digest.py`, `test_codex_hooks.py`, `test_codex_hook_launcher.py`, `test_codex_hook_setup.py`, `test_codex_reapproval.py`, `test_hook_glob_ranges.py`, `test_plugin_packaging.py` I/mixed/A; changing hooks.json definitions imposes renewed user approval; see the [hook acceptance checklist](#hook-endpoints-acceptance-checklist) and [Console hook summary](#complete-console-registration-checklist) | deferred |
 | HTTP-WRITES | 4 | Every POST Console route, coercion/error mapping, config whitelist/live/restart classification, backup preservation. `web/routes.py`, `config_io.py` | `test_web.py`, `test_console_source_guards.py`, `test_correction_interfaces.py`, `test_web_hardening.py` I/mixed; record POST routes and their storage effects | deferred |
 | STORAGE-COMPAT | 3/4/5 | Embedded PG18 lite startup/stable data-dir, files `.pt` state+import/partial restore/weights, Chroma reference-bank ingest/search, parser/chunk rules. `storage/embedded_pg.py`, `migrate.py`, `memory/reference_bank.py`, `document_parser.py`, `utils/atomic_io.py` | `test_embedded_pg.py`, `test_cms_pt_schema.py`, `test_cms_legacy_load.py`, `test_migration.py`, `test_restore_from_pt.py`, `test_atomic_weights.py`, `test_reference_bank.py`, `test_document_parser.py`, `test_document_ingest_batch_bound.py` I/mixed. No simplification is pre-authorized | deferred |
-| OPS-CUTOVER | 5 | CPU/offline images, models, compose byte equality, update backup/rollback/daemon-only health/clients, runtimes beside current sessions, unattended upgrade policy, four release surfaces. `ops/Dockerfile.daemon`, compose copies, `update_cli.py`, `unattended_update.py`, `runtimes.py`, `.github/workflows/` | `test_daemon_image_is_cpu_only.py`, `test_update_cli.py`, `test_ops_update_wrappers.py`, `test_shim_runtimes.py`, `test_unattended_update.py`, `test_client_install_ux.py`, `test_client_credentials_setup.py`, `test_ops_script_modes.py` I/A/mixed; fresh disposable install/update proof, no deploy | deferred |
-| DOCS-CUTOVER | 5 | Guide/provider/tunnel/config/schema/atlas/defaults/help/LLMS and benchmark claim currency, oracle retained pending maintainer retirement. `docs/guide/`, `docs/atlas/`, READMEs, `llms*`, `server.json`, `pyproject.toml`, release manifests | `test_release_ux.py`, `test_atlas_currency.py`, `test_llms_txt.py`, `test_i18n_readme.py`, `test_eval_evidence.py`, `test_extractor_model_lists.py`, `test_repository_claims.py` A; regenerate LLMS after doc edits | deferred |
+| OPS-CUTOVER | 5 | CPU/offline images, models, compose byte equality, update backup/rollback/daemon-only health/clients, runtimes beside current sessions, unattended upgrade policy, four release surfaces. `ops/Dockerfile.daemon`, compose copies, `update_cli.py`, `unattended_update.py`, `runtimes.py`, `.github/workflows/` | `test_daemon_image_is_cpu_only.py`, `test_update_cli.py`, `test_ops_update_wrappers.py`, `test_shim_runtimes.py`, `test_unattended_update.py`, `test_client_install_ux.py`, `test_client_credentials_setup.py`, `test_ops_script_modes.py` I/A/mixed; fresh disposable install/update proof, no deploy; [W3-J preparation](CUTOVER.md) tracks remaining acceptance; opt-in image and YAML evidence only | deferred |
+| DOCS-CUTOVER | 5 | Guide/provider/tunnel/config/schema/atlas/defaults/help/LLMS and benchmark claim currency, oracle retained pending maintainer retirement. `docs/guide/`, `docs/atlas/`, READMEs, `llms*`, `server.json`, `pyproject.toml`, release manifests | `test_release_ux.py`, `test_atlas_currency.py`, `test_llms_txt.py`, `test_i18n_readme.py`, `test_eval_evidence.py`, `test_extractor_model_lists.py`, `test_repository_claims.py` A; regenerate LLMS after doc edits; [W3-J preparation](CUTOVER.md) tracks remaining acceptance; opt-in image and YAML evidence only | deferred |
 | CONFIG-LOAD | 1/2/3/4/5 | YAML path/missing-file defaults, unknown-key filtering, recursive dataclass construction, section-specific load rules and env precedence at each reader. `utils/config.py`, service/daemon/client/ops readers; every dataclass and variable is enumerated below and in `contract-inventory.json` | `test_memory_config.py`, `test_ops_env_example.py`, `test_dream.py`, `test_client_environment.py` I/A; preserve defaults, coercion and validation errors | deferred |
 | BACKGROUND-SWEEP | 4 | `mcp_server.start_dream_sweep` starts once when dream OR retrieval logging is enabled; sweep drives superseded compaction, dream-run journal pruning and retrieval-log pruning even with dreams off; automatic dream remains backlog/quiescence gated. `memory/dream.py:run_sweep_once` | `test_dream.py`, `test_compaction.py`, `test_dream_runs.py`, `test_retrieval_log.py` I/DB; daemon wire/restart equivalents pending | deferred |
-| BACKGROUND-SESSIONS | 4 | `mcp_server.start_session_reaper` idempotence, idle/reap intervals, close/end dream, empty-session resume window and tombstones; `start_background_durability` registers clean-exit flush, autosave and warmup exactly once. `service.py`, `mcp_server.py` | `test_session_identity.py`, `test_episode_service.py`, `test_loop_health.py` I; startup/clean-exit/reap wire cases pending | deferred |
+| BACKGROUND-SESSIONS | 4 | `mcp_server.start_session_reaper` idempotence, idle/reap intervals, close/end dream, empty-session resume window and tombstones; `start_background_durability` registers clean-exit flush, autosave and warmup exactly once. `service.py`, `mcp_server.py` | `test_session_identity.py`, `test_episode_service.py`, `test_loop_health.py` I; native scheduling/reaper source and unit coverage added, daemon reap/restart and writer integration still pending; see background-duty preparation below | deferred |
 | HEALTH | 3 | Open /health payload mandatory and conditional fields and 200/503/500 mapping listed below; bank fingerprint only after successful DB ping; warnings that leave status ok remain non-fatal. `daemon.py:_build_health_payload`, `web/api.py` | `test_daemon_http.py`, `test_dim_mismatch_health.py`, `test_daemon_moved_fence.py` I/P; network health corpus pending | deferred |
 | MCP-MOUNT | 3 | /mcp and /mcp/* pass to SDK after bearer gate; a supplied bound identity must resolve an authenticated principal and match the coordination context, failing closed before forwarding to `mcp_app`, including on open loopback installs. Streamable HTTP mount and token-aware transport security: tokenless DNS-rebinding protection allows loopback Host/Origin patterns; configured auth disables SDK rebinding protection. `mcp_server.transport_security_for`, `build_streamable_http_app`, `daemon.py`, `web/api.py` | `test_daemon_http.py`, `test_mcp_client_neutrality.py`, `test_web.py` I/P; negotiate and probe mount over HTTP | deferred |
 | DISPOSABLE-GUARDS | 2/3/4/5 | `storage/schema.py:refuse_production_database` rejects known production names after stripping trailing slashes and casefolding; unresolved production identity, including the literal `<unresolved>` sentinel, fails every check closed. `assert_disposable_database` asks the connected server for its actual database and applies that same refusal before reap/DDL/truncate. It does not impose a disposable-name prefix allowlist. Existing guards precede destructive work. | `test_disposable_database_guard.py`, `test_bench_production_port_guard.py` I/DB; equivalent Rust refusal tests pending | deferred |
 | SEARCH-COMPACTION | 3 | `memory_search` compact payload uses `memory.mcp.entry_text_chars` (600 default), literal `truncated: true` only when own text is clipped; verbose bypasses compaction. `replaced_by` is {id, at, preview, verified, current}, preview 120 chars; null id/date and false current remain distinct. Full text available via memory_get. `mcp_server.py:_compact_entry`, `_replaced_by` | `test_mcp_server.py`, `test_superseded_visibility.py` I; compact/verbose/successor wire corpus pending | deferred |
 | CONTRADICTION | 4 | Structured-slot identity first, then negation asymmetry, affirmative replacement and anchor-tier state transition heuristics; optional bounded NLI scorer is implemented but unwired by service. Detection admits possible conflicts and never retires whole notes automatically. `memory/contradiction.py`, `memory/nli.py`, `memory/cms.py`, `service.py` | `test_contradiction_cost.py`, `test_service.py`, `test_store_retirement.py` I; four paths and missing-scorer equivalents pending | deferred |
-| HTTP-BODY-LIMITS | 3/4 | Per-route byte limits and /api/agents?view=coordination response selection listed below; wrong methods, oversized and malformed bodies preserve oracle statuses. `web/api.py:_body_limit`, `web/routes.py` | `test_web_hardening.py`, `test_coordination_web.py`, `test_coordination_console.py`, `test_pair_endpoint.py` I; additive HTTP boundary cases pending | deferred |
-| PRINCIPALS-V53 | 1/2/3/4 | Durable principals, SHA-256 token/code storage, refresh/exclusion rules, expiry/revocation and fail-closed unavailable identities; invited caller operator restrictions. `principal_store.py`, `principals.py`, `storage/schema.py` | `test_principal_store_pg.py`, `test_stored_principals.py`, `test_stored_principals_daemon.py`, `test_stored_principals_mcp.py`, `test_stored_principals_daemon_wiring.py` I/DB | deferred |
-| CLI-PAIRING | 2/3/4 | invite principal creation/list/revoke; pair mints owner-only local token, sends only hash to POST /api/pair, updates existing registrations; browser-origin refusal, uniform pairing_refused, concurrency/rate budget, unavailable mapping. `invite_cli.py`, `pair_cli.py`, `web/api.py` | `test_invite_cli.py`, `test_pair_cli.py`, `test_pair_endpoint.py` I/mixed | deferred |
-| CLI-EXPOSE-MOVE | 2/3/5 | expose requires token and owns only its Tailscale forward; move final stopped-daemon backup, source fencing, restore/row verification, one destination start, client re-pointing and rollback; moved/unfinished move startup refusal. `expose_cli.py`, `move_cli.py`, `daemon.py:moved_refusal` | `test_expose_cli.py`, `test_move_cli.py`, `test_daemon_moved_fence.py` I/mixed; disposable host stand-ins pending | deferred |
+| HTTP-BODY-LIMITS | 3/4 | Per-route byte limits and /api/agents?view=coordination response selection listed below; wrong methods and oversized bodies preserve oracle statuses. Malformed/non-object SessionEnd bodies deliberately return native 400 `invalid_json` where Python returns 200 `{ok:true}` without writes, so a close that did not happen is never acknowledged; non-object SessionEnd uses `invalid_json` while other REST routes use `body_must_be_object`. `web/api.py:_body_limit`, `web/routes.py` | [Admission spec](daemon/spec-http-body-limits.md); daemon harness `body-limits`, `body-view-open`, `body-pair-budget`, `body-text-window`: 132 current live/golden cases (92/13/21/6), including 16 invalid SessionEnd probes and fixed/chunked `{"session_id": NaN}` strict-domain checks; Windows and Linux CI run the row. Fixed/chunked wire boundaries and bounded early-refusal cleanup, four source controls and an early-read stream control. This row closes front-layer limits, admission and error selection; authenticated roster/session/board handlers remain named W2-D/E/F deferrals. Unreachable storage isolates the probes. | ported-with-substitution |
+| PRINCIPALS-V53 | 1/2/3/4 | Durable principal service operations, SHA-256 token/code storage, refresh/exclusion rules, expiry/revocation, fail-closed resolution and invited-caller operator policy. Store + policy closed; daemon gate invocation deferred to HTTP-SECURITY and CLI-PAIRING-ENDPOINT; native invite/pair CLI coverage is recorded separately below. Store boundary: `daemon/spec-principals.md`; tier mapping remains MCP-TIER/MCP-MOUNT. `principal_store.py`, `principals.py`, `storage/schema.py` | `test_principal_store_pg.py`, `test_stored_principals.py`, `test_stored_principals_daemon.py`, `test_stored_principals_mcp.py`, `test_stored_principals_daemon_wiring.py` I/DB; `daemon/harness/principals.py` live/golden DB comparison and eight source mutants | deferred |
+| CLI-PAIRING | 2 | `invite` create, `--list` and `--revoke` over an explicit `PSEUDOLIFE_MCP_DATABASE_URL` (daemon `/health` auth, schema and bank confirmation; the principal store's SQL; reports, JSON and exits) and `pair` (owner-only minted token file, hash-only `POST /api/pair` without Origin or Authorization, the outcome table with retries, the kept file on an unknown outcome, verification and the report). `invite_cli.py`, `pair_cli.py`, `principal_store.py` | `rust/cli_harness/rows/invite.py` and `pair.py` live differentials (per-arm disposable banks with DB state compared; a fixture daemon with the real response shapes; owner-only checked with the oracle's `check_token_file`), with caught mutants; specs `rust/cli_harness/rows/invite.md`, `pair.md`; `shim/tests/cli_pairing_contract.rs` in CI | ported |
+| CLI-PAIRING-CONTAINER | 2/3 | `invite` without a DSN: the lite tier's embedded bank, the `docker exec` re-run in the daemon container and the psql fallback for `--list`/`--revoke`; https, proxied or terminal-prompt `pair` shapes. `invite_cli.py`, `pair_cli.py` | `test_invite_cli.py`, `test_pair_cli.py` remain the oracle; native defers by name before any effect. Blocker: native embedded_pg and container dispatch | deferred |
+| CLI-PAIRING-ENDPOINT | 3/4 | The daemon side of pairing: browser-origin refusal, uniform `pairing_refused`, concurrency and rate budget, unavailable mapping. `web/api.py` | `test_pair_endpoint.py`; the `POST /api/pair` route row | deferred |
+| CLI-TEST-LOGIN | 2 | `test-login create` for canonical argv, through `--admin-url` (the shared PostgreSQL client) and the `docker exec` psql container path: refusals before any change (exit 2/4), the SCRAM-only role change in one transaction, leftover hand-over, template1 CONNECT and vector, the owner-only staged login file, text and `--json` reports, the post-change check. `pseudolife_memory/test_login_cli.py` | `rust/cli_harness/rows/test_login.py` live differential on throwaway pg0 clusters per arm (`--admin-url`) and disposable `pseudolife-pg:18` containers per arm (container path), comparing roles with attributes and configs, memberships, database owners and ACLs, template1 extensions, the validated login and the effective file ACL; a guard keeps every case off the stack container; caught mutants; spec `rust/cli_harness/rows/test_login.md`; `shim/tests/cli_test_login_contract.rs` in CI | ported |
+| CLI-EXPOSE-MOVE | 2/3/5 | expose requires token and owns only its Tailscale forward; move final stopped-daemon backup, source fencing, restore/row verification, one destination start, client re-pointing and rollback; moved/unfinished move startup refusal. `expose_cli.py`, `move_cli.py`, `daemon.py:moved_refusal` | `test_expose_cli.py`, `test_move_cli.py`, `test_daemon_moved_fence.py` I/mixed; disposable host stand-ins pending; `move`'s refusals before any effect are ported as CLI-MOVE-REFUSALS, and the move itself defers by name before any effect. Move blockers: the hardcoded `SOURCE_URL` (127.0.0.1:8765, no environment seam) that a harness cannot aim away from a live daemon, about 40 docker and ssh stand-in answers, the Python-specific `connect` re-run, signal-driven rollback | deferred |
+| CLI-TUNNEL-STATUS | 2 | Read-only `tunnel` subset: `status [--json]` for a saved profile with no process record (pending/ready, key presence on POSIX, expiry, refresh records), `update` with no profiles or only pending ones, the `verify` refusals (unfinished setup; ready with a key but no launch record) and the `setup` refusals before its handshake (name, ambiguous credentials, endpoint, tunnel and organization id, expiry), corrupt, unsafe or missing profiles. `tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_bridge.py` | `rust/cli_harness/rows/tunnel.py` live differential (disposable homes and profile dirs; a recording listener as every daemon URL; a metadata-only guard on the real `~/.pseudolife-mcp`; the child's environment preflighted), with caught mutants; spec `rust/cli_harness/rows/tunnel.md`; `shim/tests/cli_tunnel_contract.rs` in CI | ported |
+| CLI-TUNNEL-RUNTIME | 2/3/5 | The rest of `tunnel`: `setup` past its handshake, `doctor`, `verify` success, `run`, `start`, `stop`, `shim`, `service` (including `preview`), `update` with ready profiles, status with a process record, and any key-bearing shape needing Windows DPAPI. `tunnel_cli.py`, `tunnel_runtime.py`, `tunnel_service.py`, `tunnel_bridge.py` | `test_tunnel_cli.py` remains the oracle; native defers by name before any effect. Blockers: the hard-coded vendor runtime download, the daemon handshake subprocess, live-process identity, host launcher discovery (`stable_command`), service managers, Windows DPAPI unprotect, challenge and receipt writes | deferred |
+| CLI-MOVE-REFUSALS | 2 | `move`'s refusals before any effect: argparse help and the missing `--to` usage at `COLUMNS=80`, an invalid `--target-url`, an empty, whitespace or C0-control `--to`, a CR/LF `--target-checkout`; every argv that passes them defers before any I/O. `move_cli.py` `_parser`, `main`, `Mover.run` | `rust/cli_harness/rows/move.py` live differential (the oracle runs only on refusing argv; valid argv runs against a verified stub, with proxies recorded and no docker or ssh on PATH), with caught mutants; spec `rust/cli_harness/rows/move.md`; `shim/tests/cli_move_contract.rs` (help, refusals, deferrals, no connection) in CI | ported |
 | MAIL-RING-V53 | 1/2/4 | wait-mail wakes on an authorized daemon ring, plain addressed mail never wakes; digest/watermark cleanup, mailbox attribution to parent/subagent, generation/attachment continuity and optional Codex mailbox-tool approval. `wait_mail_cli.py`, `coordination_adapter.py`, `ops/setup-codex-hooks.py` | `test_wait_mail_cli.py`, `test_coordination_adapter.py`, `test_codex_subagent_stop.py`, `test_codex_hook_setup.py` I/mixed | deferred |
-| OPS-INSTALL-RESTORE | 5 | install.sh/ps1; install-autostart.ps1; install-shim-autostart.sh/ps1 and install-codex-shim-autostart.sh/ps1; install-hook.sh/ps1; restore.sh/ps1 and restore_from_pt.py; preflight.sh/ps1; migrate-pg18.ps1; backup.sh/ps1 and install-backup-task.ps1; prune-rollbacks.sh/ps1, prune-build-cache.sh/ps1 and install-cache-retention.ps1; register_claude_desktop.py; setup-codex-coordination.py; update.sh/ps1/update.py/update_clients.py. Preserve checks/refusals/rollback/platform and client ownership. `ops/` | `test_ops_script_modes.py`, `test_ops_backup_integrity.py`, `test_ops_restore_rehearsal.py`, `test_ops_restore_skips_held.py`, `test_ops_prune_rollbacks.py`, `test_ops_prune_build_cache.py`, `test_ops_install_backup_task.py`, `test_ops_install_cache_retention.py`, `test_ops_update_wrappers.py`, `test_client_install_ux.py` I/A/mixed | deferred |
+| OPS-INSTALL-RESTORE | 5 | install.sh/ps1; install-autostart.ps1; install-shim-autostart.sh/ps1 and install-codex-shim-autostart.sh/ps1; install-hook.sh/ps1; restore.sh/ps1 and restore_from_pt.py; preflight.sh/ps1; migrate-pg18.ps1; backup.sh/ps1 and install-backup-task.ps1; prune-rollbacks.sh/ps1, prune-build-cache.sh/ps1 and install-cache-retention.ps1; register_claude_desktop.py; setup-codex-coordination.py; update.sh/ps1/update.py/update_clients.py. Preserve checks/refusals/rollback/platform and client ownership. `ops/` | `test_ops_script_modes.py`, `test_ops_backup_integrity.py`, `test_ops_restore_rehearsal.py`, `test_ops_restore_skips_held.py`, `test_ops_prune_rollbacks.py`, `test_ops_prune_build_cache.py`, `test_ops_install_backup_task.py`, `test_ops_install_cache_retention.py`, `test_ops_update_wrappers.py`, `test_client_install_ux.py` I/A/mixed; [W3-J preparation](CUTOVER.md) tracks remaining acceptance; opt-in image and YAML evidence only | deferred |
 | OPS-MAINTENANCE | 5 | `ops/migrate_embeddings.py`: dry-run default, backup/daemon refusal gates and vector/schema migration; `ops/dedup_cortex.py`: dry-run/apply supersession, writer-lease refusal and changed-slot persistence; `ops/retire_by_writer.py`: dry-run/apply writer/session retirement; `ops/backfill_edge_confidence.py`: dry-run/apply confidence backfill; `ops/migrate_drop_age.py`: immediate AGE extension removal; `ops/measure_reverify_population.py`: consistent read-only counts and text/JSON output. Preserve each script's distinct mutation/refusal contract | `test_migrate_embeddings.py`, `test_dedup_cortex_script.py`, `test_writer_keying.py`, `test_backfill_edge_confidence.py`, `test_trace_invalidations_storage.py` I/DB/mixed; no dedicated `migrate_drop_age.py` test at the pin; public process and Rust evidence pending | deferred |
-| OPS-IMAGES | 5 | Dockerfile.extractor sidecar model/config/health contract; Dockerfile.pg PostgreSQL18/pgvector build/runtime contract; preserve daemon CPU/offline and compose byte equality. `ops/Dockerfile.extractor`, `ops/Dockerfile.pg`, `ops/Dockerfile.daemon` | `test_daemon_image_is_cpu_only.py`, `test_update_cli.py`, `test_extractor_model_lists.py` A; disposable image proofs pending | deferred |
+| OPS-IMAGES | 5 | Dockerfile.extractor sidecar model/config/health contract; Dockerfile.pg PostgreSQL18/pgvector build/runtime contract; preserve daemon CPU/offline and compose byte equality. `ops/Dockerfile.extractor`, `ops/Dockerfile.pg`, `ops/Dockerfile.daemon` | `test_daemon_image_is_cpu_only.py`, `test_update_cli.py`, `test_extractor_model_lists.py` A; disposable image proofs pending; [W3-J preparation](CUTOVER.md) tracks remaining acceptance; opt-in image and YAML evidence only | deferred |
 | PLUGIN-COMMANDS | 2/4/5 | plugin/commands/dream.md and memory-status.md user workflows; plugin/.claude-plugin/plugin.json identity and release.json release metadata; hooks.json 11 entries/eight shell scripts/lifecycle.ps1; PreToolUse subagent-board-guard allows list/default agents and receive-only mail, denies board writes/send/ack on parent address. `plugin/`, `plugin_hooks.py` | `test_plugin_packaging.py`, `test_subagent_board_guard.py`, `test_subagent_board_hook.py`, `test_hooks_digest.py`, `test_codex_reapproval.py` A/I/mixed; cross-reference HOOKS and hook acceptance checklist | deferred |
-| ONNX-PREREQUISITE | 3 | pyproject.toml onnx-extra comment says bit-identical embeddings; docs/guide/configuration.md says default Qwen has no supplied ONNX artifact. Packaging/docs disagreement remains unchanged here; phase 3 requires identified same graph/tokenizer, measured error and maintainer docs resolution before accepting embedding parity. | `test_onnx_artifacts.py`, `test_onnx_model_provision.py`, `test_embedding_backend.py` I/A; no accepted tolerance or equivalence | deferred |
+| ONNX-PREREQUISITE | 3 | pyproject.toml onnx-extra comment says bit-identical embeddings; docs/guide/configuration.md says default Qwen has no supplied ONNX artifact. Packaging/docs disagreement remains unchanged here; phase 3 requires identified same graph/tokenizer, measured error and maintainer docs resolution before accepting embedding parity. | `test_onnx_artifacts.py`, `test_onnx_model_provision.py`, `test_embedding_backend.py` I/A; W3 measured existing fp32 export with accepted bounds (see daemon/spec-embedding.md); default artifact provisioning remains W3-J cutover blocker | deferred |
 
 ## Per-phase selection and acceptance gaps
 
@@ -524,27 +664,166 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 | embedded | 3/5 | deferred | Outside client leaves; in-process `mcp_server.py` with storage/models/install behavior; `test_mcp_server.py` internal pool |
 | channel | 1/2 | deferred | Phase 1 process boundary; internal remainder `test_channel.py::test_channel_serializes_simultaneous_writes`, `test_channel_startup_failure_closes_output_without_opening_inbox`; inherited Phase 1 equivalents and receipts remain separately governed |
 | coordination-recovery | 2 | deferred | Requested A, actual direct PostgreSQL via `coordination_recovery.py`/CoordinationStore; Phase 4 recovery transaction; `test_coordination_recovery.py::test_recovery_revokes_and_rebinds_private_state_without_exposing_key`, `test_rebind_state_failure_rolls_back_credential_issuance` |
-| board-audit | 2 | deferred | Requested A, direct PostgreSQL/container operator path in `board_audit_cli.py`; Phase 3 reads/4 redact; `test_board_audit_cli.py::test_export_writes_json_lines_filtered_by_task_agent_and_time`, `test_verify_prints_the_head_and_fails_on_tampering_but_an_archive_still_verifies` |
-| briefing | 2 | deferred | A HTTP/filesystem in `briefing_cli.py`; `test_briefing.py::test_briefing_no_daemon_prints_nothing`, `test_hook_json_serves_the_session_start_core_not_the_bare_briefing`; internal fakes need process equivalents |
-| prompt-hook | 2 | deferred | A HTTP/private watermark in `briefing_cli.py`; `test_memory_changes_hook.py::test_prompt_hook_prints_only_changes_and_advances_its_cursor`, `test_prompt_hook_prints_nothing_when_it_cannot_save_its_cursor`; internal fakes need process equivalents |
-| doctor | 2 | deferred | A offline/HTTP/MCP subprocess checks in `doctor_cli.py`; public `test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`; `test_doctor_cli.py::test_doctor_hands_the_registration_credential_to_the_handshake` internal; adapter and corpus pending |
-| connect | 2 | deferred | B installed-shim handshake/config transaction (`connect_cli.py`); `test_connect.py::test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_directory`, `test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved`; process seam audit pending |
-| tunnel | 2 | deferred | B operator/runtime/bridge/network consent (`tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_runtime.py`, `tunnel_bridge.py`); internal `test_tunnel_cli.py::test_setup_resumes_without_erasing_key_consent_or_local_config`, `test_handshake_failure_redacts_transport_output_and_does_not_write`; additive process fixtures pending |
+| board-audit | 2 | deferred | Canonical verify, export and redact over an explicit DSN ported as CLI-AUDIT (harness row `audit`); stats (CLI-AUDIT-STATS) and the embedded/container transports (CLI-AUDIT-TRANSPORT) defer; Requested A, direct PostgreSQL/container operator path in `board_audit_cli.py`; Phase 3 reads/4 redact; `test_board_audit_cli.py::test_export_writes_json_lines_filtered_by_task_agent_and_time`, `test_verify_prints_the_head_and_fails_on_tampering_but_an_archive_still_verifies` |
+| briefing | 2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09) |
+| prompt-hook | 2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09) |
+| doctor | 2 | deferred | Read-only diagnostics ported as CLI-DOCTOR (harness row `doctor`, runtime-identity substitution); `--disposable-proof` with a database (CLI-DOCTOR-PROOF) defers; A offline/HTTP/MCP subprocess checks in `doctor_cli.py`; public `test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`; `test_doctor_cli.py::test_doctor_hands_the_registration_credential_to_the_handshake` internal; adapter and corpus pending |
+| connect | 2 | deferred | JSON-file clients ported as CLI-CONNECT (harness row `connect`, own-shim handshake substitution); Codex (CLI-CONNECT-CODEX) and pairing codes (CLI-CONNECT-PAIR) defer; B installed-shim handshake/config transaction (`connect_cli.py`); `test_connect.py::test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_directory`, `test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved`; process seam audit pending |
+| tunnel | 2 | deferred | The read-only status, pending-only update and pre-effect refusals ported as CLI-TUNNEL-STATUS (harness row `tunnel`); the runtime (CLI-TUNNEL-RUNTIME) defers before any effect; B operator/runtime/bridge/network consent (`tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_runtime.py`, `tunnel_bridge.py`); internal `test_tunnel_cli.py::test_setup_resumes_without_erasing_key_consent_or_local_config`, `test_handshake_failure_redacts_transport_output_and_does_not_write`; additive process fixtures pending |
 | update | 5 | deferred | Outside client leaves; release/install/runtime transactions in `update_cli.py`; `test_update_cli.py`/`test_client_install_ux.py` pools |
-| backup | 2 | deferred | C Phase 3/4; `backup_cli.py` imports embedded_pg, resolves direct DSN and runs pg_dump; `test_backup_cli.py::test_file_mode_backup_archives_state_only`, `test_dumpless_run_never_rotates_dumps`, `test_backup_roundtrip_embedded`; file-only coverage cannot accept whole mode |
-| export | 2 | deferred | C Phase 3; `transfer_cli.py` direct psycopg/schema/vector text, torch-free at CLI module; `test_transfer_cli.py::test_export_import_roundtrip_preserves_every_table`, `test_export_skips_transient_meta_and_telemetry` |
-| import | 2 | deferred | C Phase 4 direct psycopg durable writes; `test_transfer_cli.py::test_import_refuses_a_nonempty_bank`, `test_import_refuses_while_other_connections_hold_the_bank`, `test_import_refuses_embedding_dim_mismatch`, `test_import_leaves_the_curation_spelling_flag_to_the_export` |
-| episode-start | 2 | deferred | A HTTP POST `/api/episode/start` in `episode_cli.py`; `test_episode_cli.py::test_daemon_down_is_silent_exit_zero`, `test_parses_session_key_from_stdin`, `test_post_does_not_forward_the_bearer_across_a_redirect`; stdin/HTTP process fixtures pending |
-| episode-end | 2 | deferred | A HTTP POST `/api/episode/end` in `episode_cli.py`; same `test_episode_cli.py` nodes as episode-start; action-specific process fixtures pending |
-| wait-mail | 2 | deferred | A private digest/seen/WaitListener (`wait_mail_cli.py`); `test_wait_mail_cli.py::test_a_rung_marker_ends_the_wait_once`, `test_non_ascii_peer_text_reaches_stdout_byte_for_byte`, `test_missing_digest_file_exits_2_and_says_what_to_do`; bounded disposable process fixtures pending |
-| doorbell-prompt-seen | 1/2 | deferred | A receipt correlation/private filesystem lock (`codex_doorbell_state.py`); internal `test_codex_doorbell.py::test_prompt_hook_arrival_racing_queue_acceptance_does_not_restore_pending`, `test_a_linked_prompt_receipt_cannot_release_the_queue`; process equivalents pending |
-| lease | 2 | deferred | Requested A; check/list/run/hold filesystem+HTTP (`lease_cli.py`, `os_lock.py`), break/delegate direct CoordinationConnection/CoordinationStore deferred Phase 4; `test_lease_cli.py::test_check_says_free_and_exits_0_without_a_board`, `test_check_exits_1_while_the_local_lock_is_held`, `test_hold_keeps_the_lease_while_the_pid_lives_then_releases`; operator `test_lease_cli_board.py::test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it`, `test_the_operator_grants_a_projects_delegate`; `--for 7d` and hold grammar retained in deferred scope |
-| invite | 2 | deferred | B direct operator SQL/psql/container (`invite_cli.py`); internal `test_invite_cli.py::test_an_invite_prints_the_code_once_and_stores_only_its_hash`, `test_a_malformed_name_is_a_usage_error`; direct-bank effect deferred Phase 4, process seam pending |
-| pair | 2 | deferred | B HTTP pairing/owner-only token/retry (`pair_cli.py`); `test_pair_cli.py::test_read_code_takes_the_code_from_stdin`, `test_an_unknown_outcome_keeps_the_file_and_names_it`; stdin and retry process fixtures pending |
+| backup | 2 | deferred | Explicit-DSN and file mode ported as CLI-BACKUP-DSN (harness row `backup`); the lite tier (CLI-BACKUP-LITE) defers by name until native embedded_pg; `test_backup_cli.py::test_backup_roundtrip_embedded` remains its oracle node |
+| export | 2 | deferred | Explicit-DSN export ported as CLI-TRANSFER-DSN (harness row `transfer`); the lite tier (CLI-TRANSFER-LITE) defers by name; C Phase 3; `transfer_cli.py` direct psycopg/schema/vector text, torch-free at CLI module; `test_transfer_cli.py::test_export_import_roundtrip_preserves_every_table`, `test_export_skips_transient_meta_and_telemetry` |
+| import | 2 | deferred | Explicit-DSN import into a current-schema bank ported as CLI-TRANSFER-DSN; the lite tier and banks needing ensure_schema work (CLI-TRANSFER-LITE, CLI-TRANSFER-SCHEMA) defer by name; C Phase 4 direct psycopg durable writes; `test_transfer_cli.py::test_import_refuses_a_nonempty_bank`, `test_import_refuses_while_other_connections_hold_the_bank`, `test_import_refuses_embedding_dim_mismatch`, `test_import_leaves_the_curation_spelling_flag_to_the_export` |
+| episode-start | 2 | ported-with-substitution | See the CLI-EPISODE row and [CLI-EPISODE closure](#cli-episode-closure-2026-10-09) |
+| episode-end | 2 | ported-with-substitution | See the CLI-EPISODE row and [CLI-EPISODE closure](#cli-episode-closure-2026-10-09) |
+| wait-mail | 2 | ported-with-substitution | See the CLI-MAIL row and [CLI-MAIL closure](#cli-mail-closure-2026-10-09); original `test_wait_mail_cli.py` nodes remain Python oracle tests |
+| doorbell-prompt-seen | 1/2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09); the internal queue-race nodes remain Python oracle tests |
+| lease | 2/4 | deferred | CLI-LEASE-core verifies native check/list/run through the shared differential candidate; hosted acceptance and CLI-LEASE's hold/break/delegate/designate remainder remain pending. The original in-process lease/coordination tests remain Python baselines. |
+| invite | 2 | deferred | Create, list and revoke over an explicit DSN ported as CLI-PAIRING (harness row `invite`); the no-DSN embedded, container and psql paths (CLI-PAIRING-CONTAINER) defer; B direct operator SQL/psql/container (`invite_cli.py`); internal `test_invite_cli.py::test_an_invite_prints_the_code_once_and_stores_only_its_hash`, `test_a_malformed_name_is_a_usage_error` |
+| pair | 2 | deferred | Canonical http pairing ported as CLI-PAIRING (harness row `pair`); https, proxied and terminal-prompt shapes (CLI-PAIRING-CONTAINER) defer; B HTTP pairing/owner-only token/retry (`pair_cli.py`); `test_pair_cli.py::test_read_code_takes_the_code_from_stdin`, `test_an_unknown_outcome_keeps_the_file_and_names_it` |
 | expose | 2 | deferred | B Tailscale status/subprocess/HTTP (`expose_cli.py`); internal `test_expose_cli.py::test_success_runs_the_exact_command_and_prints_the_url`, `test_a_foreign_serve_on_the_port_is_never_replaced`; disposable executable equivalents pending |
-| move | 2 | deferred | B Docker/ssh pg_dump/restore/fence/operator transaction (`move_cli.py`); `test_move_cli.py::test_declining_exits_2_and_changes_nothing`; process seam and disposable operator state pending; no live-bank work |
-| maintainer | 4/5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
-| test-login | 5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_test_login_cli.py` |
+| move | 2 | deferred | The refusals before any effect ported as CLI-MOVE-REFUSALS (harness row `move`); the move itself (CLI-EXPOSE-MOVE) defers before any effect; B Docker/ssh pg_dump/restore/fence/operator transaction (`move_cli.py`); `test_move_cli.py::test_declining_exits_2_and_changes_nothing`; process seam and disposable operator state pending; no live-bank work |
+| maintainer | 4/5 | deferred | enrol-code, confirm, revoke, reset and list over an explicit DSN ported as CLI-MAINTAINER (harness row `maintainer`); `setup`, help, `--poll` and the embedded/container transports (CLI-MAINTAINER-TRANSPORT) defer; added upstream at the schema-54 close-out pin; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
+| test-login | 5 | deferred | `create` ported as CLI-TEST-LOGIN (harness row `test_login`); help and non-canonical spellings defer; Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_test_login_cli.py` |
+
+## Retained wait-mail evidence boundary (2026-10-09)
+
+The [ring-admission receipt](evidence/wait-mail-ring219.json) records completed
+Windows/Linux cells at `33f55402`, with images built at `57c720ef`; it does not
+certify a new ec697 runtime. Long-ring and bad-reason pairs retain exit 3 and
+unchanged files; Unicode delivery retains exit 0 and its existing named clock
+policy. Raw REDs, overlapping focused/workflow counts, and the four named source
+gaps stay separate. No status row or producer substitution is promoted.
+The original long-ring exit 3/3 observation remains an acceptance RED/blocker,
+separate from its historical comparator pass; accepted-master provenance and
+the hosted long-ring proof are still outstanding.
+
+For new findings, stderr wording is semantic by default when diagnostic class
+and exit code match, except pinned lines. Timing within bounds, identities,
+entropy and clock fields are semantic. Exit codes, consumed stdout, shared files,
+help at COLUMNS=80 and argv acceptance remain contract surfaces; this additive
+note does not rewrite historical comparisons or discard failed receipts.
+
+## CLI-EPISODE closure (2026-10-09)
+
+The [CLI differential harness](cli_harness/README.md) closes CLI-EPISODE. The
+canonical inputs are the mode-only legacy hook commands with the host's
+SessionStart/SessionEnd JSON on stdin ([spec](cli_harness/specs/CLI-EPISODE.md)).
+Twenty-six wire cases run both CLIs against a fixture daemon and compare exit,
+streams and each request exactly, the POSTed JSON body byte for byte, with the
+`episode-title-minute` rule letting only the title's minute vary inside each
+arm's own window. They cover titles from git roots, plain directories, home,
+system and Windows paths and non-ASCII names, silence on missing or invalid
+input, down, degraded, non-JSON and redirecting daemons, and the transport
+(localhost, trickled health and POST replies, https through the test CA, the
+health redirect limit). Seven bank cases run both CLIs against two real
+oracle daemons, one per arm on its own disposable bank (test login,
+`pl_cf_` names), and compare the episodes and client-session rows each case's
+keys own after every case: first start, idempotent repeat, a second session,
+end of an empty session (episode deleted, client session ended), a repeated
+and an unknown end, and a restart opening a new root. Episode ids, wall-clock
+seconds and title minutes are symbolized after validation
+(`normalize.episode_rows`; timestamps as this case's or an earlier case's).
+Each bank case also checks its expected state, so a start both arms dropped
+differs rather than matching two empty banks, and each daemon finishes its
+startup warmup (which holds the service lock) before any case runs; an
+earlier settle-only version let either arm miss the 0.25 s health probe at
+random. Every case matches on Windows (34, three consecutive runs) and Linux
+(33), and the wire cases also against goldens. The harness found, and this
+fixes, a title difference: a home reported with a lowercase drive letter
+was titled `session` natively, where Python compares the abspath strings
+exactly. The episode leaf now uses the CLI-HOOK
+transport (`hook_http`, gaining a JSON POST) for its health probe and POST,
+which brings urllib's connection order, per-receive timeouts and redirect
+limits to episode too. Four source mutants (start path, body spacing, system
+directory title, default name) are each caught. The bank cases need live
+oracle daemons and run locally; CI runs the wire cases live and against
+goldens. Source-vote session titles remain out of scope until their producer
+lands on master; the `http-forbidden-input-refused` bearer refusal and the
+transport deferrals (proxy settings) stand.
+
+## CLI-HOOK closure (2026-10-09)
+
+The [CLI differential harness](cli_harness/README.md) closes CLI-HOOK for
+`briefing`, `prompt-hook` and `doorbell-prompt-seen`; episode start/end moved
+to the separate deferred CLI-EPISODE row. Each canonical case (the
+[spec](cli_harness/specs/CLI-HOOK.md)) runs both CLIs against a fixture
+daemon serving the real routes' shapes, with identical reply bytes per arm,
+and compares exit, streams, files and each request on the wire: method,
+target, body and every header field exact by case-insensitive name (the
+native client now sends urllib's fields, so the Accept dispositions below
+are retired for current captures); a repeated name always fails. Doorbell pending records are
+written by `PendingNotice.reserve`. Every case matches: 65 on Windows and 65
+on Linux, including three https cases that trust the test CA through
+`SSL_CERT_FILE` in both arms.
+Named rules: `doorbell-legacy-first-seen` (a migrated legacy record's clock
+inside the arm's window, expiry exactly a day later) and
+`python-shutdown-flush-silent` (CPython's shutdown trailer and exit 120 after
+prompt-hook stayed silent on an unwritable stdout). The harness and its reviews
+found three native defects, fixed here. `briefing_help.txt` lacked the LF
+pin its sibling assets have, so a CRLF checkout (Windows CI's default)
+printed `\r\r\n` in `briefing --help`. The hook GETs went through reqwest,
+whose one connect budget ran out on `::1` before trying IPv4 for a
+`localhost` daemon URL on Windows, and whose read timeout covers the whole
+response head, so a daemon trickling its reply inside each 0.25 s (health)
+or 2 s (prompt-hook) receive failed natively where Python completed. The
+hook GETs now use `hook_http::get`: hyper's HTTP/1 client over a socket
+whose every read and write must progress within the timeout, as
+`socket.settimeout` bounds each recv, with each resolved address tried in
+order, urllib's request fields and `HTTPRedirectHandler`'s limits (a URL at
+most four times, ten distinct targets). Field names go out in Title-Case;
+urllib spells some with one capital (`User-agent`), and field-name case is
+not compared (HTTP names are case-insensitive). https verifies against the system trust store loaded by
+`rustls-native-certs` (honouring `SSL_CERT_FILE`/`SSL_CERT_DIR`) with
+rustls's webpki verifier, so no revocation lookup can block a probe; the
+handshake has one deadline and each TLS read must yield plaintext within the
+timeout, as CPython bounds each SSL operation, and a ragged TLS EOF reads as
+EOF (`suppress_ragged_eofs`). A rejected payload request returns at its head,
+as urllib's `HTTPErrorProcessor` raises. That needed hyper's `client`
+feature and two shim dependencies already in the lockfile (`tokio-rustls`,
+formerly a dev-dependency, and `rustls-native-certs`). Declared
+divergences: on Windows a set `SSL_CERT_FILE` replaces the system store
+where CPython unions the two; proxy settings (`HTTP(S)_PROXY`, `NO_PROXY`,
+the Windows registry) are not consulted (deferred; no shipped producer sets
+a proxy for the daemon URL).
+Nine source mutants (cap order, hook event name, dropped bearer, first
+address only, whole-reply read budget, redirect repeat limit, unsaved cursor,
+dropped `since`, inverted receipt match) are each caught (first-address-only
+on Windows only, where `localhost` resolves `::1` first). Not covered:
+Windows symlink parents,
+POSIX distinct real/effective UID and empty HOME, briefing's own output
+failure (a declared substitution), non-UTF-8 locale output encoding (the
+Python arm runs with UTF-8 streams, as for CLI-VERSION) and non-canonical
+argv.
+
+## CLI-MAIL closure (2026-10-09)
+
+The contract-first [CLI differential harness](cli_harness/README.md) closes
+CLI-MAIL. It runs `python -m pseudolife_memory.cli wait-mail` and the native
+binary on each canonical case (the argv shapes in the
+[spec](cli_harness/specs/CLI-MAIL.md)) in the same disposable home, with state
+seeded through the coordination adapter's own writers, and compares exit,
+both streams, every file under the home (with POSIX mode bits) and the
+waiter's `.wait-armed` listener record, observed once it has armed. All
+cases match on Windows (40) and Linux (42, adding the chmod-000 stat refusal
+and a double-leading-slash path). Three named rules apply,
+each validated before it rewrites its span: `mail-clock` (announcement clock,
+elapsed seconds and ledger epoch inside each arm's own window),
+`mail-stdout-error-text` (OS error wording inside the closed-stdout line) and
+`python-shutdown-flush` (CPython's shutdown trailer and exit 120 after its own
+exit 2, the declared `wait-mail-direct-stdout` substitution). Eight source
+mutants (ring width, decision, `.seen` advance, timeout exit, ledger column,
+help text, listener renewal, leading `.` in paths) are each caught on both
+OSes; CI runs the live and golden comparisons, the mutants run locally. The Windows stat refusal is the
+injected `metadata_error_refuses_arming_and_retries_during_wait` unit, watched
+red with its seam disabled. The harness and its reviews found path-spelling
+defects in diagnostics, fixed here: mixed separators in the Windows default
+digest path, a forward-slash `PSEUDOLIFE_DIGEST_DIR` not rejoined as pathlib
+does, a leading `./` kept, and POSIX `//` collapsed. Not
+covered: Ctrl-C (exit 130), Windows sharing violations mid-replace, and the
+non-canonical inputs the substitutions below govern. Earlier receipts and the
+13-digit negative control keep their own scope; the 13-digit ring is also a
+harness case (exit 3 in both arms).
 
 ## Wait-mail producer substitutions
 
@@ -555,7 +834,7 @@ unvalidated and `wait-mail` remains deferred.
 
 | Input/output | Producer | Declared native substitution |
 |---|---|---|
-| `wait-mail-writer-records`: Digest, ring and seen watermarks | `coordination_adapter._write_digest`, `_write_ring`, `_mark_seen`, and `wait_mail_cli._mark_seen` write unsigned ASCII decimal followed by LF. Additional `.seen` writers are `plugin/hooks/coordination-prompt.sh:86`, `plugin/hooks/stop-wake.sh:661`, and `rust/shim/src/board/adapter.rs:953-960,1116-1121`. The prompt hook truncates before its `printf` write. | Arbitrary-width decimal ordering by numeric value, including leading zeros, with no CPython 4,300-digit ceiling; native output is canonical decimal. The seen reader strips precisely ASCII byte whitespace, treats empty/whitespace-only as zero, and accepts an unsigned counter without a final LF. Signs, underscores and non-ASCII digits remain corrupt. Digest headers retain their LF and bodies their final LF; rings retain exactly two LF-terminated lines. Malformed admitted records retain exit 2 and the existing canonical/LF-framing diagnostic, with no stdout, ledger or marker advance. Missing/unreadable seen markers keep the existing behavior, including the separate directory rename diagnostic. |
+| `wait-mail-writer-records`: Digest, ring and seen watermarks | `coordination_adapter._write_digest`, `_write_ring`, `_mark_seen`, and `wait_mail_cli._mark_seen` write unsigned ASCII decimal followed by LF. Additional `.seen` writers are `plugin/hooks/coordination-prompt.sh:86`, `plugin/hooks/stop-wake.sh:661`, and `rust/shim/src/board/adapter.rs:953-960,1116-1121`. The prompt hook truncates before its `printf` write. | Digest and seen counters retain arbitrary-width decimal ordering by numeric value, including leading zeros, with no CPython 4,300-digit ceiling; native output is canonical decimal. The seen reader strips precisely ASCII byte whitespace, treats empty/whitespace-only as zero, and accepts an unsigned counter without a final LF. Signs, underscores and non-ASCII digits remain corrupt. Digest headers retain their LF and bodies their final LF. Rings follow the shared `wait_mail_cli._read_ring` (lines110–130) / `plugin/hooks/stop-wake.sh::ring_past_seen` (lines564–577) predicate: regular file, first-line CR/space removal, 1–12 ASCII digits, second-line single trailing CR removal and `rung [-A-Za-z0-9_ ]*`; missing final LF or extra later lines do not invalidate an otherwise matching ring. Nonmatching ring records mean no ring and keep waiting (`Ok(None)`), rather than exit2. This ring clause supersedes the prior framing/width substitution; the `wait-mail-cr-spaces-ring` fixture remains historical. Malformed admitted digest/seen records retain exit 2 and the existing canonical/LF-framing diagnostic, with no stdout, ledger or marker advance. Missing/unreadable seen markers keep the existing behavior, including the separate directory rename diagnostic. |
 | `wait-mail-ascii-numeric-options`: Timeout and interval | Shell/CLI callers and existing launchers supply finite decimal seconds. | ASCII `[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?`, finite after conversion; existing timeout `(0,86400]` and interval `[0.01,60]` bounds remain. Unicode digits, underscores, outer whitespace, NaN/Infinity and overflow refuse with argparse-shaped usage/error and exit 2. |
 | `wait-mail-ascii-columns-help`: Terminal dimensions and help | Terminals/callers supply COLUMNS; the help drift guard runs at COLUMNS80. | Positive ASCII integers; invalid grammar, zero or machine-integer overflow falls back to 80. COLUMNS80 retains the exact help asset and usage. Other widths use simple word wrapping, retain whole words and omit argparse's extreme-width thresholds/action-group emulation. |
 | `wait-mail-direct-stdout`: Failed stdout writes/flushes | Caller-owned pipes and redirected descriptors. | Direct failure exits 2 and leaves mail unshown, without seen/ledger advance. `PYTHONUNBUFFERED`, block size and CPython shutdown retries do not change this behavior. Delivery retains `wait-mail: could not write the mail to stdout (<error>); left it unshown.` Help failure uses `wait-mail: could not write help to stdout (<error>).` No synthetic `TextIOWrapper` shutdown exception is emitted. |
@@ -564,8 +843,10 @@ unvalidated and `wait-mail` remains deferred.
 | `wait-mail-native-temporary-collisions`: Temporary-file collisions | Native atomic marker/listener writes. | Keep `.tmp-[a-z0-9_]{8}.seen`, exclusive creation, private permissions and cleanup of owned files. Sixteen collisions exhaust the native budget with `temporary file creation exhausted after 16 collisions`, without overwriting a colliding file/directory. The copied CPython platform retry count and exhaustion exception are removed. |
 
 The native ring reason gate and symlink refusal stay exact. A canonical `plain`
-decision does not wake the wait. A ring watermark is no longer limited to twelve
-digits; actual writers use the same decimal counter representation as digests.
+decision does not wake the wait. Ring watermarks retain the shared 1–12 ASCII
+digit limit after removing first-line CR and spaces; the former arbitrary-width
+ring substitution is superseded. Digest and seen counters retain their declared
+arbitrary-width representation.
 An explicit user-authored `--digest` file is subject to the same declared record
 grammar. The approved legacy-test exceptions are applied. The shared candidate
 contract fixture binds 19 changed cases to exact declared requests and retained
@@ -598,7 +879,7 @@ lifecycle, timeout or diagnostic behavior.
 
 The Phase 0b snapshot retains 406 `tests/test_*.py` files: 68 oracle, 1 candidate and 337 internal. Its historical manifests remain `test-buckets.json` and `contract-inventory.json`; validate them with `python rust/contract_inventory.py` and the unchanged `python -m pytest rust/test_contract_inventory.py -q`.
 
-The current Phase 1 manifest at `3c01bb31abd60178e15dea99adda369b4bbf92fc` contains 423 `tests/test_*.py` files: 68 oracle, 2 candidate and 353 internal. Historical manifests at `f709abb54f7912ae9cd767998d0926ca33df4bcd` retain 419 files: 68 oracle, 2 candidate and 349 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 18 concrete nodes: 8 from `test_cli_dispatch.py` and 10 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies all 191 current-pin functions in its nine scoped files as 10 candidates, 1 public oracle CLI case and 180 internal cases. The two current-pin additions check tool refusals and unknown-parameter forwarding through the public default stdio launch; their source identity and adapter routing are covered. Both executed once/non-skipped per arm in the historical native Linux capture at `74b5998c`: tool refusal failed in both arms, while unknown-parameter refusal passed in both. At published `95d5402d`, both additions passed once/non-skipped in each OS candidate lane; no Python ten-stdio original lane was reported. The later console/warm successor remains pending its combined-head proof. Historical targeted-equivalence evidence retains its original candidate trees and pins. Historically, at `2e628b27`, all 125 scoped internal cases named Rust equivalents with targeted Windows and Linux evidence. The current mapping has 121 completed equivalents, exactly 3 SDK cases retired-by-decision, and 1 pending postframe update-scheduling substitution with targeted evidence on both platforms at frozen tree `a4ff3236eb349aaed427d80129513fe22cf0183f`; 55 internal cases remain outside this phase's scope. Windows retains the recorded transient ConnectionReset followed by successful exact and full-file reruns; Linux check/clippy, 66 integration and 5 wire cases passed with four saved exits 0. The mapping's pending postframe row remains subject to overall acceptance g; the register separately records its authorized substitution and current runtime evidence. Four historical 690bb8ac schema-2 receipts, both 3x10 paired measurements and executing CI are recorded below. Phase 1 later completed its own final integrated-head suites/review/CI before #560 merged; version-branch stdio acceptance remains separate. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
+The selected Phase 1 manifest at `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1` contains 425 `tests/test_*.py` files: 68 oracle, 2 candidate and 355 internal. Historical manifests at `f709abb54f7912ae9cd767998d0926ca33df4bcd` retain 419 files: 68 oracle, 2 candidate and 349 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 18 concrete nodes: 8 from `test_cli_dispatch.py` and 10 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies all 191 current-pin functions in its nine scoped files as 10 candidates, 1 public oracle CLI case and 180 internal cases. The two current-pin additions check tool refusals and unknown-parameter forwarding through the public default stdio launch; their source identity and adapter routing are covered. Both executed once/non-skipped per arm in the historical native Linux capture at `74b5998c`: tool refusal failed in both arms, while unknown-parameter refusal passed in both. At published `95d5402d`, both additions passed once/non-skipped in each OS candidate lane; no Python ten-stdio original lane was reported. The later console/warm successor remains pending its combined-head proof. Historical targeted-equivalence evidence retains its original candidate trees and pins. Historically, at `2e628b27`, all 125 scoped internal cases named Rust equivalents with targeted Windows and Linux evidence. The current mapping has 121 completed equivalents, exactly 3 SDK cases retired-by-decision, and 1 pending postframe update-scheduling substitution with targeted evidence on both platforms at frozen tree `a4ff3236eb349aaed427d80129513fe22cf0183f`; 55 internal cases remain outside this phase's scope. Windows retains the recorded transient ConnectionReset followed by successful exact and full-file reruns; Linux check/clippy, 66 integration and 5 wire cases passed with four saved exits 0. The mapping's pending postframe row remains subject to overall acceptance g; the register separately records its authorized substitution and current runtime evidence. Four historical 690bb8ac schema-2 receipts, both 3x10 paired measurements and executing CI are recorded below. Phase 1 later completed its own final integrated-head suites/review/CI before #560 merged; version-branch stdio acceptance remains separate. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
 
 The final Phase 1 judge always adds seven startup and six concurrent non-EOF candidate cells through `evals/rust_port/stdio_scenarios.py`. The pinned byte templates and platform-specific common-release order evidence are committed in `stdio_startup_contract.json` and `stdio_concurrent_orders.json`; each cell must bind the actual candidate executable. Separate response releases retain exact AB or BA order, while a common release permits only the observed final call pair orders. These additive checks do not establish final-head acceptance or replace the existing EOF corpus.
 
@@ -1247,9 +1528,10 @@ metadata omits the optional since text. The CPython ISO grammar grid is retired.
 
 Opaque OS lease arguments are refused with exit 2 and
 `lease: arguments must be valid Unicode`, before state or child effects. This
-candidate does not pass opaque child arguments through. Deferred actions
-hold/break/delegate/designate still return exit 1 with
-`deferred in this candidate`. Windows unlock and Ctrl-C receipts at final7e are
+candidate does not pass opaque child arguments through. At the reduced source
+checkpoint `96356249`, hold/break/delegate/designate returned exit 1 with
+`deferred in this candidate`; the later Phase 4 implementation supersedes those
+implementation deferrals. Windows unlock and Ctrl-C receipts at final7e are
 historical execution evidence. Actual b3 Windows unlock/release and Ctrl-C
 checks are recorded in the [reduced-runtime bundle](../evals/results/rust-phase2d-lease-b3e36f70/README.md);
 hosted acceptance and fresh review remain pending.
@@ -1277,6 +1559,230 @@ list-waiter-extreme under the existing two-ID rule, with exact JSON companions
 and rejecting controls. The complete raw receipt SHA256 bindings are in
 functional-policy-evidence.json; no broader exit substitution is admitted.
 
+
+## Phase 4 lease hold preparation
+
+The Phase 4 branch includes the accepted Phase 2d source base. Native
+`hold` takes the existing named local OS lock, follows an external PID using a
+read-only process probe, and releases without signalling that PID. Its board
+mirror registers `lease-hold@<instance-id>`, renews and notifies the concerned
+peers asynchronously; local exclusion ends before bounded board cleanup.
+The parser and pinned Python help guards include hold/break/delegate and the
+`designate` deprecation alias. The historical hold checkpoint retained break/
+delegate/designate exit-1 deferrals. Subsequent operator preparation supersedes
+those implementation deferrals; acceptance of all four actions remains deferred.
+
+The named `hold-mirror-best-effort` rule follows the producer contract in
+`pseudolife_memory/lease_cli.py:487-509` (`_connect`), lines 1103-1115
+(`BoardMirror` connection failure), and lines 1285-1324 (`_hold`). Hold acquires
+its local lock before attempting the mirror. An unusable configured bearer
+therefore reports board skipped after acquisition; it does not refuse local
+ownership. This corrects the earlier pre-lock bearer refusal in the historical
+Phase 4 candidate. A failure after acquisition, including forbidden registration headers or
+`HTTP_REPLY_NOT_UNDERSTOOD`, stops only the mirror. The hold keeps its lock,
+leaves the followed PID running and retains its normal exits. Core refusal
+before lock/fallback/child effects remains scoped to check/list/run. The
+additive `lease_hold.rs` controls distinguish these two admission boundaries.
+Ordinary non-ASCII registration failures also remain mirror-only.
+
+The `nondeterministic-bytes-semantic` rule applies to identities issued by
+the real daemon during mirrored hold registration. Its exact field scope is
+the registration reply's `agent_id` and `credential`, their subsequent
+`X-PL-Agent`/`X-PL-Agent-Key` echoes, `coordination_agents.agent_id` and
+`credential_hash`, lease holder IDs (including HTTP holder views), and audit
+rows' `agent_id` plus the chain links derived from that identity. Each arm
+must receive a canonical UUID4 hex ID and a 43-character URL-safe token;
+the stored credential hash must equal SHA-256 of its actual issued token.
+Each arm also validates the exact display name produced by its label, one
+space and its own `agent_id[:8]` suffix. The producer is `_board_name` at
+`pseudolife_memory/storage/coordination.py:623`, with the derivation at lines
+627-628; only that eight-character UUID echo is semantic.
+Every captured audit chain must independently verify its original payload
+text, hashes and links before semantic comparison, with exact event kinds,
+order, sequence and all other columns. Request-body bytes, CLI streams,
+lock/child behavior and all unrelated rows remain exact. This rule does not
+permit replacing entropy sources or discarding unrelated state differences.
+Mirrored hold whole-command acceptance remains pending.
+
+This historical hold checkpoint was source preparation, with no Phase 4 native
+execution or acceptance claim. Windows format, both-feature Clippy and targeted cargo tests, both-OS
+public-process/state corpora, Windows interruption and PostgreSQL transaction/
+audit/ownership controls remain pending. Linux runtime gates run on the
+existing homelab machine; nextest remains in hosted CI. The Phase 2d runtime
+receipts keep their old identities and do not validate this changed runtime.
+Full CLI-LEASE and scoped lease-core acceptance remain separate and deferred.
+
+Pending operator comparisons use the named `fixed-clock-replay` rule: both
+arms receive the identical fixed clock through the same existing test or
+OS-level injection seam. Receipts identify that clock and its source; expiry,
+audit rows and chain hashes remain exact. Cases without a shared clock seam
+remain explicitly uncompared. No production Python clock hook, timestamp
+removal or hash relaxation is introduced.
+
+## Shared PostgreSQL client preparation
+
+The named **`pg-dsn-explicit-tls`** scope admits explicit sslmode/sslrootcert in
+the installed/documented single-TCP-host DSN grammar and the platform default
+root.crt behavior. `require` verifies an available CA as `verify-ca`; `prefer`
+also verifies an available CA. Ambient client certificate/key and CRL files,
+PGSSL*/PGTLS* variables and other libpq connection/session PG* controls refuse
+with exit 1 and a diagnostic naming only the control. Unknown configured DSN
+options or modes likewise refuse by option name; none is silently ignored.
+
+`shim/tests/pg_client.rs` contains disposable SSLRequest, CA, hostname,
+default-root, named-refusal, resolution/argv and connection-closure controls.
+The first Windows preparation run passed six tests and 18 transport cells before
+the invalid-SSL-response admission fix; that run remains historical. The final
+focused test covers invalid SSL responses before startup, all five modes,
+available/missing/default/wrong CA roots and connection closure.
+
+The named **`pg-tls-webpki-hostnames`** rule restricts verify-full to WebPKI
+hostname grammar: matching SAN `dNSName` and `iPAddress`. CN-only certificates
+and IP addresses in `dNSName` refuse exit 1 with the named rule; the diagnostic
+explains libpq's matching legacy acceptance. The original disposable comparison
+retains libpq 18 success against native refusal for both certificates. The
+additive controls require the named refusal before startup and separately show
+that `verify-ca` still accepts their valid CA chains. No bespoke hostname
+verifier, timestamp/hash relaxation or certificate normalization is added.
+
+The shared-client checkpoint prepared the reusable dedicated client separately
+from break/delegate/designate transactions and embedded/container lifecycle. Real PostgreSQL rows,
+audit-chain effects, shared fixed-clock replay, Linux execution and fresh review remain pending; targeted Windows
+format, both-feature Clippy and eight PG transport tests passed. Neither full CLI-LEASE nor any
+new mode is promoted by these transport observations.
+
+## Phase 4 offline break source preparation
+
+`shim/src/cli/lease/operator/` prepares native external-DSN break with the
+reviewed shared PG client. It locks the lease before waiters, vacates the
+holder, removes departed waiters, skips revoked waiters and grants the earliest
+eligible ticket with the existing 300-second grant window. Reserved delegate/
+designated queues dequeue instead of inheriting an operator role. Mutation and
+ordered audit append share one transaction; the audit advisory lock is last,
+and success is printed only after an observed commit. Names retain Unicode,
+whitespace, length and credential-shaped-text admission before durable writes.
+Break never acquires an OS lease lock or signals its holder's process.
+
+The retained container transport uses the same Docker inspect and `docker exec`
+argv, inherited streams, terminal choice and container exit. Its Python command
+runs inside the daemon container; no host Python storage bridge or agent HTTP
+operator route is introduced. The named **`phase4-embedded-pg-deferred`** rule
+refuses an existing embedded bank with exit 1 and stderr
+`lease: break refused: phase4-embedded-pg-deferred`; it never starts, attaches to
+or stops that bank. An explicit DSN takes priority. Native detection uses the
+existing bank marker without importing the host's pg0 package.
+
+The named **`native-pg-diagnostics`** rule replaces generic psycopg class names
+with safe native PG diagnostics, retaining exit 1, empty stdout and stderr-only
+placement. This substitution replaces only the parenthesized exception class
+at `pseudolife_memory/lease_cli.py:1639` (`_operator`); it does not add a
+`lease: ` prefix. A Windows Python 3.11.9 / psycopg 3.3.4 whole-command
+`lease designate resource fixture-agent`, with explicit DSN `not-a-dsn`,
+observed `ProgrammingError` before connection setup. Its stdout is empty,
+exit is 1, and stderr is the designate deprecation line followed by
+`cannot open the bank (ProgrammingError)`. Native DSN admission must use
+`cannot open the bank (PostgreSQL DSN is not understood)`; the port-owned
+control asserts the same streams, exit, ordering and unchanged files,
+without a socket or listener. `designate` retains its deprecation
+before the refusal. Unknown DSN options use the fixed parenthesized diagnostic
+`unsupported PostgreSQL DSN option`; operator diagnostics never echo an option
+spelling supplied by the DSN, which can be a malformed password fragment.
+The no-bank line remains exactly the prefix-free producer at
+`pseudolife_memory/daemon_exec.py:40-43` and `lease_cli.py:1887-1888`.
+The designate rewrite at `lease_cli.py:1854-1859` also applies to the argv
+forwarded into the container, so its deprecation is emitted once.
+Coordination refusal codes and their surrounding bytes
+remain exact. The separate named embedded refusal retains its specified
+diagnostic. Failure controls must
+compare every durable row, raw stream and local file; no row or time field is
+dropped. Transport loss around COMMIT needs an actual outcome/rollback control
+before acceptance; preparation is not a guarantee about an unobserved commit.
+
+The additive [operator fixture plan](../evals/rust_port/lease_operator_cases.json)
+pins the first missing-row whole-command cell, queue/reserved/revocation,
+rollback, secret-boundary and container/refusal controls. Held-row comparisons
+use `fixed-clock-replay` with the same clock seam in both arms and exact audit
+hashes. No build, service or native action was executed at the original break
+source checkpoint. Subsequent targeted execution is recorded above against
+`67478612`; those receipts retain that source identity. New source repairs need
+new validation. Broader whole-command, Windows durable-state, cancellation/
+rollback coverage, final hosted gates and fresh independent review remain pending.
+Every lease mode row remains deferred.
+
+## Phase 4 delegate source preparation
+
+Native `delegate` and its deprecated `designate` alias prepare the existing
+external-DSN role grant. Both role rows lock in name order before resolving a
+registered, unrevoked recipient. The transaction removes its coordinator
+queue entry, breaks its live coordinator role, settles that queue, drops
+reserved delegate waiters, replaces the delegate and appends the ordered audit
+chain with the recipient's project/task scope. The ordinary prefix grammar,
+60-second to seven-day grant, 24-hour default, reachability warning and JSON
+field order are retained. The shared PG/TLS policy and container transport are
+unchanged; embedded banks still refuse `phase4-embedded-pg-deferred`, naming
+the requested action. Generic failures use `native-pg-diagnostics`.
+
+The original delegate successor was source preparation only. Subsequent
+compilation and whole-command receipts are recorded above against `90fd0082`
+and `67478612`; they do not validate later source repairs. Mutation proof requires `fixed-clock-replay` and
+exact rows, audit payloads, hashes, sequences and streams. Earlier break/hold
+images retain their original source identities and do not validate this
+changed runtime. The port-owned operator deferral assertion is replaced by
+the approved explicit malformed-DSN refusal control, retaining exact exit,
+streams, deprecation ordering and unchanged local files. At source checkpoint
+`3583bb6c`, that control had run only on the historical candidates; the repairs
+at that checkpoint remained unrun. Original Python
+and tests retain accepted master bytes.
+No lease mode is promoted.
+
+## Phase 4 source repair validation boundary
+
+`LeaseHome` always sets `PSEUDOLIFE_DAEMON_EXEC=1`, preventing operator tests
+without a bank from entering a real daemon container. The additive admission
+test first proves its owned synthetic Docker executable works, then requires
+both fixture constructors to refuse without invoking it. A separate owned
+transport test explicitly removes the guard to inspect designate's rewritten
+argv and single deprecation, without using a real container.
+
+The named **`lease-pid-platform-range`** rule retains Python `int()` grammar at
+`pseudolife_memory/lease_cli.py:1693-1700`: Unicode decimal digits, underscores
+between digits, surrounding whitespace and one sign. Zero and negative values
+retain the exact positive-whole-number diagnostic. Platform PID producers
+(`$$`, `$PID`, Get-Process and launchers) supply representable PIDs. Other
+positive values refuse exit 2 with the usage-shaped `not a process id` error
+before any lock, board or child effects: POSIX permits 1 through i32::MAX and
+Windows permits 1 through u32::MAX. This avoids the POSIX `os.kill` overflow at
+line 1267 and Windows DWORD truncation. Original baseline nodes are
+`tests/test_lease_cli.py::test_hold_and_check_usage_errors_exit_2`,
+`test_hold_of_a_pid_that_is_gone_releases_at_once` and
+`test_hold_keeps_the_lease_while_the_pid_lives_then_releases`.
+The port-owned boundary tests require Windows 4294967295 exit 0, POSIX exit 2
+with unchanged files, and rejection above the respective range.
+
+DB-free operator units pin all secret/ordinary vectors from unchanged
+`tests/test_coordination_secrets.py` and append's canonical material against
+the unchanged Python `coordination.audit_hash` producer, including non-ASCII
+payload and a null recipient. Audit predecessor and unrelated-payload controls
+must change the hash. At source checkpoint `3583bb6c` these controls were unrun;
+prior receipts and hosted failures retain their original identities.
+
+Accepted doorbell test repair `7a2d59b2` was merged once into this branch.
+Windows successor `58b8f9ff` passed format, check, Clippy with warnings denied
+and 196 affected Rust tests under each feature configuration. Its initial
+owned-container argv test failed because CMD consumed a trailing digit as a
+redirection descriptor; moving the fixture redirection retained the exact
+assertion, and all three admission controls then passed. Production bytes are
+unchanged from built source `5e6e62f1`.
+Whole Python/native Windows no-bank and malformed-DSN controls matched exact
+bytes except the named parenthesized native diagnostic; PID grammar refusals
+matched, and the native range refusal preceded effects. The unusable-bearer
+hold pair matched exact streams and files, retained local ownership and the
+followed child, then released normally. Its state, stream and lifecycle
+rejecting controls passed. No real container, daemon or PostgreSQL bank was
+started for these cells. Remote range/state/TLS/mirror recapture, final hosted
+gates and fresh independent review remain pending. All lease acceptance rows
+remain deferred.
+
 ## Episode merge-forward validation boundary
 
 Accepted lease master `59a8624e` is a parent of episode source merge
@@ -1299,6 +1805,44 @@ exit 0) is accepted for the unchanged episode leaf. Fresh independent review
 and hosted merge-ref CI remain pending. No parity row is
 promoted; both episode modes remain deferred. This documentation successor changes
 no runtime/instrument input and does not relabel execution as a successor run.
+
+### Recorded episode producer correspondence (2026-10-09)
+
+The completed Windows and Linux scripted cells are consolidated in the
+[episode evidence receipt](../docs/evidence/rust-stream-c-episode-20261009.json).
+Each OS records 14 of 16 prepared IDs, 16 pairs, 32 CLI arms, 52 HTTP requests
+and 104 synthetic comparator rejects; redirect sinks received zero requests.
+The two source-vote IDs remain UNRUN through the real daemon and persisted
+title path (eight arm cells). Execution of the prepared owner/controller is
+also UNRUN.
+
+The fixture source is `e9987bb3350970a37db153164c73ec28fac96833`, tree
+`a8867c79c2de1ecab07129e0f8480a399c208de2`. Actual images were built at
+`c2525de993b198f22bc0427da8e7d9fc5cbbda4b`, tree
+`2c56d25e80fc322f5a1d75cb905cadf46c024902`; 71 compiled components matched
+the fixture source. These are historical images, not fresh e998 builds or
+whole-source equivalence. The oracle source remains
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493`, distinct from declared pin
+`3c01bb31abd60178e15dea99adda369b4bbf92fc`; no re-pin follows from this receipt.
+Parent interpreters were Python 3.11.9 on Windows and 3.11.17 on Linux;
+their hashes and dependency observations are retained separately from the
+unmeasured child import origins.
+
+The two earlier Windows wire REDs, Linux health preflight RED and both
+source-vote static/source-check REDs remain separately bound to their originals.
+Later scoped matches do not relabel those failures. The receipt projects only
+named evidence fields, omits identifying/raw runtime payloads, describes that
+transformation and binds every pair and failure to its exact original SHA256.
+
+The original inventory remains ten Python in-process nodes, A=2/B=0/C=0,
+eight bounded correspondences and zero original Rust executions. Historical
+closure counters and the 73-ID wire admission ledger remain unchanged. Cold
+connection attempts and real CLI negative executions are unmeasured; synthetic
+rejects mutate captured records. Scripted captures do not prove a real daemon,
+persisted titles, complete raw-wire equality or whole-mode acceptance. Final
+oracle attribution, owner bindings, final-head both-OS proof, review and hosted
+gates remain open; both episode modes remain deferred.
+
 ### Recorded hook HTTP dispositions
 
 `hook-absent-accept-wildcard` applies only when the oracle has no Accept field
@@ -1362,10 +1906,110 @@ ledger is:
 Outside this ledger Accept is exact. `http-field-name-case-insensitive` and distinct-name order
 use HTTP association; same-name value order, multiplicity and bytes stay exact.
 No Referer is generated on `/health` redirects or discarded by comparison.
-The `Python-urllib/3.11` User-Agent is oracle-pinned. Native transport drops
-urllib's `Accept-Encoding: identity` and `Connection: close`; historical full
-wire differences remain retained, rather than receiving a comparison waiver.
+The `Python-urllib/3.11` User-Agent is oracle-pinned. Before 2026-10-09 the
+native transport dropped urllib's `Accept-Encoding: identity` and
+`Connection: close` and added `Accept: */*`; the current `hook_http` client
+sends urllib's fields exactly, and the historical wire differences remain
+retained rather than receiving a comparison waiver.
 `http-forbidden-input-refused` names bearer C0/DEL/folded refusals; it replaces
 the pending-policy description without rewriting Python observations.
 Non-JSON `/health` means quiet no-daemon, separately from the consumed payload
 scope of `hook-strict-json-refusal`; valid degraded JSON 503 remains available.
+
+## CLI-LEASE-core closure (2026-10-09)
+
+The shared CLI differential harness verifies native `lease check`,
+`lease list` and `lease run` over their canonical producer shapes. Its
+[66-case row](cli_harness/rows/lease.py) and
+[specification](cli_harness/specs/CLI-LEASE-core.md) compare live and golden
+observations on Windows and local WSL/Linux. Exit codes, both streams,
+filesystem bytes and modes, decoded HTTP JSON and intermediate coordination
+table rows and sequence positions remain exact except for the three named rules in the spec:
+`lease-http-json`, `lease-seeded-clock` and `lease-native-stdout`.
+
+Seven real source mutants are caught: lock-name hashing, child status, local
+lock truth, same-instance stale mirrors, timeout status, board mirror
+release and the named list filter. CI's existing Parity jobs run live and platform golden comparisons
+with their own disposable PostgreSQL and isolated test login. The original
+Python in-process lease tests remain oracle baselines, rather than being
+adapted to call a different implementation.
+
+Hosted replay at `58f6ad58` failed on schema-catalog ordering across server
+collations; `4e17a667` passed Linux but failed Windows PostgreSQL preparation.
+The repaired `d5372952` passed both complete hosted Parity jobs in
+[run 37932590137](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37932590137),
+including all 66 live and golden cases on each OS. The Windows fixture uses
+owned user-profile PGDATA and a standalone sanitized diagnostic. The shared
+observer sorts coordination rows and sequence positions in Python; historical
+seed clocks and actual lock-wait capture keep their declared bounds. This
+closes the core row with the named substitutions above. Earlier observations
+remain evidence for their own revisions.
+CLI-LEASE's phase 4 remainder and the daemon coordination
+`lease`/`release`/`leases` rows retain their separate acceptance boundaries.
+No per-row performance claim or installed-candidate claim is made.
+
+## Background-duty preparation
+
+The experimental daemon now owns cancellable, idempotent durability/reaper/sweep
+scheduling; an initialized session log supports cascade idle close, deferred
+empty-root retention, and persisted tombstones. Release checks and glibc trim
+run outside requests and service locks. Sweep pruning keeps the newest dream
+journal rows, marks stale running rows failed, and deletes expired retrieval
+and lesson-search rows even with dreams disabled. The native compaction
+selection and update-offer formatter use live Python policy goldens.
+
+`BACKGROUND-SESSIONS`, `BACKGROUND`, and `BACKGROUND-SWEEP` remain deferred.
+Writer durability and canonical-store slot synchronization require W2-E;
+session write/resume routes and generic close-time titles are not integrated;
+automatic dreams and graph sweep ticks require W3-H. The session trigger is
+an explicit no-op interface. File-mode tensors and embedded bank lifecycle
+remain separately deferred. Source preparation and unit tests do not establish
+those missing process-boundary contracts.
+
+The enabled release loop under `/health` remains unproved: the health normalizer
+equates an unchecked `latest_release: null` / `checked_at: 0` snapshot with a
+retained release and check clock.
+
+The pruning scenario uses the existing daemon differential harness. It checks
+whole-bank state after the observed pruning milestone. For portable goldens,
+catalog fields must first match the arm's seeded baseline exactly, then become
+an unchanged-baseline marker; sequence values remain exact except for one
+identified new warmup probe and its matching single sequence allocation.
+Seeded primary-key identities survive the init scrub even when rewritten;
+unexplained sequence changes and other new retrieval rows remain differences.
+Seeded relation
+clocks must remain unchanged before their declared clock normalization. The
+session scenarios validate new close clocks against each arm's own start/end
+window and check equality of episode, client-session, deferred-map and
+tombstone clocks before normalizing them by root identity.
+## W3-H graph-store increment
+
+`daemon/src/storage/graph.rs` provides native entity, alias, relation, edge,
+merge/delete and orphan-repair APIs, exercised through the feature-gated
+`graph-contract` binary. `daemon/harness/graph_store.py` compares responses
+and all bank state after every operation, with recorded oracle replay and
+source-mutant controls. PostgreSQL REAL response values follow Psycopg's
+text-format decoding exactly (binary widening differs).
+
+The GRAPH-REVIEW row remains deferred: traversal/order, communities, graph
+services/MCP wiring, proposals, judges/audit and deep dream are not closed by
+this storage increment. Console GET routes retain their HTTP-READS ownership.
+
+## W3-H graph read-model increment
+
+`daemon/src/graph_read.rs` adds pure alias, relation-suggestion, degree,
+transitive/inverse, neighborhood and path helpers. `storage::graph::subgraph`
+loads the full graph and registry under the shared writer guard, then returns
+the GraphStore view including full entity and alias maps. It does not register
+Console GET or MCP handlers.
+
+The `graph_store.py --row read` profile reuses the store fixture and disposable
+bank harness, with all-bank comparison after every operation and oracle replay.
+Derived triples/provenance compare as multisets; asserted order, subgraph path
+choice and returned node/edge selection remain exact. Standalone paths may be
+any valid minimum-hop path. The declared inverse-provenance collision rule
+chooses the smallest source relation and checks membership in the oracle's
+possible provenance set. Other inference provenance stays exact.
+
+GRAPH-REVIEW remains deferred for service/MCP wiring, fact projection, whole
+graph caps, communities, proposals, review judgments/audit and deep dream.

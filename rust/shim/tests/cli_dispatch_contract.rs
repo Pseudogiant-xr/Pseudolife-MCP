@@ -59,18 +59,16 @@ fn unknown_mode_uses_python_quotes_and_exit_two() {
 
 #[test]
 fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
-    for mode in ["board-audit", "maintainer", "test-login"] {
+    for mode in ["maintainer", "test-login"] {
         let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
             .arg(mode)
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
-        assert_eq!(
-            output.stderr,
-            bytes(&format!(
-                "pseudolife-stdio: mode '{mode}' is deferred in this candidate\n"
-            ))
-        );
+        let expected = bytes(&format!(
+            "pseudolife-stdio: mode '{mode}' is deferred in this candidate\n"
+        ));
+        assert_eq!(output.stderr, expected);
     }
 }

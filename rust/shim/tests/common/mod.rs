@@ -192,7 +192,13 @@ fn respond(
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    // Read through a borrow, never a `try_clone`: on Windows the clone is an
+    // inheritable handle, so a child spawned by a concurrent test can hold
+    // this connection past our close. Measured 2026-10-10 (Rust 1.94): with
+    // the clone, clients saw ConnectionReset after a full reply in 7 of 10
+    // parallel runs; without it, 0 of 40. That the reset comes from the
+    // inheriting child's exit is inferred, not traced.
+    let mut reader = BufReader::new(&stream);
     let mut line = String::new();
     if reader.read_line(&mut line).unwrap_or(0) == 0 {
         return;
@@ -449,6 +455,19 @@ pub fn meta() -> Value {
     json!({"io.modelcontextprotocol/protocolVersion":"2026-07-28", "io.modelcontextprotocol/clientCapabilities":{}, "io.modelcontextprotocol/clientInfo":{"name":"eof-contract","version":"1"}})
 }
 
+/// Windows reserves the exited child's PID with its retained process handle.
+/// Other platforms retain the existing reaped-PID fixture and its reuse risk.
+pub struct CompletedPid {
+    pid: u32,
+    #[cfg(windows)]
+    _child: Child,
+}
+impl CompletedPid {
+    pub fn id(&self) -> u32 {
+        self.pid
+    }
+}
+
 /// Disposable lease homes retain the local and board tests' original profiles.
 pub struct LeaseHome(pub std::path::PathBuf);
 impl LeaseHome {
@@ -477,6 +496,7 @@ impl LeaseHome {
             .env("PSEUDOLIFE_LEASE_LOCK_DIR", &self.0)
             .env("PSEUDOLIFE_SUITE_LOCK_DIR", &self.0)
             .env("PSEUDOLIFE_MCP_DAEMON_URL", url)
+            .env("PSEUDOLIFE_DAEMON_EXEC", "1")
             .env("PSEUDOLIFE_MCP_NO_SPAWN", "1");
         command
     }
@@ -492,6 +512,22 @@ impl LeaseHome {
     }
     pub fn call(&self, args: &[&str]) -> std::process::Output {
         self.command().args(args).output().unwrap()
+    }
+    pub fn completed_pid(&self) -> CompletedPid {
+        let mut child = self
+            .command()
+            .args(["lease", "--help"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert!(child.wait().unwrap().success());
+        CompletedPid {
+            pid,
+            #[cfg(windows)]
+            _child: child,
+        }
     }
 }
 impl Drop for LeaseHome {

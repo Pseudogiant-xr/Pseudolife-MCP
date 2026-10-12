@@ -2,6 +2,7 @@ import base64
 from copy import deepcopy
 import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -9,16 +10,34 @@ import pytest
 from evals.rust_port import cli_argv
 from evals.rust_port.harness import isolated_env, run_cli
 from evals.rust_port.provenance import ROOT
+from evals.rust_port.stdio_capture import ORACLE_HEAD
+from evals.rust_port.oracle_selection import SELECTION_ENV, selected_oracle, stale_pin_report
 
 
-def test_raw_invalid_argument_survives_the_pinned_python_process_boundary(tmp_path):
-    cli_argv.require_phase1_source(ROOT)
+def test_stale_production_pin_is_information_only():
+    report = stale_pin_report(ROOT, ORACLE_HEAD, ("pseudolife_memory",))
+    assert report["informational_only"] is True
+    assert report["historical_pin"] == ORACLE_HEAD
+
+
+@pytest.fixture
+def pinned_source(tmp_path):
+    root = tmp_path / "oracle"
+    subprocess.run(["git", "clone", "--shared", "--quiet", "--no-checkout",
+                    str(ROOT), str(root)], check=True)
+    subprocess.run(["git", "checkout", "--quiet", "--detach", selected_oracle()["oracle_head"]],
+                   cwd=root, check=True)
+    return root
+
+
+def test_raw_invalid_argument_survives_the_pinned_python_process_boundary(tmp_path, pinned_source):
+    cli_argv.require_phase1_source(pinned_source)
     shadow = tmp_path / "pseudolife_memory"
     shadow.mkdir()
     (shadow / "__init__.py").write_text("", encoding="utf-8")
     (shadow / "cli.py").write_text("raise RuntimeError('wrong source selected')", encoding="utf-8")
     for case in cli_argv.cases():
-        observed = run_cli(cli_argv.oracle_command(ROOT), cli_argv.native_argv(case),
+        observed = run_cli(cli_argv.oracle_command(pinned_source), cli_argv.native_argv(case),
                            cwd=tmp_path, env=isolated_env(tmp_path / "home"), timeout=10)
         assert observed == cli_argv.expected_result(case)
         if os.name == "posix":
@@ -73,19 +92,31 @@ def test_case_cannot_be_transcoded_for_another_platform():
         cli_argv.native_argv(case)
 
 
-def test_module_entrypoint_writes_public_exact_bytes_and_binds_executables(tmp_path):
+def test_module_entrypoint_writes_public_exact_bytes_and_binds_executables(tmp_path, pinned_source):
     private = tmp_path / "private.json"
     public = tmp_path / "public.json"
-    command = [sys.executable, "-m", "evals.rust_port.cli_argv", "--oracle-root", str(ROOT),
-               "--candidate-json", json.dumps(cli_argv.oracle_command(ROOT)),
+    command = [sys.executable, "-m", "evals.rust_port.cli_argv", "--oracle-root", str(pinned_source),
+               "--candidate-json", json.dumps(cli_argv.oracle_command(pinned_source)),
                "--out", str(private), "--public-out", str(public)]
-    observed = run_cli(command, [], cwd=ROOT, env=isolated_env(tmp_path / "home"), timeout=20)
+    environment = isolated_env(tmp_path / "home")
+    environment[SELECTION_ENV] = os.environ[SELECTION_ENV]
+    observed = run_cli(command, [], cwd=ROOT, env=environment, timeout=20)
     assert observed["exit_code"] == 0
     assert observed["stderr_b64"] == ""
     receipt = json.loads(public.read_text(encoding="utf-8"))
     assert receipt == json.loads(private.read_text(encoding="utf-8"))
     assert receipt["production_source_matches_pin"]
+    assert receipt["source_head"] == receipt["oracle_head"] == selected_oracle()["oracle_head"]
+    assert receipt["oracle_selection"] == selected_oracle()
     assert receipt["candidate"]["executable_sha256"] == receipt["oracle_python"]["executable_sha256"]
     assert receipt["cases"][0]["oracle"] == receipt["cases"][0]["candidate"]
     assert str(ROOT) not in public.read_text(encoding="utf-8")
     assert str(tmp_path) not in public.read_text(encoding="utf-8")
+
+
+def test_pinned_argv_source_rejects_changed_production(pinned_source):
+    cli_argv.require_phase1_source(pinned_source)
+    source = pinned_source / "pseudolife_memory/cli.py"
+    source.write_bytes(source.read_bytes() + b"\n# fixture source change\n")
+    with pytest.raises(RuntimeError, match="phase-1 selected production source required"):
+        cli_argv.require_phase1_source(pinned_source)

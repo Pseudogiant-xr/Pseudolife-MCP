@@ -6,9 +6,144 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-09 — contract-first Rust daemon crate skeleton)
+
+- The experimental workspace crate `rust/daemon/` (`pseudolife-daemon`)
+  carries the contract-first spike forward so later port slices can build
+  on it: `GET /health`, the bearer gate with env tokens and stored
+  principals, read-only hydration of a schema-55 bank, ONNX query
+  embedding and `GET /api/search` with the slot pool and BM25. Its spec
+  and differential harness move with it. Nothing installs or runs it, and
+  the spike's declared divergences still stand.
+
+### Added (2026-10-09 — native register audit archive verification)
+
+- The experimental native `board-audit verify --input PATH` computes chained
+  register hashes and walks archive rows in order without Python delegation or
+  bank attachment. It detects decoded duplicate keys and retains sequence,
+  previous-hash, hash and body-failure precedence for this bounded slice.
+  Archive acceptance remains partial: unsupported JSON and numeric domains,
+  other event families, retention, expected-head checks, bank verification,
+  export and stats remain deferred. Exhaustive finite-float correspondence
+  with Python and Windows integration remain unverified; the full audit mode
+  is not accepted.
+
+### Added (2026-10-09 — native doctor disposable database refusal)
+
+- The experimental Rust `doctor --disposable-proof` command returns the
+  existing refusal JSON for an absent or empty disposable database DSN,
+  using canonical arguments. Normal diagnostics, saved-state requests
+  and nonempty database operations remain deferred.
+
+### Changed (2026-10-09 — canonical native doctor arguments)
+
+- The experimental Rust doctor refusal accepts full option names with
+  separate values: positive finite ASCII decimal timeouts and the four
+  host names. Other argument shapes defer without argparse diagnostics;
+  saved-state requests also remain deferred.
+
+### Added (2026-10-09 — native empty board-audit archive verification)
+
+- The experimental native `board-audit verify --input PATH` verifies a
+  zero-byte archive without Python delegation or bank attachment. Input path
+  tokens starting with `-` defer unless exactly `-`; negative numeric and
+  dash-prefixed space-containing tokens also defer. Archive open/read failures
+  explicitly defer.
+  Nonempty chains, bank verification, other argument forms, export and stats
+  remain deferred.
+
+### Changed (2026-10-09 — Rust parity oracle selection)
+
+- Rust parity builds its Python oracle from the PR merge base, the push commit
+  or the frozen master capture head, recording that SHA in new receipts.
+  Historical pins remain unchanged and stale-pin reports are informational.
+  Manual dispatch requires the master branch ref and its matching frozen head
+  in both CI and capture modes; selection receipts also record the ref.
+
+### Changed (2026-10-09 — Rust-only pull requests skip the Python suite lanes)
+
+- CI classifies each pull request first. One that touches `rust/`, and whose
+  other changed files are only `.github/workflows/rust.yml` or
+  `CHANGELOG.md`, skips the four Python suite lanes. A `guards` job runs
+  instead: every test file that reads `CHANGELOG.md`, plus the tracked-tree
+  identifier and control-byte scan. The lanes still run when the
+  classification fails. Master pushes run everything, and a nightly
+  scheduled run covers master on days with only Rust merges. Only pull
+  request runs cancel superseded runs.
+
+### Fixed (2026-10-08 — native PostgreSQL password lookup)
+
+- The experimental Rust PostgreSQL client resolves an explicit password,
+  `PGPASSWORD`, or the platform default password file in libpq order. An empty
+  explicit password suppresses `PGPASSWORD` and still permits default-file
+  lookup. File matching and POSIX permissions follow libpq 18.6; custom passfile
+  controls retain their named refusals. Runtime parity remains unverified.
+
+### Fixed (2026-10-08 — native lease zombie detection)
+
+- The experimental native `lease hold` recognizes exited Linux processes whose
+  names contain non-UTF-8 bytes or embedded right parentheses. Live-process and
+  unreadable-procfs behavior remain unchanged; native lease acceptance remains
+  deferred.
+
+### Fixed (2026-10-08 — transient Codex coordination checks)
+
+- Ordinary Codex coordination calls recover one transient bank-authority
+  check automatically, using the same adapter and saved mailbox. Existing
+  adapters use a context-validation deadline compatible with the HTTP
+  timeout instead of the shorter startup deadline. Authentication,
+  binding and credential changes still fail closed without retry, and
+  failure hints distinguish validation, access and attachment failures.
+  Existing-adapter checks request strict read-only context and cannot
+  initialize a missing bank identity or cold storage. Initial startup and
+  legacy migration retain their authority-establishment behavior.
+  Cancellation during validation or cleanup propagates before retry or
+  dispatch. Message operations are never replayed by this recovery.
+
+### Added (2026-10-08 — current Claude models in the dreamer menus)
+
+- The Claude dreamer model lists now offer `claude-sonnet-5-5`,
+  `claude-haiku-5-5` and `claude-fable-5-1` beside the models they follow,
+  everywhere the list is written: both installers' lists and menus (now
+  numbered 1-8), the Claude shim autostart help text, the dreaming guide,
+  the Console's Dreamer card, the Extractor panel's override suggestions and
+  the Claude shim's `/models`. They join as options only: `claude-opus-5-5`
+  stays the default and the only recommended model until a ladder run
+  measures the new ones.
+
+### Fixed (2026-10-08 — daemon log no longer carries the database password)
+
+- The daemon's `storage: postgres (...)` startup line is now the endpoint
+  (`host:port/dbname`) parsed with libpq's rules. It used to split the DSN on
+  `@`, which left a keyword-form DSN (`host=... password=... dbname=...`)
+  logged whole, password included. Rotate any credential that reached a
+  daemon log through that line.
+
+### Fixed (2026-10-08 — native lease argument classification)
+
+- The experimental native lease parser accepts a lone `-` and unmatched
+  dash-prefixed arguments containing a literal ASCII space, matching Python
+  argparse. Recognized options, argument validation and refusal before effects
+  retain their existing behavior; native lease acceptance remains deferred.
+
+### Added (2026-10-07 — Phase 4 lease action candidate)
+
+- Add a native Rust `lease hold` candidate with a read-only external-process
+  probe and asynchronous board mirror, plus hold/operator parser help guards.
+  Native PostgreSQL `break`, `delegate` and `designate` actions are implemented;
+  Phase 4 action and mode-row acceptance remain deferred. No installation path
+  installs the candidate.
+
 ### Added
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
+
+### Fixed (2026-10-07 — native wait-mail ring predicate)
+
+- The experimental native `wait-mail` follows the shared Python/Stop-hook ring
+  predicate: malformed or over-width markers do not wake, while accepted CR/space
+  spellings and markers without a final newline retain their existing behavior.
+  Digest and seen-marker policies remain unchanged.
 
 ### Added (2026-10-07 — native maintainer sent candidate)
 

@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "oracle_head": "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1",
   "package_version": "0.17.0",
   "template_rule": "Only exact owned fixture URL and credential-file parameters replaced; expected newline generated for capture platform. Actual streams remain raw.",
   "oracle_schema": 55,

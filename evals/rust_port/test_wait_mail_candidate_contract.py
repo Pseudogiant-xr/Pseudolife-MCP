@@ -67,18 +67,30 @@ def test_explicit_candidate_contract_retains_raw_oracle_and_rejects_mutations(ca
         assert not compare_record(changed, platform)["passed"]
 
 
-def test_declared_record_bytes_and_delivery_clock_cannot_drift():
-    record = contract_record("wait-mail-long-ring-watermark", "linux")
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_declared_long_ring_timeout_preserves_files_and_matches_oracle(platform):
+    record = contract_record("wait-mail-long-ring-watermark", platform)
+    fixture = EXPECTATIONS[record["id"]]
+    response = record["candidate"]["response"]
+    newline = "\r\n" if platform == "windows" else "\n"
+    assert fixture["exit_code"] == 3 and "delivery" not in fixture
+    assert "Oracle-conformant" in fixture["note"]
+    assert response["stdout_b64"] == ""
+    expected = "wait-mail: no ring in 0.025 s (plain mail does not end the wait); re-arm to keep waiting.\n"
+    assert base64.b64decode(response["stderr_b64"]) == expected.replace("\n", newline).encode()
+    assert response["post_files_b64"] == record["candidate"]["pre_files_b64"]
+    assert LEDGER not in response["post_files_b64"]
+    record["oracle"]["response"] = copy.deepcopy(response)
+    checked = compare_record(record, platform)
+    assert checked["passed"] and not checked["raw_oracle_differences"]
+    seen_path = next(path for path in fixture["request"]["pre_files_b64"] if path.endswith(".seen"))
     for arm in ("oracle", "candidate"):
-        record[arm]["pre_files_b64"][EXPECTATIONS[record["id"]]["delivery"]["seen_path"]] = encoded(b"1\n")
-    assert not compare_record(record, "linux")["passed"]
-    record = contract_record("wait-mail-long-ring-watermark", "linux")
-    record["candidate"]["execution"]["wall_window"] = [1791242390, 1791242390.5]
-    assert not compare_record(record, "linux")["passed"]
-    record = contract_record("wait-mail-long-ring-watermark", "linux")
-    for arm in ("oracle", "candidate"):
-        record[arm]["pre_files_b64"][LEDGER] = encoded(b"old ledger\n")
-    assert not compare_record(record, "linux")["passed"]
+        record[arm]["pre_files_b64"][seen_path] = encoded(b"1\n")
+    assert not compare_record(record, platform)["passed"]
+    for path, raw in ((seen_path, b"12\n"), (LEDGER, b"unexpected ledger\n")):
+        record = contract_record("wait-mail-long-ring-watermark", platform)
+        record["candidate"]["response"]["post_files_b64"][path] = encoded(raw)
+        assert not compare_record(record, platform)["passed"]
 
 
 def test_full_pair_lane_uses_contract_and_keeps_actual_oracle(monkeypatch):

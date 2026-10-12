@@ -1,4 +1,4 @@
-use super::{Dsn, Error, SslMode};
+use super::{Dsn, Error, PasswordEnvironment, SslMode};
 use rustls::{
     DigitallySignedStruct, SignatureScheme,
     client::{
@@ -11,11 +11,12 @@ use rustls::{
 };
 use std::{path::PathBuf, sync::Arc};
 
-/// Only control names are retained, never their values.
+/// Unsupported controls retain only their names; passwords have redacted Debug.
 #[derive(Debug, Clone, Default)]
 pub struct TlsEnvironment {
     pub default_directory: Option<PathBuf>,
     pub ambient_controls: Vec<String>,
+    pub password: PasswordEnvironment,
 }
 impl TlsEnvironment {
     pub fn from_environment() -> Self {
@@ -41,7 +42,6 @@ impl TlsEnvironment {
                             | "PGPORT"
                             | "PGDATABASE"
                             | "PGUSER"
-                            | "PGPASSWORD"
                             | "PGPASSFILE"
                             | "PGSERVICE"
                             | "PGSERVICEFILE"
@@ -74,6 +74,7 @@ impl TlsEnvironment {
         Self {
             default_directory,
             ambient_controls,
+            password: PasswordEnvironment::from_environment(),
         }
     }
     pub fn validate(&self) -> Result<(), Error> {

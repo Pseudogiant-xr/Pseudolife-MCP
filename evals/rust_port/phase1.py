@@ -82,23 +82,35 @@ def corpus(root, command, clearance):
             "judge_sensitivity_controls": judge_sensitivity_controls(arms[0], policy)}
 
 
-def eof(root, command):
+def eof_required_outcome(historical, live):
+    """Keep successful, silent EOF and complete frame coverage load-bearing."""
+    differences = []
+    if live["exit_code"] != historical["exit_code"]:
+        differences.append({"path": "/exit_code", "reason": "eof_required_exit"})
+    if live["stderr_b64"] != "":
+        differences.append({"path": "/stderr", "reason": "eof_required_silence"})
+    if len(live["stdout_frames_b64"]) != len(historical["stdout_frames_b64"]):
+        differences.append({"path": "/frames", "reason": "eof_required_frame_count"})
+    return differences
+
+
+def eof(root, command, *, selected_source=None):
     from evals.rust_baseline.daemon import private_directory
     from .stdio_eof import observe as eof_observe
     evidence = json.loads(Path(__file__).with_name("stdio_eof_orders.json").read_text())
-    cells, differences, oracle_captures, frozen_verifications = [], [], {}, []
+    cells, differences, oracle_captures, frozen_verifications, historical_comparisons = [], [], {}, [], []
     same_platform = capture_platform() == evidence.get("capture_platform")
     for historical in evidence["cells"]:
         key = historical["era"], historical["case"]
-        # Keep same-platform frozen bytes authoritative. A matching live
-        # process can supply provenance; an unchecked one cannot rebaseline it.
+        # Historical replay keeps frozen bytes authoritative. Active parity
+        # compares the selected live process under the same ordering policy.
         if key not in oracle_captures:
             with private_directory() as private:
                 expected = eof_observe(root, Path(private) / "oracle", *key)
             expected["arm"] = "oracle"
             oracle_captures[key] = expected
         live = oracle_captures[key]
-        expected = historical if same_platform else live
+        expected = live if selected_source is not None else historical if same_platform else live
         with private_directory() as private:
             actual = eof_observe(root, Path(private) / "shim", expected["era"], expected["case"],
                                  command=command, validate_oracle=False)
@@ -107,6 +119,12 @@ def eof(root, command):
         policy = eof_policy(evidence, expected["era"], expected["case"])
         compared = judge_with_evidence(expected, actual, policy)
         verified = same_platform and verifies_frozen_capture(historical, live, policy)
+        if selected_source is not None:
+            historical_comparisons.append({"era": key[0], "case": key[1], "informational_only": True,
+                "differences": judge_with_evidence(historical, live, policy) if same_platform else [],
+                "same_platform": same_platform})
+            required = eof_required_outcome(historical, live)
+            compared.extend(retain_stderr(required, live, actual))
         if verified:
             compared = retain_stderr(compared, live, actual)
         if same_platform:
@@ -118,8 +136,12 @@ def eof(root, command):
             "frozen_verifications": frozen_verifications,
             "differences": differences, "frozen_oracle_observations": evidence["observations"],
             "evidence_sha256": evidence["evidence_sha256"],
+            "historical_comparisons": historical_comparisons,
+            **({"oracle_head": selected_source["oracle_head"]} if selected_source is not None else {}),
             "normalization_rule": "eof-observed-final-pair-orders",
-            "byte_oracle": "same-platform; frozen order evidence does not normalize line framing"}
+            "byte_oracle": ("selected live Python; frozen order policy, successful silent EOF and frame coverage retained"
+                            if selected_source is not None else
+                            "same-platform; frozen order evidence does not normalize line framing")}
 
 
 def main():
@@ -171,14 +193,15 @@ def main():
         args.out.parent.mkdir(parents=True, exist_ok=True)
         receipt["process_tests"] = process_tests(command, root, args.out.with_suffix(".pytest.log"))
     receipt.update(corpus(root, command, args.offline_resource_checked_at))
-    receipt["eof"] = eof(root, command)
+    selected_arguments = {"selected_source": source} if "oracle_selection" in source else {}
+    receipt["eof"] = eof(root, command, **selected_arguments)
     receipt["differences"].extend(receipt["eof"]["differences"])
     if not args.skip_faults:
         from .stdio_faults import run as fault_run
         receipt["faults"] = fault_run(root, command)
         receipt["differences"].extend(receipt["faults"]["differences"])
     from .stdio_scenarios import run as scenario_run
-    receipt["scenarios"] = scenario_run(root, command)
+    receipt["scenarios"] = scenario_run(root, command, **selected_arguments)
     receipt["differences"].extend(receipt["scenarios"]["differences"])
     from .stdio_process_controls import run as process_controls
     receipt["process_controls"] = process_controls(root)

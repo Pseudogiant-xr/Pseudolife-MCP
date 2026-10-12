@@ -968,6 +968,29 @@ def dsn_database_name(dsn: str) -> str | None:
     return os.environ.get("PGDATABASE") or None
 
 
+def dsn_endpoint(dsn: str) -> str:
+    """``host:port/dbname`` of ``dsn`` for a log line or a result file;
+    never the credential.
+
+    Parsed with libpq's own rules rather than split on ``@``: a keyword-form
+    DSN (``host=... password=... dbname=...``) has no ``@``, so a
+    ``rsplit("@", 1)`` sanitizer passes the whole string through, password
+    included (2026-10-08: the daemon's startup line did exactly that, and a
+    reviewer then printed it from a private daemon log). A DSN libpq cannot
+    parse is summarised as such, not echoed.
+    """
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+
+        params = conninfo_to_dict(dsn)
+    except Exception:  # noqa: BLE001 — the message can carry credentials
+        return "<unparseable dsn>"
+    host = params.get("host") or "<default host>"
+    port = params.get("port")
+    dbname = params.get("dbname") or "<default dbname>"
+    return f"{host}:{port}/{dbname}" if port else f"{host}/{dbname}"
+
+
 def _unresolved_error() -> ProductionDatabaseError:
     return ProductionDatabaseError(
         "refusing every test/bench reset: PSEUDOLIFE_MCP_DATABASE_URL is set "
