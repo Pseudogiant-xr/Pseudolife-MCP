@@ -280,7 +280,7 @@ async fn cms_store(
         access_count: 0,
         source: new.source.to_string(),
         seq: episodes::next_seq(),
-        tags: new.tags,
+        tags: new.tags.into_iter().map(Value::String).collect(),
         slots: found.slots.iter().map(Slot::to_json).collect(),
         authority: new.authority,
         distortion_tolerance: new.distortion,
