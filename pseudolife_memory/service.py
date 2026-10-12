@@ -699,7 +699,7 @@ def _inherited_labels(parents, new_text: str) -> tuple[str | None, str | None]:
 # same _origin_from_source mapping the auto-promote write path uses, and
 # witness identity is ep:<episode_id> when the entry has one (the daemon's
 # session identity), else src:<source>. A claim with no resolvable backing
-# entry has no witness at all — it follows its own origin field.
+# entry is agent tier and low-trust, under one shared "unbacked" token.
 
 def _quarantine_low_trust(claim: dict, src_entry: dict | None,
                           trusted: set[str]) -> bool:
@@ -714,7 +714,9 @@ def _quarantine_low_trust(claim: dict, src_entry: dict | None,
             return True
         src = src_entry.get("source") or ""
         return _origin_from_source(src) == "agent" and src not in trusted
-    return (claim.get("origin") or "agent") == "agent"
+    # Unbacked: the dream writes it at agent tier, so it is low-trust. Its
+    # origin field is model output and never read.
+    return True
 
 
 def _quarantine_witness(claim: dict, src_entry: dict | None) -> str:
@@ -725,7 +727,9 @@ def _quarantine_witness(claim: dict, src_entry: dict | None) -> str:
         if ep:
             return f"ep:{ep}"
         return f"src:{src_entry.get('source') or ''}"
-    return f"origin:{claim.get('origin') or 'agent'}"
+    # One token for every unbacked claim: varying the model-written origin
+    # label must not mint "independent" witnesses.
+    return "unbacked"
 
 
 def _onnx_embedding_available() -> bool:
@@ -4053,7 +4057,8 @@ class MemoryService(DreamOps, MaintainerOps):
         Returns ``{"action", "entity", "attribute", "member", "members_count"}``
         — ``action`` is one of ``"member_added"``, ``"member_confirmed"``,
         ``"member_capped"``, ``"member_invalid"``, ``"contested"`` (the
-        aggregate-conversion guard parked the add as a contender), or
+        aggregate, assistant-origin or tier guard parked the add as a
+        contender rather than convert a scalar), or
         ``"confirmed"`` (the member equalled the protected scalar) — see
         ``add_member``.
         """
@@ -4089,12 +4094,13 @@ class MemoryService(DreamOps, MaintainerOps):
         ``status`` -> ``"removed"``). Persists via the same per-slot
         write-through path ``cortex_write`` uses.
 
-        ``origin`` is the retracting write's provenance tier. Only the
-        ``assistant`` floor is consulted: an assistant-stated retraction of a
-        member some other tier put there is refused
-        (``"member_remove_refused"``), so an assistant-origin claim can never
-        take a member out of the user's set. Callers that pass nothing (the
-        MCP tool, the dream rollback replay) are unguarded exactly as before.
+        ``origin`` is the retracting write's provenance tier. An
+        assistant-stated retraction of a member some other tier put there is
+        refused (``"member_remove_refused"``), and with ``protect_provenance``
+        on so is any retraction by a tier below the member's own, so an
+        agent-tier dream op can never take a member out of the user's set. Callers that pass nothing (the
+        MCP tool, the dream rollback replay's removes) are unguarded exactly
+        as before.
 
         Returns ``{"action", "entity", "attribute", "member", "members_count"}``
         — ``action`` is ``"member_removed"``, ``"member_not_found"`` or

@@ -792,8 +792,10 @@ directly:
   origin**: the two-man rule is never weaker than the provenance guard
   it reinforces, so two agent witnesses cannot supersede a user-stated
   fact. The same witness restating merely re-confirms the parked value;
-  an automated promotion is stamped agent-supported (a literal, never
-  the claim's own origin field), and never as a user act.
+  an automated promotion is stamped with the promoting witness's own tier
+  (from its note's `source` tag, as every dream write is — never the
+  claim's own origin field), so a value a user-sourced note confirms is
+  as protected as one it wrote directly.
 
 Run results carry `quarantine_parked` / `quarantine_held` /
 `quarantine_promoted`; parks and promotions are journaled (a promotion

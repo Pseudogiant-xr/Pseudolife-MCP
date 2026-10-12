@@ -410,7 +410,8 @@ def test_rollback_re_parks_a_contender_the_runs_insert_settled(svc):
 def test_rollback_re_parks_a_contender_the_runs_member_add_settled(svc):
     svc.cortex_write("team", "mascot", "fox", support="user")
     svc.cortex_write("team", "mascot", "owl", support="agent")
-    svc.store("adding an owl to the mascots", source="notes")
+    # User-sourced: a weaker-tier add may not convert the user scalar.
+    svc.store("adding an owl to the mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
     assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
     assert _contenders(svc, "team", "mascot") == []
@@ -444,7 +445,8 @@ def test_rollback_readds_removed_member(svc):
 
 def test_rollback_unwinds_scalar_to_set_conversion(svc):
     svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
-    svc.store("adding an owl to the mascots", source="notes")
+    # User-sourced: a weaker-tier add may not convert the user scalar.
+    svc.store("adding an owl to the mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
     # Conversion happened: the scalar became a member alongside owl.
     assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
@@ -457,7 +459,8 @@ def test_rollback_unwinds_scalar_to_set_conversion(svc):
 
 def test_rollback_keeps_set_when_other_members_arrived(svc):
     svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
-    svc.store("adding an owl to the mascots", source="notes")
+    # User-sourced: a weaker-tier add may not convert the user scalar.
+    svc.store("adding an owl to the mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
     # A member the run did NOT add arrives afterwards.
     svc.set_add("team", "mascot", "crow")

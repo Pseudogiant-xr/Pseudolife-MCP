@@ -439,7 +439,14 @@ it came from a live `memory_set_add` call or a dream claim.
 
 Every cortex fact carries a provenance tier: **`user` > `action` >
 `agent` > `assistant`** (set via `origin=`, or defaulted from `source`). A
-write may only *supersede* a slot whose current value is backed by an
+dream-consolidated fact takes the tier of its backing note's `source` tag
+(`user` / `conversation` → `user`; an unmapped tag or no backing note →
+`agent`); the claim's own `origin` field is model output and is never read.
+When a dream batch holds several notes the extractor chooses which one a
+claim cites, so a tier above `agent` also needs the claim's value in the
+cited note's text (as a phrase, or all its content words and literals);
+otherwise the claim counts as unbacked: `agent` tier, and low-trust to the
+consolidation quarantine. A write may only *supersede* a slot whose current value is backed by an
 equal-or-weaker tier. A **weaker-tier** write (e.g. an `agent` value
 conflicting with a `user`-stated fact), or one below the confidence margin,
 is **not applied** — it's parked as a *contender*:
@@ -475,6 +482,12 @@ member another tier added (the retraction is dropped, `action:
 "member_remove_refused"`). It may fill an empty slot, extend a set it
 alone built, and retract its own members. Nothing supersedes *it*
 in return: an assistant-origin value is replaced by any later write.
+With `protect_provenance` on, every other tier gets the same two set-slot
+guards against a stronger tier: a weaker-tier add cannot convert a
+stronger tier's scalar into a set (it parks, `member_add_blocked_tier`),
+and a weaker-tier retraction of a stronger tier's member is dropped
+(`member_remove_refused`). Joining a set is not tier-guarded, and the MCP
+set tools, which pass no tier, are unguarded by design.
 Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
 for assistant-stated facts lifts the fact-only arm on
 `single-session-assistant` from 0.054 to 0.536 while the knowledge-update

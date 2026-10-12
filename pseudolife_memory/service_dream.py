@@ -216,6 +216,29 @@ class DreamStallTracker:
                 self.announced_hard = self._hard(self.stall)
 
 
+def _citation_backs(value: str, note: str) -> bool:
+    """Whether a cited note's text carries a claim ``value``: the value as a
+    whole phrase (case-insensitive, whitespace-collapsed, on word
+    boundaries), or every content token of it with no unbacked literal. A
+    value with nothing checkable is not backed. Deterministic, no model.
+
+    Guards the write tier in a multi-note dream batch, where the backing
+    note is the extractor's citation (model output): a claim keeps a tier
+    above agent only when its value is in the note it cites. Paraphrase
+    fails safe to agent, the tier every dream claim had before the tier
+    was taken from the note."""
+    from pseudolife_memory.memory.dream import literal_violations
+    v = " ".join((value or "").split()).lower()
+    n = " ".join((note or "").split()).lower()
+    if not v or not n:
+        return False
+    if re.search(r"(?<![a-z0-9])" + re.escape(v) + r"(?![a-z0-9])", n):
+        return True
+    toks = content_tokens(value)
+    return bool(toks) and toks <= content_tokens(note) \
+        and not literal_violations(value, note)
+
+
 def _stall_tracker(service) -> DreamStallTracker:
     """The service's tracker; created on first use for stand-ins that
     borrow ``dream_run_auto`` without ``MemoryService.__init__``."""
@@ -1462,6 +1485,8 @@ class DreamOps:
         from pseudolife_memory.memory.dream import (_DATE_LIKE_RE,
                                                     literal_violations,
                                                     span_unbacked)
+        # Late import: service.py imports this module at load time.
+        from pseudolife_memory.service import _origin_from_source
         import time as _time
         traces_cfg = self.config.memory.traces
         dream_cfg = self.config.memory.dream
@@ -1808,13 +1833,31 @@ class DreamOps:
                     if chronicle_on:
                         _write_event(c, src_id)
                     continue
-                # Speaker provenance -> write origin. "user" is a label about
-                # the TURN, never a tier promotion: support is never taken
-                # from claim text (2026-08-09 review), so only the DEMOTING
-                # direction is honoured here. Absent speaker (every shipped
-                # extraction) leaves the origin exactly as the claim carries
-                # it, so nothing about the shipped dream moves.
-                claim_origin = c.get("origin", "agent")
+                # Write tier = the backing entry's source tier, the same trust
+                # base the quarantine's witness check stands on
+                # (_quarantine_route). The claim's own ``origin`` field is
+                # model output and never read: support is never taken from
+                # claim text (2026-08-09 review), and the shipped extractors
+                # stamp every claim "agent", which stored user-sourced notes
+                # at agent tier where any agent note could supersede them.
+                # An unbacked claim, or an unmapped source tag, is agent.
+                # In a multi-note batch the backing note is the extractor's
+                # citation (model output), so a tier above agent also needs
+                # the value to be in the cited note (_citation_backs); a
+                # citation that fails counts as no backing note, for the
+                # tier and the quarantine alike.
+                tier_entry = src_entry
+                if (src_entry is not None and len(entries) > 1
+                        and _origin_from_source(src_entry.get("source"))
+                        not in (None, "agent")
+                        and not _citation_backs(str(c.get("value", "")),
+                                                src_entry.get("text", ""))):
+                    tier_entry = None
+                claim_origin = ((_origin_from_source(tier_entry.get("source"))
+                                 if tier_entry is not None else None)
+                                or "agent")
+                # Speaker provenance only ever DEMOTES: "user" is a label
+                # about the turn, never a tier promotion.
                 if c.get("speaker") == "assistant":
                     if assistant_policy == "drop":
                         logger.info(
@@ -1950,18 +1993,17 @@ class DreamOps:
                             "for %s.%s", ent, attr)
                     elif res["action"] == "contested":
                         logger.info(
-                            "dream: member add parked by %s guard for %s.%s",
-                            "assistant-origin"
-                            if claim_origin == "assistant" else "aggregate",
-                            ent, attr)
+                            "dream: member add parked (assistant-origin, "
+                            "tier or aggregate guard; %s-tier claim) for "
+                            "%s.%s", claim_origin, ent, attr)
                 elif op == "remove":
                     res = self.set_remove(ent, attr, c["value"],
                                           origin=claim_origin)
                     if res["action"] == "member_remove_refused":
                         logger.info(
-                            "dream: dropping assistant-stated retraction of "
-                            "a member backed by a stronger tier for %s.%s "
-                            "= %r", ent, attr, c["value"])
+                            "dream: dropping %s-tier retraction of a member "
+                            "backed by a stronger tier for %s.%s = %r",
+                            claim_origin, ent, attr, c["value"])
                 else:
                     # Consolidation quarantine (two-man rule): route the
                     # scalar claim BEFORE the write. Scope v1 is scalars
@@ -1971,7 +2013,7 @@ class DreamOps:
                     q_route, q_low = None, False
                     if quarantine_on:
                         q_route, q_witness, q_low = self._quarantine_route(
-                            ent, attr, c, src_entry, qt_trusted)
+                            ent, attr, c, tier_entry, qt_trusted)
                     # Claim-derived kwargs shared by every scalar write
                     # below — one definition, so the next claim field
                     # cannot silently miss one of the routing paths (this
@@ -1997,11 +2039,15 @@ class DreamOps:
                         if q_route == "promote":
                             # Independent second witness: promote the parked
                             # value via the contender machinery. Support is
-                            # the LITERAL "agent" — never the claim's own
-                            # origin field, which is model output and
-                            # steerable by note text (2026-08-09 review).
+                            # the promoting claim's write tier (its backing
+                            # note's source, speaker-demoted), exactly what a
+                            # direct write would store — never the claim's
+                            # own origin field, which is model output and
+                            # steerable by note text (2026-08-09 review). A
+                            # fixed "agent" here left a user-confirmed value
+                            # supersedable by the next agent note.
                             rr = self.cortex_resolve(
-                                ent, attr, accept=True, support="agent")
+                                ent, attr, accept=True, support=claim_origin)
                             if rr.get("resolved"):
                                 qt_promoted += 1
                                 res = {"action": "quarantine_promoted"}

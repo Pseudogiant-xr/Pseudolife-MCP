@@ -14,9 +14,9 @@ restating does not count.
 
 Witness identity is derived from persisted entry metadata only (the prereg
 mandates no schema change): ``ep:<episode_id>`` when the entry has one,
-else ``src:<source>``; a claim with no resolvable backing entry falls back
-to its own ``origin`` field and — being agent-asserted with no witness at
-all — quarantines under the same rule.
+else ``src:<source>``; a claim with no resolvable backing entry is agent
+tier and low-trust whatever its ``origin`` field says, under one shared
+``unbacked`` witness token.
 
 Scope v1 (documented): scalar claims only. Member ops keep their existing
 guards (members are never contested by design; the aggregate guard already
@@ -171,11 +171,10 @@ def test_trusted_source_bypasses_quarantine(svc):
     assert out.get("quarantine_parked", 0) == 0
 
 
-def test_unbacked_agent_claim_quarantines_on_its_own_origin(svc):
-    """A claim with no resolvable backing entry has no witness at all —
-    it follows its own origin field and quarantines (documented fallback;
-    the entries table persists no per-entry origin, so this is the most
-    metadata the schema can offer)."""
+def test_unbacked_claim_quarantines(svc):
+    """A claim with no resolvable backing entry writes at agent tier and
+    quarantines whatever its own origin field says (the entries table
+    persists no per-entry origin, and the claim's field is model output)."""
     svc.config.memory.dream.quarantine_low_trust = True
     # Two entries in one batch + a claim citing neither -> src_entry None.
     svc.store("alpha note one", source="agent")

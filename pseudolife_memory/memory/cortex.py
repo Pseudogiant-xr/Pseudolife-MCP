@@ -739,6 +739,13 @@ class CortexStore:
         assistant-origin is the assistant's to convert and extend, and any
         stronger tier writes through it untouched.
 
+        With ``protect_provenance`` on, the conversion carries the scalar
+        path's tier guard too: an add whose tier ranks below the current
+        scalar's origin parks (reason ``member_add_blocked_tier``) instead of
+        converting it. Joining an existing set is not tier-guarded (a
+        differing member is a second member, not a dispute), and an
+        unlabelled add (``support=None``) is unguarded as before.
+
         Know what parking against a SET costs, because this reuses the
         scalar guard's ``_contend`` rather than inventing a member
         contender path: :meth:`resolve` refuses any slot holding current
@@ -809,14 +816,21 @@ class CortexStore:
                                      writer_id=writer_id,
                                      session_id=session_id,
                                      hlc=hlc, tx_time=t, valid_time=t)
-            if sup == "assistant" and cur.origin != "assistant":
+            assistant_blocked = sup == "assistant" and cur.origin != "assistant"
+            # The tier guard the scalar path applies (write_fact's
+            # provenance guard), gated the same way: a weaker tier may not
+            # convert a stronger tier's scalar either. An unlabelled add
+            # (the MCP set tool) stays unguarded; the rollback replay's
+            # re-add carries its journaled tier and is guarded.
+            tier_blocked = (bool(sup) and self.protect_provenance
+                            and _rank(sup) < _rank(cur.origin))
+            if assistant_blocked or tier_blocked:
                 # The scalar/set conversion is one-way and takes the
                 # current value out of ``_current`` — an assistant-stated
                 # member must never be able to trigger it against a value
-                # some other tier put there. Same rule, same machinery and
-                # the same deliberate independence from
-                # ``protect_provenance`` as the scalar guard in
-                # :meth:`write_fact`.
+                # some other tier put there. The assistant rule keeps the
+                # same deliberate independence from ``protect_provenance``
+                # as the scalar guard in :meth:`write_fact`.
                 self.dirty_slots.add(key)
                 if _norm_value(slot.value) == _norm_value(cur.value):
                     # Corroboration, not conflict — never park a contender
@@ -831,7 +845,9 @@ class CortexStore:
                     return WriteResult("confirmed", cur)
                 return self._contend(cur, slot, emb, confidence,
                                      {p for p in provenance if p}, t, sup,
-                                     "member_add_blocked_assistant",
+                                     "member_add_blocked_assistant"
+                                     if assistant_blocked
+                                     else "member_add_blocked_tier",
                                      cur.slot_embedding,
                                      writer_id=writer_id,
                                      session_id=session_id,
@@ -974,14 +990,15 @@ class CortexStore:
         Returns ``"member_not_found"`` (record not persisted anywhere) when no
         current member at the slot matches.
 
-        ``support`` is the retracting write's provenance tier, and only the
-        ``assistant`` floor is consulted: an assistant-stated retraction of a
-        member some other tier put there is REFUSED
-        (``"member_remove_refused"``, nothing mutated) — removal is the one
-        member operation with no contender to park in, so the guard drops it
-        rather than parking. An assistant may retract its own members. Every
-        other caller (the MCP tool, the rollback replay) passes nothing and is
-        unguarded, exactly as before."""
+        ``support`` is the retracting write's provenance tier. An
+        assistant-stated retraction of a member some other tier put there is
+        REFUSED (``"member_remove_refused"``, nothing mutated), and with
+        ``protect_provenance`` on so is any retraction by a tier below the
+        member's own (an agent-tier dream op cannot take a user's member out
+        of the set). Removal is the one member operation with no contender to
+        park in, so the guard drops it rather than parking. A tier may retract
+        its own and weaker members. Every caller that passes nothing (the MCP
+        tool, the rollback replay's removes) is unguarded, exactly as before."""
         t = time.time() if now is None else float(now)
         key = (_norm_key(entity), _norm_key(attribute))
         nv = _norm_value(member)
@@ -994,12 +1011,15 @@ class CortexStore:
             return WriteResult("member_not_found", CortexRecord(
                 entity=entity, attribute=attribute, value=member, kind="member",
             ))
-        if (_norm_support(support) == "assistant"
-                and self.records[idxs[pos]].origin != "assistant"):
+        target = self.records[idxs[pos]]
+        sup = _norm_support(support)
+        if ((sup == "assistant" and target.origin != "assistant")
+                or (bool(sup) and self.protect_provenance
+                    and _rank(sup) < _rank(target.origin))):
             # Nothing is mutated and no dirty_slots write is scheduled: the
             # refusal must be a true no-op, or a persistence pass would
             # rewrite a slot this call never touched.
-            return WriteResult("member_remove_refused", self.records[idxs[pos]])
+            return WriteResult("member_remove_refused", target)
         self.dirty_slots.add(key)
         idx = idxs.pop(pos)
         rec = self.records[idx]

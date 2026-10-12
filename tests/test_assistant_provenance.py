@@ -662,10 +662,10 @@ def test_an_assistant_remove_of_an_assistant_member_is_allowed(svc):
 
 
 def test_a_user_speaker_remove_still_retracts_a_user_member(svc):
-    """``speaker: "user"`` is never a demotion — the claim stays an ordinary
-    agent-tier write, and agent-tier removes are unguarded as before."""
+    """``speaker: "user"`` is never a demotion — the claim writes at its
+    note's tier, and a user-sourced retraction takes the user's member out."""
     svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
-    svc.store("The Quillon Larder no longer serves kaya toast", source="agent")
+    svc.store("The Quillon Larder no longer serves kaya toast", source="user")
     svc.dream_run(StubExtractor([
         _member_claim("kaya toast", "remove", speaker="user")]))
 
@@ -689,12 +689,13 @@ def test_the_set_guard_holds_with_protect_provenance_off(svc):
 
 def test_supersede_keeps_the_legacy_set_behaviour(svc):
     """The naive arm: the label is never applied, so member ops route as
-    ordinary agent-tier dream claims — conversion and retraction included."""
+    ordinary dream claims at their note's tier — conversion and retraction
+    included."""
     svc.config.memory.dream.assistant_claims = "supersede"
     svc.cortex_write("the-quillon-larder", "menu", "seasonal tasting menu",
                      support="user", provenance=["seed"])
     svc.store("The Quillon Larder also serves an ember-plum tart",
-              source="agent")
+              source="user")
     svc.dream_run(StubExtractor([
         _member_claim("ember-plum tart", "add", speaker="assistant")]))
 
@@ -704,7 +705,7 @@ def test_supersede_keeps_the_legacy_set_behaviour(svc):
         "ember-plum tart", "seasonal tasting menu"]
 
     svc.set_add("kedai-sembilir", "menu", "kaya toast", origin="user")
-    svc.store("Kedai Sembilir no longer serves kaya toast", source="agent")
+    svc.store("Kedai Sembilir no longer serves kaya toast", source="user")
     svc.dream_run(StubExtractor([
         _member_claim("kaya toast", "remove", speaker="assistant",
                       entity="kedai-sembilir")]))
@@ -727,15 +728,16 @@ def test_drop_writes_no_member_and_retracts_none(svc):
 
 
 @pytest.mark.parametrize("policy", ["contender", "supersede", "drop"])
-def test_a_speakerless_set_claim_writes_exactly_as_before(svc, policy):
+def test_a_speakerless_set_claim_converts_and_retracts_at_its_notes_tier(svc, policy):
     """Behaviour-neutrality extended to the member model: a claim with no
-    ``speaker`` must still convert and retract under every policy value."""
+    ``speaker`` must still convert and retract (at its note's tier) under
+    every policy value."""
     svc.config.memory.dream.assistant_claims = policy
 
     svc.cortex_write("the-quillon-larder", "menu", "seasonal tasting menu",
                      support="user", provenance=["seed"])
     svc.store("The Quillon Larder also serves an ember-plum tart",
-              source="agent")
+              source="user")
     svc.dream_run(StubExtractor([_member_claim("ember-plum tart", "add")]))
     got = svc.cortex_lookup("the-quillon-larder", "menu")
     assert got["kind"] == "set"
@@ -743,7 +745,7 @@ def test_a_speakerless_set_claim_writes_exactly_as_before(svc, policy):
         "ember-plum tart", "seasonal tasting menu"]
 
     svc.set_add("kedai-sembilir", "menu", "kaya toast", origin="user")
-    svc.store("Kedai Sembilir no longer serves kaya toast", source="agent")
+    svc.store("Kedai Sembilir no longer serves kaya toast", source="user")
     svc.dream_run(StubExtractor([
         _member_claim("kaya toast", "remove", entity="kedai-sembilir")]))
     assert svc.cortex_lookup("kedai-sembilir", "menu")["members"] == []
