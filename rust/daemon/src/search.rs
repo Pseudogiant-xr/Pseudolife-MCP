@@ -145,9 +145,12 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
             && p.episodes
                 .as_ref()
                 .is_none_or(|s| e.episode_id.as_ref().is_some_and(|x| s.contains(x)))
-            && p.tags
-                .as_ref()
-                .is_none_or(|t| e.tags.iter().filter_map(Value::as_str).any(|x| t.contains(x)))
+            && p.tags.as_ref().is_none_or(|t| {
+                e.tags
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|x| t.contains(x))
+            })
     };
     let dense_eligible = |e: &Entry| keep(e) && meta_ok(e);
     let dense_filter_active =
@@ -853,6 +856,47 @@ pub fn temporal_neighbors(
 }
 
 #[cfg(test)]
+pub(crate) fn fixture_params(query: &str, k: usize) -> Params {
+    Params {
+        query: query.into(),
+        k,
+        sources: None,
+        tags: None,
+        episodes: None,
+        min_score: None,
+        default_floor: 0.25,
+        bm25: Bm25Knobs {
+            k1: 1.5,
+            b: 0.75,
+            weight: 0.3,
+            top_n: 20,
+            min_norm: 0.1,
+        },
+        bm25_enabled: false,
+        hide_superseded: false,
+        bands: None,
+        band_order: vec!["flat".into()],
+        disable_recency_boost: false,
+        recency_boost_enabled: false,
+        recency_base_half_life_s: 86400.0,
+        pool_multiplier: 1,
+        fusion_rrf: false,
+        fusion_name: "weighted_sum".into(),
+        timeline_enabled: false,
+        rerank_enabled: false,
+        rerank: RerankKnobs {
+            top_n: 20,
+            fusion_weight: 0.7,
+            skip_margin: 0.0,
+            model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2".into(),
+        },
+        count_access: true,
+        now: 1e9,
+        filters_json: serde_json::json!({}),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicI64;
@@ -891,43 +935,7 @@ mod tests {
     }
 
     fn params(query: &str, k: usize) -> Params {
-        Params {
-            query: query.into(),
-            k,
-            sources: None,
-            tags: None,
-            episodes: None,
-            min_score: None,
-            default_floor: 0.25,
-            bm25: Bm25Knobs {
-                k1: 1.5,
-                b: 0.75,
-                weight: 0.3,
-                top_n: 20,
-                min_norm: 0.1,
-            },
-            bm25_enabled: false,
-            hide_superseded: false,
-            bands: None,
-            band_order: vec!["flat".into()],
-            disable_recency_boost: false,
-            recency_boost_enabled: false,
-            recency_base_half_life_s: 86400.0,
-            pool_multiplier: 1,
-            fusion_rrf: false,
-            fusion_name: "weighted_sum".into(),
-            timeline_enabled: false,
-            rerank_enabled: false,
-            rerank: RerankKnobs {
-                top_n: 20,
-                fusion_weight: 0.7,
-                skip_margin: 0.0,
-                model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2".into(),
-            },
-            count_access: true,
-            now: 1e9,
-            filters_json: serde_json::json!({}),
-        }
+        fixture_params(query, k)
     }
 
     fn ids(bank: &Bank, r: &Ranked) -> Vec<i64> {
@@ -1032,7 +1040,7 @@ mod tests {
         };
         assert_eq!(rank_compat(&bank, &unit(1.0), &params).len(), 1);
         assert_eq!(
-            entry_json( &bank.entries[0], 1.0)["tags"],
+            entry_json(&bank.entries[0], 1.0)["tags"],
             json!(["valid", 7, true])
         );
         let params = Params {
@@ -1184,10 +1192,22 @@ mod tests {
         assert_eq!(after, vec![2]);
     }
 
-    const DEFAULT_BM25: Bm25Knobs = Bm25Knobs { k1: 1.5, b: 0.75, weight: 0.3, top_n: 200, min_norm: 0.0 };
-    fn rank_compat(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> { rank(bank, q, p, None).hits }
+    const DEFAULT_BM25: Bm25Knobs = Bm25Knobs {
+        k1: 1.5,
+        b: 0.75,
+        weight: 0.3,
+        top_n: 20,
+        min_norm: 0.1,
+    };
+    fn rank_compat(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
+        rank(bank, q, p, None).hits
+    }
     fn entry_json_compat(bank: &Bank, e: &Entry, score: f64) -> Value {
-        let idx = bank.entries.iter().position(|row| std::ptr::eq(row, e)).unwrap();
+        let idx = bank
+            .entries
+            .iter()
+            .position(|row| std::ptr::eq(row, e))
+            .unwrap();
         let mut served = vec![(idx, entry_json(e, score))];
         annotate_supersession_in(bank, &mut served);
         served.pop().unwrap().1
@@ -1200,6 +1220,7 @@ mod tests {
             tags: None,
             min_score: None,
             default_floor: 0.25,
+            count_access: false,
             ..params("", 8)
         }
     }
@@ -1430,7 +1451,7 @@ mod tests {
         let p = Params {
             query: "needle".into(),
             bm25_enabled: true,
-                bm25: Bm25Knobs {
+            bm25: Bm25Knobs {
                 min_norm: 1.0,
                 ..DEFAULT_BM25
             },
