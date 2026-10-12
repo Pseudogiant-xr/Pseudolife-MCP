@@ -114,3 +114,15 @@ The scratch merge of store checklist head `0e1481c7` with slots checklist head `
 - `rust/daemon/src/service.rs`
 
 The scratch merge was aborted and both forward worktrees are clean. Neither original branch was modified. Both slot/contradiction implementations remain byte-identical; the conflicting checklists describe the two independent branches. The final follow-up commits change checklist text only.
+
+## W2P preparation, 2026-10-12
+
+- BASE: `aaa652c6f570d02d9b2985acf1b3da5e1c45e92d`.
+- Local branch: `w2p/e-store`; no publication.
+- Conflicts: `../../rust/Cargo.lock`, `divergences.md`, `src/main.rs`, `src/service.rs`.
+
+Master lock is retained then Cargo resolves combined dependencies. Module declarations preserve the union. Mutable resident bank and store WriteState coexist with master background Sessions.
+
+NEEDS OPUS: WriteState and background Sessions are separate resident episode caches; lifecycle unification is not designed in this preparation. Existing autosave/write API gaps and golden catalogue drift remain.
+
+Validation and independent Codex high review are recorded in the private W2P report; initial failures and final reruns are listed separately. Windows evidence is cross compilation, not runtime. Frozen oracle goldens are not re-recorded.
