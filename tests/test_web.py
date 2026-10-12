@@ -9,8 +9,11 @@ so these tests require torch installed and run under ``.venv``.
 from __future__ import annotations
 
 import json
+import ntpath
 import os
+import posixpath
 import re
+import sys
 
 import pytest
 import yaml
@@ -626,6 +629,132 @@ def test_static_index_loop_matches_direct_response(svc, tmp_path, monkeypatch):
     app = _app(svc)
     direct = call(app, "GET", "/ui/")
     assert call(app, "GET", "/ui/unknown/route") == direct
+
+
+_ESCAPING_UI_PATHS = ["/ui/../../../etc/passwd", "/ui///etc/passwd", "/ui/a/../../x",
+                      # Out of the root and back in: refused, not resolved.
+                      "/ui/../ui/index.html", "/ui/a/../../static/index.html"]
+if sys.platform == "win32":
+    # A drive other than the checkout's: a same-drive "X:rel" joins under the root.
+    _OTHER = "R" if os.path.abspath(__file__)[:1].upper() == "Q" else "Q"
+    _ESCAPING_UI_PATHS += ["/ui/\\\\attacker\\share\\x", "/ui///attacker/share/x",
+                           "/ui/\\\\.\\pipe\\x", f"/ui/\\\\?\\{_OTHER}:\\x",
+                           f"/ui/{_OTHER}:\\x", f"/ui/{_OTHER}:x",
+                           "/ui/NUL", "/ui/assets/com1.txt", "/ui/COM¹.txt",
+                           "/ui/con .txt", "/ui/index.html:private",
+                           "/ui/..\\static\\index.html"]
+
+
+@pytest.mark.parametrize("path", _ESCAPING_UI_PATHS)
+def test_asgi_static_escape_refused_before_filesystem(svc, monkeypatch, path):
+    """A /ui path that leaves the static root, or names a Windows device or
+    stream, is refused from the string alone. The resolver is replaced by
+    one that touches nothing, so an unguarded run fails without opening the
+    UNC, pipe or device path the case names."""
+    from pathlib import Path  # noqa: PLC0415
+    resolved = []
+
+    def inert(self, *a, **k):
+        resolved.append(str(self))
+        raise RuntimeError("resolve() reached for an escaping path")
+
+    monkeypatch.setattr(Path, "resolve", inert)
+    st, _ = call(_app(svc), "GET", path)
+    assert (st, resolved) == (403, [])
+
+
+def _link_or_skip(link, target):
+    try:
+        link.symlink_to(target)
+    except OSError as exc:  # Windows without the symlink privilege
+        pytest.skip(f"cannot create a symlink here: {exc}")
+
+
+@pytest.mark.parametrize("path", ["/ui/docs/", "/ui/docs", "/ui/missing-route"])
+def test_asgi_static_linked_index_outside_root_refused(svc, monkeypatch, tmp_path, path):
+    """A directory index or the SPA fallback index that links outside the
+    static folder is refused, not served."""
+    from pseudolife_memory.web import api  # noqa: PLC0415
+    root, outside = tmp_path / "static", tmp_path / "outside.txt"
+    (root / "docs").mkdir(parents=True)
+    outside.write_bytes(b"outside-secret")
+    _link_or_skip(root / "docs" / "index.html", outside)
+    _link_or_skip(root / "index.html", outside)
+    monkeypatch.setattr(api, "STATIC_DIR", root)
+    st, body = call(_app(svc), "GET", path)
+    assert st == 403 and b"outside-secret" not in body
+
+
+def test_asgi_static_index_and_fallback_still_serve(svc, monkeypatch, tmp_path):
+    from pseudolife_memory.web import api  # noqa: PLC0415
+    root = tmp_path / "static"
+    (root / "docs").mkdir(parents=True)
+    (root / "index.html").write_bytes(b"shell")
+    (root / "docs" / "index.html").write_bytes(b"docs")
+    monkeypatch.setattr(api, "STATIC_DIR", root)
+    assert call(_app(svc), "GET", "/ui/docs/")[1] == b"docs"
+    assert call(_app(svc), "GET", "/ui/missing-route")[1] == b"shell"
+
+
+def test_asgi_static_linked_root_and_inside_links_still_serve(svc, monkeypatch, tmp_path):
+    """A static folder that is itself a link, and index links that stay
+    inside it, keep serving."""
+    from pseudolife_memory.web import api  # noqa: PLC0415
+    real = tmp_path / "real"
+    (real / "docs").mkdir(parents=True)
+    (real / "shell.html").write_bytes(b"shell")
+    (real / "docs" / "page.html").write_bytes(b"docs")
+    _link_or_skip(real / "index.html", real / "shell.html")
+    _link_or_skip(real / "docs" / "index.html", real / "docs" / "page.html")
+    alias = tmp_path / "alias"
+    _link_or_skip(alias, real)
+    monkeypatch.setattr(api, "STATIC_DIR", alias)
+    assert call(_app(svc), "GET", "/ui/docs/")[1] == b"docs"
+    assert call(_app(svc), "GET", "/ui/missing-route")[1] == b"shell"
+    assert call(_app(svc), "GET", "/ui/")[1] == b"shell"
+
+
+@pytest.mark.parametrize("pathmod", [ntpath, posixpath])
+def test_static_containment_is_lexical(pathmod):
+    from pseudolife_memory.web.api import _inside_static_root  # noqa: PLC0415
+    root = "C:\\app\\static" if pathmod is ntpath else "/app/static"
+    for rel in ("index.html", "js/app.js", "a/../index.html", "x/./y.css"):
+        assert _inside_static_root(root, rel, pathmod), rel
+    escaping = ["../x", "a/../../x", "/etc/passwd", "//host/share/x",
+                # Climb above the root and come back: normalizes inside, but
+                # resolving would visit the outside directory on the way.
+                "../static/index.html", "../outside/../static/index.html",
+                "a/../../static/js/app.js"]
+    if pathmod is ntpath:
+        escaping += ["\\\\host\\share\\x", "\\\\.\\pipe\\x", "\\\\?\\C:\\x", "C:\\x",
+                     "D:x", "D:\\app\\static\\x", "..\\x", "..\\static\\index.html",
+                     "C:..\\static\\index.html"]
+        escaping += ["NUL", "nul.txt", "a/CON", "COM1.js", "lpt9.css", "COM¹",
+                     "AUX .txt", "CONOUT$", "index.html:private", "a:b/index.html"]
+        # Same drive, drive-relative: joins under the root, as pathlib does.
+        assert _inside_static_root(root, "C:x", pathmod)
+        assert _inside_static_root(root, "C:index.html", pathmod)
+    for rel in ("console.js", "icon.svg", "nul-ish.css", "com10.txt", "COM0.js", "lpt0.css",
+                "js/../index.html", "a/./b/../c.css"):
+        assert _inside_static_root(root, rel, pathmod), rel
+    for rel in escaping:
+        assert not _inside_static_root(root, rel, pathmod), rel
+
+
+def test_static_containment_crosses_path_rules():
+    """POSIX-style input under Windows rules, and Windows-style input under
+    POSIX rules, where a backslash, drive or device name is part of an
+    ordinary file name and so stays inside the root."""
+    from pseudolife_memory.web.api import _inside_static_root  # noqa: PLC0415
+    win_root = "C:\\app\\static"
+    for rel in ("assets/js/app.js", "a/./b/../c.css"):
+        assert _inside_static_root(win_root, rel, ntpath), rel
+    for rel in ("../../etc/passwd", "a/./../../x", "/", "/etc/passwd", "//host/share/x",
+                "assets/nul", "assets/x.css:stream"):
+        assert not _inside_static_root(win_root, rel, ntpath), rel
+    for rel in ("\\\\host\\share\\x", "\\\\?\\C:\\x", "\\\\.\\pipe\\x", "C:\\x", "C:foo",
+                "..\\x", "NUL", "COM1.txt", "index.html:stream", "assets\\app.js"):
+        assert _inside_static_root("/app/static", rel, posixpath), rel
 
 
 def test_asgi_root_redirects(svc):
