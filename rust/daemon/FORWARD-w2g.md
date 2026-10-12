@@ -138,3 +138,15 @@ names their paths and the tested code commit. Review by the paused author
 is pending; this branch is a review candidate, not a publication decision.
 
 No deployment, full suite, GPU launch, public push or PR was performed.
+
+## W2P preparation, 2026-10-12
+
+- BASE: `aaa652c6f570d02d9b2985acf1b3da5e1c45e92d`.
+- Local branch: `w2p/g`; no publication.
+- Conflicts: `../../rust/Cargo.lock`, `src/http.rs`, `src/main.rs`.
+
+Master lock is retained for Cargo regeneration. Module declarations retain MCP and maintenance. Authenticated MCP keeps principal dispatch and tokenless 501, using the shared counted HTTP body reader.
+
+NEEDS OPUS: shared bounded refusal cleanup replaces the older MCP detached body drain; review transport deadline policy at landing. Bound identity and tool-body integration remain deferred.
+
+Validation and independent Codex high review are recorded in the private W2P report; initial failures and final reruns are listed separately. Windows evidence is cross compilation, not runtime. Frozen oracle goldens are not re-recorded.
