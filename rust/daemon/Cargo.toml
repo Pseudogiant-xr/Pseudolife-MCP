@@ -19,9 +19,17 @@ required-features = ["graph-harness"]
 [features]
 # Deliberate breaks for the harness mutant control; never in a release build.
 mutants = []
+contract-harness = []
+# Store differential driver; never enabled in the serving release binary.
+principal-harness = []
 graph-harness = []
 # Harness-only access to write tool bodies.
 harness = []
+
+[[bin]]
+name = "dream-contract"
+path = "src/bin/dream-contract.rs"
+required-features = ["contract-harness"]
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }
@@ -31,6 +39,9 @@ serde.workspace = true
 http-body-util.workspace = true
 chrono.workspace = true
 sha2.workspace = true
+hmac.workspace = true
+base64 = "=0.22.1"
+getrandom = "=0.3.4"
 percent-encoding.workspace = true
 regex.workspace = true
 yaml-rust2.workspace = true
@@ -41,6 +52,9 @@ fancy-regex = "=0.14.0"
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
 anyhow = "=1.0.104"
 hex = "=0.4.3"
+indexmap = "=2.14.2"
+reqwest.workspace = true
+libc.workspace = true
 form_urlencoded = "=1.2.2"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray", "std"] }
 ndarray = "=0.16.1"

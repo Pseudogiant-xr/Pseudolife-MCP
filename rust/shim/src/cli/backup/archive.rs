@@ -186,13 +186,8 @@ fn owner(_meta: &Metadata) -> (u64, u64) {
 }
 
 /// Python `str(float)`: shortest round-trip digits, `.0` on integral values.
-fn float_text(value: f64) -> String {
-    let text = format!("{value}");
-    if text.contains(['.', 'e', 'N', 'i']) {
-        text
-    } else {
-        format!("{text}.0")
-    }
+fn float_text(value: f64) -> io::Result<String> {
+    crate::float_repr::finite_float(value)
 }
 
 fn pax_record(key: &str, value: &str) -> Vec<u8> {
@@ -260,7 +255,7 @@ fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<
     {
         records.extend(pax_record("linkpath", link));
     }
-    records.extend(pax_record("mtime", &float_text(mtime)));
+    records.extend(pax_record("mtime", &float_text(mtime)?));
     if !records.is_empty() {
         let mut pax = Header::new_ustar();
         ascii_field(&mut pax.as_old_mut().name, "././@PaxHeader");
@@ -368,4 +363,45 @@ pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBu
     }
     fs::rename(&partial, &target)?;
     Ok(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn python_float_shortest_ties() {
+        // Python writer: pseudolife_memory/backup_cli.py:150 (tar.add),
+        // CPython tarfile.TarInfo.create_pax_header (pax_headers[name] = str(val)).
+        let mut wrong = Vec::new();
+        for (bits, expected) in [
+            (0x430c6bf526340002, "1000000000000000.2"),
+            (0xc308130f222a4572, "-847044394961070.2"),
+            (0x42d526daef896bc8, "93026504287663.12"),
+        ] {
+            let actual = float_text(f64::from_bits(bits)).unwrap();
+            if actual != expected {
+                wrong.push(format!("{bits:016x}: {actual} != {expected}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
+
+    #[test]
+    fn python_float_full_cpython_table() {
+        let table = include_str!("../../../tests/cli_audit_float_repr.tsv");
+        let mut count = 0;
+        for line in table
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+        {
+            let (bits, expected) = line.split_once('\t').unwrap();
+            let value = f64::from_bits(u64::from_str_radix(bits, 16).unwrap());
+            assert_eq!(float_text(value).unwrap(), expected, "bits {bits}");
+            count += 1;
+        }
+        assert_eq!(count, 5358);
+        assert!(float_text(f64::INFINITY).is_err());
+        assert!(float_text(f64::NAN).is_err());
+    }
 }

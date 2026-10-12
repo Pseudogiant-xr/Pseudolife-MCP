@@ -71,55 +71,7 @@ fn float(value: f64, out: &mut String) -> Result<(), InvalidInteger> {
         });
         return Ok(());
     }
-    if value == 0.0 {
-        out.push_str(if value.is_sign_negative() {
-            "-0.0"
-        } else {
-            "0.0"
-        });
-        return Ok(());
-    }
-    // Reshape Rust's shortest decimal to Python repr's exponent window.
-    // Acceptance still requires the independently captured exact corpus.
-    let text = value.abs().to_string();
-    let (mantissa, power) = text
-        .split_once(['e', 'E'])
-        .map_or((text.as_str(), 0), |(m, p)| {
-            (m, p.parse::<i32>().expect("float exponent"))
-        });
-    let decimal = mantissa.find('.').unwrap_or(mantissa.len());
-    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
-    let first = digits.find(|c| c != '0').expect("nonzero finite float");
-    let significant = digits[first..].trim_end_matches('0');
-    let exponent = decimal as i32 - first as i32 - 1 + power;
-    if value.is_sign_negative() {
-        out.push('-');
-    }
-    if !(-4..16).contains(&exponent) {
-        out.push(significant.as_bytes()[0] as char);
-        if significant.len() > 1 {
-            out.push('.');
-            out.push_str(&significant[1..]);
-        }
-        let sign = if exponent < 0 { '-' } else { '+' };
-        let _ = write!(out, "e{sign}{:02}", exponent.abs());
-    } else {
-        let point = exponent + 1;
-        if point <= 0 {
-            out.push_str("0.");
-            out.extend(std::iter::repeat_n('0', (-point) as usize));
-            out.push_str(significant);
-        } else if point as usize >= significant.len() {
-            out.push_str(significant);
-            out.extend(std::iter::repeat_n('0', point as usize - significant.len()));
-            out.push_str(".0");
-        } else {
-            let point = point as usize;
-            out.push_str(&significant[..point]);
-            out.push('.');
-            out.push_str(&significant[point..]);
-        }
-    }
+    out.push_str(&crate::float_repr::finite_float(value).map_err(|_| InvalidInteger)?);
     Ok(())
 }
 
@@ -196,6 +148,46 @@ pub fn encode(value: &Json) -> Result<Vec<u8>, InvalidInteger> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn python_float_shortest_ties() {
+        // Python writer: pseudolife_memory/web/api.py:103 (json.dumps).
+        let mut wrong = Vec::new();
+        for (bits, expected) in [
+            (0x430c6bf526340002, "1000000000000000.2"),
+            (0xc308130f222a4572, "-847044394961070.2"),
+            (0x42d526daef896bc8, "93026504287663.12"),
+        ] {
+            let actual = encode(&Json::Float(f64::from_bits(bits))).unwrap();
+            if actual != expected.as_bytes() {
+                wrong.push(format!(
+                    "{bits:016x}: {} != {expected}",
+                    String::from_utf8(actual).unwrap()
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
+
+    #[test]
+    fn python_float_full_cpython_table() {
+        let table = include_str!("../tests/cli_audit_float_repr.tsv");
+        let mut count = 0;
+        for line in table
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+        {
+            let (bits, expected) = line.split_once('\t').unwrap();
+            let value = f64::from_bits(u64::from_str_radix(bits, 16).unwrap());
+            assert_eq!(
+                encode(&Json::Float(value)).unwrap(),
+                expected.as_bytes(),
+                "bits {bits}"
+            );
+            count += 1;
+        }
+        assert_eq!(count, 5358);
+    }
 
     #[test]
     fn python_float_spelling() {
