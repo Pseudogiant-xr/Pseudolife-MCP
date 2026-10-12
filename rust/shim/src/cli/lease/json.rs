@@ -14,15 +14,30 @@ fn checked(value: Value) -> Result<Value, ()> {
     if admitted(&value) { Ok(value) } else { Err(()) }
 }
 pub fn from_str(text: &str) -> Result<Value, ()> {
-    checked(serde_json::from_str(text).map_err(|_| ())?)
+    checked(super::super::doorbell_seen::json::value_from_str(text).map_err(|_| ())?)
 }
 pub fn from_slice(bytes: &[u8]) -> Result<Value, ()> {
-    checked(serde_json::from_slice(bytes).map_err(|_| ())?)
+    from_str(std::str::from_utf8(bytes).map_err(|_| ())?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn private_number_keys_remain_ordinary_lease_data() {
+        // lease_cli.py:358,1391: reply and holder JSON keep nested object types.
+        for token in ["not a number", "123"] {
+            let text =
+                format!(r#"{{"pid":1,"worktree":{{"$serde_json::private::Number":"{token}"}}}}"#);
+            for value in [
+                from_str(&text).unwrap(),
+                from_slice(text.as_bytes()).unwrap(),
+            ] {
+                assert!(value["worktree"].is_object());
+                assert_eq!(value["worktree"]["$serde_json::private::Number"], token);
+            }
+        }
+    }
     #[test]
     fn producer_json_preserves_unicode_numbers_and_key_order() {
         let value =

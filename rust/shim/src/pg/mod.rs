@@ -82,7 +82,11 @@ pub struct Session {
     client: Option<Client>,
     driver: JoinHandle<Result<(), tokio_postgres::Error>>,
     notices: Notices,
+    ended: Ended,
 }
+/// The SQLSTATE of a server error that ended the connection with no request
+/// pending (a FATAL such as `admin_shutdown`), kept for the caller.
+type Ended = std::sync::Arc<std::sync::Mutex<Option<tokio_postgres::error::SqlState>>>;
 type Notices =
     std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<tokio_postgres::error::DbError>>>;
 /// Notices kept until a caller takes them; beyond this the oldest are
@@ -127,12 +131,22 @@ impl Session {
         // server notices are kept for the caller instead of being logged.
         let notices = Notices::default();
         let sink = std::sync::Arc::clone(&notices);
+        let ended = Ended::default();
+        let fatal = std::sync::Arc::clone(&ended);
         let mut connection = connection;
         let driver = tokio::spawn(async move {
             while let Some(message) =
                 std::future::poll_fn(|context| connection.poll_message(context)).await
             {
-                if let tokio_postgres::AsyncMessage::Notice(notice) = message? {
+                let message = message.inspect_err(|error| {
+                    if let Some(error) = error.as_db_error() {
+                        *fatal
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            Some(error.code().clone());
+                    }
+                })?;
+                if let tokio_postgres::AsyncMessage::Notice(notice) = message {
                     let mut kept = sink
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -148,6 +162,7 @@ impl Session {
             client: Some(client),
             driver,
             notices,
+            ended,
         };
         session
             .client()
@@ -172,6 +187,14 @@ impl Session {
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         )
         .into()
+    }
+    /// The SQLSTATE of the server error that ended this connection while no
+    /// request was pending, once the connection has ended that way.
+    pub fn ended_with(&self) -> Option<tokio_postgres::error::SqlState> {
+        self.ended
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
     /// Close gracefully after all borrowed operations have ended.
     pub async fn close(mut self) -> Result<(), Error> {

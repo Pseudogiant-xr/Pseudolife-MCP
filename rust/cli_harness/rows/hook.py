@@ -64,6 +64,16 @@ def _briefing_cases() -> list[Case]:
     add(Case("briefing-help", ["briefing", "--help"]))
     add(Case("briefing-daemon-down", ["briefing", "--hook-json"]))
     add(Case("briefing-plain", ["briefing"], daemon=daemon(), env=TOKEN))
+    # briefing_cli.py:55 and :183 retain ordinary nested JSON objects.
+    for suffix, value in (("text", "not a number"), ("numeric", "123")):
+        extra = {"$serde_json::private::Number": value}
+        add(Case(f"briefing-private-number-{suffix}", ["briefing"], expect_output=True,
+                 golden=False,
+                 daemon=daemon(**{"/api/briefing": json_body(
+                     {"markdown": MARKDOWN, "extra": [extra]})}), env=TOKEN))
+        add(Case(f"prompt-private-number-{suffix}", ["prompt-hook"], expect_output=True,
+                 golden=False,
+                 stdin=prompt_input(extra=[extra]), daemon=daemon(), env=TOKEN))
     add(Case("briefing-caps", ["briefing", "--max-unsure", "5", "--max-lessons", "2",
                                "--max-world", "0"], daemon=daemon(), env=TOKEN))
     add(Case("briefing-hook-json", ["briefing", "--hook-json"], daemon=daemon(), env=TOKEN))
@@ -142,8 +152,11 @@ def _briefing_cases() -> list[Case]:
         path.parent.mkdir(parents=True)
         path.write_bytes(b"")
         path.chmod(0o755)
+    # With the home's launcher present, the oracle asks PATH for
+    # pseudolife-mcp (runtimes.launcher_command): none outside the home.
     add(Case("briefing-hook-json-launcher-query", ["briefing", "--hook-json"], daemon=daemon(),
-             env=TOKEN, setup=launcher))
+             env={**TOKEN, "PATH": "{HOME}" + os.sep + "no-bin"}, setup=launcher,
+             programs=("pseudolife-mcp",)))
     return c
 
 

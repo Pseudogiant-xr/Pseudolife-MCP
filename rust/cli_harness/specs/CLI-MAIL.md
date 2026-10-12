@@ -40,6 +40,10 @@ all through `_write_private`). Every other argv shape is deferred.
 - `mail-clock`: the announcement's `HH:MM:SS` (on the running host's clock)
   and elapsed seconds, and the ledger epoch, each inside its own arm's
   invocation window.
+- Listener expiry is checked at each observation with a one-second wall-clock
+  resolution allowance and an upper bound of `min(60, timeout)` seconds ahead.
+  `ring-arrives-later` observes two distinct records before delivery;
+  `mail-expired-listener` writes an expiry two seconds behind the observer.
 - `mail-stdout-error-text`: the parenthesized OS error text inside the
   closed-stdout diagnostic; the rest of the line and the exit stay exact.
 - `python-shutdown-flush`: CPython's shutdown flush trailer and exit 120 after

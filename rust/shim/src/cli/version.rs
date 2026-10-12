@@ -80,16 +80,19 @@ pub(super) fn python_text(value: &Value, nested: bool) -> String {
             if !raw.contains(['.', 'e', 'E']) {
                 return raw;
             }
-            let rendered = value
+            value
                 .as_f64()
-                .map(|value| format!("{value:?}"))
-                .unwrap_or(raw);
-            if let Some((mantissa, exponent)) = rendered.split_once('e')
-                && let Ok(exponent) = exponent.parse::<i32>()
-            {
-                return format!("{mantissa}e{exponent:+03}");
-            }
-            rendered
+                .map(|value| {
+                    crate::float_repr::finite_float(value).unwrap_or_else(|_| {
+                        if value.is_sign_negative() {
+                            "-inf"
+                        } else {
+                            "inf"
+                        }
+                        .into()
+                    })
+                })
+                .unwrap_or(raw)
         }
         Value::Array(values) => format!(
             "[{}]",
@@ -180,6 +183,24 @@ mod tests {
         for name in ["00001", "0000001", "¹²³⁴⁵⁶", "000001\n\n", "manual"] {
             assert!(!runtime_name(name));
         }
+    }
+    #[test]
+    fn python_float_shortest_ties() {
+        // Python writer: pseudolife_memory/cli.py:129-131 (runtime source fields).
+        let mut wrong = Vec::new();
+        for (bits, expected) in [
+            (0x430c6bf526340002, "1000000000000000.2"),
+            (0xc308130f222a4572, "-847044394961070.2"),
+            (0x42d526daef896bc8, "93026504287663.12"),
+        ] {
+            let value = serde_json::json!(f64::from_bits(bits));
+            let actual = python_text(&value, false);
+            let nested = python_text(&serde_json::json!([value]), false);
+            if actual != expected || nested != format!("[{expected}]") {
+                wrong.push(format!("{bits:016x}: {actual}, {nested} != {expected}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
     #[test]
     fn manifest_field_rendering_uses_python_truth_and_representation() {
