@@ -58,9 +58,9 @@
   default origin is `agent`, now parks against a fact the dream consolidated
   at `user` tier instead of superseding it; pass `origin="user"` when the
   human stated the change, or settle it with `memory_fact_resolve`.
-- Known limits: the shipped extractor's parser turns a JSON `null` value
-  into the text `None`, which is checked like any other string; a
-  retraction skips the negation rule, so a note that affirms a
+- The shipped extractor's parser drops a claim whose value is JSON `null`
+  instead of storing the text `None`.
+- Known limits: a retraction skips the negation rule, so a note that affirms a
   dream-consolidated member can still back a misread removal of it; and a
   dream rollback restores the previous value as a direct write, so a
   restored dream value is protected from later dream claims until it is

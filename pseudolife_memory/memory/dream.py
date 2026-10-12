@@ -1343,6 +1343,9 @@ class OpenAICompatExtractor:
         for c in raw if isinstance(raw, list) else []:
             if not isinstance(c, dict):
                 continue
+            if c.get("value") is None:
+                # A JSON null is no value; str() would turn it into "None".
+                continue
             entity = str(c.get("entity", "")).strip()
             attribute = str(c.get("attribute", "")).strip()
             value = str(c.get("value", "")).strip()

@@ -477,9 +477,8 @@ its limits are deliberate trade-offs, not guarantees:
   misread removal of it even when the note affirms it. A member added by a
   direct write is not affected (see below).
 - Only a string value is checked: a `None`, number, boolean, list or dict
-  value stays at `agent` tier. The shipped extractor's parser turns a JSON
-  `null` value into the text `None`, which is checked like any other
-  string.
+  value stays at `agent` tier. The shipped extractor's parser drops a claim
+  whose value is JSON `null` rather than storing the text `None`.
 - `memory_dream(rollback)` restores the previous value as a direct write,
   so a restored value the dream had consolidated is protected from later
   dream claims until it is changed directly.

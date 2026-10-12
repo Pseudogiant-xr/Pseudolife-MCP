@@ -312,6 +312,20 @@ def test_bool_source_is_dropped_at_the_parse_boundary(bad):
     assert len(ev) == 1 and "source" not in ev[0]
 
 
+def test_null_value_claim_is_dropped_at_the_parse_boundary():
+    """A JSON null value would otherwise become the text "None", which a
+    note such as "None of my editor plugins work" then backs as a phrase."""
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+    from tests.dream_helpers import chat_payload, stub_server
+    claims = [{"entity": "editor-pref", "attribute": "editor", "value": None,
+               "confidence": 0.8, "source": 0},
+              {"entity": "editor-pref", "attribute": "editor", "value": "vim",
+               "confidence": 0.8, "source": 0}]
+    with stub_server(lambda: (200, chat_payload(claims))) as url:
+        got = OpenAICompatExtractor(url, "m").extract(["my editor is vim"], [])
+    assert [c["value"] for c in got] == ["vim"]
+
+
 def test_assistant_speaker_cannot_promote_a_parked_value_over_user(svc):
     """Quarantine on: the promote route's tier check uses the claim's
     write tier after the assistant-speaker demotion, so the two-man rule
