@@ -1,6 +1,9 @@
 //! Runtime identity fields from the pinned Python CLI and side-by-side layout.
 use serde_json::Value;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 fn env_path(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
@@ -33,7 +36,7 @@ fn runtime_root() -> Option<PathBuf> {
     Some(data.join("pseudolife-mcp").join("runtimes"))
 }
 
-fn runtime_name(name: &str) -> bool {
+fn runtime_sequence(name: &str) -> Option<u32> {
     // CPython 3.11 / Unicode 14: runtimes.py's six Unicode decimal digits.
     const ZEROS: &[u32] = &[
         0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66,
@@ -45,12 +48,15 @@ fn runtime_name(name: &str) -> bool {
     ];
     // Python's regex $ also matches immediately before one final newline.
     let name = name.strip_suffix('\n').unwrap_or(name);
-    name.chars().count() == 6
-        && name.chars().all(|c| {
-            ZEROS
-                .iter()
-                .any(|zero| (c as u32).checked_sub(*zero).is_some_and(|n| n < 10))
-        })
+    if name.chars().count() != 6 {
+        return None;
+    }
+    name.chars().try_fold(0, |sequence, c| {
+        let digit = ZEROS
+            .iter()
+            .find_map(|zero| (c as u32).checked_sub(*zero).filter(|n| *n < 10))?;
+        Some(sequence * 10 + digit)
+    })
 }
 
 fn truthy(value: &Value) -> bool {
@@ -125,19 +131,47 @@ fn runtime_line() -> Option<String> {
         return None;
     }
     let directory = fs::canonicalize(executable.parent()?.parent()?).ok()?;
-    for entry in fs::read_dir(runtime_root()?).ok()?.flatten() {
-        let path = entry.path();
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if !runtime_name(name)
-            || !path.is_dir()
-            || (path != directory && fs::canonicalize(&path).ok().as_ref() != Some(&directory))
-        {
+    runtime_line_at(&runtime_root()?, &directory)
+}
+
+fn runtime_line_at(root: &Path, directory: &Path) -> Option<String> {
+    runtime_line_from_paths(
+        fs::read_dir(root)
+            .ok()?
+            .flatten()
+            .map(|entry| entry.path())
+            .collect(),
+        |path| path == directory || fs::canonicalize(path).ok().as_deref() == Some(directory),
+    )
+}
+
+fn runtime_line_from_paths(
+    paths: Vec<PathBuf>,
+    same_path: impl Fn(&Path) -> bool,
+) -> Option<String> {
+    let mut candidates: Vec<_> = paths
+        .into_iter()
+        .filter_map(|path| {
+            let sequence = runtime_sequence(path.file_name()?.to_str()?)?;
+            Some((sequence, path))
+        })
+        .collect();
+    // Python list_runtimes sorts stably by sequence: numeric ties retain
+    // directory enumeration order, and non-numeric names are excluded.
+    candidates.sort_by_key(|(sequence, _)| *sequence);
+    for (_, path) in candidates {
+        if !path.is_dir() || !same_path(&path) {
             continue;
         }
-        let marker: Value =
-            serde_json::from_slice(&fs::read(path.join("runtime.json")).ok()?).ok()?;
-        let marker = marker.as_object()?;
+        let Some(marker) = fs::read(path.join("runtime.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+        else {
+            continue;
+        };
+        let Some(marker) = marker.as_object() else {
+            continue;
+        };
         let console = path.join(if cfg!(windows) {
             "Scripts/pseudolife-mcp.exe"
         } else {
@@ -178,12 +212,98 @@ mod tests {
     #[test]
     fn runtime_names_match_python_decimal_digits_and_final_newline() {
         for name in ["000001", "０００００１", "٠٠٠٠٠١", "000001\n"] {
-            assert!(runtime_name(name));
+            assert!(runtime_sequence(name).is_some());
         }
         for name in ["00001", "0000001", "¹²³⁴⁵⁶", "000001\n\n", "manual"] {
-            assert!(!runtime_name(name));
+            assert!(runtime_sequence(name).is_none());
         }
     }
+    #[cfg(unix)]
+    fn alias_fixture(names: &[&str], marker: &[u8]) -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("runtime-order-{}", uuid::Uuid::new_v4()));
+        let directory = root.join("installed");
+        fs::create_dir_all(directory.join("bin")).unwrap();
+        fs::write(directory.join("bin/pseudolife-mcp"), b"console").unwrap();
+        fs::write(directory.join("runtime.json"), marker).unwrap();
+        for name in names {
+            std::os::unix::fs::symlink(&directory, root.join(name)).unwrap();
+        }
+        (root, fs::canonicalize(directory).unwrap())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_aliases_use_numeric_order_and_skip_non_numeric_names() {
+        let (root, directory) =
+            alias_fixture(&["000009", "000002", "manual"], br#"{"source":"fixture"}"#);
+        let actual = runtime_line_at(&root, &directory);
+        let expected = format!(
+            "runtime {} (source fixture)\n",
+            root.join("000002").display()
+        );
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(actual.as_deref(), Some(expected.as_str()));
+    }
+
+    fn marker_fixture(names: &[(&str, Option<&[u8]>)]) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("runtime-markers-{}", uuid::Uuid::new_v4()));
+        for (name, marker) in names {
+            let path = root.join(name);
+            let console = path.join(if cfg!(windows) {
+                "Scripts/pseudolife-mcp.exe"
+            } else {
+                "bin/pseudolife-mcp"
+            });
+            fs::create_dir_all(console.parent().unwrap()).unwrap();
+            fs::write(console, b"console").unwrap();
+            if let Some(marker) = marker {
+                fs::write(path.join("runtime.json"), marker).unwrap();
+            }
+        }
+        root
+    }
+
+    #[test]
+    fn ordered_candidates_keep_numeric_ties_in_enumeration_order() {
+        let root = marker_fixture(&[
+            ("０００００２", Some(br#"{"source":"first"}"#)),
+            ("000002", Some(br#"{"source":"second"}"#)),
+            ("000009", Some(br#"{"source":"higher"}"#)),
+            ("manual", Some(b"{}")),
+        ]);
+        let paths = ["manual", "000009", "０００００２", "000002"]
+            .map(|name| root.join(name))
+            .to_vec();
+        let actual = runtime_line_from_paths(paths, |_| true);
+        let expected = format!(
+            "runtime {} (source first)\n",
+            root.join("０００００２").display()
+        );
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(actual.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn damaged_matching_marker_does_not_hide_later_valid_runtime() {
+        for marker in [
+            Some(b"{".as_slice()),
+            Some(b"[]"),
+            Some(b"null"),
+            Some(b"\xff"),
+            None,
+        ] {
+            let root = marker_fixture(&[
+                ("000001", marker),
+                ("000002", Some(br#"{"source":"later"}"#)),
+            ]);
+            let paths = vec![root.join("000001"), root.join("000002")];
+            let actual = runtime_line_from_paths(paths, |_| true);
+            let expected = format!("runtime {} (source later)\n", root.join("000002").display());
+            fs::remove_dir_all(root).unwrap();
+            assert_eq!(actual.as_deref(), Some(expected.as_str()));
+        }
+    }
+
     #[test]
     fn python_float_shortest_ties() {
         // Python writer: pseudolife_memory/cli.py:129-131 (runtime source fields).
