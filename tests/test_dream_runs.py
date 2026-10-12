@@ -407,8 +407,15 @@ def test_rollback_re_parks_a_contender_the_runs_insert_settled(svc):
     assert _contenders(svc, "team", "mascot") == ["owl"]
 
 
+def _dream_seed_fox(svc):
+    """A user-tier fox the dream consolidated: a later user note's add may
+    convert it (a direct user write could not be converted by the dream)."""
+    svc.store("the team mascot is a fox", source="user")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))
+
+
 def test_rollback_re_parks_a_contender_the_runs_member_add_settled(svc):
-    svc.cortex_write("team", "mascot", "fox", support="user")
+    _dream_seed_fox(svc)
     svc.cortex_write("team", "mascot", "owl", support="agent")
     # User-sourced: a weaker-tier add may not convert the user scalar.
     svc.store("adding an owl to the team mascots", source="user")
@@ -444,7 +451,7 @@ def test_rollback_readds_removed_member(svc):
 
 
 def test_rollback_unwinds_scalar_to_set_conversion(svc):
-    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
+    _dream_seed_fox(svc)
     # User-sourced: a weaker-tier add may not convert the user scalar.
     svc.store("adding an owl to the team mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
@@ -533,7 +540,7 @@ class _CiteStub(_Stub):
 
 
 def test_rollback_keeps_set_when_other_members_arrived(svc):
-    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
+    _dream_seed_fox(svc)
     # User-sourced: a weaker-tier add may not convert the user scalar.
     svc.store("adding an owl to the team mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))

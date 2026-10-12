@@ -756,6 +756,7 @@ class CortexStore:
         hlc: tuple[int, int] | None = None,
         writer_id: str | None = None,
         session_id: str | None = None,
+        dream: bool = False,
     ) -> WriteResult:
         """Add (or confirm) a member of the set-valued slot ``(slot.entity,
         slot.attribute)``.
@@ -802,7 +803,11 @@ class CortexStore:
         scalar's origin parks (reason ``member_add_blocked_tier``) instead of
         converting it. Joining an existing set is not tier-guarded (a
         differing member is a second member, not a dispute), and an
-        unlabelled add (``support=None``) is unguarded as before.
+        unlabelled add (``support=None``) is unguarded as before. A dream add
+        (``dream=True``) also parks instead of converting a scalar a direct
+        user or action write backs (reason ``member_add_blocked_direct``,
+        :func:`direct_backed`), and marks a user or action tier it is first
+        to give a record, as :meth:`write_fact` does.
 
         Know what parking against a SET costs, because this reuses the
         scalar guard's ``_contend`` rather than inventing a member
@@ -863,6 +868,7 @@ class CortexStore:
                     cur.last_confirmed = t
                     cur.provenance |= {p for p in provenance if p}
                     if sup:
+                        _mark_tier(cur, sup, dream)
                         cur.support.add(sup)
                     cur.confidence = min(
                         1.0, max(self._reinforce(cur.confidence), float(confidence)))
@@ -873,7 +879,8 @@ class CortexStore:
                                      cur.slot_embedding,
                                      writer_id=writer_id,
                                      session_id=session_id,
-                                     hlc=hlc, tx_time=t, valid_time=t)
+                                     hlc=hlc, tx_time=t, valid_time=t,
+                                     dream=dream)
             assistant_blocked = sup == "assistant" and cur.origin != "assistant"
             # The tier guard the scalar path applies (write_fact's
             # provenance guard), gated the same way: a weaker tier may not
@@ -882,7 +889,11 @@ class CortexStore:
             # re-add carries its journaled tier and is guarded.
             tier_blocked = (bool(sup) and self.protect_provenance
                             and _rank(sup) < _rank(cur.origin))
-            if assistant_blocked or tier_blocked:
+            # A dream add never converts a value a direct user or action
+            # write put there, whatever its own tier (write_fact's rule).
+            direct_blocked = (dream and self.protect_provenance
+                              and direct_backed(cur))
+            if assistant_blocked or tier_blocked or direct_blocked:
                 # The scalar/set conversion is one-way and takes the
                 # current value out of ``_current`` — an assistant-stated
                 # member must never be able to trigger it against a value
@@ -896,7 +907,9 @@ class CortexStore:
                     # aggregate guard's own rule).
                     cur.last_confirmed = t
                     cur.provenance |= {p for p in provenance if p}
-                    cur.support.add(sup)
+                    if sup:
+                        _mark_tier(cur, sup, dream)
+                        cur.support.add(sup)
                     cur.confidence = min(
                         1.0, max(self._reinforce(cur.confidence),
                                  float(confidence)))
@@ -905,11 +918,14 @@ class CortexStore:
                                      {p for p in provenance if p}, t, sup,
                                      "member_add_blocked_assistant"
                                      if assistant_blocked
-                                     else "member_add_blocked_tier",
+                                     else "member_add_blocked_tier"
+                                     if tier_blocked
+                                     else "member_add_blocked_direct",
                                      cur.slot_embedding,
                                      writer_id=writer_id,
                                      session_id=session_id,
-                                     hlc=hlc, tx_time=t, valid_time=t)
+                                     hlc=hlc, tx_time=t, valid_time=t,
+                                     dream=dream)
             self.dirty_slots.add(key)
             cur.status = "superseded"
             cur.superseded_at = t
@@ -966,7 +982,8 @@ class CortexStore:
                                  "member_add_blocked_assistant",
                                  None, writer_id=writer_id,
                                  session_id=session_id,
-                                 hlc=hlc, tx_time=t, valid_time=t)
+                                 hlc=hlc, tx_time=t, valid_time=t,
+                                 dream=dream)
         if len(members) >= MAX_CURRENT_MEMBERS:
             # Rejected: return an unpersisted record carrying the OFFENDING
             # value (never an unrelated existing member), and log it against
@@ -986,6 +1003,8 @@ class CortexStore:
                                   {p for p in provenance if p}, t, hlc=hlc,
                                   writer_id=writer_id, session_id=session_id,
                                   support=support)
+        if dream and sup in _DIRECT_TIERS:
+            rec.provenance.add(f"dream:{sup}")
         self._settle_matching_contender(key, rec, t, writer_id, session_id)
         return WriteResult("member_added", rec)
 
@@ -1041,6 +1060,7 @@ class CortexStore:
     def remove_member(
         self, entity: str, attribute: str, member: str, *,
         now: float | None = None, support: str | None = None,
+        dream: bool = False,
     ) -> WriteResult:
         """Retract one current member by normalised-value match. The row is
         kept (``status`` -> ``"removed"``, ``superseded_at`` stamped) as the
@@ -1056,7 +1076,10 @@ class CortexStore:
         of the set). Removal is the one member operation with no contender to
         park in, so the guard drops it rather than parking. A tier may retract
         its own and weaker members. Every caller that passes nothing (the MCP
-        tool, the rollback replay's removes) is unguarded, exactly as before."""
+        tool, the rollback replay's removes) is unguarded, exactly as before.
+        A dream retraction (``dream=True``) of a member a direct user or
+        action write backs (:func:`direct_backed`) is refused too, whatever
+        its own tier."""
         t = time.time() if now is None else float(now)
         key = (_norm_key(entity), _norm_key(attribute))
         nv = _norm_value(member)
@@ -1073,7 +1096,9 @@ class CortexStore:
         sup = _norm_support(support)
         if ((sup == "assistant" and target.origin != "assistant")
                 or (bool(sup) and self.protect_provenance
-                    and _rank(sup) < _rank(target.origin))):
+                    and _rank(sup) < _rank(target.origin))
+                or (dream and self.protect_provenance
+                    and direct_backed(target))):
             # Nothing is mutated and no dirty_slots write is scheduled: the
             # refusal must be a true no-op, or a persistence pass would
             # rewrite a slot this call never touched.

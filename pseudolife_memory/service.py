@@ -4047,6 +4047,7 @@ class MemoryService(DreamOps, MaintainerOps):
         provenance: list[str] | None = None,
         origin: str | None = None,
         confidence: float = 0.7,
+        dream: bool = False,
     ) -> dict[str, Any]:
         """Add (or confirm) a member of the set-valued ``(entity, attribute)``
         slot. A scalar already occupying the slot converts to a set one-way
@@ -4084,6 +4085,7 @@ class MemoryService(DreamOps, MaintainerOps):
                 hlc=self._hlc.tick(),
                 writer_id=writer_id,
                 session_id=session_id,
+                dream=dream,
             )
             self._ensure_subject_entity(entity)
             self._save_cortex()
@@ -4096,7 +4098,8 @@ class MemoryService(DreamOps, MaintainerOps):
             }
 
     def set_remove(self, entity: str, attribute: str, member: str,
-                   origin: str | None = None) -> dict[str, Any]:
+                   origin: str | None = None,
+                   dream: bool = False) -> dict[str, Any]:
         """Retract one current member of a set-valued slot (audit row kept,
         ``status`` -> ``"removed"``). Persists via the same per-slot
         write-through path ``cortex_write`` uses.
@@ -4105,7 +4108,9 @@ class MemoryService(DreamOps, MaintainerOps):
         assistant-stated retraction of a member some other tier put there is
         refused (``"member_remove_refused"``), and with ``protect_provenance``
         on so is any retraction by a tier below the member's own, so an
-        agent-tier dream op can never take a member out of the user's set. Callers that pass nothing (the
+        agent-tier dream op can never take a member out of the user's set,
+        and so is a dream retraction (``dream=True``, internal) of a member a
+        direct user or action write backs. Callers that pass nothing (the
         MCP tool, the dream rollback replay's removes) are unguarded exactly
         as before.
 
@@ -4117,7 +4122,7 @@ class MemoryService(DreamOps, MaintainerOps):
             self._ensure_init()
             assert self._cortex is not None
             res = self._cortex.remove_member(entity, attribute, member,
-                                             support=origin)
+                                             support=origin, dream=dream)
             self._save_cortex()
             return {
                 "action": res.action,

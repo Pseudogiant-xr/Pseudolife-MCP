@@ -2053,7 +2053,7 @@ class DreamOps:
                     res = self.set_add(
                         ent, attr, c["value"],
                         confidence=float(c.get("confidence", 0.55)),
-                        origin=claim_origin)
+                        origin=claim_origin, dream=True)
                     if res["action"] == "member_invalid":
                         logger.info(
                             "dream: member add rejected (invalid value) "
@@ -2065,15 +2065,17 @@ class DreamOps:
                     elif res["action"] == "contested":
                         logger.info(
                             "dream: member add parked (assistant-origin, "
-                            "tier or aggregate guard; %s-tier claim) for "
+                            "tier, direct-write or aggregate guard; %s-tier "
+                            "claim) for "
                             "%s.%s", claim_origin, ent, attr)
                 elif op == "remove":
                     res = self.set_remove(ent, attr, c["value"],
-                                          origin=claim_origin)
+                                          origin=claim_origin, dream=True)
                     if res["action"] == "member_remove_refused":
                         logger.info(
                             "dream: dropping %s-tier retraction of a member "
-                            "backed by a stronger tier for %s.%s = %r",
+                            "backed by a stronger tier or a direct write for "
+                            "%s.%s = %r",
                             claim_origin, ent, attr, c["value"])
                 else:
                     # Consolidation quarantine (two-man rule): route the

@@ -126,7 +126,8 @@ def test_agent_member_remove_cannot_retract_user_member(svc):
 
 
 def test_user_member_remove_still_retracts_user_member(svc):
-    svc.set_add("editor-pref", "editor", "vim", origin="user")
+    svc.store("my editor list now includes vim", source="user")
+    svc.dream_run(StubExtractor([_claim("vim", op="add")]))
     svc.store("vim is no longer an editor I use", source="user")
     svc.dream_run(StubExtractor([_claim("vim", op="remove")]))
     got = svc.cortex_lookup("editor-pref", "editor")
@@ -418,7 +419,10 @@ def test_a_retraction_is_backed_by_a_negated_mention(svc):
     args = ("kaya toast", note, "the-quillon-larder", "menu")
     assert _citation_backs(*args) is False
     assert _citation_backs(*args, affirmative=False) is True
-    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
+    svc.store("the quillon larder menu has kaya toast", source="user")
+    svc.dream_run(StubExtractor([_claim("kaya toast", op="add",
+                                        entity="the-quillon-larder",
+                                        attribute="menu")]))
     svc.store(note, source="user")
     svc.dream_run(StubExtractor([_claim("kaya toast", op="remove",
                                         entity="the-quillon-larder",
@@ -504,6 +508,55 @@ def test_a_quarantine_promoted_value_still_updates_from_a_user_note(svc):
     svc.dream_run(StubExtractor([_claim("helix")]))
     cur = svc.cortex_lookup("editor-pref", "editor")
     assert cur["value"] == "helix" and cur["origin"] == "user"
+
+
+@pytest.mark.parametrize("support", ["user", "action"])
+def test_dream_remove_cannot_retract_a_direct_member(svc, support):
+    svc.set_add("editor-pref", "editor", "vim", origin=support)
+    svc.store("vim is no longer an editor I use", source="user")
+    out = svc.dream_run(StubExtractor([_claim("vim", op="remove")]))
+    assert out.get("member_remove_refused") == 1
+    got = svc.cortex_lookup("editor-pref", "editor")
+    assert [m["value"] for m in got["members"]] == ["vim"]
+
+
+def test_dream_remove_retracts_a_dream_consolidated_member(svc):
+    svc.store("my editor list now includes vim", source="user")
+    svc.dream_run(StubExtractor([_claim("vim", op="add")]))
+    assert [m["value"] for m in svc.cortex_lookup(
+        "editor-pref", "editor")["members"]] == ["vim"]
+    svc.store("vim is no longer an editor I use", source="user")
+    svc.dream_run(StubExtractor([_claim("vim", op="remove")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["members"] == []
+
+
+def test_dream_remove_leaves_a_direct_scalar(svc):
+    """A retraction only ever targets set members: against a scalar slot
+    it finds no member and changes nothing."""
+    _direct(svc, "vim")
+    svc.store("vim is no longer an editor I use", source="user")
+    svc.dream_run(StubExtractor([_claim("vim", op="remove")]))
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["kind"] == "scalar" and cur["value"] == "vim"
+
+
+@pytest.mark.parametrize("support", ["user", "action"])
+def test_dream_add_cannot_convert_a_direct_scalar(svc, support):
+    _direct(svc, "vim", support=support)
+    svc.store("my editor list now includes emacs", source="user")
+    svc.dream_run(StubExtractor([_claim("emacs", op="add")]))
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["kind"] == "scalar" and cur["value"] == "vim"
+    assert _contender_values(svc) == ["emacs"]
+
+
+def test_dream_add_converts_a_dream_consolidated_scalar(svc):
+    _seed_user_fact(svc, "vim")
+    svc.store("my editor list now includes emacs", source="user")
+    svc.dream_run(StubExtractor([_claim("emacs", op="add")]))
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["kind"] == "set"
+    assert sorted(m["value"] for m in cur["members"]) == ["emacs", "vim"]
 
 
 def test_direct_write_guard_follows_protect_provenance(svc):
