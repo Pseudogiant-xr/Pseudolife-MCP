@@ -107,6 +107,7 @@ struct PythonLines<'a> {
     at: usize,
     tail: Vec<u8>,
     decoded: String,
+    searched: usize,
 }
 impl<'a> PythonLines<'a> {
     fn new(bytes: &'a [u8]) -> Self {
@@ -115,28 +116,38 @@ impl<'a> PythonLines<'a> {
             at: 0,
             tail: Vec::new(),
             decoded: String::new(),
+            searched: 0,
         }
     }
     fn next(&mut self) -> Result<Option<String>, ()> {
         loop {
-            if let Some(end) = self.decoded.find(['\r', '\n'])
-                && (self.decoded.as_bytes()[end] != b'\r'
+            if let Some(relative) = self.decoded[self.searched..].find(['\r', '\n']) {
+                let end = self.searched + relative;
+                // A trailing CR must be reconsidered after the next decode
+                // so CRLF across an 8192-byte boundary remains one newline.
+                self.searched = end;
+                if self.decoded.as_bytes()[end] != b'\r'
                     || end + 1 < self.decoded.len()
-                    || self.at == self.bytes.len() && self.tail.is_empty())
-            {
-                let skip = if self.decoded[end..].starts_with("\r\n") {
-                    2
-                } else {
-                    1
-                };
-                let line = self.decoded[..end].to_owned();
-                self.decoded.drain(..end + skip);
-                return Ok(Some(line));
+                    || self.at == self.bytes.len() && self.tail.is_empty()
+                {
+                    let skip = if self.decoded[end..].starts_with("\r\n") {
+                        2
+                    } else {
+                        1
+                    };
+                    let line = self.decoded[..end].to_owned();
+                    self.decoded.drain(..end + skip);
+                    self.searched = 0;
+                    return Ok(Some(line));
+                }
+            } else {
+                self.searched = self.decoded.len();
             }
             if self.at == self.bytes.len() {
                 if !self.tail.is_empty() {
                     return Err(());
                 }
+                self.searched = 0;
                 return Ok((!self.decoded.is_empty()).then(|| std::mem::take(&mut self.decoded)));
             }
             let end = (self.at + 8192).min(self.bytes.len());
@@ -261,6 +272,34 @@ fn failed() -> u8 {
 #[cfg(test)]
 mod tests {
     use super::PythonLines;
+
+    #[test]
+    fn cr_and_utf8_at_decode_boundaries_keep_line_semantics() {
+        let prefix = "a".repeat(8191);
+        for suffix in ["\r\nb\rc", "\rb\nc", "\ré\nc", "\r"] {
+            let bytes = format!("{prefix}{suffix}").into_bytes();
+            let mut reader = PythonLines::new(&bytes);
+            assert_eq!(reader.next().unwrap(), Some(prefix.clone()));
+            if suffix == "\r" {
+                assert_eq!(reader.next().unwrap(), None);
+            } else {
+                assert_eq!(
+                    reader.next().unwrap(),
+                    Some(if suffix == "\ré\nc" { "é" } else { "b" }.into())
+                );
+                assert_eq!(reader.next().unwrap(), Some("c".into()));
+                assert_eq!(reader.next().unwrap(), None);
+            }
+        }
+        let bytes = format!("{}é\nlast", "a".repeat(8191)).into_bytes();
+        let mut reader = PythonLines::new(&bytes);
+        assert_eq!(
+            reader.next().unwrap(),
+            Some(format!("{}é", "a".repeat(8191)))
+        );
+        assert_eq!(reader.next().unwrap(), Some("last".into()));
+        assert_eq!(reader.next().unwrap(), None);
+    }
 
     #[test]
     fn universal_newlines_number_lines_as_python_does() {

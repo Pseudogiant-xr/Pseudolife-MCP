@@ -61,3 +61,44 @@ async fn failed_export_preserves_a_replacement_created_while_the_query_waits() {
     assert_eq!(std::fs::read(&moved).unwrap(), b"");
     fixture.task.await.unwrap();
 }
+
+#[tokio::test]
+async fn failed_export_removes_its_own_unreplaced_destination() {
+    let directory = Directory::new();
+    let out = directory.0.join("out.jsonl");
+    let (fixture, seen, release) = pg_wire::fail_after_output_created().await;
+    let mut command =
+        common::cli::cleared_command(std::path::Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")));
+    command
+        .args(["board-audit", "export", "--out"])
+        .arg(&out)
+        .env("PSEUDOLIFE_MCP_DATABASE_URL", &fixture.dsn)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let child = tokio::process::Command::from(command).spawn().unwrap();
+    tokio::time::timeout(Duration::from_secs(10), seen)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        out.exists(),
+        "the query must wait after exclusive destination creation"
+    );
+    release.send(()).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(1));
+    assert!(result.stdout.is_empty());
+    assert!(
+        std::str::from_utf8(&result.stderr)
+            .unwrap()
+            .starts_with("board-audit: this path is deferred;")
+    );
+    fixture.task.await.unwrap();
+    assert!(
+        !out.exists(),
+        "a failed export must remove the file it still owns"
+    );
+}

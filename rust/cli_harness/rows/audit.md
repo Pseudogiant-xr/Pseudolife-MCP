@@ -118,7 +118,8 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 The live option, archive-error and historical-payload parity evidence for this
 change is Linux-only until #726 selects the h5-audit suite. Windows live cases
 remain unproven: `input-windows-leading-dot`, `input-drive-relative`,
-`export-windows-long-name` and `export-windows-invalid-name`, plus the shared
+`export-windows-long-name`, `export-windows-invalid-name`,
+`input-windows-interior-drive` and `input-windows-verbatim`, plus the shared
 UTF-8, path-normalization and output-cleanup cases. CRT diagnostics from actual
 Windows file operations remain unproven for 2/3/206 → ENOENT, 5/32 → EACCES,
 80/183 → EEXIST, 112 → ENOSPC, 123 → EINVAL and 267 → ENOTDIR.
@@ -135,9 +136,20 @@ partial interpretation. Golden replay remains limited to the stable subset.
 
 The 100,000-key object case exceeded five seconds with the previous linear
 scan and checks the indexed reader against Python. The local-minute ISO case
-is a guard: it already passed on the original base. A PostgreSQL-wire regression
+is a guard: it already passed on the original base. The driver-side row decode
+case is also an original-base guard; it failed against the rejected PR head's
+new generic-error mapping. A PostgreSQL-wire regression
 blocks an export query, renames its created destination and installs a replacement
 before failing the query; cleanup preserves that replacement by checking the
 original live file's identity. This safety behavior is an intentional departure
-from Python's pathname cleanup. A concurrent replacement between the identity
-check and unlink is outside this check's guarantee on POSIX.
+from Python's pathname cleanup. Replacements already installed before the identity check are preserved. A
+concurrent replacement between the check and pathname unlink is outside this
+check's guarantee on both POSIX and Windows.
+
+A 100 MiB archive line exceeded ten seconds with the old newline search;
+scanning resumes from a cursor after each 8192-byte decode. CR pending at a
+chunk boundary is reconsidered, and EOF, CRLF and split-UTF-8 guards preserve
+line semantics. ISO deferral cases use an explicit fixture DSN; an admitted-ISO
+source control catches a converter that incorrectly returns an epoch. Failed
+export coverage also asserts that an unreplaced, owned destination disappears;
+disabling its cleanup makes that case fail.

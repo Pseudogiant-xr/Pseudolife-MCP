@@ -281,14 +281,46 @@ fn option_token(value: &str, allowed: &[&str]) -> bool {
 pub(super) fn path(value: &str) -> String {
     if cfg!(windows) {
         let value = value.replace('/', "\\");
-        let normalized: std::path::PathBuf = std::path::Path::new(&value)
-            .components()
-            .filter(|component| *component != std::path::Component::CurDir)
-            .collect();
-        return if normalized.as_os_str().is_empty() {
+        let mut normalized = String::new();
+        let mut separator = false;
+        for component in std::path::Path::new(&value).components() {
+            use std::path::Component;
+            match component {
+                Component::CurDir => {}
+                Component::Prefix(prefix) => {
+                    normalized.push_str(&component.as_os_str().to_string_lossy());
+                    // Rust omits an implicit root for a bare verbatim UNC
+                    // share; pathlib includes it even without a final slash.
+                    if matches!(prefix.kind(), std::path::Prefix::VerbatimUNC(_, _)) {
+                        normalized.push('\\');
+                    }
+                    separator = false;
+                }
+                Component::RootDir => {
+                    if !normalized.ends_with('\\') {
+                        normalized.push('\\');
+                    }
+                    separator = false;
+                }
+                Component::Normal(_) | Component::ParentDir => {
+                    let text = component.as_os_str().to_string_lossy();
+                    if text == "." {
+                        continue;
+                    }
+                    // PathBuf::push would reparse an interior drive prefix
+                    // as a replacement path. Append its text unchanged.
+                    if separator {
+                        normalized.push('\\');
+                    }
+                    normalized.push_str(&text);
+                    separator = true;
+                }
+            }
+        }
+        return if normalized.is_empty() {
             ".".into()
         } else {
-            normalized.to_string_lossy().into_owned()
+            normalized
         };
     }
     let root = if value.starts_with("//") && !value.starts_with("///") {
@@ -473,6 +505,17 @@ mod tests {
     fn pathlib_paths_keep_parent_components() {
         if cfg!(windows) {
             assert_eq!(path("./missing//archive.jsonl/"), "missing\\archive.jsonl");
+            assert_eq!(path(r"subdir\C:\archive.jsonl"), r"subdir\C:\archive.jsonl");
+            assert_eq!(
+                path(r"\\?\C:\.\subdir\archive.jsonl"),
+                r"\\?\C:\subdir\archive.jsonl"
+            );
+            assert_eq!(
+                path(r"\\?\UNC\server\share\.\archive.jsonl"),
+                r"\\?\UNC\server\share\archive.jsonl"
+            );
+            assert_eq!(path(r"\\?\UNC\server\share"), r"\\?\UNC\server\share\");
+            assert_eq!(path(r"\\?\UNC\server\share\"), r"\\?\UNC\server\share\");
         } else {
             assert_eq!(path("./a//../b/"), "a/../b");
             assert_eq!(path("//a/./b"), "//a/b");
