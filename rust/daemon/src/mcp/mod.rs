@@ -35,13 +35,20 @@ const PING_EVERY: Duration = Duration::from_secs(15);
 const TERMINATED_KEPT: usize = 10_000;
 /// `transport_security.DEFAULT_MAX_REQUEST_BODY_SIZE`, enforced by the SDK's
 /// Keep the MCP limit and refusal body while sharing HTTP frame accounting.
-async fn read_body(headers: &HeaderMap, body: &mut crate::http::RequestBody) -> Result<Bytes, Response> {
+async fn read_body(
+    headers: &HeaderMap,
+    body: &mut crate::http::RequestBody,
+) -> Result<Bytes, Response> {
     let declared_over = latin1(headers, "content-length")
         .and_then(|v| v.trim().parse::<i128>().ok())
         .is_some_and(|d| d > BODY_LIMIT as i128);
-    if declared_over { return Err(plain(413, "Request body too large")); }
-    crate::http::read_body(body, BODY_LIMIT).await
-        .map(Bytes::from).ok_or_else(|| plain(413, "Request body too large"))
+    if declared_over {
+        return Err(plain(413, "Request body too large"));
+    }
+    crate::http::read_body(body, BODY_LIMIT)
+        .await
+        .map(Bytes::from)
+        .ok_or_else(|| plain(413, "Request body too large"))
 }
 
 /// Entry for `/mcp` and `/mcp/*` once the gate has named the principal

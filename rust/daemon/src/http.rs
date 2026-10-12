@@ -930,16 +930,7 @@ async fn dispatch(
         if !app.auth_configured() {
             return not_implemented(&path);
         }
-        return crate::mcp::handle(
-            app,
-            &principal,
-            path,
-            method,
-            h.clone(),
-            raw_query,
-            body,
-        )
-        .await;
+        return crate::mcp::handle(app, &principal, path, method, h.clone(), raw_query, body).await;
     }
     // The MCP app's own router: `/mcp` is its only route.
     text_response(
