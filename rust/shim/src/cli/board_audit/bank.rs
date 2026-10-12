@@ -382,8 +382,9 @@ fn write_strerror(error: &std::io::Error) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Remove this run's exclusive destination if reading or writing fails;
-/// an agent refusal preserves the empty file, as Python does.
+/// Remove the destination on failure only while its identity still matches.
+/// The check and pathname unlink are separate on POSIX and Windows; an agent
+/// refusal preserves the empty file, as Python does.
 struct Output<'a> {
     args: &'a Export,
     file: Option<std::fs::File>,

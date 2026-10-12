@@ -771,7 +771,7 @@ def cases() -> list[core.Case]:
         file_case("input-wide-object", ["verify", "--input", _home("wide.jsonl")],
                   files={"wide.jsonl": lambda: json.dumps({f"key-{n}": None for n in range(100000)}).encode("utf-8")},
                   timeout=5.0),
-        *[file_case(f"defer-export-iso-{name}", ["export", "--since", value],
+        *[read_case(f"defer-export-iso-{name}", "rich", ["export", "--since", value],
                     rules=("rust-deferral",)) for name, value in [
             ("week-date", "2026-W41-1"),
             ("week-datetime", "2026-W41-6T12:00:00"),
@@ -782,6 +782,14 @@ def cases() -> list[core.Case]:
             ("compact-hour", "20261011T12"),
             ("second-offset", "2026-10-11T12:00:00-00:00:30"),
         ]],
+        # The pre-fix 100 MiB newline scan exceeded 10s on Linux (2026-10-12).
+        file_case("input-long-line", ["verify", "--input", _home("long.jsonl")],
+                  files={"long.jsonl": lambda: b" " * (100 * 1024 * 1024) + b"\n"},
+                  timeout=10.0),
+        file_case("input-windows-interior-drive", ["verify", "--input", r"subdir\C:\archive.jsonl"],
+                  platforms=("windows",), note="Windows: pending CI"),
+        file_case("input-windows-verbatim", ["verify", "--input", "\\\\?\\" + _home("./missing//archive.jsonl")],
+                  platforms=("windows",), note="Windows: pending CI"),
         archive_case("input-surrogate-before-link", "surrogate-before-link"),
         file_case("root-delimiter", ["--", "verify"]),
         file_case("short-help-joined-tail", ["verify", "-hello=x"]),
@@ -1029,6 +1037,9 @@ def cases() -> list[core.Case]:
 
 
 MUTANTS = [
+    Mutant("audit-iso-conversion-admitted", "audit", "shim/src/cli/board_audit/args.rs",
+           "None => iso(value),", "None => iso(value).or(Some(0.0)),",
+           ("defer-export-iso-week-date", "defer-export-iso-hour")),
     Mutant("audit-repeat-first-wins", "audit", "shim/src/cli/board_audit/args.rs",
            "slot.1 = value;", "let _ = value;", ("input-repeated", "export-repeated-abbreviated")),
     Mutant("audit-create-message", "audit", "shim/src/cli/board_audit/bank.rs",
