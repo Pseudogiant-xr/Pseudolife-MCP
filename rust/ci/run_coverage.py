@@ -68,7 +68,8 @@ def suite_actions(suite, platform):
                           if suite == 'h5-w1a' and entry['platform'] == platform}
     actions = [action for action in SUITES[suite]
                if action.get('scenario') not in omitted_scenarios
-               and not any((action.get('scenario'), action['mode']) == (entry['scenario'], entry['mode'])
+               and not any(action.get('scenario') == entry['scenario']
+                           and (entry['mode'] == 'both' or action['mode'] == entry['mode'])
                            for entry in omitted_selections.values())]
     return actions, omitted_scenarios, omitted_selections
 
