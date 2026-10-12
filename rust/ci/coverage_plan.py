@@ -59,7 +59,7 @@ EXCEPTIONS = {
             'tl-keep-staged-on-failure': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
         },
     },
-    'audit_golden': 'Only the 29 stable cases in audit_golden_cases.json replay across processes; the remaining 81 cases carry fresh IDs, hashes or redaction state. All 110 run live (Linux 2026-10-11).',
+    'audit_golden': 'Only the stable cases in audit_golden_cases.json replay across processes (29 measured on Linux 2026-10-11; 23 after #730 ported six deferral cases, whose successors are not yet measured for cross-process stability); the rest carry fresh IDs, hashes or redaction state. Every audit case runs live.',
 }
 
 DAEMON_CONTROLS = {
