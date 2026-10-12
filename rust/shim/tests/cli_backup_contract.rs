@@ -15,6 +15,23 @@ const DEFERRED: &str = "pseudolife-stdio: mode 'backup' is deferred in this cand
 const SKIPPED: &str =
     "bank dump:     skipped (no database configured — file-mode state archived only)\n";
 
+#[cfg(any(windows, target_os = "linux"))]
+fn in_ci() -> bool {
+    std::env::var_os("CI").is_some() || std::env::var_os("GITHUB_ACTIONS").is_some()
+}
+
+#[cfg(windows)]
+fn symlink_created(result: std::io::Result<()>) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) if error.raw_os_error() == Some(1314) && !in_ci() => {
+            eprintln!("Windows symlink fixture unverified locally: privilege unavailable (1314)");
+            false
+        }
+        Err(error) => panic!("Windows symlink fixture failed: {error}"),
+    }
+}
+
 struct Home(PathBuf);
 
 impl Home {
@@ -451,10 +468,21 @@ fn windows_symlinks_roundtrip_without_following_external_targets() {
     let bank = home.path().join("bank");
     fs::create_dir(&bank).unwrap();
     fs::write(home.path().join("outside"), b"outside state").unwrap();
-    std::os::windows::fs::symlink_file(home.path().join("outside"), bank.join("file-link"))
-        .unwrap();
-    std::os::windows::fs::symlink_file("absent", bank.join("dangling")).unwrap();
-    std::os::windows::fs::symlink_dir(home.path(), bank.join("directory-link")).unwrap();
+    if !symlink_created(std::os::windows::fs::symlink_file(
+        home.path().join("outside"),
+        bank.join("file-link"),
+    )) {
+        return;
+    }
+    if !symlink_created(std::os::windows::fs::symlink_file(
+        "absent",
+        bank.join("dangling"),
+    )) || !symlink_created(std::os::windows::fs::symlink_dir(
+        home.path(),
+        bank.join("directory-link"),
+    )) {
+        return;
+    }
     let output = run(home.path(), &["--data-dir", &text(&bank)]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let archive = fs::read_dir(bank.join("backups"))
@@ -687,15 +715,26 @@ elif sys.argv[1] == 'cleanup':
         (bank / name).unlink(missing_ok=True)
 '''
 restored = home / 'restored'
-prefix = [sys.executable] if os.geteuid() == 0 else ['sudo', '-n', sys.executable]
+def unavailable(reason):
+    if 'CI' in os.environ or 'GITHUB_ACTIONS' in os.environ:
+        raise RuntimeError('CI device round-trip requires ' + reason)
+    print('device restore unverified locally: ' + reason)
+    sys.exit(77)
+if os.geteuid() == 0:
+    prefix = [sys.executable]
+else:
+    sudo = shutil.which('sudo')
+    if sudo is None:
+        unavailable('sudo availability')
+    prefix = [sudo, '-n', sys.executable]
+    probe = subprocess.run([*prefix, '-c', 'pass'], capture_output=True)
+    if probe.returncode:
+        unavailable('non-interactive sudo permission')
 def run(action):
     return subprocess.run([*prefix, '-c', worker, action, str(bank), str(restored)])
 created = run('create')
 if created.returncode == 77:
-    if os.environ.get('GITHUB_ACTIONS') == 'true':
-        raise RuntimeError('CI device round-trip requires mknod permission')
-    print('device restore unverified: mknod permission unavailable')
-    sys.exit(0)
+    unavailable('mknod permission')
 created.check_returncode()
 try:
     subprocess.run([str(executable), 'backup', '--data-dir', str(bank)], cwd=home,
@@ -704,6 +743,10 @@ try:
 finally:
     run('cleanup').check_returncode()
 "#, &text(home.path()), env!("CARGO_BIN_EXE_pseudolife-stdio")]).output().unwrap();
+    if output.status.code() == Some(77) && !in_ci() {
+        eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+        return;
+    }
     assert!(output.status.success(), "{output:?}");
     if !output.stdout.is_empty() {
         eprintln!("{}", String::from_utf8_lossy(&output.stdout));
@@ -732,14 +775,18 @@ fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
     let bank = home.path().join("bank");
     fs::create_dir(&bank).unwrap();
     let link = bank.join("link");
-    std::os::windows::fs::symlink_dir("absent", &link).unwrap();
+    if !symlink_created(std::os::windows::fs::symlink_dir("absent", &link)) {
+        return;
+    }
     let output = run(home.path(), &["--data-dir", &text(&bank)]);
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(output.stderr, cli::native_text(DEFERRED));
     assert!(!bank.join("backups").exists());
     fs::remove_dir(&link).unwrap();
     fs::create_dir(bank.join("z-directory")).unwrap();
-    std::os::windows::fs::symlink_dir("z-directory", &link).unwrap();
+    if !symlink_created(std::os::windows::fs::symlink_dir("z-directory", &link)) {
+        return;
+    }
     let output = run(home.path(), &["--data-dir", &text(&bank)]);
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(output.stderr, cli::native_text(DEFERRED));
@@ -751,10 +798,27 @@ fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
     }
     fs::create_dir_all(&long_target).unwrap();
     let long_target = fs::canonicalize(long_target).unwrap();
-    std::os::windows::fs::symlink_dir(&long_target, &link).unwrap();
+    if !symlink_created(std::os::windows::fs::symlink_dir(&long_target, &link)) {
+        return;
+    }
     let output = run(home.path(), &["--data-dir", &text(&bank)]);
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(output.stderr, cli::native_text(DEFERRED));
     assert!(!bank.join("backups").exists());
     fs::remove_dir(&link).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn nested_self_junction_cycle_defers_with_output_outside_the_bank() {
+    let home = Home::new("nested-cycle");
+    let bank = home.path().join("bank");
+    let directory = bank.join("a");
+    let out = home.path().join("outside-backups");
+    fs::create_dir_all(&directory).unwrap();
+    let link = directory.join("j");
+    junction(&link, &directory);
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    assert!(!out.exists());
+    fs::remove_dir(link).unwrap();
 }

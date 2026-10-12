@@ -712,6 +712,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn admission_rejects_a_directory_already_on_the_active_walk() {
+        let directory = std::env::temp_dir().join(format!("backup-cycle-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let root = fs::canonicalize(&directory).unwrap();
+        let meta = metadata(&root).unwrap();
+        let mut active = HashSet::from([root.clone()]);
+        let result = supported(
+            &root,
+            &meta,
+            &root,
+            &root.with_extension("outside"),
+            &mut active,
+        );
+        fs::remove_dir(directory).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
     fn directory_link_target_must_fit_python_inference_buffer() {
         assert!(directory_link_target_supported(true, 259));
         assert!(!directory_link_target_supported(true, 260));

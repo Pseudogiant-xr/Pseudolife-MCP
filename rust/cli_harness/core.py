@@ -273,7 +273,7 @@ def snapshot(root: Path) -> dict[str, str]:
                     elif stat.S_ISCHR(info.st_mode) or stat.S_ISBLK(info.st_mode):
                         kind = "character" if stat.S_ISCHR(info.st_mode) else "block"
                         files[rel] = f"{kind}:{os.major(info.st_rdev)}:{os.minor(info.st_rdev)}"
-                    elif stat.S_ISREG(info.st_mode):
+                    elif stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode):
                         files[rel] = "file:" + base64.b64encode(path.read_bytes()).decode()
                     else:
                         files[rel] = f"special:{stat.S_IFMT(info.st_mode)}"

@@ -63,6 +63,20 @@ def test_backup_restore_case_requires_observations_from_both_arms(monkeypatch):
     assert compare.diff(obs(), obs(), case.rules)
 
 
+def test_snapshot_keeps_read_error_for_an_unfollowable_directory(tmp_path, monkeypatch):
+    directory = tmp_path / "profile"
+    directory.mkdir()
+    try:
+        directory.read_bytes()
+    except OSError as error:
+        expected = f"unreadable:{error.__class__.__name__}"
+    else:
+        pytest.fail("directory fixture must refuse a file read")
+    original = Path.is_dir
+    monkeypatch.setattr(Path, "is_dir", lambda path: False if path == directory else original(path))
+    assert core.snapshot(tmp_path)["profile"] == expected
+
+
 @pytest.mark.parametrize("directory", ["bank/backups", "bank/mybk"])
 @pytest.mark.parametrize("kind,extension", [("state", "tar.gz"), ("memory", "sql.gz")])
 def test_backup_mode_paths_use_each_arms_validated_timestamp(directory, kind, extension):
