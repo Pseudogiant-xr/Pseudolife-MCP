@@ -657,6 +657,65 @@ def test_a_direct_exact_member_confirm_adds_its_support(svc):
     assert member["origin"] == "user"
 
 
+def test_set_conversion_keeps_a_direct_support_tier(svc):
+    """A dream-written user scalar a direct action write confirmed is
+    direct-backed; converting it into a set must carry every support tier
+    and its marks, or the member loses that protection."""
+    _seed_user_fact(svc, "vim")
+    svc.cortex_write("editor-pref", "editor", "vim", support="action")
+    svc.set_add("editor-pref", "editor", "emacs")
+    assert svc.cortex_lookup("editor-pref", "editor")["kind"] == "set"
+    svc.store("vim is no longer an editor I use", source="user")
+    svc.dream_run(StubExtractor([_claim("vim", op="remove")]))
+    members = svc.cortex_lookup("editor-pref", "editor")["members"]
+    assert sorted(m["value"] for m in members) == ["emacs", "vim"]
+
+
+def test_a_refused_promotion_parks_with_its_witness(svc):
+    """When the store refuses a dream promotion (a direct write landed after
+    the route chose to promote), the fallback parks the claim with its
+    witness token and the run counts the park."""
+    svc.config.memory.dream.quarantine_low_trust = True
+    svc.store("my preferred editor is emacs", source="agent")
+    svc.dream_run(StubExtractor([_claim("emacs")]))
+    route = svc._quarantine_route
+
+    def racing_route(*a, **kw):
+        out = route(*a, **kw)
+        if out[0] == "promote":
+            svc.cortex_write("editor-pref", "editor", "vim", support="user")
+        return out
+
+    svc._quarantine_route = racing_route
+    svc.store("yes, my preferred editor is emacs", source="user")
+    out = svc.dream_run(StubExtractor([_claim("emacs")]))
+    assert out.get("quarantine_parked") == 1
+    contenders = svc.cortex_contenders("editor-pref", "editor")["contenders"]
+    assert [c["value"] for c in contenders] == ["emacs"]
+    assert "src:user" in contenders[0]["provenance"]
+
+
+def test_a_direct_near_duplicate_member_confirm_protects_the_member(svc):
+    """A direct write matched to a dream-written member only by similarity
+    still confirms it directly: the tier accumulates and the dream mark is
+    cleared, so a later dream retraction is refused."""
+    svc.store("the quillon larder menu has kaya toast", source="user")
+    svc.dream_run(StubExtractor([_claim("kaya toast", op="add",
+                                        entity="the-quillon-larder",
+                                        attribute="menu")]))
+    svc.set_add("the-quillon-larder", "menu", "kaya toasts", origin="user")
+    member = svc.cortex_lookup("the-quillon-larder", "menu")["members"][0]
+    assert member["value"] == "kaya toast"
+    assert "dream:user" not in member["provenance"]
+    svc.store("the quillon larder menu no longer has kaya toast",
+              source="user")
+    svc.dream_run(StubExtractor([_claim("kaya toast", op="remove",
+                                        entity="the-quillon-larder",
+                                        attribute="menu")]))
+    assert [m["value"] for m in svc.cortex_lookup(
+        "the-quillon-larder", "menu")["members"]] == ["kaya toast"]
+
+
 def test_a_dream_near_duplicate_member_confirm_keeps_the_tier(svc):
     """A dream add matched to an existing member only by similarity (not
     the same text) confirms it without raising its tier, like a scalar

@@ -2137,16 +2137,19 @@ class DreamOps:
                             else:
                                 # Raced away (e.g. the user rejected the
                                 # contender from another connection between
-                                # the route read and this resolve): fail
-                                # CLOSED — a low-trust claim still parks.
+                                # the route read and this resolve, or a
+                                # direct write landed and the store refused
+                                # the promotion): fail CLOSED — the claim
+                                # still parks, carrying its witness token
+                                # like any other park, and is counted.
                                 res = self.cortex_write(
                                     ent, attr, c["value"],
                                     provenance=(
                                         ["quarantine:low_trust", q_witness]
-                                        if q_low else None),
+                                        if q_low else [q_witness]),
                                     force_contend=q_low,
                                     **claim_kwargs)
-                                if q_low and res["action"] == "contested":
+                                if res["action"] == "contested":
                                     qt_parked += 1
                         elif q_route in ("park", "hold", "hold_ordinary"):
                             # "hold_ordinary" parks WITHOUT the marker: an

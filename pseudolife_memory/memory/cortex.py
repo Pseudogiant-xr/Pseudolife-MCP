@@ -956,13 +956,18 @@ class CortexStore:
             for fld in ("authority", "distortion_tolerance"):
                 if getattr(cur, fld, None):
                     self.supersession_log[-1][f"dropped_{fld}"] = getattr(cur, fld)
-            self._insert_member(Slot(cur.entity, cur.attribute, cur.value,
-                                     cur.polarity),
-                                cur.embedding, cur.confidence,
-                                set(cur.provenance), cur.asserted_at,
-                                hlc=hlc, writer_id=cur.writer_id,
-                                session_id=cur.session_id,
-                                support=cur.origin or None)
+            converted = self._insert_member(
+                Slot(cur.entity, cur.attribute, cur.value, cur.polarity),
+                cur.embedding, cur.confidence,
+                set(cur.provenance), cur.asserted_at,
+                hlc=hlc, writer_id=cur.writer_id,
+                session_id=cur.session_id,
+                support=cur.origin or None)
+            # Every support tier rides through with its dream:<tier> marks
+            # (copied with the provenance above), not just the strongest:
+            # a direct tier below a dream-written one is what keeps the
+            # value direct-backed (direct_backed).
+            converted.support = set(cur.support)
         # Dedup against current members: exact norm OR cosine >= threshold.
         members = self.members(slot.entity, slot.attribute)
         for m in members:
