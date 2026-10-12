@@ -928,7 +928,7 @@ async fn dispatch(
     if path == "/mcp" || path.starts_with("/mcp/") {
         // Tokenless MCP awaits the accepted Host/Origin and identity policy.
         if !app.auth_configured() {
-            return not_implemented(&path);
+            return not_implemented(path);
         }
         return crate::mcp::handle(app, &principal, path, method, h.clone(), raw_query, body).await;
     }
