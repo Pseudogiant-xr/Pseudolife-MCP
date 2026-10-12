@@ -26,44 +26,15 @@ import daemons  # noqa: E402
 
 sys.path.insert(0, str(daemons.REPO))
 
-DISPOSABLE = re.compile(r"pl_cf_w2g_[a-z0-9_]{1,40}")
-HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
-LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
-                  or Path.home() / ".pseudolife-mcp" / "test-pg.env")
+os.environ["PL_HARNESS_SLICE"] = "w2g"
+import pgdisposable as pg  # noqa: E402
+
 ENV = {
     "PSEUDOLIFE_MCP_TOKEN": "tok-default-0001",
     "PSEUDOLIFE_MCP_TOKENS": "tok-alice-0001:alice,tok-bob-0001:bob,tok-carol-0001:carol",
     "PSEUDOLIFE_MCP_TIER_MAP": "alice:minimal,bob:core,writer-m:minimal",
     "PSEUDOLIFE_MCP_TOOLSET": "core",
 }
-
-
-def login():
-    values = {}
-    for line in LOGIN_FILE.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            values[k.strip()] = v.strip()
-    return values["PSEUDOLIFE_TEST_PG_USER"], values["PSEUDOLIFE_TEST_PG_PASSWORD"]
-
-
-def admin(statement):
-    import psycopg
-    user, password = login()
-    host, port = HOST_PORT.rsplit(":", 1)
-    with psycopg.connect(host=host, port=int(port), user=user, password=password,
-                         dbname="postgres", autocommit=True, connect_timeout=10) as c:
-        c.execute(statement)
-
-
-def fresh(name):
-    assert DISPOSABLE.fullmatch(name), name
-    admin(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-    admin(f'CREATE DATABASE "{name}"')
-    user, password = login()
-    host, port = HOST_PORT.rsplit(":", 1)
-    return f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}/{name}"
 
 
 # Stored principals, seeded on both banks through Python's own write path
@@ -83,11 +54,6 @@ def seed_stored(dsn):
             assert row is not None and row.principal == name, (name, row)
 
 
-def drop(name):
-    assert DISPOSABLE.fullmatch(name), name
-    admin(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-
-
 def main():
     args = sys.argv[1:]
     binary, out = Path(args[0]), Path(args[1])
@@ -104,11 +70,12 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     root = daemons.scratch_root() / "w2g"
     started = []
+    dbs = {side: pg.name(f"pl_cf_w2g_{side}") for side in ("py", "rs")}
     try:
         py_home = daemons.make_home(root, "py", None)
         rs_home = daemons.make_home(root, "rs", None)
         py_port, rs_port = daemons.free_port(), daemons.free_port()
-        py_dsn, rs_dsn = fresh("pl_cf_w2g_py"), fresh("pl_cf_w2g_rs")
+        py_dsn, rs_dsn = pg.create(dbs["py"]), pg.create(dbs["rs"])
         py_env = daemons.base_env(py_home, dict(env, PSEUDOLIFE_MCP_DATABASE_URL=py_dsn))
         rs_extra = dict(env, PSEUDOLIFE_MCP_DATABASE_URL=rs_dsn)
         if mutant:
@@ -138,16 +105,16 @@ def main():
     finally:
         for d in reversed(started):
             d.stop()
-        for name in ("pl_cf_w2g_py", "pl_cf_w2g_rs"):
+        for name in dbs.values():
             try:
-                drop(name)
+                pg.drop(name)
             except Exception as exc:  # noqa: BLE001
                 print(f"drop {name} failed: {exc}", file=sys.stderr)
     if mutant:
         # Caught means the comparison ran and found diffs, not that it crashed.
         import json
         try:
-            summary = json.loads((out / f"mutant-{mutant}.json").read_text())["summary"]
+            summary = json.loads((out / f"mutant-{mutant}.json").read_text(encoding="utf-8"))["summary"]
         except (OSError, ValueError, KeyError):
             summary = {"diffs": 0}
         caught = code == 1 and summary["diffs"] > 0
