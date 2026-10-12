@@ -73,8 +73,6 @@ def cases(case, auth):
     out += [case("end exact limit no session", "POST", end, a, object_body(16384)),
             case("end next byte", "POST", end, a, object_body(16385)),
             case("end empty", "POST", end, a, b''),
-            case("end malformed", "POST", end, a, b'{'),
-            case("end non-object", "POST", end, a, b'[]'),
             case("end null session", "POST", end, a, b'{"session_id":null}'),
             case("end empty session", "POST", end, a, b'{"session_id":""}'),
             case("end session mutation remains delegated", "POST", end, a,
@@ -83,6 +81,16 @@ def cases(case, auth):
                  b'{"session_id":1' + b'0' * 400 + b'}', declared="W2-E/F: session-end mutation"),
             case("end UTF8 error", "POST", end, a, b'\xff'),
             case("end method before body", "GET", end, a, object_body(16385))]
+    # Deliberate difference: Python acknowledges these invalid closes without
+    # writes. The native route must return invalid_json rather than success.
+    for label, body in [("malformed", b'{'), ("whitespace", b' '),
+                        ("array", b'[]'), ("null", b'null'),
+                        ("string", b'"session"'), ("number", b'1'), ("boolean", b'true'),
+                        ("NaN session", b'{"session_id": NaN}')]:
+        for chunked in (False, True):
+            item = case("end invalid " + label + (" chunked" if chunked else ""), "POST", end, a, body)
+            item.update(session_end_invalid_json=True, chunked=chunked)
+            out.append(item)
     pair = "/api/pair"
     out += [case("pair exact limit", "POST", pair, [js], b'{}' + b' ' * 1022),
             case("pair next byte", "POST", pair, [js], b'{}' + b' ' * 1023),
