@@ -394,6 +394,22 @@ def test_citation_backs(value, note, entity, attribute, backed):
     assert _citation_backs(value, note, entity, attribute) is backed
 
 
+@pytest.mark.parametrize("value,note", [
+    (None, "None of my editor plugins work"),
+    (32, "my editor font is 32"),
+    (True, "editor: True"),
+    (["vim"], "my editor is ['vim']"),
+    ({"a": "vim"}, "my editor is {'a': 'vim'}"),
+])
+def test_a_non_string_value_is_unbacked(svc, value, note):
+    """Only a string value can be checked against its note: anything else
+    stays at agent tier (it is still stored, as before)."""
+    svc.store(note, source="user")
+    svc.dream_run(StubExtractor([_claim(value)]))
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur is not None and cur["origin"] == "agent"
+
+
 def test_a_retraction_is_backed_by_a_negated_mention(svc):
     """A remove claim is not affirmative: "no longer serves X" is exactly
     the note that backs retracting X, so the negation rule skips it."""
