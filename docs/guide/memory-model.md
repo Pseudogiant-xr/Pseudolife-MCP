@@ -446,15 +446,52 @@ The extractor chooses which note a claim cites, in a one-note batch as in a
 larger one, so a tier above `agent` also needs the cited note to pass a
 citation check: the claim's whole value appears in it as one phrase
 (case-insensitive, on Unicode word boundaries, every word kept, so
-"retired" does not back `not retired`, nor "UK" back `US`), and it
+"retired" does not back `not retired`, nor "UK" back `US`), at least once
+without a negator (`not`, `no`, `never`, `without`, `neither`, `nor`,
+`cannot` or an `n't` form) among the three words before it in the same
+clause, so "editor: never emacs" does not back `emacs`; and the note
 contains at least one word of the claim's entity or attribute name (split
-on `-`, `_`, `.` and spaces; a plural or paraphrase does not match).
+on `-`, `_`, `.` and spaces; stop words and single letters skipped; a
+plural or paraphrase does not match). A retraction (`op: "remove"`) skips
+the negation rule, since "no longer serves X" is what backs removing X.
 Otherwise the claim counts as unbacked: `agent` tier, and low-trust to the
 consolidation quarantine (which then parks it rather than writing it). A
-`source` index that is a boolean is not read as a note number. A write may
-only *supersede* a slot whose current value is backed by an equal-or-weaker
-tier, so a `memory_fact_set` with no `origin` (recorded as `agent`) parks
-against a fact the dream consolidated at `user` tier. A **weaker-tier** write (e.g. an `agent` value
+`source` index that is a boolean is not read as a note number.
+
+The check bounds the tier a claim may borrow; it is not a fact check, and
+its limits are deliberate trade-offs, not guarantees:
+
+- It proves a *mention*, not an *assertion*: "I tried vim but hated it; my
+  editor is emacs" mentions `vim` and names the editor slot, so a claim of
+  `vim` passes. The rule below keeps such a claim from replacing a value
+  the user set directly.
+- Hyphens and apostrophes are word edges: "editor-vim" backs `vim`, and
+  "O'Brien" backs `O`.
+- A value that contains its own slot word (`home city` at `user.home_city`)
+  passes the slot-word check by itself.
+- Negation is read only from the three words before a mention in its
+  clause: a negation further back, after the value, or in other words
+  ("hated", "gave up on") is not seen.
+
+**A dream claim never replaces a value a direct write set.** When the
+current value's `user` or `action` tier comes from a direct write
+(`memory_fact_set`, a resolve, a store's auto-promote, anything but the
+dream), a dream claim for a different value parks as a contender, whatever
+its own tier and whether or not the quarantine is on. A value the dream
+itself consolidated from a user note still updates from a later backed
+user note, so changed preferences keep flowing. The record tells the two
+apart by a `dream:<tier>` provenance mark the dream adds when it is the
+write that first gives a fact that tier; a direct write at the tier clears
+it, so a direct confirmation protects the value from then on (facts
+written before the mark existed count as direct). A dream restatement
+that is a shorter form of the current value (a compression echo) confirms
+it without raising its tier; only an exact restatement can. With
+`protect_provenance` off, these rules are off as well.
+
+A write may only *supersede* a slot whose current value is backed by an
+equal-or-weaker tier, so a `memory_fact_set` with no `origin` (recorded as
+`agent`) parks against a fact the dream consolidated at `user` tier. A
+**weaker-tier** write (e.g. an `agent` value
 conflicting with a `user`-stated fact), or one below the confidence margin,
 is **not applied** — it's parked as a *contender*:
 
