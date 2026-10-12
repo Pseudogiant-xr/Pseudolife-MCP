@@ -142,3 +142,15 @@ The mutant artifact records the following observed differences:
 | `board-no-read-event` | 3 | 270 | 0 |
 | `board-receipt-path-live` | 19 | 0 | 0 |
 | `board-park-default-ttl` | 6 | 440 | 0 |
+
+## W2P preparation, 2026-10-12
+
+- BASE: `aaa652c6f570d02d9b2985acf1b3da5e1c45e92d`.
+- Local branch: `w2p/f`; no publication.
+- Conflicts: `../../rust/Cargo.lock`, `divergences.md`, `src/http.rs`, `src/main.rs`.
+
+Master lock is retained for Cargo regeneration. Board hooks keep their query argument while adopting counted RequestBody. Master background task ownership replaces detached warmup/reaper calls, with board construction retained. Divergence ledger keeps current principal-store wording and implemented board-hook status.
+
+NEEDS OPUS: dedicated board-client transaction exception remains as recorded in the prior checklist; do not share the leased-client OPEN marker. Existing board golden readiness/pacing problem and pairing stub remain.
+
+Validation and independent Codex high review are recorded in the private W2P report; initial failures and final reruns are listed separately. Windows evidence is cross compilation, not runtime. Frozen oracle goldens are not re-recorded.
