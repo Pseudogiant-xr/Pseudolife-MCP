@@ -25,6 +25,11 @@ fn main() -> ExitCode {
             arguments.into_iter().skip(1).collect(),
         ));
     }
+    if arguments.first().is_some_and(|mode| mode == "maintainer")
+        && let Some(code) = pseudolife_stdio::cli::maintainer::run(arguments[1..].to_vec())
+    {
+        return ExitCode::from(code);
+    }
     if arguments.first().and_then(|mode| mode.to_str()) == Some("lease") {
         let Some(lease_arguments) = arguments
             .iter()

@@ -21,6 +21,7 @@ headers, compression) are free.
 
 from __future__ import annotations
 
+import atexit
 import base64
 import gzip
 import hashlib
@@ -39,18 +40,21 @@ from ..core import WINDOWS, Case
 from ..mutants import Mutant
 from . import _bank
 
-DB = "pl_cf_w1c_backup_src"
-ABSENT_DB = "pl_cf_w1c_backup_absent"
+DB = _bank.name("pl_cf_w1c_backup_src")
+ABSENT_DB = _bank.name("pl_cf_w1c_backup_absent")
 PG0 = Path.home() / ".pg0" / "installation"
 _SEEDED = False
+_CREATED = False
 _BASELINE: dict | None = None
 FIXED = 1_790_000_000.123456  # seeded mtimes, identical in both arms
 OLD = time.time() - 30 * 86400
 
 
 def _source() -> str:
-    global _SEEDED, _BASELINE
+    global _SEEDED, _BASELINE, _CREATED
+    _bank.NAMES.require_process()
     if not _SEEDED:
+        _CREATED = True
         _bank.create(DB)
         from tests.test_transfer_cli import _seed_bank  # noqa: PLC0415 (oracle seeder)
         with _bank.connect(DB) as conn:
@@ -59,6 +63,12 @@ def _source() -> str:
         _BASELINE = _bank.dump(DB)
         _SEEDED = True
     return _bank.url(DB)
+
+
+@atexit.register
+def _drop_source() -> None:
+    if _CREATED:
+        _bank.drop(DB)
 
 
 def _pg0_version() -> Path:
@@ -211,17 +221,21 @@ def backup_files(obs: dict) -> None:
     for field in ("stdout", "stderr"):
         obs[field] = base64.b64encode(
             _stamp(base64.b64decode(obs[field]), window)).decode()
-    files = {}
-    for rel, value in obs["files"].items():
-        new_rel = _stamp(rel.encode(), window).decode()
-        if value.startswith("file:") and new_rel != rel:
-            data = base64.b64decode(value[5:])
-            view = _tar_view(data) if rel.endswith(".tar.gz") else _dump_view(data)
-            value = "file:" + base64.b64encode(view).decode()
-        while new_rel in files:
-            new_rel += " <normalized-collision>"
-        files[new_rel] = value
-    obs["files"] = files
+    # The same timestamped path keys both the content and permission snapshots.
+    for field in ("files", "modes"):
+        if field not in obs:
+            continue
+        values = {}
+        for rel, value in obs[field].items():
+            new_rel = _stamp(rel.encode(), window).decode()
+            if field == "files" and value.startswith("file:") and new_rel != rel:
+                data = base64.b64decode(value[5:])
+                view = _tar_view(data) if rel.endswith(".tar.gz") else _dump_view(data)
+                value = "file:" + base64.b64encode(view).decode()
+            while new_rel in values:
+                new_rel += " <normalized-collision>"
+            values[new_rel] = value
+        obs[field] = values
 
 
 _SHUTDOWN_FLUSH = re.compile(rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'"
@@ -281,18 +295,25 @@ def cases() -> list[Case]:
              setup=lambda arm: (arm.home / "bank").mkdir(), rules=RULES),
         Case("file-mode-stdout-closed", ["backup", *data], setup=tree(), stdout_closed=True,
              rules=RULES + ("backup-stdout-closed",)),
-        Case("dsn-pg0-bundle", ["backup", *data], env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn},
-             setup=with_pg0(tree()), after=check_bank, platforms=dsn_platforms, rules=RULES, timeout=120),
+        # DSN cases look pg_dump up (the home's ~/.pg0 bundle, then PATH):
+        # core's preflight proves PATH finds none outside the home, except
+        # in dsn-path, which runs this host's bundled pg_dump from its PATH.
+        Case("dsn-pg0-bundle", ["backup", *data],
+             env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn, **no_pg_dump},
+             setup=with_pg0(tree()), after=check_bank, platforms=dsn_platforms, rules=RULES, timeout=120,
+             programs=("pg_dump",)),
         Case("dsn-path", ["backup", *data, "--keep-days", "10"],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn,
                   "PATH": pg0_bin + os.pathsep + f"{{HOME}}{sep}no-bin"},
-             setup=tree(), after=check_bank, platforms=dsn_platforms, rules=RULES, timeout=120),
+             setup=tree(), after=check_bank, platforms=dsn_platforms, rules=RULES, timeout=120,
+             real_programs=("pg_dump",)),
         Case("dsn-pg-dump-missing", ["backup", *data],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn, **no_pg_dump},
-             setup=tree(), platforms=dsn_platforms, rules=RULES),
+             setup=tree(), platforms=dsn_platforms, rules=RULES, programs=("pg_dump",)),
         Case("dsn-pg-dump-fails", ["backup", *data],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": absent, **no_pg_dump},
-             setup=with_pg0(tree()), after=drop_pg0, platforms=dsn_platforms, rules=RULES, timeout=60),
+             setup=with_pg0(tree()), after=drop_pg0, platforms=dsn_platforms, rules=RULES, timeout=60,
+             programs=("pg_dump",)),
         Case("posix-symlink-member", ["backup", *data], setup=with_symlink,
              platforms=("linux",), rules=RULES),
     ]

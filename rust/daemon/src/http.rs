@@ -145,12 +145,20 @@ fn latin1(v: &HeaderValue) -> String {
 
 /// `_hdr`: the first value.
 fn first_header(h: &HeaderMap, name: &str) -> Option<String> {
-    h.get(name).map(latin1)
+    if crate::mutants::active("security-browser-last") {
+        h.get_all(name).iter().next_back().map(latin1)
+    } else {
+        h.get(name).map(latin1)
+    }
 }
 
 /// The resolver reads headers through a dict: the last value wins.
 fn last_header(h: &HeaderMap, name: &str) -> Option<String> {
-    h.get_all(name).iter().next_back().map(latin1)
+    if crate::mutants::active("security-auth-first") {
+        h.get(name).map(latin1)
+    } else {
+        h.get_all(name).iter().next_back().map(latin1)
+    }
 }
 
 /// `urllib.parse.urlsplit(value).netloc` (Python 3.11): leading C0 and
@@ -238,11 +246,13 @@ fn browser_gate(app: &App, h: &HeaderMap) -> Result<Option<&'static str>, ()> {
     };
     if let Some(o) = first_header(h, "origin")
         && !loopback(&o)?
+        && !crate::mutants::active("security-origin-open")
     {
         return Ok(Some("forbidden_origin"));
     }
     if let Some(host) = first_header(h, "host")
         && !loopback(&host)?
+        && !crate::mutants::active("security-host-open")
     {
         return Ok(Some("forbidden_host"));
     }
@@ -270,7 +280,11 @@ fn unauthorized() -> Response {
 }
 
 fn principals_unavailable() -> Response {
-    json_response(503, &json!({"error": "principals_unavailable"}))
+    if crate::mutants::active("security-unavailable-401") {
+        unauthorized()
+    } else {
+        json_response(503, &json!({"error": "principals_unavailable"}))
+    }
 }
 
 fn method_not_allowed() -> Response {
@@ -419,6 +433,60 @@ fn normalize_pairing_code(v: &Value) -> Option<String> {
         .then_some(code)
 }
 
+/// Protect real object keys from serde_json's arbitrary-precision Number
+/// transport, as the doorbell reader does. Prefixing every key is injective,
+/// including escaped spellings; normal serde validation still owns syntax.
+fn parse_body_json(text: &str) -> Result<Value, serde_json::Error> {
+    let bytes = text.as_bytes();
+    let mut encoded = String::with_capacity(text.len());
+    let (mut index, mut copied) = (0, 0);
+    while index < bytes.len() {
+        if bytes[index] != b'"' {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'\\' => index += 2,
+                b'"' => break,
+                _ => index += 1,
+            }
+        }
+        let mut next = index.saturating_add(1);
+        while bytes.get(next).is_some_and(u8::is_ascii_whitespace) {
+            next += 1;
+        }
+        if bytes.get(next) == Some(&b':') {
+            encoded.push_str(&text[copied..=start]);
+            encoded.push('_');
+            copied = start + 1;
+        }
+        index = index.saturating_add(1);
+    }
+    encoded.push_str(&text[copied..]);
+    let mut value = serde_json::from_str(&encoded)?;
+    restore_body_keys(&mut value);
+    Ok(value)
+}
+
+fn restore_body_keys(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            *object = std::mem::take(object)
+                .into_iter()
+                .map(|(key, mut value)| {
+                    restore_body_keys(&mut value);
+                    (key[1..].to_owned(), value)
+                })
+                .collect();
+        }
+        Value::Array(array) => array.iter_mut().for_each(restore_body_keys),
+        _ => (),
+    }
+}
+
 fn is_sha256_hex(v: &Value) -> bool {
     v.as_str().is_some_and(|s| {
         s.len() == 64
@@ -449,7 +517,7 @@ async fn pair(app: &App, method: &str, h: &HeaderMap, body: &mut RequestBody) ->
     };
     let parsed = std::str::from_utf8(&raw)
         .ok()
-        .and_then(|t| serde_json::from_str::<Value>(t).ok());
+        .and_then(|t| parse_body_json(t).ok());
     let valid = parsed.as_ref().and_then(Value::as_object).is_some_and(|o| {
         o.len() == 2
             && o.get("code").and_then(normalize_pairing_code).is_some()
@@ -508,7 +576,7 @@ async fn hook(
             };
             // Malformed JSON and non-object bodies become an empty object.
             // With no session ID, hook_session_end returns without writes.
-            let parsed = serde_json::from_str::<Value>(text).ok();
+            let parsed = parse_body_json(text).ok();
             let id = parsed
                 .as_ref()
                 .and_then(Value::as_object)
@@ -661,7 +729,7 @@ async fn api(
                     uvicorn_500()
                 };
             };
-            match serde_json::from_str::<Value>(text) {
+            match parse_body_json(text) {
                 Err(_) => return json_response(400, &json!({"error": "invalid_json"})),
                 Ok(v) if !v.is_object() => {
                     return json_response(400, &json!({"error": "body_must_be_object"}));
@@ -1011,6 +1079,27 @@ async fn search_route(app: &App, raw_query: Option<&str>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn body_json_preserves_object_keys_and_numeric_values() {
+        let text = r#"{"\u0024serde_json::private::Number":"1","_":"prefix","":"empty","\u0000key":2,"nested":[{"$serde_json::private::Number":"text"}],"duplicate":0,"duplicate":3}"#;
+        let value = parse_body_json(text).unwrap();
+        assert_eq!(value["$serde_json::private::Number"], "1");
+        assert_eq!(value["_"], "prefix");
+        assert_eq!(value[""], "empty");
+        assert_eq!(value["\u{0}key"], 2);
+        assert_eq!(value["nested"][0]["$serde_json::private::Number"], "text");
+        assert_eq!(value["duplicate"], 3);
+        let integer = "9".repeat(401);
+        assert_eq!(parse_body_json(&integer).unwrap().to_string(), integer);
+        for malformed in [
+            r#"{"key": "unterminated\"#,
+            r#"{"key": "escaped\"quote",}"#,
+            "{\"key\":",
+        ] {
+            assert!(parse_body_json(malformed).is_err());
+        }
+    }
 
     #[tokio::test]
     async fn body_stream_stops_after_the_first_over_limit_frame() {
