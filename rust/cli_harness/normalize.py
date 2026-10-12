@@ -281,7 +281,7 @@ def _golden_bytes(node: Any, where: str = ""):
         for index, value in enumerate(node):
             yield from _golden_bytes(value, f"{where}[{index}]")
     elif isinstance(node, str):
-        yield where, node.encode()
+        yield where, node.encode("utf-8", "surrogatepass")
         text = node[5:] if node.startswith("file:") else node
         try:
             yield where, base64.b64decode(text, validate=True)
@@ -341,7 +341,8 @@ def home_tokens(obs: dict, home: str) -> None:
         if value.startswith("file:"):
             _set_file(obs, rel, swap(base64.b64decode(value[5:])))
         elif value.startswith("link:"):
-            obs["files"][rel] = "link:" + swap(value[5:].encode()).decode()
+            obs["files"][rel] = "link:" + swap(
+                value[5:].encode("utf-8", "surrogatepass")).decode("utf-8", "surrogatepass")
     for request in obs.get("requests", []):
         request["target"] = swap(request["target"].encode()).decode()
         request["body"] = swap(request["body"].encode()).decode()

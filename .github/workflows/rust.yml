@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [master]
+  schedule:
+    - cron: '23 3 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -74,12 +76,15 @@ jobs:
         working-directory: .
         shell: pwsh
         run: |
-          python -m pip install pytest
+          python -m pip install pytest pyyaml "psycopg[binary]" psutil
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py -k 'not committed_census_matches_current_tree'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
+      - name: ported-row-and-mutant-ci-inventory
+        working-directory: .
+        run: python rust/ci/inventory.py
       - name: Bind the event-selected Python oracle
         shell: pwsh
         working-directory: .
@@ -218,7 +223,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
-        suite: [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection]
+        suite: [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
         # W1-C row sums: master run 38076979343, 2026-10-10, Windows.
         # Live + golden: doctor 15.3m; pairing 17.6m; connection 20.1m.
         # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice
@@ -236,6 +241,37 @@ jobs:
             w1c_rows: "'test_login', 'connect', 'maintainer', 'move', 'tunnel'"
             w1c_timeout: 42
             job_timeout: 66
+          # Linux 2026-10-11, live + oracle capture + replay:
+          # audit 112s, backup 34s, W1-A 435s, daemon controls 189s,
+          # graph controls 394s. Linux step budgets are about twice these.
+          # Windows budgets are provisional until the first hosted run;
+          # each new job stays inside the existing ~56-minute slowest job.
+          - suite: h5-audit
+            h5_timeout: 4
+            h5_windows_timeout: 20
+            job_timeout: 30
+          - suite: h5-backup
+            h5_timeout: 2
+            h5_windows_timeout: 10
+            job_timeout: 20
+          - suite: h5-w1a
+            h5_timeout: 15
+            h5_windows_timeout: 40
+            job_timeout: 56
+          # Linux 2026-10-11: six background scenarios, 9 live cases,
+          # 110s combined; 4m allows about twice measured CPU work.
+          - suite: h5-background
+            h5_timeout: 4
+            h5_windows_timeout: 20
+            job_timeout: 30
+          - suite: h5-daemon-mutants
+            h5_timeout: 6
+            h5_windows_timeout: 20
+            job_timeout: 35
+          - suite: h5-graph-mutants
+            h5_timeout: 14
+            h5_windows_timeout: 30
+            job_timeout: 45
     runs-on: ${{ matrix.os }}
     # Hosted Windows cli jobs for PRs #709/#710 (2026-10-10 UTC) took
     # 105m55s/104m04s, with about 50m outside W1-C. Master run
@@ -271,7 +307,7 @@ jobs:
           name: rust-shim-${{ runner.os }}
           path: rust/target/release
       - name: Download debug bind fixture
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli' || matrix.suite == 'h5-w1a'
         uses: actions/download-artifact@v4
         with:
           name: daemon-bind-fixture-${{ runner.os }}
@@ -660,6 +696,52 @@ jobs:
           name: cli-harness-${{ runner.os }}-${{ matrix.suite }}
           path: ${{ runner.temp }}/cli-harness*.json
           if-no-files-found: warn
+      - name: Prepare disposable PostgreSQL for H5
+        if: startsWith(matrix.suite, 'h5-')
+        # Linux 2026-10-11: fixture setup under 5s; network-bound floor.
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
+      - name: Install offline W1-A fixture dependencies
+        if: matrix.suite == 'h5-w1a' || matrix.suite == 'h5-background' || matrix.suite == 'h5-daemon-mutants'
+        # Network-bound setup gets the five-minute floor.
+        timeout-minutes: 5
+        run: python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0"
+      - name: Restore H5 fixture executable permissions
+        if: runner.os == 'Linux' && startsWith(matrix.suite, 'h5-')
+        shell: pwsh
+        run: |
+          chmod +x rust/target/release/graph-contract
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Test-Path 'rust/target/debug/pseudolife-daemon') {
+            chmod +x rust/target/debug/pseudolife-daemon
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Ported rows and daemon controls
+        if: startsWith(matrix.suite, 'h5-')
+        # Twice the Linux measurements named beside the matrix entries;
+        # retain the first hosted Windows measurement in the same artifacts.
+        timeout-minutes: ${{ runner.os == 'Linux' && matrix.h5_timeout || matrix.h5_windows_timeout }}
+        shell: pwsh
+        run: |
+          python rust/ci/run_coverage.py --suite ${{ matrix.suite }} --out-dir (Join-Path $env:RUNNER_TEMP 'h5') --keep-going
+          exit $LASTEXITCODE
+      - name: Retain H5 row and control outcomes
+        if: always() && startsWith(matrix.suite, 'h5-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: h5-${{ runner.os }}-${{ matrix.suite }}
+          # Static-path witnesses leave deliberate symlink loops in scratch.
+          # Upload only receipts and oracle captures, without walking scratch.
+          path: |
+            ${{ runner.temp }}/h5/*.json
+            ${{ runner.temp }}/h5/goldens/*.json
+          if-no-files-found: error
       - name: Run unchanged candidates and differential judges
         if: matrix.suite == 'judges'
         timeout-minutes: 15
@@ -755,6 +837,94 @@ jobs:
             ${{ runner.temp }}/oracle-selection.json
           if-no-files-found: warn
 
+  source-mutants:
+    # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs
+    # queued behind the 20-job concurrency cap, with a largest matrix queue
+    # of 24m25s. Catch CLI source survivors after merge on master/nightly.
+    if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')
+    name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
+    # These shards compile their own source copies and consume no rust-job
+    # artifact; the final Parity gate still requires both Rust jobs.
+    needs: [candidate]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        shard: [audit-0, audit-1, audit-2, backup-0, backup-1, connect-0, connect-1, connect-2, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, mail-0, mail-1, maintainer-0, maintainer-1, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
+          key: cli-source-mutants
+      - name: Install source harness dependencies
+        # Network-bound setup keeps the existing ten-minute dependency floor.
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          exit $LASTEXITCODE
+      - name: Prepare disposable PostgreSQL for source controls
+        # Linux 2026-10-11: fixture setup under 5s; network-bound floor.
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
+      - name: Install offline episode fixture dependencies
+        if: startsWith(matrix.shard, 'episode-')
+        timeout-minutes: 5
+        run: python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0"
+      - name: Bind the source-control Python oracle
+        shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'h5-source-oracle.json') --github-env $env:GITHUB_ENV
+          exit $LASTEXITCODE
+      - name: Build the test_login source-control image
+        if: runner.os == 'Linux' && startsWith(matrix.shard, 'test_login-')
+        # Master 38076979343: Linux image build 13s; network-bound floor.
+        timeout-minutes: 5
+        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
+      - name: CLI source mutants
+        # Linux 2026-10-11: slowest eight-control selection 81s plus
+        # 65s cold compile; six minutes is about twice that cold bound.
+        # Windows is provisional, with startup headroom inside 56m.
+        timeout-minutes: ${{ runner.os == 'Linux' && 6 || 30 }}
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/source-mutants-target
+        run: |
+          python rust/ci/run_coverage.py --source-shard ${{ matrix.shard }} --out-dir (Join-Path $env:RUNNER_TEMP 'h5-source')
+          exit $LASTEXITCODE
+      - name: Retain source-control witnesses and timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-mutants-${{ runner.os }}-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/h5-source/*.json
+            ${{ runner.temp }}/h5-source-oracle.json
+          if-no-files-found: error
+
   daemon-image:
     name: Rust daemon / disposable image
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
@@ -795,10 +965,11 @@ jobs:
           docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
           python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
-    # Preserve the required check names; a skipped/cancelled dependency is a failure.
+    # Only a PR may skip the after-merge CLI source matrix. Master/nightly
+    # (and ordinary manual CI) require its success, never a skip or failure.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
     name: Parity / ${{ matrix.os }}
-    needs: [rust, candidate, parity-checks]
+    needs: [rust, candidate, parity-checks, source-mutants]
     strategy:
       fail-fast: false
       matrix:
@@ -810,6 +981,7 @@ jobs:
         shell: pwsh
         env:
           GATE_RESULTS: ${{ toJSON(needs) }}
+          GATE_EVENT: ${{ github.event_name }}
         run: |
           $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
           foreach ($job in @('rust', 'candidate', 'parity-checks')) {
@@ -817,6 +989,11 @@ jobs:
               Write-Error "$job did not succeed"
               exit 1
             }
+          }
+          $sourceResult = $results['source-mutants'].result
+          if ($sourceResult -cne 'success' -and -not ($env:GATE_EVENT -ceq 'pull_request' -and $sourceResult -ceq 'skipped')) {
+            Write-Error "source-mutants did not succeed outside the PR skip exception"
+            exit 1
           }
 
   capture-windows:

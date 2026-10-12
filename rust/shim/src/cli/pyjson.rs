@@ -9,7 +9,7 @@
 //! up to the caller's measured recursion limit. Values keep Python's number
 //! spelling (`int(lexeme)`, `repr(float(lexeme))`) and dict insertion order;
 //! a duplicate key keeps its first position with its last value.
-use std::fmt::Write as _;
+use std::{collections::HashMap, fmt::Write as _};
 
 /// A value `json.loads` produced.
 #[derive(Clone, Debug, PartialEq)]
@@ -149,6 +149,8 @@ struct Reader<'a> {
     at: usize,
     depth: usize,
     limit: usize,
+    unique: bool,
+    duplicate: bool,
 }
 
 impl Reader<'_> {
@@ -330,7 +332,9 @@ impl Reader<'_> {
 
     fn object(&mut self) -> Result<J, Refused> {
         self.at += 1;
-        let mut dict = Vec::new();
+        let mut dict: Dict = Vec::new();
+        let mut positions = HashMap::<Vec<u16>, usize>::new();
+        let mut repeated = false;
         self.space();
         if self.peek() == Some(b'}') {
             self.at += 1;
@@ -340,7 +344,8 @@ impl Reader<'_> {
             if self.peek() != Some(b'"') {
                 return Err(Refused::NotJson);
             }
-            let key = text(self.string()?);
+            let units = self.string()?;
+            let key = text(units.clone());
             self.space();
             if self.peek() != Some(b':') {
                 return Err(Refused::NotJson);
@@ -349,7 +354,13 @@ impl Reader<'_> {
             self.space();
             let value = self.value()?;
             // dict assignment: a repeated key keeps its first place.
-            set_key(&mut dict, key, value);
+            if let Some(position) = positions.get(&units) {
+                repeated = true;
+                dict[*position].1 = value;
+            } else {
+                positions.insert(units, dict.len());
+                dict.push((key, value));
+            }
             self.space();
             match self.peek() {
                 Some(b',') => {
@@ -358,6 +369,10 @@ impl Reader<'_> {
                 }
                 Some(b'}') => {
                     self.at += 1;
+                    if self.unique && repeated {
+                        self.duplicate = true;
+                        return Err(Refused::NotJson);
+                    }
                     return Ok(J::Dict(dict));
                 }
                 _ => return Err(Refused::NotJson),
@@ -393,20 +408,35 @@ impl Reader<'_> {
 
 /// `json.loads(text)` on a path whose recursion limit is `limit`.
 pub(super) fn loads(text: &str, limit: usize) -> Result<J, Refused> {
+    read(text, limit, false).0
+}
+
+/// `object_pairs_hook` refuses a repeated key only when its object closes.
+pub(super) fn loads_unique(text: &str, limit: usize) -> Result<J, Option<Refused>> {
+    let (result, duplicate) = read(text, limit, true);
+    result.map_err(|error| if duplicate { None } else { Some(error) })
+}
+
+fn read(text: &str, limit: usize, unique: bool) -> (Result<J, Refused>, bool) {
     let mut reader = Reader {
         text,
         at: 0,
         depth: 0,
         limit,
+        unique,
+        duplicate: false,
     };
-    reader.space();
-    let value = reader.value()?;
-    reader.space();
-    if reader.at == text.len() {
-        Ok(value)
-    } else {
-        Err(Refused::NotJson)
-    }
+    let result = stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
+        reader.space();
+        let value = reader.value()?;
+        reader.space();
+        if reader.at == text.len() {
+            Ok(value)
+        } else {
+            Err(Refused::NotJson)
+        }
+    });
+    (result, reader.duplicate)
 }
 
 /// Python's `repr()` of a str (`unicode_repr`), from its code units.
@@ -430,7 +460,7 @@ fn str_repr(units: &[u16], out: &mut String) {
                 out.push('\\');
                 out.push(c);
             }
-            Ok(c) if !super::printable(c) => {
+            Ok(c) if !super::pairing::printable(c) => {
                 let point = c as u32;
                 if point <= 0xff {
                     let _ = write!(out, "\\x{point:02x}");
@@ -758,6 +788,26 @@ mod tests {
     }
 
     #[test]
+    fn object_index_preserves_decoded_keys_order_and_last_values() {
+        assert_eq!(
+            read(r#"{"😀":1,"b":2,"\ud83d\ude00":3,"\ud800":4,"\ud800":5}"#),
+            J::Dict(vec![
+                (J::Str("😀".into()), J::Int("3".into())),
+                (J::Str("b".into()), J::Int("2".into())),
+                (J::Wtf(vec![0xd800]), J::Int("5".into())),
+            ])
+        );
+        assert_eq!(
+            loads_unique(r#"{"😀":1,"\ud83d\ude00":3}"#, PAIR_DEPTH),
+            Err(None)
+        );
+        assert_eq!(
+            loads_unique(r#"{"a":1,"a":2,"bad":"#, PAIR_DEPTH),
+            Err(Some(Refused::NotJson))
+        );
+    }
+
+    #[test]
     fn float_repr_matches_python() {
         for (value, expected) in [
             (1e16, "1e+16"),
@@ -783,8 +833,8 @@ mod tests {
     #[test]
     fn float_repr_matches_cpython_tables() {
         for table in [
-            include_str!("float_repr_ties.tsv"),
-            include_str!("../../../tests/cli_audit_float_repr.tsv"),
+            include_str!("pairing/float_repr_ties.tsv"),
+            include_str!("../../tests/cli_audit_float_repr.tsv"),
         ] {
             for line in table
                 .lines()
