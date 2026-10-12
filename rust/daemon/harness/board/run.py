@@ -276,7 +276,8 @@ def wait_ready(port: int, timeout: float = 600.0) -> None:
 
 def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
-    names = {"python": f"pl_cf_w2f_{tag}_py", "rust": f"pl_cf_w2f_{tag}_rs"}
+    names = {side: pg.name(f"pl_cf_w2f_{tag}_{suffix}")
+             for side, suffix in (("python", "py"), ("rust", "rs"))}
     sides = ["rust"] if mode == "golden" else ["python", "rust"]
     golden = load_golden(scn.name) if mode == "golden" else None
     arms: dict[str, Arm] = {}
@@ -329,7 +330,7 @@ def run_mixed(binary: Path, root: Path, first: str) -> dict:
     """One bank, two writers: ``first`` appends, stops, the other appends
     to the same chain, and Python's verifier must accept the whole chain."""
     scn = S.MIXED
-    name = f"pl_cf_w2f_mixed_{first}"
+    name = pg.name(f"pl_cf_w2f_mixed_{first}")
     dsn = pg.create(name)
     problems = []
     try:
