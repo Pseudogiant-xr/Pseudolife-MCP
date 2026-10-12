@@ -57,7 +57,8 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 - The lite tier's embedded bank and the daemon-container transport (no or empty
   `PSEUDOLIFE_MCP_DATABASE_URL`); DSNs or ambient PG controls the shared client
   refuses; any connection or SQL failure on a read.
-- Local-time and additional ISO forms, including the documented date-only
+- Every non-numeric time conversion the native ISO reader cannot reproduce,
+  including local time, additional ISO forms and the documented date-only
   `--since 2026-09-23`; non-Unicode OS arguments.
 - Archive sequence values beyond i64 and metadata outside the native scalar
   domain. Stored payloads use Python's JSON domain, including non-finite
@@ -69,7 +70,8 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 - A verify report or a redaction refusal stdout refuses.
 - Redaction reasons holding a non-Cc category-C character (Cf vs Co/Cn needs
   a table the crate does not pin). SQL exceptions retain Python's generic
-  safe diagnostic and exit 2, with the transaction rolled back.
+  safe diagnostic and exit 2, with the transaction rolled back. Driver-side
+  row decode failures remain deferrals.
 
 ## Declared divergences
 
@@ -113,6 +115,14 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 - **CLI-AUDIT-TRANSPORT: deferred.** The embedded and container transports and
   local-time ISO arguments (including the documented date-only `--since`).
 
+The live option, archive-error and historical-payload parity evidence for this
+change is Linux-only until #726 selects the h5-audit suite. Windows live cases
+remain unproven: `input-windows-leading-dot`, `input-drive-relative`,
+`export-windows-long-name` and `export-windows-invalid-name`, plus the shared
+UTF-8, path-normalization and output-cleanup cases. CRT diagnostics from actual
+Windows file operations remain unproven for 2/3/206 → ENOENT, 5/32 → EACCES,
+80/183 → EEXIST, 112 → ENOSPC, 123 → EINVAL and 267 → ENOTDIR.
+
 ## Reader compatibility checks
 
 The live row compares open errors, malformed JSON, UTF-8 diagnostics and
@@ -122,3 +132,12 @@ The measured CPython 3.11 container limits are 988 for export and 987 for
 stored payload inspection; the archive's 987 includes its outer row. Reader
 failures preserve the Python diagnostic and exit rather than admitting a
 partial interpretation. Golden replay remains limited to the stable subset.
+
+The 100,000-key object case exceeded five seconds with the previous linear
+scan and checks the indexed reader against Python. The local-minute ISO case
+is a guard: it already passed on the original base. A PostgreSQL-wire regression
+blocks an export query, renames its created destination and installs a replacement
+before failing the query; cleanup preserves that replacement by checking the
+original live file's identity. This safety behavior is an intentional departure
+from Python's pathname cleanup. A concurrent replacement between the identity
+check and unlink is outside this check's guarantee on POSIX.

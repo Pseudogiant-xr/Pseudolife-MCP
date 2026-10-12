@@ -26,8 +26,10 @@ impl From<tokio_postgres::Error> for Stop {
     fn from(error: tokio_postgres::Error) -> Self {
         if error.code() == Some(&SqlState::LOCK_NOT_AVAILABLE) {
             Stop::Busy
-        } else {
+        } else if error.as_db_error().is_some() {
             Stop::Python
+        } else {
+            Stop::Deferred
         }
     }
 }
@@ -522,6 +524,33 @@ async fn run_in(session: &mut pg::Session, message_id: &str, reason: &str) -> ba
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(dead_code)]
+    mod pg_wire {
+        include!("../../../tests/common/pg_wire.rs");
+    }
+
+    #[tokio::test]
+    async fn driver_side_row_decode_errors_remain_deferred() {
+        let fixture = pg_wire::start().await;
+        let dsn = pg::Dsn::parse(&fixture.dsn).unwrap();
+        let session = pg::Session::open_in(&dsn, &pg::TlsEnvironment::default())
+            .await
+            .unwrap();
+        let row = session
+            .client()
+            .query_one("SELECT true", &[])
+            .await
+            .unwrap();
+        let error = row.try_get::<_, String>(0).unwrap_err();
+        assert!(error.as_db_error().is_none());
+        let stop = Stop::from(error);
+        session.close().await.unwrap();
+        fixture.task.await.unwrap();
+        assert!(
+            matches!(stop, Stop::Deferred),
+            "driver-side conversion errors remain deferred"
+        );
+    }
 
     #[test]
     fn reason_refusals_and_category_deferrals() {

@@ -9,7 +9,7 @@
 //! up to the caller's measured recursion limit. Values keep Python's number
 //! spelling (`int(lexeme)`, `repr(float(lexeme))`) and dict insertion order;
 //! a duplicate key keeps its first position with its last value.
-use std::fmt::Write as _;
+use std::{collections::HashMap, fmt::Write as _};
 
 /// A value `json.loads` produced.
 #[derive(Clone, Debug, PartialEq)]
@@ -332,7 +332,8 @@ impl Reader<'_> {
 
     fn object(&mut self) -> Result<J, Refused> {
         self.at += 1;
-        let mut dict = Vec::new();
+        let mut dict: Dict = Vec::new();
+        let mut positions = HashMap::<Vec<u16>, usize>::new();
         let mut repeated = false;
         self.space();
         if self.peek() == Some(b'}') {
@@ -343,7 +344,8 @@ impl Reader<'_> {
             if self.peek() != Some(b'"') {
                 return Err(Refused::NotJson);
             }
-            let key = text(self.string()?);
+            let units = self.string()?;
+            let key = text(units.clone());
             self.space();
             if self.peek() != Some(b':') {
                 return Err(Refused::NotJson);
@@ -352,8 +354,13 @@ impl Reader<'_> {
             self.space();
             let value = self.value()?;
             // dict assignment: a repeated key keeps its first place.
-            repeated |= dict.iter().any(|(old, _)| old == &key);
-            set_key(&mut dict, key, value);
+            if let Some(position) = positions.get(&units) {
+                repeated = true;
+                dict[*position].1 = value;
+            } else {
+                positions.insert(units, dict.len());
+                dict.push((key, value));
+            }
             self.space();
             match self.peek() {
                 Some(b',') => {
@@ -778,6 +785,26 @@ mod tests {
 
     fn read(text: &str) -> J {
         loads(text, PAIR_DEPTH).unwrap()
+    }
+
+    #[test]
+    fn object_index_preserves_decoded_keys_order_and_last_values() {
+        assert_eq!(
+            read(r#"{"😀":1,"b":2,"\ud83d\ude00":3,"\ud800":4,"\ud800":5}"#),
+            J::Dict(vec![
+                (J::Str("😀".into()), J::Int("3".into())),
+                (J::Str("b".into()), J::Int("2".into())),
+                (J::Wtf(vec![0xd800]), J::Int("5".into())),
+            ])
+        );
+        assert_eq!(
+            loads_unique(r#"{"😀":1,"\ud83d\ude00":3}"#, PAIR_DEPTH),
+            Err(None)
+        );
+        assert_eq!(
+            loads_unique(r#"{"a":1,"a":2,"bad":"#, PAIR_DEPTH),
+            Err(Some(Refused::NotJson))
+        );
     }
 
     #[test]

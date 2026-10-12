@@ -675,7 +675,7 @@ def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
 
 
 def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False,
-              platforms=("windows", "linux"), note=""):
+              platforms=("windows", "linux"), note="", timeout=30.0):
     """A file-only action (no bank in the environment)."""
     original = ["board-audit", *argv]
 
@@ -686,7 +686,7 @@ def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False,
 
     case = core.Case(case_id, list(original), env=dict(GUARDS), setup=setup, after=_record,
                      rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note,
-                     programs=PROGRAMS)
+                     programs=PROGRAMS, timeout=timeout)
     return case
 
 
@@ -767,6 +767,21 @@ def _pruned(key):
 def cases() -> list[core.Case]:
     rich_head = _Lazy(lambda: head("rich"))
     out = [
+        # The old 100,000-key scan exceeded five seconds on Linux (2026-10-12).
+        file_case("input-wide-object", ["verify", "--input", _home("wide.jsonl")],
+                  files={"wide.jsonl": lambda: json.dumps({f"key-{n}": None for n in range(100000)}).encode("utf-8")},
+                  timeout=5.0),
+        *[file_case(f"defer-export-iso-{name}", ["export", "--since", value],
+                    rules=("rust-deferral",)) for name, value in [
+            ("week-date", "2026-W41-1"),
+            ("week-datetime", "2026-W41-6T12:00:00"),
+            ("hour", "2026-10-11T12"),
+            ("compact-offset", "2026-10-11T12:00:00+0100"),
+            ("hour-offset", "2026-10-11T12:00:00+01"),
+            ("comma-fraction", "2026-10-11T12:00:00,5+00:00"),
+            ("compact-hour", "20261011T12"),
+            ("second-offset", "2026-10-11T12:00:00-00:00:30"),
+        ]],
         archive_case("input-surrogate-before-link", "surrogate-before-link"),
         file_case("root-delimiter", ["--", "verify"]),
         file_case("short-help-joined-tail", ["verify", "-hello=x"]),
@@ -779,7 +794,7 @@ def cases() -> list[core.Case]:
         read_case("export-windows-long-name", "rich", ["export", "--out", _home("x" * 260)],
                   platforms=("windows",), note="Windows: pending CI"),
         file_case("defer-export-local-minute", ["export", "--since", "2026-10-10T12:00"],
-                  rules=("rust-deferral",)),
+                  rules=("rust-deferral",), note="Guard: already deferred on the original base"),
         read_case("export-invalid-payload-prefix", "invalid_payload", ["export"]),
         # verify --input: every event family the seeded chain carries
         archive_case("input-rich", "rich"),
@@ -856,6 +871,12 @@ def cases() -> list[core.Case]:
         file_case("redact-required", ["redact"]),
         read_case("redact-abbreviated", "rich", ["redact", "--m", "x", "--r", "why"]),
         file_case("export-bad-time", ["export", "--since", "NaN"]),
+        *[file_case(f"export-bad-numeric-{name}", ["export", "--since=" + value])
+          for name, value in [("inf", "inf"), ("negative-inf", "-Infinity"), ("overflow", "1e9999")]],
+        file_case("defer-export-invalid-nonnumeric", ["export", "--since", "not-a-time"],
+                  rules=("rust-deferral",)),
+        file_case("defer-export-iso-overwritten", ["export", "--since", "2026-W41-1", "--since", "0"],
+                  rules=("rust-deferral",)),
         file_case("audit-missing-action", []),
         file_case("audit-invalid-action", ["other"]),
         file_case("audit-root-unknown", ["--unknown", "verify"]),
@@ -975,7 +996,7 @@ def cases() -> list[core.Case]:
         archive_case("input-duplicate-nested-then-long-int", "duplicate-nested-then-long-int"),
         archive_case("input-duplicate-truncated", "duplicate-truncated"),
         archive_case("input-duplicate-then-long-int", "duplicate-then-long-int"),
-        # (C3) pathlib reprints a drive-relative spelling: defer it
+        # pathlib reprints a drive-relative spelling natively
         file_case("input-drive-relative",
                   ["verify", "--input", "C:.\\missing-audit-archive.jsonl"],
                   platforms=("windows",)),
@@ -1049,8 +1070,8 @@ MUTANTS = [
            "            let _ = row;", ("redact-fanout-siblings",)),
     # review round 1
     Mutant("audit-duplicate-eager", "audit", "shim/src/cli/pyjson.rs",
-           "            repeated |= dict.iter().any(|(old, _)| old == &key);",
-           "            repeated |= dict.iter().any(|(old, _)| old == &key);\n"
+           "                dict.push((key, value));\n            }",
+           "                dict.push((key, value));\n            }\n"
            "            if self.unique && repeated { self.duplicate = true; return Err(Refused::NotJson); }",
            ("input-duplicate-truncated", "input-duplicate-then-long-int")),
     Mutant("audit-verify-stdout-closed-exit-1", "audit", "shim/src/cli/board_audit/mod.rs",

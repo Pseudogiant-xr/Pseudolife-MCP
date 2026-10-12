@@ -421,12 +421,69 @@ impl<'a> Output<'a> {
 impl Drop for Output<'_> {
     fn drop(&mut self) {
         if !self.keep
-            && self.file.take().is_some()
+            && let Some(file) = &self.file
             && let Some(out) = &self.args.out
+            && created_destination(file, std::path::Path::new(out))
         {
             let _ = std::fs::remove_file(out);
         }
     }
+}
+
+#[cfg(unix)]
+fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (file.metadata(), std::fs::symlink_metadata(path)) {
+        (Ok(created), Ok(current)) => {
+            current.is_file() && created.dev() == current.dev() && created.ino() == current.ino()
+        }
+        _ => false,
+    }
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
+    use std::{
+        mem,
+        os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
+    };
+    use windows_sys::Win32::{
+        Foundation::HANDLE,
+        Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_READ_ATTRIBUTES, GetFileInformationByHandle,
+        },
+    };
+    fn identity(file: &std::fs::File) -> Option<(u32, u32, u32)> {
+        // SAFETY: File owns the live handle and the initialized structure has
+        // the size and alignment required by GetFileInformationByHandle.
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut info) } == 0
+            || info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            || (info.nFileIndexHigh == 0 && info.nFileIndexLow == 0)
+        {
+            return None;
+        }
+        Some((
+            info.dwVolumeSerialNumber,
+            info.nFileIndexHigh,
+            info.nFileIndexLow,
+        ))
+    }
+    let Ok(current) = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+    else {
+        return false;
+    };
+    identity(file).is_some_and(|created| Some(created) == identity(&current))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn created_destination(_: &std::fs::File, _: &std::path::Path) -> bool {
+    false
 }
 
 fn write_lines(mut output: Output<'_>, outcome: Outcome) -> Ending {

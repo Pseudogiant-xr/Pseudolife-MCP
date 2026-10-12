@@ -181,11 +181,16 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Action> {
         {
             return error(action, format!("argument --expect-head: {message}"));
         }
-        if matches!(name, "--since" | "--until") && time(value).is_none() && !deferred_time(value) {
-            return error(
-                action,
-                format!("argument {name}: expected epoch seconds or an ISO 8601 date/time"),
-            );
+        if matches!(name, "--since" | "--until") && time(value).is_none() {
+            if epoch(value).is_some() {
+                return error(
+                    action,
+                    format!("argument {name}: expected epoch seconds or an ISO 8601 date/time"),
+                );
+            }
+            // Python admits more ISO spellings than the native converter.
+            // Defer every non-numeric failure, including overwritten options.
+            return None;
         }
         if let Some(slot) = seen.iter_mut().find(|(key, _)| *key == name) {
             slot.1 = value;
@@ -344,6 +349,13 @@ fn python_digit(c: char) -> bool {
 }
 
 fn time(value: &str) -> Option<f64> {
+    match epoch(value) {
+        Some(number) => number.is_finite().then_some(number),
+        None => iso(value),
+    }
+}
+
+fn epoch(value: &str) -> Option<f64> {
     let chars: Vec<_> = value.trim().chars().collect();
     let mut normalized = String::new();
     for (index, c) in chars.iter().copied().enumerate() {
@@ -363,27 +375,7 @@ fn time(value: &str) -> Option<f64> {
             );
         }
     }
-    if let Ok(number) = normalized.parse::<f64>() {
-        return number.is_finite().then_some(number);
-    }
-    iso(value)
-}
-
-/// Existing local-time and additional ISO forms remain transport deferrals,
-/// rather than argparse errors for values the oracle accepts.
-fn deferred_time(value: &str) -> bool {
-    chrono::DateTime::parse_from_rfc3339(value).is_ok()
-        || chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
-        || [
-            "%Y-%m-%dT%H:%M:%S%.f",
-            "%Y-%m-%dT%H:%M",
-            "%Y-%m-%dT%H",
-            "%Y-%m-%d %H:%M:%S%.f",
-            "%Y-%m-%d %H:%M",
-            "%Y%m%dT%H%M%S%.f",
-        ]
-        .iter()
-        .any(|format| chrono::NaiveDateTime::parse_from_str(value, format).is_ok())
+    normalized.parse().ok()
 }
 
 fn iso(value: &str) -> Option<f64> {
