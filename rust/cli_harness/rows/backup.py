@@ -551,10 +551,10 @@ MUTANTS = [
            '        if number == code {\n            let _ = class;\n            return "OSError";',
            ("discovery-permission-metadata", "discovery-permission-read-dir"),
            platforms=("linux",)),
-    Mutant("backup-relative-root-not-canonical", "backup", B + "archive.rs",
-           '    let base = fs::canonicalize(std::env::current_dir().ok()?).ok()?;',
-           '    let base = std::env::current_dir().ok()?;',
-           ("file-mode-data-dir-dot",), platforms=("windows",)),
+    Mutant("backup-owner-name-windows", "backup", B + "archive.rs",
+           '        let _ = (uid, gid);\n        Ok((Vec::new(), Vec::new()))',
+           '        let _ = (uid, gid);\n        Ok((b"unexpected-owner".to_vec(), Vec::new()))',
+           ("file-mode",), platforms=("windows",)),
 ]
 if WINDOWS:
     MUTANTS += [

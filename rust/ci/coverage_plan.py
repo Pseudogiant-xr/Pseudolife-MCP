@@ -113,7 +113,7 @@ PLATFORM_EXCLUSIONS = {
         'backup-dotfile-suffix-windows': 'Registered only by the Windows backup source branch.',
         'backup-member-mode-windows': 'Registered only by the Windows backup source branch.',
         'backup-top-order-windows': 'Registered only by the Windows backup source branch.',
-        'backup-relative-root-not-canonical': 'Windows dot-path witness requires consistent ordinary and verbatim absolute root spelling; POSIX cwd is already canonical.',
+        'backup-owner-name-windows': 'Declared Windows-only empty archive owner-name witness; POSIX names are resolved through NSS.',
         'doctor-json-depth-off-by-one': 'Registered only by the Windows doctor source branch.',
         'doctor-pathlib-keeps-dot-parts': 'Registered only by the Windows doctor source branch.',
         'doctor-which-skips-cwd': 'Registered only by the Windows doctor source branch.',

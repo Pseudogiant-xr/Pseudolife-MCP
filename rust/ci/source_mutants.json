@@ -42,7 +42,7 @@
     "backup-help-closed-exit-1",
     "backup-dot-join-keeps-prefix",
     "backup-discovery-generic-errno-class",
-    "backup-relative-root-not-canonical"
+    "backup-owner-name-windows"
   ],
   "connect": [
     "connect-backup-stamp-millis",
