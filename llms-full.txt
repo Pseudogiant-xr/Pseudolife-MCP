@@ -1327,7 +1327,7 @@ mistaken for a real bank.
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use; the offline daemon image does not include it); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
 | Schema version | v55 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
@@ -2505,7 +2505,10 @@ calls cost ~10 ms per reranked candidate on CPU (≈ 200 ms wall-clock
 added to a top-20 search). A `reranker.skip_margin` skips the pass when
 the top-2 bi-encoder gap is decisive. If the model fails to load, the
 reranker disables itself silently and retrieval falls back to bi-encoder
-ranking — search never breaks because of an optional component.
+ranking — search never breaks because of an optional component. The
+daemon image runs offline (`HF_HUB_OFFLINE=1`) and does not include the
+reranker's model, so in the container stack it takes that fallback; the
+download applies to pip and host-process installs.
 
 `memory_search(..., rerank=True, explain=True)` surfaces the per-candidate
 `original_score`, `ce_score`, and `fused_score` under `trace.reranker`
@@ -5433,6 +5436,15 @@ on fork. Process environment variables, checkout names and titles do not select
 the mailbox. Missing or malformed metadata leaves ordinary memory available
 without attaching a mailbox.
 
+Once a task's mailbox is attached, each later coordination call first
+re-checks the bank's identity with a read-only request that never
+initializes anything. A timeout, an unreachable daemon or a 429/5xx answer
+gets one automatic retry with the same adapter and saved mailbox (each
+check allows six seconds). A refused credential, a different bank or a
+credential that changed meanwhile fails closed at once, and the task's
+hint says whether validation, access or attachment failed. Message
+operations are never replayed by this retry.
+
 A native subagent (`collaboration.spawn_agent`) is a thread of its own, so it
 gets its own address too, and since schema v50 that address is linked to its
 parent's. Codex 0.158.0 (CLI and desktop, measured 2026-09-29) sends
@@ -5491,8 +5503,8 @@ A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map (principal `codex`, say) is
 off the board until an operator lists it: without `allowed_principals` only
 `default` is admitted. On the default setting the shim's startup question
 then leaves coordination off with no error, and memory keeps working. In
-explicit mode each task instead gets an "identity attachment unavailable"
-hint. In either mode the check reports
+explicit mode each task instead gets a hint that identity attachment "was
+refused by authentication or access policy". In either mode the check reports
 `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
 Add the principal the map gives that bearer, keeping `default` if the
 singular token should stay on the board, and restart the daemon:
@@ -7209,9 +7221,11 @@ every variant.
   Since schema v39, correction events for existing traces survive source
   deletion and are preserved even while tracing is off; new trace formation
   remains disabled. Re-enabling tracing can therefore surface those warnings.
-  `memory.traces.retention_boost` (default `0.0`) is the separate Phase-2
-  MTT-retention weight this same cross-index feeds; `0.0` is today's
-  eviction behavior unchanged.
+  `memory.traces.retention_boost` is the separate Phase-2 MTT-retention
+  weight this same cross-index feeds: the daemon runs `1.0` unless the key
+  is set (a reinforced entry resists eviction by
+  `retention_boost * log1p(reinforcements)`), while the library default is
+  `0.0`, eviction unchanged.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -8773,7 +8787,8 @@ startup briefing is not a relevance-ranked answer to a prompt it has not seen.
 
 The provider that *talks* to the bank and the model that *consolidates* it
 are separate choices, and the installer wires both. `--extractor` /
-`-Extractor` takes `sidecar` (the bundled CPU model, the default),
+`-Extractor` (required: the installer has no default and asks when run
+interactively) takes `sidecar` (the bundled CPU model),
 `claude-fallback` / `claude-only` (a Claude Max plan via the CLI shim),
 `openai-fallback` / `openai-only` (a ChatGPT plan via the Codex CLI shim),
 or `endpoint` / `endpoint-fallback` (any OpenAI-compatible server, no shim:
@@ -10399,8 +10414,10 @@ problem than the limitation it hides.
 - **Content screening.** There is none, deliberately — see the evaded-class
   note above. Do not read the literal-faithfulness gate, the novelty gate,
   or the contradiction detector as trust filters. In particular the
-  **surprise gate** is an *admission* filter that drops near-duplicates:
-  novel malicious content passes it preferentially.
+  **surprise gate** is an *admission* filter that can drop near-duplicates
+  when `memory.surprise_threshold` is above `0` (the shipped default,
+  `0.0`, is permissive and stores everything): novel malicious content
+  passes it preferentially.
 - **Cryptographic writer authentication.** Writer identity is
   self-reported over MCP. Per-principal bearer tokens improve on this
   (the token determines the writer id) but agent writers have no signing,

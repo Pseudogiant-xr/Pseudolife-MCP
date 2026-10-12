@@ -76,7 +76,10 @@ calls cost ~10 ms per reranked candidate on CPU (≈ 200 ms wall-clock
 added to a top-20 search). A `reranker.skip_margin` skips the pass when
 the top-2 bi-encoder gap is decisive. If the model fails to load, the
 reranker disables itself silently and retrieval falls back to bi-encoder
-ranking — search never breaks because of an optional component.
+ranking — search never breaks because of an optional component. The
+daemon image runs offline (`HF_HUB_OFFLINE=1`) and does not include the
+reranker's model, so in the container stack it takes that fallback; the
+download applies to pip and host-process installs.
 
 `memory_search(..., rerank=True, explain=True)` surfaces the per-candidate
 `original_score`, `ce_score`, and `fused_score` under `trace.reranker`
