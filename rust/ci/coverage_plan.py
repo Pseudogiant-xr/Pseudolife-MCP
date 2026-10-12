@@ -24,7 +24,6 @@ EXCEPTIONS = {
         'config': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
         'seeded': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
         'json-float-shortest-ties': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
-        'encodings': 'Three HTTP responses match, but hosted Linux run 38139355489 differs on the bank sequence catalog in live and golden modes; Windows run 38132737537 differs on eleven initialization bank entries. The auth-only scenario does not settle initialization. The separately passing auth-candidate-order control remains selected on both OSes.',
     },
     'daemon_mutants': {
         'del-unescaped': 'Its tokens witness has the named retrieval telemetry bank-state difference; the control baseline is not clean.',
@@ -40,12 +39,7 @@ EXCEPTIONS = {
         'linux': {},
         'windows': {},
     },
-    'w1a_selections': {
-        'windows-map-order-unsettled-bank-init': {
-            'platform': 'windows', 'mode': 'both', 'scenario': 'map-order',
-            'reason': 'Hosted Windows run 38187846311 failed golden and run 38192913404 failed live: the one HTTP response matches, but bank differences (57 golden entries, 50 live entries) compare initialized Python state with an empty Rust catalog. The auth-only scenario has settle=False and snapshots unsettled initialization. Both Linux map-order modes, both reversed-map modes and auth-candidate-order remain selected.',
-        },
-    },
+    'w1a_selections': {},
     'cli_mutants': {
         'linux': {
             'connect-config-not-private': 'Survived Linux 2026-10-11; the file is already created with private POSIX mode before make_private.',
