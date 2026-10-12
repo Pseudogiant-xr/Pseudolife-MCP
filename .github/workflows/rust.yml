@@ -363,7 +363,9 @@ jobs:
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py
+          $env:PSEUDOLIFE_RUST_BINARY = $candidate
+          $env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py rust/cli_harness/test_backup.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row mail --row hook --row episode --skip-bank --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

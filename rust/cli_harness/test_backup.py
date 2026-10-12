@@ -59,12 +59,56 @@ def test_discovery_traceback_only_removes_interpreter_frames(class_name, code, m
 
 
 def _native_backup():
+    import os
+    from pathlib import Path
     from .runner import _default_candidate
     import pytest
-    candidate = _default_candidate()
+    requested = os.environ.get("PSEUDOLIFE_RUST_BINARY")
+    candidate = Path(requested) if requested else _default_candidate()
     if not candidate.is_file():
+        if os.environ.get("PSEUDOLIFE_BACKUP_NATIVE_REQUIRED") == "1":
+            pytest.fail("required backup native candidate is missing")
         pytest.skip("build the CLI harness candidate before native backup proofs")
     return str(candidate)
+
+
+def _nss_compiler():
+    import os
+    import shutil
+    import sys
+    if sys.platform != "linux":
+        pytest.skip("Linux NSS interposition proof")
+    compiler = shutil.which("cc")
+    if not compiler:
+        if os.environ.get("PSEUDOLIFE_BACKUP_NATIVE_REQUIRED") == "1":
+            pytest.fail("required Linux NSS compiler is missing")
+        pytest.skip("Linux NSS interposition proof requires a C compiler")
+    return compiler
+
+
+def test_native_proofs_use_the_explicit_candidate(tmp_path, monkeypatch):
+    candidate = tmp_path / "built candidate.exe"
+    candidate.write_bytes(b"fixture")
+    monkeypatch.setenv("PSEUDOLIFE_RUST_BINARY", str(candidate))
+    monkeypatch.setenv("PSEUDOLIFE_BACKUP_NATIVE_REQUIRED", "1")
+    assert _native_backup() == str(candidate)
+
+
+def test_required_native_proofs_cannot_skip_a_missing_candidate(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_RUST_BINARY", str(tmp_path / "missing"))
+    monkeypatch.setenv("PSEUDOLIFE_BACKUP_NATIVE_REQUIRED", "1")
+    with pytest.raises(pytest.fail.Exception, match="required backup native candidate"):
+        _native_backup()
+
+
+def test_required_linux_nss_proofs_cannot_skip_a_missing_compiler(monkeypatch):
+    import shutil
+    import sys
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setenv("PSEUDOLIFE_BACKUP_NATIVE_REQUIRED", "1")
+    with pytest.raises(pytest.fail.Exception, match="required Linux NSS compiler"):
+        _nss_compiler()
 
 
 def test_help_uses_the_terminal_when_columns_is_unusable():
@@ -118,13 +162,10 @@ def test_help_uses_the_terminal_when_columns_is_unusable():
 
 def test_nss_errors_keep_numeric_ownership_and_empty_names(tmp_path):
     import os
-    import shutil
     import subprocess
     import sys
     import tarfile
-    import pytest
-    if sys.platform != "linux" or not shutil.which("cc"):
-        pytest.skip("Linux NSS interposition proof requires a C compiler")
+    compiler = _nss_compiler()
     native = _native_backup()
     source = tmp_path / "nss.c"
     source.write_text('''#include <pwd.h>
@@ -136,7 +177,7 @@ struct passwd *getpwuid(uid_t id) { errno=EIO; return 0; }
 struct group *getgrgid(gid_t id) { errno=EIO; return 0; }
 ''', encoding="utf-8")
     library = tmp_path / "nss.so"
-    subprocess.run(["cc", "-shared", "-fPIC", str(source), "-o", str(library)], check=True)
+    subprocess.run([compiler, "-shared", "-fPIC", str(source), "-o", str(library)], check=True)
     bank = tmp_path / "bank"
     bank.mkdir()
     (bank / "state").write_bytes(b"state")
@@ -157,13 +198,10 @@ struct group *getgrgid(gid_t id) { errno=EIO; return 0; }
 
 def test_non_utf8_nss_names_roundtrip_through_binary_pax(tmp_path):
     import os
-    import shutil
     import subprocess
     import sys
     import tarfile
-    import pytest
-    if sys.platform != "linux" or not shutil.which("cc"):
-        pytest.skip("Linux NSS interposition proof requires a C compiler")
+    compiler = _nss_compiler()
     native = _native_backup()
     source = tmp_path / "nss-raw.c"
     source.write_text('''#include <pwd.h>
@@ -185,7 +223,7 @@ struct passwd *getpwuid(uid_t id) { static struct passwd p; memset(&p,0,sizeof p
 struct group *getgrgid(gid_t id) { static struct group p; memset(&p,0,sizeof p); p.gr_name=group; p.gr_gid=id; p.gr_mem=members; return &p; }
 ''', encoding="utf-8")
     library = tmp_path / "nss-raw.so"
-    subprocess.run(["cc", "-shared", "-fPIC", str(source), "-o", str(library)], check=True)
+    subprocess.run([compiler, "-shared", "-fPIC", str(source), "-o", str(library)], check=True)
     bank = tmp_path / "bank"
     bank.mkdir()
     (bank / "state").write_bytes(b"state")
