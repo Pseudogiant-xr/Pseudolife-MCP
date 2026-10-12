@@ -248,11 +248,11 @@
       "windows": {}
     },
     "w1a_selections": {
-      "windows-map-order-golden-unsettled-bank-init": {
+      "windows-map-order-unsettled-bank-init": {
         "platform": "windows",
-        "mode": "golden",
+        "mode": "both",
         "scenario": "map-order",
-        "reason": "Hosted run 38187846311: the one HTTP response matches, but the Python golden has 479 columns, 356 constraints and 19 sequences against an empty Rust catalog. The auth-only scenario has settle=False and snapshots unsettled initialization. Both live selections and Linux golden remain selected."
+        "reason": "Hosted Windows run 38187846311 failed golden and run 38192913404 failed live: the one HTTP response matches, but bank differences (57 golden entries, 50 live entries) compare initialized Python state with an empty Rust catalog. The auth-only scenario has settle=False and snapshots unsettled initialization. Both Linux map-order modes, both reversed-map modes and auth-candidate-order remain selected."
       }
     },
     "cli_mutants": {
@@ -372,5 +372,46 @@
       0
     ],
     "scope": "Only this Windows golden selection is excepted; both live selections and Linux golden remain selected."
+  },
+  "hosted_windows_live_gap": {
+    "date": "2026-10-12",
+    "run": 38192913404,
+    "head": "811483991740e65d1af237242e38601256f75089",
+    "exception": "windows-map-order-unsettled-bank-init",
+    "platform": "windows",
+    "mode": "live",
+    "scenario": "map-order",
+    "response_cases": 1,
+    "response_diffs": 0,
+    "bank_diffs": 50,
+    "python_catalog": "initialized",
+    "rust_catalog": "empty",
+    "other_action_exits": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "scope": "Only Windows map-order in both modes is excepted; Linux map-order and both reversed-map modes remain selected."
   }
 }

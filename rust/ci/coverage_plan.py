@@ -41,9 +41,9 @@ EXCEPTIONS = {
         'windows': {},
     },
     'w1a_selections': {
-        'windows-map-order-golden-unsettled-bank-init': {
-            'platform': 'windows', 'mode': 'golden', 'scenario': 'map-order',
-            'reason': 'Hosted run 38187846311: the one HTTP response matches, but the Python golden has 479 columns, 356 constraints and 19 sequences against an empty Rust catalog. The auth-only scenario has settle=False and snapshots unsettled initialization. Both live selections and Linux golden remain selected.',
+        'windows-map-order-unsettled-bank-init': {
+            'platform': 'windows', 'mode': 'both', 'scenario': 'map-order',
+            'reason': 'Hosted Windows run 38187846311 failed golden and run 38192913404 failed live: the one HTTP response matches, but bank differences (57 golden entries, 50 live entries) compare initialized Python state with an empty Rust catalog. The auth-only scenario has settle=False and snapshots unsettled initialization. Both Linux map-order modes, both reversed-map modes and auth-candidate-order remain selected.',
         },
     },
     'cli_mutants': {
