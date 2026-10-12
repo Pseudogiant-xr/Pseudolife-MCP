@@ -482,6 +482,21 @@ def test_map_order_exception_only_omits_windows_golden(monkeypatch, tmp_path, pl
     assert ('live', 'map-order-reversed') in selected and ('golden', 'map-order-reversed') in selected
 
 
+@pytest.mark.parametrize('platform, scenario', [(None, 'map-order'), ('windows', 'map-order'),
+    ('linux', 'map-order'), ('windows', 'map-order-reversed'), ('linux', 'map-order-reversed')])
+def test_inventory_rejects_alternate_map_order_omissions(monkeypatch, platform, scenario):
+    from coverage_plan import EXCEPTIONS, SUITES
+    from inventory import check
+    if platform is None:
+        monkeypatch.setitem(EXCEPTIONS['w1a'], scenario, 'broad initialization exception')
+        monkeypatch.setitem(SUITES, 'h5-w1a', [a for a in SUITES['h5-w1a'] if a['scenario'] != scenario])
+    else:
+        monkeypatch.setitem(EXCEPTIONS['w1a_platform'][platform], scenario, 'broad platform initialization exception')
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    with pytest.raises(AssertionError, match='protected map-order selections'):
+        check(workflow)
+
+
 @pytest.mark.parametrize('job, name', [('parity-checks', 'Ported rows and daemon controls'),
                                       ('source-mutants', 'CLI source mutants')])
 @pytest.mark.parametrize('suffix', ['; exit 0', '; python -c "raise SystemExit(0)"'])

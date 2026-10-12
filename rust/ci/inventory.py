@@ -194,6 +194,13 @@ def check(workflow):
     from run_coverage import suite_actions
     for platform in ('linux', 'windows'):
         actions, omitted_scenarios, omitted_selections = suite_actions('h5-w1a', platform)
+        protected = [('live', 'map-order'), ('live', 'map-order-reversed'),
+                     ('golden', 'map-order-reversed')]
+        if platform == 'linux':
+            protected.append(('golden', 'map-order'))
+        actual_protected = Counter((a['mode'], a['scenario']) for a in actions
+                                   if a['scenario'] in ('map-order', 'map-order-reversed'))
+        assert actual_protected == Counter(protected), 'protected map-order selections dropped or changed'
         expected = [a for a in expected_w1a if a['scenario'] not in EXCEPTIONS['w1a_platform'][platform]
                     and not (platform == 'windows' and a['mode'] == 'golden' and a['scenario'] == 'map-order')]
         assert actions == expected, 'map-order golden exception scope changed in executable selection'
