@@ -517,7 +517,7 @@ def run_op(op: dict, port: int, mcp: Mcp | None, dsn: str, rust: bool) -> dict |
 
 
 def prepare_template(scn: dict, tag: str, root: Path) -> str:
-    template = f"pl_cf_w2e_{tag}_t"
+    template = pg.name(f"pl_cf_w2e_{tag}_t")
     dsn = pg.create(template)
     home = daemons.make_home(root, f"{tag}-seed", scn.get("config"))
     d = daemons.python_daemon(home, daemons.free_port(),
@@ -543,7 +543,8 @@ def run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
     if mode == "golden":
         return run_golden(name, binary, root, tol)
     template = prepare_template(scn, tag, root)
-    dbs = {"python": f"pl_cf_w2e_{tag}_py", "rust": f"pl_cf_w2e_{tag}_rs"}
+    dbs = {side: pg.name(f"pl_cf_w2e_{tag}_{suffix}")
+           for side, suffix in (("python", "py"), ("rust", "rs"))}
     dsns = {k: pg.create(v, template=template) for k, v in dbs.items()}
     before = {k: dbstate.dump(dsn) for k, dsn in dsns.items()}
     procs = {}
@@ -647,7 +648,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
                 "stats": {}}
     golden = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
     tag = name.replace("-", "_")
-    db = f"pl_cf_w2e_{tag}_rs"
+    db = pg.name(f"pl_cf_w2e_{tag}_rs")
     dsn = pg.create(db)
     before = dbstate.dump(dsn)
     home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
