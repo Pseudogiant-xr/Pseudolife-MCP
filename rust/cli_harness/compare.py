@@ -43,6 +43,10 @@ def diff(python: dict, rust: dict, rules: tuple[str, ...]) -> list[str]:
     for side, observation in (("python", a), ("rust", b)):
         if observation.get("vacuous"):
             out.append(f"{side}: {observation['vacuous']}")
+        if "restore" in a or "restore" in b or "backup-restoration" in rules:
+            expected = {"mismatches": [], "socket_omitted": True, "hardlink_same_inode": True}
+            if not _equal(observation.get("restore"), expected):
+                out.append(f"{side}: backup restoration did not satisfy its required invariants")
     if not _equal(a["exit"], b["exit"]):
         out.append(f"exit: python {a['exit']} rust {b['exit']}")
     for field in ("stdout", "stderr"):
@@ -60,7 +64,7 @@ def diff(python: dict, rust: dict, rules: tuple[str, ...]) -> list[str]:
             out += _stream_diff(f"file {rel}", va[5:], vb[5:])
         else:
             out.append(f"file {rel}: python {va[:80]!r} rust {vb[:80]!r}")
-    for field in ("requests", "db", "listener", "modes"):
+    for field in ("requests", "db", "listener", "modes", "restore"):
         if not _equal(a.get(field), b.get(field)):
             ja = json.dumps(a.get(field), indent=1, sort_keys=False).splitlines()
             jb = json.dumps(b.get(field), indent=1, sort_keys=False).splitlines()

@@ -62,4 +62,5 @@ libc.workspace = true
 rustix = { workspace = true, features = ["event"] }
 
 [target.'cfg(windows)'.dependencies]
+libc.workspace = true
 windows-sys.workspace = true
