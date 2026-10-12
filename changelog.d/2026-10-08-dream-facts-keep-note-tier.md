@@ -53,7 +53,9 @@
   claim. The store checks again at promotion time, so a direct write that
   lands after the quarantine chose to promote is not replaced, and a
   different value parked in place of the one the quarantine validated is not
-  promoted; the claim parks its own value instead.
+  promoted; the claim parks its own value instead. That holds for a trusted
+  claim too: once the quarantine has chosen to promote, a refused promotion
+  parks the claim as a contender and never falls back to a direct write.
 - A dream write at a user note's tier records no correction signal: those
   remain the record of a human changing a value directly.
 - Set-valued slots get the scalar path's tier guard (with `protect_provenance`
