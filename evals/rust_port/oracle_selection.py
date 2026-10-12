@@ -40,6 +40,11 @@ def select(root, event_name, event, checkout_head, *, github_ref=None):
         base = None
         if head != checkout_head:
             raise ValueError("push after and checkout head differ")
+    elif event_name == "schedule":
+        if github_ref != "refs/heads/master":
+            raise ValueError("schedule requires refs/heads/master")
+        head = oracle = checkout_head
+        base = None
     elif event_name == "workflow_dispatch":
         if github_ref != "refs/heads/master":
             raise ValueError("dispatch requires refs/heads/master")
@@ -65,7 +70,8 @@ def selected_oracle(root=ROOT):
     event = ({"pull_request": {"base": {"sha": observed["base_head"]},
                                "head": {"sha": observed["candidate_head"]}}}
              if name == "pull_request" else {"after": observed["candidate_head"]}
-             if name == "push" else {"inputs": {"frozen_head": observed["candidate_head"]}})
+             if name == "push" else {} if name == "schedule"
+             else {"inputs": {"frozen_head": observed["candidate_head"]}})
     checked = select(root, name, event, observed["checkout_head"], github_ref=observed.get("github_ref"))
     if observed != checked:
         raise ValueError("oracle selection differs from its immutable event binding")

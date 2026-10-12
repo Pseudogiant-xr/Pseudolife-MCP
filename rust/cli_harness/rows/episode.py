@@ -63,6 +63,15 @@ def _wire_cases() -> list[Case]:
     c: list[Case] = []
     add = c.append
     start, end = ["episode-start"], ["episode-end"]
+    # episode_cli.py:36 admits ignored objects; shim.py:probe_health uses json.loads.
+    for suffix, value in (("text", "not a number"), ("numeric", "123")):
+        extra = {"$serde_json::private::Number": value}
+        add(Case(f"start-private-number-{suffix}", start, daemon=daemon(), rules=TITLE,
+                 stdin_json=hook(cwd="{CWD}", extra=[extra]), after=require_post,
+                 golden=False))
+        add(Case(f"health-private-number-{suffix}", start, rules=TITLE,
+                 stdin_json=hook(cwd="{CWD}"), after=require_post, golden=False,
+                 daemon=daemon(**{"/health": json_body({**HEALTH, "extra": [extra]})})))
     add(Case("start-plain-dir", start, daemon=daemon(), rules=TITLE,
              stdin_json=hook(cwd="{CWD}"), setup=lambda arm: None))
     add(Case("start-git-subdir", start, daemon=daemon(), rules=TITLE, setup=git_repo,
@@ -108,9 +117,14 @@ def _wire_cases() -> list[Case]:
     add(Case("start-localhost", start, rules=TITLE, stdin_json=hook(cwd="{CWD}"),
              daemon=daemon(), after=require_post,
              env={"PSEUDOLIFE_MCP_DAEMON_URL": "http://localhost:{DAEMON_PORT}"}))
+    # On Windows, 30 runs on 2026-10-10 took 4.14-4.67 s for both arms with
+    # 100 ms gaps; one extra 180 ms fixture wakeup reproduced the hosted abort.
+    # One-byte pieces keep the whole reply past 250 ms while 5 ms gaps leave
+    # scheduler headroom inside that per-read deadline. Still require the POST
+    # and a duration beyond the deadline, so a total-timeout client cannot pass.
     add(Case("start-health-trickle", start, rules=TITLE, stdin_json=hook(cwd="{CWD}"),
-             daemon=daemon(**{"/health": Trickle(json_body(HEALTH), 16, 0.1)}),
-             after=require_post))
+             daemon=daemon(**{"/health": Trickle(json_body(HEALTH), 1, 0.005)}),
+             after=require_post_read(0.25)))
     # The reply takes ~8 s in 8-byte pieces 0.7 s apart: past the 5 s timeout
     # in total, inside it per receive. Both arms must wait for the whole reply.
     add(Case("end-post-trickle", end, stdin_json=hook(event="SessionEnd"), timeout=60,
@@ -130,7 +144,7 @@ def require_post_read(seconds: float):
         require_post(arm, observation)
         lo, hi = observation["window"]
         if hi - lo < seconds:
-            observation["vacuous"] = (f"left after {hi - lo:.1f} s, before the {seconds:.0f} s "
+            observation["vacuous"] = (f"left after {hi - lo:.1f} s, before the {seconds:g} s "
                                       "reply was read")
     return after
 

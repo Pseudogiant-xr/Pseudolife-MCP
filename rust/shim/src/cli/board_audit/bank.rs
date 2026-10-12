@@ -154,7 +154,7 @@ pub(super) fn no_log() -> Ending {
     Ending::Exit(2)
 }
 
-pub(super) async fn verify(dsn: &pg::Dsn, expect: Option<(i64, String)>) -> Ending {
+pub(super) async fn verify(dsn: &pg::Dsn, expect: Option<super::args::Head>) -> Ending {
     let Ok(mut session) = pg::Session::open(dsn).await else {
         return Ending::Deferred;
     };
@@ -163,7 +163,7 @@ pub(super) async fn verify(dsn: &pg::Dsn, expect: Option<(i64, String)>) -> Endi
     ending
 }
 
-async fn verify_in(session: &mut pg::Session, expect: Option<(i64, String)>) -> Ending {
+async fn verify_in(session: &mut pg::Session, expect: Option<super::args::Head>) -> Ending {
     let Ok(tx) = snapshot(session).await else {
         return Ending::Deferred;
     };
@@ -181,6 +181,7 @@ async fn verify_in(session: &mut pg::Session, expect: Option<(i64, String)>) -> 
         let seq = map["seq"].as_i64().expect("bigint seq");
         let row = chain::Row {
             value: Value::Object(map),
+            pending_payload: None,
             seq,
             created_at,
         };
@@ -188,11 +189,13 @@ async fn verify_in(session: &mut pg::Session, expect: Option<(i64, String)>) -> 
             Ok(None) => {}
             Ok(Some(report)) => return Ending::Exit(super::report(report, 1)),
             Err(chain::Deferred) => return Ending::Deferred,
+            Err(chain::Failure::Python) => return Ending::Exit(super::failed()),
         }
     }
     match walker.finish() {
         Ok((report, ok)) => Ending::Exit(super::report(report, if ok { 0 } else { 1 })),
         Err(chain::Deferred) => Ending::Deferred,
+        Err(chain::Failure::Python) => Ending::Exit(super::failed()),
     }
 }
 
@@ -260,15 +263,22 @@ async fn resolve_agent(client: &impl GenericClient, value: &str) -> Result<Resol
 
 /// One export line: `json.dumps(row, ensure_ascii=True, separators=(",", ":"))`
 /// with the payload parsed by `json.loads`.
-fn export_line(mut map: Map<String, Value>) -> Option<String> {
-    let payload = match map.get("payload") {
-        Some(Value::String(text)) => codec::python_loads(text)?,
-        _ => return None,
-    };
-    map.insert("payload".into(), payload);
-    let mut line = String::new();
-    codec::ascii_compact(&Value::Object(map), &mut line)?;
-    line.push('\n');
+fn export_line(map: Map<String, Value>) -> Option<String> {
+    let mut line = String::from("{");
+    for (index, (key, value)) in map.iter().enumerate() {
+        if index > 0 {
+            line.push(',');
+        }
+        codec::ascii_compact(&Value::String(key.clone()), &mut line)?;
+        line.push(':');
+        if key == "payload" {
+            let payload = codec::python_loads(value.as_str()?).ok()?;
+            codec::python_compact(&payload, true, false, &mut line)?;
+        } else {
+            codec::ascii_compact(value, &mut line)?;
+        }
+    }
+    line.push_str("}\n");
     Some(line)
 }
 
@@ -295,20 +305,28 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
         Ok(false) => return no_log(),
         Err(()) => return Ending::Deferred,
     }
-    // Everything is read and rendered before the first byte is written, so
-    // any deferral leaves no file and no partial stdout behind.
+    // Python creates the destination before agent resolution and payload decoding.
+    let output = match Output::create(args) {
+        Ok(output) => output,
+        Err(ending) => return ending,
+    };
     let outcome = match &args.agent {
         None => None,
         Some(agent) => match resolve_agent(&tx, agent).await {
             Err(()) => return Ending::Deferred,
             Ok(Resolved::Id(id)) => Some(id),
             Ok(Resolved::Missing) => {
-                return write_refusal(args, format!("no agent id starts with {agent}"));
+                return write_lines(
+                    output,
+                    Outcome::AgentRefused(format!("no agent id starts with {agent}")),
+                );
             }
             Ok(Resolved::Ambiguous(listed)) => {
-                return write_refusal(
-                    args,
-                    format!("--agent {agent} matches several ids: {listed}; give a longer prefix"),
+                return write_lines(
+                    output,
+                    Outcome::AgentRefused(format!(
+                        "--agent {agent} matches several ids: {listed}; give a longer prefix"
+                    )),
                 );
             }
         },
@@ -327,53 +345,159 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
     let mut text = String::new();
     for (map, _) in rows {
         let Some(line) = export_line(map) else {
-            return Ending::Deferred;
+            // Python has already emitted preceding stdout rows. A failed
+            // file export still removes the run's exclusive destination.
+            if output.file.is_none() {
+                let ending = write_lines(output, Outcome::Lines(text));
+                if !matches!(ending, Ending::Exit(0)) {
+                    return ending;
+                }
+            }
+            return Ending::Exit(super::failed());
         };
         text.push_str(&line);
     }
-    write_lines(args, Outcome::Lines(text))
+    write_lines(output, Outcome::Lines(text))
 }
 
 /// `OSError.strerror` of a failed file write in CPython. POSIX: the C
 /// library's `strerror` text, which std prints before ` (os error N)`.
-/// Windows: CPython writes through the C runtime's `_write`, which maps the
-/// Win32 error to an errno and names it with the runtime's own table; only
-/// a full disk (`ERROR_DISK_FULL` -> `ENOSPC`) is pinned here.
+/// Windows: the C runtime maps Win32 file errors to errno, including
+/// missing parents, access denial, sharing violations and invalid names.
 fn write_strerror(error: &std::io::Error) -> Option<String> {
     let code = error.raw_os_error()?;
     if cfg!(windows) {
-        return (code == 112).then(|| "No space left on device".to_owned());
+        return match code {
+            2 | 3 | 206 => Some("No such file or directory".into()),
+            5 | 32 => Some("Permission denied".into()),
+            80 | 183 => Some("File exists".into()),
+            112 => Some("No space left on device".into()),
+            123 => Some("Invalid argument".into()),
+            267 => Some("Not a directory".into()),
+            _ => None,
+        };
     }
     let text = error.to_string();
     text.strip_suffix(&format!(" (os error {code})"))
         .map(str::to_owned)
 }
 
-/// Python creates `--out` before resolving `--agent`, so a refused agent
-/// leaves that new empty file behind; stdout gets nothing.
-fn write_refusal(args: &Export, message: String) -> Ending {
-    write_lines(args, Outcome::AgentRefused(message))
+/// Remove the destination on failure only while its identity still matches.
+/// The check and pathname unlink are separate on POSIX and Windows; an agent
+/// refusal preserves the empty file, as Python does.
+struct Output<'a> {
+    args: &'a Export,
+    file: Option<std::fs::File>,
+    keep: bool,
+}
+impl<'a> Output<'a> {
+    fn create(args: &'a Export) -> Result<Self, Ending> {
+        let file = if let Some(out) = &args.out {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(out)
+            {
+                Ok(file) => Some(file),
+                Err(error) => {
+                    return Err(match write_strerror(&error) {
+                        Some(text) => {
+                            crate::stderrln!("board-audit: cannot create {out}: {text}");
+                            Ending::Exit(2)
+                        }
+                        None => Ending::Deferred,
+                    });
+                }
+            }
+        } else {
+            None
+        };
+        Ok(Self {
+            args,
+            file,
+            keep: false,
+        })
+    }
+}
+impl Drop for Output<'_> {
+    fn drop(&mut self) {
+        if !self.keep
+            && let Some(file) = &self.file
+            && let Some(out) = &self.args.out
+            && created_destination(file, std::path::Path::new(out))
+        {
+            let _ = std::fs::remove_file(out);
+        }
+    }
 }
 
-fn write_lines(args: &Export, outcome: Outcome) -> Ending {
+#[cfg(unix)]
+fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (file.metadata(), std::fs::symlink_metadata(path)) {
+        (Ok(created), Ok(current)) => {
+            current.is_file() && created.dev() == current.dev() && created.ino() == current.ino()
+        }
+        _ => false,
+    }
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
+    use std::{
+        mem,
+        os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
+    };
+    use windows_sys::Win32::{
+        Foundation::HANDLE,
+        Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_READ_ATTRIBUTES, GetFileInformationByHandle,
+        },
+    };
+    fn identity(file: &std::fs::File) -> Option<(u32, u32, u32)> {
+        // SAFETY: File owns the live handle and the initialized structure has
+        // the size and alignment required by GetFileInformationByHandle.
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut info) } == 0
+            || info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            || (info.nFileIndexHigh == 0 && info.nFileIndexLow == 0)
+        {
+            return None;
+        }
+        Some((
+            info.dwVolumeSerialNumber,
+            info.nFileIndexHigh,
+            info.nFileIndexLow,
+        ))
+    }
+    let Ok(current) = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+    else {
+        return false;
+    };
+    identity(file).is_some_and(|created| Some(created) == identity(&current))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn created_destination(_: &std::fs::File, _: &std::path::Path) -> bool {
+    false
+}
+
+fn write_lines(mut output: Output<'_>, outcome: Outcome) -> Ending {
     use std::io::Write;
     let (text, refusal) = match outcome {
         Outcome::Lines(text) => (text, None),
         Outcome::AgentRefused(message) => (String::new(), Some(message)),
     };
-    if let Some(out) = &args.out {
-        let Ok(mut file) = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(out)
-        else {
-            return Ending::Deferred;
-        };
+    if let Some(file) = &mut output.file {
+        let out = output.args.out.as_ref().expect("file destination");
         if let Err(error) = file.write_all(text.as_bytes()).and_then(|()| file.flush()) {
             // As `_export`: the file this run created is removed, then
             // `cannot write PATH: <strerror>`, exit 2.
-            drop(file);
-            let _ = std::fs::remove_file(out);
             return match write_strerror(&error) {
                 Some(text) => {
                     crate::stderrln!("board-audit: cannot write {out}: {text}");
@@ -395,6 +519,7 @@ fn write_lines(args: &Export, outcome: Outcome) -> Ending {
             return Ending::Exit(2);
         }
     }
+    output.keep = true;
     if let Some(message) = refusal {
         crate::stderrln!("board-audit: {message}");
         return Ending::Exit(2);
@@ -414,6 +539,18 @@ mod tests {
             Some("No space left on device")
         );
         if cfg!(windows) {
+            assert_eq!(
+                write_strerror(&std::io::Error::from_raw_os_error(5)).as_deref(),
+                Some("Permission denied")
+            );
+            assert_eq!(
+                write_strerror(&std::io::Error::from_raw_os_error(3)).as_deref(),
+                Some("No such file or directory")
+            );
+            assert_eq!(
+                write_strerror(&std::io::Error::from_raw_os_error(206)).as_deref(),
+                Some("No such file or directory")
+            );
             // ERROR_IO_DEVICE: the C runtime's errno for it is not pinned.
             assert_eq!(
                 write_strerror(&std::io::Error::from_raw_os_error(1117)),

@@ -82,12 +82,47 @@ pub struct Session {
     client: Option<Client>,
     driver: JoinHandle<Result<(), tokio_postgres::Error>>,
     notices: Notices,
+    ended: Ended,
 }
-type Notices =
-    std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<tokio_postgres::error::DbError>>>;
-/// Notices kept until a caller takes them; beyond this the oldest are
-/// dropped, so a long-lived session that never takes them stays bounded.
+/// The SQLSTATE of a server error that ended the connection with no request
+/// pending (a FATAL such as `admin_shutdown`), kept for the caller.
+type Ended = std::sync::Arc<std::sync::Mutex<Option<tokio_postgres::error::SqlState>>>;
+type Notices = std::sync::Arc<std::sync::Mutex<NoticeBuffer>>;
+#[derive(Default)]
+struct NoticeBuffer {
+    kept: std::collections::VecDeque<tokio_postgres::error::DbError>,
+    collecting: bool,
+}
+/// Outside an explicit collection window, retain only the newest notices.
 pub const NOTICE_LIMIT: usize = 4096;
+
+/// Complete notice retention for a caller's collection window. Dropping the
+/// collection, including cancellation, restores the ordinary receiver bound.
+pub struct NoticeCollection<'a> {
+    session: &'a mut Session,
+}
+impl NoticeCollection<'_> {
+    pub fn client(&self) -> &Client {
+        self.session.client()
+    }
+    pub fn take_notices(&self) -> Vec<tokio_postgres::error::DbError> {
+        self.session.take_notices()
+    }
+}
+impl Drop for NoticeCollection<'_> {
+    fn drop(&mut self) {
+        let mut notices = self
+            .session
+            .notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        notices.collecting = false;
+        while notices.kept.len() > NOTICE_LIMIT {
+            notices.kept.pop_front();
+        }
+        notices.kept.shrink_to(NOTICE_LIMIT);
+    }
+}
 impl Session {
     pub async fn open(dsn: &Dsn) -> Result<Self, Error> {
         Self::open_in(dsn, &TlsEnvironment::from_environment()).await
@@ -127,19 +162,29 @@ impl Session {
         // server notices are kept for the caller instead of being logged.
         let notices = Notices::default();
         let sink = std::sync::Arc::clone(&notices);
+        let ended = Ended::default();
+        let fatal = std::sync::Arc::clone(&ended);
         let mut connection = connection;
         let driver = tokio::spawn(async move {
             while let Some(message) =
                 std::future::poll_fn(|context| connection.poll_message(context)).await
             {
-                if let tokio_postgres::AsyncMessage::Notice(notice) = message? {
+                let message = message.inspect_err(|error| {
+                    if let Some(error) = error.as_db_error() {
+                        *fatal
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            Some(error.code().clone());
+                    }
+                })?;
+                if let tokio_postgres::AsyncMessage::Notice(notice) = message {
                     let mut kept = sink
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if kept.len() == NOTICE_LIMIT {
-                        kept.pop_front();
+                    if !kept.collecting && kept.kept.len() == NOTICE_LIMIT {
+                        kept.kept.pop_front();
                     }
-                    kept.push_back(notice);
+                    kept.kept.push_back(notice);
                 }
             }
             Ok(())
@@ -148,6 +193,7 @@ impl Session {
             client: Some(client),
             driver,
             notices,
+            ended,
         };
         session
             .client()
@@ -163,15 +209,38 @@ impl Session {
         self.client.as_mut().expect("open PostgreSQL session")
     }
     /// Server notices received so far (in order), removed from the session.
-    /// At most the newest [`NOTICE_LIMIT`] are kept between takes.
+    /// Normally only the newest [`NOTICE_LIMIT`] are retained. A collection
+    /// window retains all notices until drained or the window is dropped.
     pub fn take_notices(&self) -> Vec<tokio_postgres::error::DbError> {
         std::mem::take(
-            &mut *self
+            &mut self
                 .notices
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .kept,
         )
         .into()
+    }
+    /// Discard prior notices and retain every notice for this operation.
+    /// Exclusive borrowing prevents overlapping collection windows. The caller
+    /// must drain before dropping the window to claim complete output.
+    pub fn collect_notices(&mut self) -> NoticeCollection<'_> {
+        let mut notices = self
+            .notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        notices.kept.clear();
+        notices.collecting = true;
+        drop(notices);
+        NoticeCollection { session: self }
+    }
+    /// The SQLSTATE of the server error that ended this connection while no
+    /// request was pending, once the connection has ended that way.
+    pub fn ended_with(&self) -> Option<tokio_postgres::error::SqlState> {
+        self.ended
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
     /// Close gracefully after all borrowed operations have ended.
     pub async fn close(mut self) -> Result<(), Error> {

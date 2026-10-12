@@ -589,6 +589,35 @@ bank (search "dev machines homelab"), never in the tree.
   form for test runs there too (`... > log 2>&1; "exit $LASTEXITCODE"`),
   never a pipe.
 
+## Disk space (builds and long runs)
+
+A full disk kills a run mid-step and can leave half-written files behind.
+It happened twice in two days:
+- 2026-10-11: a Linux dev box filled to 100% and a session's Rust build
+  died with os error 28.
+- 2026-10-12: the sibling box hit 0 bytes free. One worktree's Rust
+  `target/` grew from 17 GB to 28 GB while rebuilding after a merge from
+  master, and the session crashed mid-task.
+
+- **Check free space before** every Rust build, full suite, eval run or bulk
+  download: `df -h /` on Linux, `Get-PSDrive` on Windows (the drive that
+  holds your worktree and build tree). Don't start below 8 GB free; one Rust
+  workspace build can add 10 GB or more.
+- **A Rust `target/` directory is a cache.** It measured 8–28 GB per
+  worktree on 2026-10-12. Prefer one shared `CARGO_TARGET_DIR` per machine to
+  one per worktree. Before a big rebuild, such as after merging master into a
+  long-lived branch, `cargo clean` your own stale profiles (for example
+  `--profile dev` when you are working in release).
+- **Below the floor, stop starting heavy work.** Free only your own caches,
+  and tell the maintainer, or the session that launched you, instead of
+  deleting anything else. Another session's worktree, evidence or cache is
+  not yours to delete. A merged branch's build cache may be removed by the
+  session that owns it, or with the maintainer's go, and the deletion is
+  recorded (path, size, why).
+- **Watchers include disk.** A heartbeat or watcher that tracks a long run
+  reports free disk on each check, so a filling disk shows up before the run
+  dies.
+
 ## Stopping processes (shared host)
 
 Every session on this host shares one process table, so a kill that selects

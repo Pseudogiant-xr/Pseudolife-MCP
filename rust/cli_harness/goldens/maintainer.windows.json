@@ -1,0 +1,2400 @@
+{
+ "row": "CLI-MAINTAINER",
+ "platform": "windows",
+ "oracle_commit": "8263e7e30c5e75f686ab8dd3a666d82edbc4c144",
+ "cases": {
+  "list-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "Tm8gcGFzc2tleXMuDQo=",
+   "stderr": "",
+   "window": [
+    1791577456.463541,
+    1791577456.8345783
+   ],
+   "arm": "python",
+   "seed_secret": null,
+   "shown": {},
+   "local_times": {},
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-pending": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "LXBlbmRpbmdLZXlBICBwZW5kaW5nICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0tICBsYXN0X3VzZWQ9LQ0K",
+   "stderr": "",
+   "window": [
+    1791577460.31091,
+    1791577460.6218615
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "list-rich": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxIDEwOjAxICBsYXN0X3VzZWQ9MjAyNi0wNy0wMSAxMDowNiAgRkxBR0dFRCAoc2lnbiBjb3VudCB3ZW50IGJhY2t3YXJkcykNCnBob25lS2V5X3F1YSAgYWN0aXZlICAgIlRvbSdzIHBob25lIOKYjiIgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAxMDowMiAgbGFzdF91c2VkPS0NCnR3aW5BQjFrZXlEQSAgYWN0aXZlICAgJ2l0XCdzICJ0d2luIicgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAxMDowMyAgbGFzdF91c2VkPS0NCnR3aW5BQjJrZXlFQSAgYWN0aXZlICAgJ3R3aW4gdHdvJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDEwOjA0ICBsYXN0X3VzZWQ9LQ0KY2FuY2VsWGRSZXZvICByZXZva2VkICAnc3BhcmUnICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDIgMTA6MDUgIGxhc3RfdXNlZD0tDQo=",
+   "stderr": "",
+   "window": [
+    1791577462.983926,
+    1791577463.3679829
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "no-tables-list": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IHRoaXMgYmFuayBoYXMgbm8gbWFpbnRhaW5lciB0YWJsZXMgeWV0IChzY2hlbWEgb2xkZXIgdGhhbiB2NTQpOyBzdGFydCBhIHY1NCBkYWVtb24gb25jZSB0byBjcmVhdGUgdGhlbQ0K",
+   "window": [
+    1791577463.9994547,
+    1791577464.455975
+   ],
+   "arm": "python",
+   "seed_secret": null,
+   "shown": {},
+   "local_times": {},
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "no-tables-enrol-code": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IHRoaXMgYmFuayBoYXMgbm8gbWFpbnRhaW5lciB0YWJsZXMgeWV0IChzY2hlbWEgb2xkZXIgdGhhbiB2NTQpOyBzdGFydCBhIHY1NCBkYWVtb24gb25jZSB0byBjcmVhdGUgdGhlbQ0K",
+   "window": [
+    1791577464.6894639,
+    1791577465.0830135
+   ],
+   "arm": "python",
+   "seed_secret": null,
+   "shown": {},
+   "local_times": {},
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "no-tables-reset": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IHRoaXMgYmFuayBoYXMgbm8gbWFpbnRhaW5lciB0YWJsZXMgeWV0IChzY2hlbWEgb2xkZXIgdGhhbiB2NTQpOyBzdGFydCBhIHY1NCBkYWVtb24gb25jZSB0byBjcmVhdGUgdGhlbQ0K",
+   "window": [
+    1791577465.5185108,
+    1791577465.899004
+   ],
+   "arm": "python",
+   "seed_secret": null,
+   "shown": {},
+   "local_times": {},
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-no-wait": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IEdHUFhaQ0pWTEMNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
+   "stderr": "",
+   "window": [
+    1791577468.141313,
+    1791577468.4662886
+   ],
+   "arm": "python",
+   "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "tables": {
+     "maintainer_bootstrap": [
+      "{\"used_at\": null, \"code_hash\": \"ed82f1e000f746fc719e5095811e79945048c37fdd69fc24a33837ad827fcaf5\", \"expires_at\": 1791578068.4337249, \"credential_id\": null, \"failed_attempts\": 0}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-no-secret": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFBLTVE2NldGTkoNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
+   "stderr": "",
+   "window": [
+    1791577468.7395828,
+    1791577469.151403
+   ],
+   "arm": "python",
+   "seed_secret": null,
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "18315e6440ca1897efe3e3217964d019bf358477fa7eb71fda83ac9d367cdffe",
+    "tables": {
+     "maintainer_bootstrap": [
+      "{\"used_at\": null, \"code_hash\": \"679f065f6e5bd66eb7a804ce837e5613852ab14824fee804d6f094547262af16\", \"expires_at\": 1791578069.1177676, \"credential_id\": null, \"failed_attempts\": 0}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-replaces-unused": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFVTQ1lQSkJTWlYNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
+   "stderr": "",
+   "window": [
+    1791577471.8514664,
+    1791577472.2228463
+   ],
+   "arm": "python",
+   "seed_secret": "0191e9aca9c8b455107a16cbc0656383d68520410b4811873c256a37624ed80d",
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "7b06d709d17be40946b0c68a5b81647cfcbf0c2a546392bbf00298bf685fc105",
+    "tables": {
+     "maintainer_bootstrap": [
+      "{\"used_at\": null, \"code_hash\": \"cce0cfb5dfcb49462e38ac48a20a8e9b438c8b2acebd593040d68d7ba359360f\", \"expires_at\": 1791578072.191492, \"credential_id\": null, \"failed_attempts\": 0}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-refused-pending": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogYSBwYXNza2V5IGlzIGFscmVhZHkgcGVuZGluZyBvciBhY3RpdmU7IHJldm9rZSBpdCBvciBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgcmVzZXRgIGZpcnN0DQo=",
+   "window": [
+    1791577472.652955,
+    1791577473.0022516
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-refused-active": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogYSBwYXNza2V5IGlzIGFscmVhZHkgcGVuZGluZyBvciBhY3RpdmU7IHJldm9rZSBpdCBvciBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgcmVzZXRgIGZpcnN0DQo=",
+   "window": [
+    1791577473.310418,
+    1791577473.6395545
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-wait-redeemed": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFRLN0NCNzdKWFANClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQpFbnJvbGxlZCAocGVuZGluZyk6IGRlc2tLZXlIb29rQSAgbGFiZWw6IGRlc2sga2V5DQpDaGVjayB0aGF0IHRoZSBDb25zb2xlIHNob3dzIHRoZSBzYW1lIHByZWZpeCBhbmQgbGFiZWwsIHRoZW4gcnVuOg0KICBwc2V1ZG9saWZlLW1jcCBtYWludGFpbmVyIGNvbmZpcm0gZGVza0tleUhvb2tBDQpJZiBpdCBkb2VzIG5vdCBtYXRjaCwgc29tZW9uZSBlbHNlIHJlZGVlbWVkIHRoZSBjb2RlOiBydW4NCiAgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciByZXZva2UgZGVza0tleUhvb2tBDQo=",
+   "stderr": "",
+   "window": [
+    1791577473.896411,
+    1791577476.249537
+   ],
+   "arm": "python",
+   "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"30265ddfbf4c3a666e6ec6a9cefb8602b6ed44e841c4d3ec9f06e250304ddd4a\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"deskKeyHookAAAAAAAAAAA\\\",\\\"label\\\":\\\"desk key\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782867600, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_bootstrap": [
+      "{\"used_at\": 1782867600, \"code_hash\": \"2a14a7ad7b006136eac771eb13549763490ce957ca97edde33af54949893013a\", \"expires_at\": 1791578074.2134318, \"credential_id\": \"deskKeyHookAAAAAAAAAAA\", \"failed_attempts\": 0}"
+     ],
+     "maintainer_nonces": [
+      "{\"nonce\": \"5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\", \"expires_at\": 1782867720}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"desk key\", \"state\": \"pending\", \"created_at\": 1782867600, \"flagged_at\": null, \"public_key\": \"\\\\xa5010203262001215820a72595596a51511ca2c28e6e3b5667a8c2de5411f5f4914757af371bdaf41a0a2258203f3aa7a7408d764a82b3ae648ca501f405ac31fef5edbddc2172a4ac89c4a0aa\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": null, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"deskKeyHookAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-wait-burned": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IE1GNVhaRElMQlINClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQpUaGUgY29kZSB3YXMgYnVybmVkIGFmdGVyIHRvbyBtYW55IHdyb25nIGd1ZXNzZXMgaW4gdGhlIENvbnNvbGUuIElmIHRoZXkgd2VyZSBub3QgeW91cnMsIHNvbWVvbmUgZWxzZSBpcyB0cnlpbmcgdG8gZW5yb2w6IGNoZWNrIGBwc2V1ZG9saWZlLW1jcCBtYWludGFpbmVyIGxpc3RgLCB0aGVuIHJ1biBlbnJvbC1jb2RlIGFnYWluLg0K",
+   "stderr": "",
+   "window": [
+    1791577476.90794,
+    1791577479.266264
+   ],
+   "arm": "python",
+   "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "tables": {
+     "maintainer_bootstrap": [
+      "{\"used_at\": null, \"code_hash\": \"028fb289f0804a34daa6717baeceabd323d113c305e2af6f0171dc2420d0fa29\", \"expires_at\": 1791578077.2299166, \"credential_id\": null, \"failed_attempts\": 5}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "confirm-dash-prefix": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "QWN0aXZlOiAtcGVuZGluZ0tleUEgIGxhYmVsOiBsYXB0b3ANCg==",
+   "stderr": "",
+   "window": [
+    1791577479.7516043,
+    1791577480.3845775
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": {
+    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"7ce68052af83121e17dacfb3bf32589db19be0d9f6100cbcfeb056993c9025a9\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577480.3402753, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577480.3387642, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "confirm-six": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "QWN0aXZlOiAtcGVuZGluZ0tleUEgIGxhYmVsOiBsYXB0b3ANCg==",
+   "stderr": "",
+   "window": [
+    1791577480.7434897,
+    1791577481.1356347
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": {
+    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"730a33ed03e8d6e0aa633073124235d53468c0f8e989afd9f7a6b988e6ebab07\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577481.0955348, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577481.0944378, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "confirm-full-id": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "QWN0aXZlOiAtcGVuZGluZ0tleUEgIGxhYmVsOiBsYXB0b3ANCg==",
+   "stderr": "",
+   "window": [
+    1791577481.6245642,
+    1791577481.9558072
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": {
+    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"010ca5834438e0effa18364c55cf422f3efe15a80d5a5e3004d2549a284338f7\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577481.9275627, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577481.9265263, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "confirm-not-pending": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogbm8gc2luZ2xlIHBhc3NrZXkgbWF0Y2hlcyB0aGF0IHByZWZpeCAoaW4gdGhlIHN0YXRlIHRoaXMgY29tbWFuZCBuZWVkcyk7IHJ1biBgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciBsaXN0YA0K",
+   "window": [
+    1791577482.2237475,
+    1791577482.5627084
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "confirm-short": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
+   "window": [
+    1791577482.8428724,
+    1791577483.176477
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "confirm-unknown": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogbm8gc2luZ2xlIHBhc3NrZXkgbWF0Y2hlcyB0aGF0IHByZWZpeCAoaW4gdGhlIHN0YXRlIHRoaXMgY29tbWFuZCBuZWVkcyk7IHJ1biBgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciBsaXN0YA0K",
+   "window": [
+    1791577483.3848479,
+    1791577483.757602
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-active": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "UmV2b2tlZDogLWRhc2hLZXlBQUFBICBsYWJlbDogbGFwdG9wDQo=",
+   "stderr": "",
+   "window": [
+    1791577484.853384,
+    1791577485.1846516
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": {
+    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"principal\": \"\", \"created_at\": 1782864060, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"phoneKey_quarantineAAA\\\",\\\"label\\\":\\\"Tom's phone \u260e\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"principal\": \"\", \"created_at\": 1782864120, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB1keyDAAAAAAAAAAA\\\",\\\"label\\\":\\\"it's \\\\\\\"twin\\\\\\\"\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"principal\": \"\", \"created_at\": 1782864180, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"d8e8933a736b13928ef6c1658a80909ce1cee14589e530ecf4cabce0cf9b0232\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577485.1565409, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"active\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
+      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"active\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1791577485.1555154, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"active\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-quarantined-underscore": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "UmV2b2tlZDogcGhvbmVLZXlfcXVhICBsYWJlbDogVG9tJ3MgcGhvbmUg4piODQo=",
+   "stderr": "",
+   "window": [
+    1791577485.4070125,
+    1791577485.7492201
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": {
+    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"principal\": \"\", \"created_at\": 1782864060, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"phoneKey_quarantineAAA\\\",\\\"label\\\":\\\"Tom's phone \u260e\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"principal\": \"\", \"created_at\": 1782864120, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB1keyDAAAAAAAAAAA\\\",\\\"label\\\":\\\"it's \\\\\\\"twin\\\\\\\"\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"principal\": \"\", \"created_at\": 1782864180, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"59477dbf09d477171d88e47f8af3aa94a958f6ba93108c153dfb246b7c6999c4\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"phoneKey_quarantineAAA\\\",\\\"label\\\":\\\"Tom's phone \u260e\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577485.7168353, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1791577485.7163298, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
+      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"active\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"active\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-pending": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "UmV2b2tlZDogLXBlbmRpbmdLZXlBICBsYWJlbDogbGFwdG9wDQo=",
+   "stderr": "",
+   "window": [
+    1791577486.031465,
+    1791577486.349306
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": {
+    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"56f4d0b2d7754b3bbc2153d5d67394561a6bd022a0715538e58d0fbec9255e84\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577486.3208246, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": 1791577486.320292, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": null, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-already-revoked": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "UmV2b2tlZDogY2FuY2VsWGRSZXZvICBsYWJlbDogc3BhcmUNCg==",
+   "stderr": "",
+   "window": [
+    1791577486.5821729,
+    1791577486.9216075
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-ambiguous": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogbm8gc2luZ2xlIHBhc3NrZXkgbWF0Y2hlcyB0aGF0IHByZWZpeCAoaW4gdGhlIHN0YXRlIHRoaXMgY29tbWFuZCBuZWVkcyk7IHJ1biBgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciBsaXN0YA0K",
+   "window": [
+    1791577487.2227998,
+    1791577487.5751202
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-twin-unique": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "UmV2b2tlZDogdHdpbkFCMmtleUVBICBsYWJlbDogdHdpbiB0d28NCg==",
+   "stderr": "",
+   "window": [
+    1791577487.8927193,
+    1791577488.2517974
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": {
+    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"principal\": \"\", \"created_at\": 1782864060, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"phoneKey_quarantineAAA\\\",\\\"label\\\":\\\"Tom's phone \u260e\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"principal\": \"\", \"created_at\": 1782864120, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB1keyDAAAAAAAAAAA\\\",\\\"label\\\":\\\"it's \\\\\\\"twin\\\\\\\"\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"principal\": \"\", \"created_at\": 1782864180, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"2f1a5e6e4fd3da5a84ffb0e2f2b49656c7dcc3edbfa8d1929da985c4f5fdbd27\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577488.2167206, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"active\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
+      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"active\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1791577488.2156396, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-underscore-wildcard": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogbm8gc2luZ2xlIHBhc3NrZXkgbWF0Y2hlcyB0aGF0IHByZWZpeCAoaW4gdGhlIHN0YXRlIHRoaXMgY29tbWFuZCBuZWVkcyk7IHJ1biBgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciBsaXN0YA0K",
+   "window": [
+    1791577488.581711,
+    1791577488.9268115
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-odd-percent": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
+   "window": [
+    1791577491.3692997,
+    1791577491.7337728
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-odd-space": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
+   "window": [
+    1791577491.961475,
+    1791577492.311148
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
+   "window": [
+    1791577492.5954642,
+    1791577492.9292922
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "revoke-non-ascii": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
+   "window": [
+    1791577493.1825984,
+    1791577493.5143192
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "reset-without-yes": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 1,
+   "stdout": "",
+   "stderr": "cmVzZXQgcmV2b2tlcyBldmVyeSBwYXNza2V5IGFuZCByb3RhdGVzIHRoZSBzZWNyZXQ7IHBhc3MgLS15ZXMNCg==",
+   "window": [
+    1791577494.758466,
+    1791577495.0927253
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "reset-rich": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "UmV2b2tlZCA0IHBhc3NrZXkocyk7IHNlY3JldCByb3RhdGVkOyBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgZW5yb2wtY29kZWAgdG8gZW5yb2wgYWdhaW4uDQo=",
+   "stderr": "",
+   "window": [
+    1791577496.6252954,
+    1791577496.9792044
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": {
+    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"principal\": \"\", \"created_at\": 1782864060, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"phoneKey_quarantineAAA\\\",\\\"label\\\":\\\"Tom's phone \u260e\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"principal\": \"\", \"created_at\": 1782864120, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB1keyDAAAAAAAAAAA\\\",\\\"label\\\":\\\"it's \\\\\\\"twin\\\\\\\"\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"principal\": \"\", \"created_at\": 1782864180, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"a015cd34b34f5913f03e09d2d74391eda8d85f5c8467408320373ef59d052c09\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":4}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577496.9480965, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_bootstrap": [],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1791577496.9442773, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
+      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"revoked\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": 1791577496.9442773, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1791577496.9442773, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1791577496.9442773, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
+     ],
+     "meta": [
+      "{\"key\": \"maintainer_secret_v1\", \"value\": \"2cea0c799f48bee394cc63ff195c27917083c1f5b982c41098916868da54a818\"}",
+      "{\"key\": \"schema_version\", \"value\": 55}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "reset-pending": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "UmV2b2tlZCAxIHBhc3NrZXkocyk7IHNlY3JldCByb3RhdGVkOyBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgZW5yb2wtY29kZWAgdG8gZW5yb2wgYWdhaW4uDQo=",
+   "stderr": "",
+   "window": [
+    1791577497.2968323,
+    1791577497.6183286
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": {
+    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"291dc8d5130cfbe6b4c373da16fe452d20df34665909b1432c28352272de5581\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":1}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577497.5904255, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_bootstrap": [],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": 1791577497.5867066, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": null, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+     ],
+     "meta": [
+      "{\"key\": \"maintainer_secret_v1\", \"value\": \"dcbbf2f34ed965a0489d47cf673a3de5b9bf59bf606c13ecfe87faec2c1fb0fd\"}",
+      "{\"key\": \"schema_version\", \"value\": 55}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "reset-empty": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "UmV2b2tlZCAwIHBhc3NrZXkocyk7IHNlY3JldCByb3RhdGVkOyBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgZW5yb2wtY29kZWAgdG8gZW5yb2wgYWdhaW4uDQo=",
+   "stderr": "",
+   "window": [
+    1791577498.0494847,
+    1791577498.391659
+   ],
+   "arm": "python",
+   "seed_secret": null,
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "18315e6440ca1897efe3e3217964d019bf358477fa7eb71fda83ac9d367cdffe",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"049e47a706fced1bea876829830d5dcfae4237ed49cd62a481973c95c41cd649\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":0}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1791577498.3618953, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "meta": [
+      "{\"key\": \"maintainer_secret_v1\", \"value\": \"beea3122385cd39af2d8661c95d016b8223c4d5e8c90baf14bbd791b28b7e5e2\"}",
+      "{\"key\": \"schema_version\", \"value\": 55}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "commit-refused-confirm": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IFJhaXNlRXhjZXB0aW9uOyBjaGVjayBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwNCg==",
+   "window": [
+    1791577498.7394,
+    1791577499.0504618
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "commit-refused-reset": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IEludGVybmFsRXJyb3I7IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0K",
+   "window": [
+    1791577499.3581061,
+    1791577499.69496
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "commit-refused-enrol-code": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IEFkbWluU2h1dGRvd247IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0K",
+   "window": [
+    1791577500.1922336,
+    1791577500.5410073
+   ],
+   "arm": "python",
+   "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
+   "shown": {},
+   "local_times": {},
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-wait-terminated": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFRDNkNXSk81M0wNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQo=",
+   "stderr": "ZXJyb3I6IEFkbWluU2h1dGRvd247IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0K",
+   "window": [
+    1791577500.8177605,
+    1791577503.1324818
+   ],
+   "arm": "python",
+   "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "tables": {
+     "maintainer_bootstrap": [
+      "{\"used_at\": null, \"code_hash\": \"418430164693efa00a90c5f1a04e0f081449d2d095e5d5b9fc7e075dd8196e06\", \"expires_at\": 1791578101.1028686, \"credential_id\": null, \"failed_attempts\": 0}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-wait-lock-timeout": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFBQRURGWEk0QjYNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQo=",
+   "stderr": "ZXJyb3I6IExvY2tOb3RBdmFpbGFibGU7IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0K",
+   "window": [
+    1791577504.256282,
+    1791577511.6580331
+   ],
+   "arm": "python",
+   "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "tables": {
+     "maintainer_bootstrap": [
+      "{\"used_at\": null, \"code_hash\": \"b1ed501f2907e160cc280be39947bef11353c9269f1979c637da3fc58c992167\", \"expires_at\": 1791578104.624303, \"credential_id\": null, \"failed_attempts\": 0}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "confirm-stdout-closed": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 120,
+   "stdout": "",
+   "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
+   "window": [
+    1791577512.4102607,
+    1791577512.8073335
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": {
+    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"a8569fe94043f655bf829fb8689749453b45c03a93fd082b3f85d0de6e1732cf\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577512.7562509, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577512.7552125, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-no-wait-stdout-closed": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 120,
+   "stdout": "",
+   "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
+   "window": [
+    1791577513.9139268,
+    1791577514.2463613
+   ],
+   "arm": "python",
+   "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "tables": {
+     "maintainer_bootstrap": [
+      "{\"used_at\": null, \"code_hash\": \"f8e013342cce01039946fdeb189b53a94b7aac6d7702aa0c01ce2b3849fbd5ad\", \"expires_at\": 1791578114.2205303, \"credential_id\": null, \"failed_attempts\": 0}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "enrol-code-wait-stdout-closed": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 120,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IE9TRXJyb3I7IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0KRXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
+   "window": [
+    1791577514.4807246,
+    1791577514.8040717
+   ],
+   "arm": "python",
+   "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "tables": {
+     "maintainer_bootstrap": [
+      "{\"used_at\": null, \"code_hash\": \"7ad3535976782fb995275073be66c966ce5a431d47eb4f28256e4af6d534150d\", \"expires_at\": 1791578114.7739701, \"credential_id\": null, \"failed_attempts\": 0}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-list-stdout-closed": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 120,
+   "stdout": "",
+   "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
+   "window": [
+    1791577515.0732853,
+    1791577515.4323335
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-list-tz-set": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxIDAwOjAxICBsYXN0X3VzZWQ9MjAyNi0wNy0wMSAwMDowNiAgRkxBR0dFRCAoc2lnbiBjb3VudCB3ZW50IGJhY2t3YXJkcykNCnBob25lS2V5X3F1YSAgYWN0aXZlICAgIlRvbSdzIHBob25lIOKYjiIgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAwMDowMiAgbGFzdF91c2VkPS0NCnR3aW5BQjFrZXlEQSAgYWN0aXZlICAgJ2l0XCdzICJ0d2luIicgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAwMDowMyAgbGFzdF91c2VkPS0NCnR3aW5BQjJrZXlFQSAgYWN0aXZlICAgJ3R3aW4gdHdvJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDAwOjA0ICBsYXN0X3VzZWQ9LQ0KY2FuY2VsWGRSZXZvICByZXZva2VkICAnc3BhcmUnICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDIgMDA6MDUgIGxhc3RfdXNlZD0tDQo=",
+   "stderr": "",
+   "window": [
+    1791577515.8367016,
+    1791577516.2182572
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-help": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgWy1oXQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAge3NldHVwLGVucm9sLWNvZGUsY29uZmlybSxyZXZva2UscmVzZXQsbGlzdH0NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC4uLg0KDQpIb3N0LXNpZGUgbWFuYWdlbWVudCBvZiB0aGUgbWFpbnRhaW5lcidzIHBhc3NrZXlzIChvcGVyYXRvci1vbmx5KS4gUmVhZHMNClBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCwgb3IgdGhlIGxpdGUgdGllcidzIGJhbmssIGVsc2UgcnVucyBpbnNpZGUgdGhlDQpwc2V1ZG9saWZlLW1jcC1kYWVtb24gY29udGFpbmVyIHdoZW4gaXQgcnVucyBoZXJlLg0KDQpwb3NpdGlvbmFsIGFyZ3VtZW50czoNCiAge3NldHVwLGVucm9sLWNvZGUsY29uZmlybSxyZXZva2UscmVzZXQsbGlzdH0NCiAgICBzZXR1cCAgICAgICAgICAgICAgIGd1aWRlZDogdGhlIENvbnNvbGUncyBIVFRQUyBuYW1lLCB0aGUgZGFlbW9uJ3MgY29uZmlnDQogICAgICAgICAgICAgICAgICAgICAgICBhbmQgdGhlIGZpcnN0IHBhc3NrZXkgKHNlZSBgbWFpbnRhaW5lciBzZXR1cCAtLWhlbHBgKQ0KICAgIGVucm9sLWNvZGUgICAgICAgICAgcHJpbnQgYSBvbmUtdGltZSBjb2RlIGZvciB0aGUgZmlyc3QgcGFzc2tleQ0KICAgIGNvbmZpcm0gICAgICAgICAgICAgYWN0aXZhdGUgdGhlIHBlbmRpbmcgYm9vdHN0cmFwIHBhc3NrZXkNCiAgICByZXZva2UgICAgICAgICAgICAgIHJldm9rZSBvbmUgcGFzc2tleQ0KICAgIHJlc2V0ICAgICAgICAgICAgICAgcmV2b2tlIGV2ZXJ5IHBhc3NrZXksIHJvdGF0ZSB0aGUgc2VjcmV0LCByZW9wZW4NCiAgICAgICAgICAgICAgICAgICAgICAgIGJvb3RzdHJhcA0KICAgIGxpc3QgICAgICAgICAgICAgICAgcHJpbnQgZXZlcnkgcGFzc2tleQ0KDQpvcHRpb25zOg0KICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdA0K",
+   "stderr": "",
+   "window": [
+    1791577517.3912838,
+    1791577517.474881
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-list-help": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgbGlzdCBbLWhdDQoNCm9wdGlvbnM6DQogIC1oLCAtLWhlbHAgIHNob3cgdGhpcyBoZWxwIG1lc3NhZ2UgYW5kIGV4aXQNCg==",
+   "stderr": "",
+   "window": [
+    1791577520.287083,
+    1791577520.3723269
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-enrol-poll": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IEVCSzVIUFRLRzYNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
+   "stderr": "",
+   "window": [
+    1791577521.9660625,
+    1791577522.2933602
+   ],
+   "arm": "python",
+   "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
+   "shown": {},
+   "local_times": {},
+   "db": {
+    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "tables": {
+     "maintainer_bootstrap": [
+      "{\"used_at\": null, \"code_hash\": \"b72a17b01c841c14e33de3ddbfd687278c296ae036cd66f8554e373aae0d987b\", \"expires_at\": 1791578122.2669463, \"credential_id\": null, \"failed_attempts\": 0}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-confirm-double-dash": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "QWN0aXZlOiAtcGVuZGluZ0tleUEgIGxhYmVsOiBsYXB0b3ANCg==",
+   "stderr": "",
+   "window": [
+    1791577529.4344685,
+    1791577529.8012097
+   ],
+   "arm": "python",
+   "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
+   "shown": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "local_times": {
+    "-pendingKeyA": [
+     null,
+     null
+    ]
+   },
+   "db": {
+    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"755c76185f367da12a8ecc9e268908a2c3849dcc4eb28e92bc0fe437e0058fd5\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577529.7715182, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577529.7704825, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-reset-repeated-yes": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "UmV2b2tlZCA0IHBhc3NrZXkocyk7IHNlY3JldCByb3RhdGVkOyBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgZW5yb2wtY29kZWAgdG8gZW5yb2wgYWdhaW4uDQo=",
+   "stderr": "",
+   "window": [
+    1791577530.160558,
+    1791577530.5750167
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": {
+    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "tables": {
+     "coordination_events": [
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"principal\": \"\", \"created_at\": 1782864060, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"phoneKey_quarantineAAA\\\",\\\"label\\\":\\\"Tom's phone \u260e\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"principal\": \"\", \"created_at\": 1782864120, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB1keyDAAAAAAAAAAA\\\",\\\"label\\\":\\\"it's \\\\\\\"twin\\\\\\\"\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"principal\": \"\", \"created_at\": 1782864180, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"a1bd4d72d9548ef5ec43746a836030e47611ba02a3ecad77b60605ffc3cceaca\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":4}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577530.5337863, \"message_id\": null, \"recipient_agent_id\": null}"
+     ],
+     "maintainer_bootstrap": [],
+     "maintainer_passkeys": [
+      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1791577530.5287893, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
+      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"revoked\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": 1791577530.5287893, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1791577530.5287893, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1791577530.5287893, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
+     ],
+     "meta": [
+      "{\"key\": \"maintainer_secret_v1\", \"value\": \"433a8556288014e771c76df1afcaac1dbea1f46a925c836eb28dc8dde9ac578f\"}",
+      "{\"key\": \"schema_version\", \"value\": 55}"
+     ]
+    }
+   },
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-no-dsn": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IG5vIGJhbmsgZm91bmQ6IHNldCBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgdG8gdGhlIGJhbmsncyBkYXRhYmFzZSBVUkwsIG9yIHJ1biB3aGVyZSB0aGUgbGl0ZSB0aWVyJ3MgZGF0YSBkaXIgaG9sZHMgb25lIChEb2NrZXIgdGllcjogc3RhcnQgdGhlIGRhZW1vbiwgb3IgcnVuIGBkb2NrZXIgZXhlYyAtaXQgcHNldWRvbGlmZS1tY3AtZGFlbW9uIHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgLi4uYCBvbiBpdHMgaG9zdCkNCg==",
+   "window": [
+    1791577531.8494587,
+    1791577532.2093384
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  },
+  "defer-dsn-option": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxIDEwOjAxICBsYXN0X3VzZWQ9MjAyNi0wNy0wMSAxMDowNiAgRkxBR0dFRCAoc2lnbiBjb3VudCB3ZW50IGJhY2t3YXJkcykNCnBob25lS2V5X3F1YSAgYWN0aXZlICAgIlRvbSdzIHBob25lIOKYjiIgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAxMDowMiAgbGFzdF91c2VkPS0NCnR3aW5BQjFrZXlEQSAgYWN0aXZlICAgJ2l0XCdzICJ0d2luIicgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAxMDowMyAgbGFzdF91c2VkPS0NCnR3aW5BQjJrZXlFQSAgYWN0aXZlICAgJ3R3aW4gdHdvJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDEwOjA0ICBsYXN0X3VzZWQ9LQ0KY2FuY2VsWGRSZXZvICByZXZva2VkICAnc3BhcmUnICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDIgMTA6MDUgIGxhc3RfdXNlZD0tDQo=",
+   "stderr": "",
+   "window": [
+    1791577532.4325376,
+    1791577532.77089
+   ],
+   "arm": "python",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "shown": {
+    "phoneKey_qua": [
+     1782950520,
+     null
+    ],
+    "twinAB1keyDA": [
+     1782950580,
+     null
+    ],
+    "-dashKeyAAAA": [
+     1782864060,
+     1782864360
+    ],
+    "cancelXdRevo": [
+     1782950700,
+     null
+    ],
+    "twinAB2keyEA": [
+     1782950640,
+     null
+    ]
+   },
+   "local_times": {
+    "phoneKey_qua": [
+     "2026-07-02 10:02",
+     null
+    ],
+    "twinAB1keyDA": [
+     "2026-07-02 10:03",
+     null
+    ],
+    "-dashKeyAAAA": [
+     "2026-07-01 10:01",
+     "2026-07-01 10:06"
+    ],
+    "cancelXdRevo": [
+     "2026-07-02 10:05",
+     null
+    ],
+    "twinAB2keyEA": [
+     "2026-07-02 10:04",
+     null
+    ]
+   },
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
+   },
+   "modes": {}
+  }
+ }
+}
