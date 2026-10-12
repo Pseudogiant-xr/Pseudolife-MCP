@@ -1516,6 +1516,17 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
+    if c.get("session_end_invalid_json"):
+        row["declared"] = "invalid SessionEnd: Python succeeds without closing; Rust refuses"
+        headers = {"content-type": "application/json; charset=utf-8",
+                   "cache-control": "no-store", "x-content-type-options": "nosniff"}
+        oracle = {"status": 200, "headers": headers, "json": {"ok": True}, "raw": '{"ok": true}'}
+        want = {"status": 400, "headers": headers, "json": {"error": "invalid_json"},
+                "raw": '{"error": "invalid_json"}'}
+        if golden:
+            oracle, want = golden_scrub(oracle), golden_scrub(want)
+        row["diffs"] = diff_values(oracle, py) + diff_values(want, rs)
+        return row
     if c.get("refusal_policy") in {"lexical-outside-root", "parent-space-refusal"}:
         sys.path.insert(0, str(REPO))
         from pseudolife_memory.web.api import CONSOLE_SECURITY_HEADERS

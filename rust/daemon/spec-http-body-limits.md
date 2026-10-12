@@ -11,13 +11,19 @@ authenticated Console/board/write handlers remain W2-D/W2-F/W2-E divergences
 | Gate order | Browser and bearer before method; non-GET/POST 405; stored operator restrictions before body; coordination non-POST 405; then body/media/JSON. | `707-772` |
 | REST parsing | Bodyless POST needs no media type. Nonempty requires application/json, ignoring parameters/case. Invalid JSON 400 invalid_json; non-object 400 body_must_be_object. Invalid UTF-8: coordination 400 invalid_json, ordinary REST unhandled 500 plaintext Internal Server Error. | `743-772` |
 | Pair | POST-only 405; any Origin 403; media 415 even without body; reserve failure budget before reading; over 1024 bytes 413; malformed body 400 pairing_refused. Oversized requests consume the failure budget. | `322-402` |
-| Session end | Browser/method/bearer first, 16 KiB cap, no media gate. Malformed JSON/non-object bodies become empty objects and produce 200 {ok:true} without writes; invalid UTF-8 escapes as 500. Truthy session-ID handling remains W2-E/F. | `558-588`; `session_hook.py:787-806` |
+| Session end | Browser/method/bearer first, 16 KiB cap, no media gate. Malformed JSON/non-object bodies deliberately return native 400 `invalid_json`, where Python returns 200 `{ok:true}` without writes: never acknowledge a close that did not happen. Non-objects use `invalid_json` here, while other REST routes use `body_must_be_object`. Empty bodies and valid objects retain their handling; invalid UTF-8 escapes as 500. Truthy session-ID handling remains W2-E/F. | `558-588`; `session_hook.py:787-806` |
 | Agents view | Query view exactly coordination selects configured-bearer admission and board error semantics, including POST before route lookup. Last query value wins; blanks retained. Authenticated roster handler remains W2-D/F 501 until ported. | `737-739,789-828`; `routes.py:98-109` |
 
 Free: date/server and unconsumed handler wording. Refusal codes, statuses,
 body bounds and byte lengths are exact. Existing noncanonical JSON/depth
 divergences remain explicit. No admission refusal writes a bank; the pair
 failure limiter is resident state and its consumption is compared separately.
+
+The four scenarios contain 132 cases: `body-limits` 92, `body-view-open` 13,
+`body-pair-budget` 21 and `body-text-window` 6. The 16 invalid SessionEnd
+probes include fixed/chunked `{"session_id": NaN}` requests: native 400
+`invalid_json` against Python 200 `{ok:true}`, with no writes to the disposable
+fixture banks. Strict JSON domain limits remain accepted differences.
 
 The corpus covers each limit at N and N+1, all three text paths, malformed
 and non-object bodies, UTF-8/escaped wire sizes, media/bodyless combinations,
