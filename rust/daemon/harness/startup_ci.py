@@ -1,7 +1,7 @@
 """Run startup hydration parity on CI's prepared disposable PostgreSQL fixture.
 
 The caller supplies the test-login environment and may set CARGO_TARGET_DIR.
-This helper checks generated schema inputs, runs the schema harness unit tests,
+This helper checks generated schema inputs, runs schema and startup fixture unit tests,
 builds the native daemon test executable, and checks startup goldens and mutants.
 It does not provision PostgreSQL or load an embedding model.
 """
@@ -30,7 +30,7 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
         raise ValueError("writer guard requires the pgs fixture slice")
     result = {}
     for variant in ("control", "mutant"):
-        name = pg.PREFIX + str(time.time_ns())
+        name = pg.name(pg.PREFIX + str(time.time_ns()))
         dsn = pg.create(name)
         try:
             child = dict(env, PL_PGS_WRITER_GUARD_DSN=dsn)
@@ -46,6 +46,21 @@ def writer_guard(binary: Path, env: dict, output: Path) -> int:
             result[variant] = {"exit_code": run.returncode, "accepted": accepted}
         finally:
             pg.drop(name)
+    name = pg.name(pg.PREFIX + "mutation_" + str(time.time_ns()))
+    dsn = pg.create(name)
+    try:
+        child = dict(env, PL_PGS_MUTATION_DSN=dsn, PL_PGS_CASE="zero-timestamp-seating")
+        child.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+        run = subprocess.run([str(binary), "--exact",
+            "bank::startup_tests::db_hydration_preserves_rows_vectors_and_seating_stamps", "--nocapture"],
+            cwd=REPO, env=child, capture_output=True, text=True, timeout=60)
+        accepted = run.returncode == 0 and "1 passed" in run.stdout
+        result["hydration_rows"] = {"exit_code": run.returncode, "accepted": accepted}
+        if not accepted:
+            print(run.stdout, end="")
+            print(run.stderr, end="", file=sys.stderr)
+    finally:
+        pg.drop(name)
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(f"writer guard: {'0 diffs / mutant caught' if all(v['accepted'] for v in result.values()) else 'FAIL'}", flush=True)
     return int(not all(value["accepted"] for value in result.values()))
@@ -68,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         for command in (
             [sys.executable, str(HERE / "gen_schema_sql.py"), "--check"],
             [sys.executable, "-m", "unittest", "discover", "-s", str(HERE), "-p", "test_schema_*.py"],
+            [sys.executable, "-m", "unittest", "discover", "-s", str(HERE), "-p", "test_startup_*.py"],
         ):
             code = subprocess.run(command, cwd=REPO, env=env).returncode
             if code:

@@ -285,8 +285,7 @@ async fn health(url: &str) -> Option<()> {
     let reply =
         super::hook_http::get(url, "/health", None, Duration::from_millis(250), true).await?;
     // The production health path decodes UTF-8 text, unlike json.loads(bytes).
-    let value: serde_json::Value =
-        serde_json::from_str(std::str::from_utf8(&reply.body).ok()?).ok()?;
+    let value = super::hook_json::input(std::str::from_utf8(&reply.body).ok()?).ok()?;
     (!value.is_null()).then_some(())
 }
 

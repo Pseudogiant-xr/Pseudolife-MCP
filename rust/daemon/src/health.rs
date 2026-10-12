@@ -243,14 +243,13 @@ pub async fn payload(svc: &Service) -> Value {
         "coordination".into(),
         json!({"enabled": c.coordination.enabled, "wake": c.coordination.wake.to_json()}),
     );
-    // No release check runs in this slice: the runtime flag stays off and
-    // nothing has been read from the package index (declared divergence).
+    let releases = svc.release_check.snapshot();
     p.insert(
         "updates".into(),
         json!({
-            "check_releases": false,
-            "latest_release": null,
-            "checked_at": 0.0,
+            "check_releases": releases.enabled,
+            "latest_release": releases.latest_release,
+            "checked_at": releases.checked_at,
             "unattended_clients": c.updates.unattended_clients,
             "unattended_daemon": c.updates.unattended_daemon,
         }),

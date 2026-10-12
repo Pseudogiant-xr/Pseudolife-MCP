@@ -6,12 +6,19 @@ use std::process::ExitCode;
 mod backup;
 pub mod board_audit;
 mod briefing_hook;
+mod connect;
 mod doctor;
 mod doorbell_seen;
 mod episode;
 mod hook_http;
 mod hook_json;
 pub mod lease;
+pub mod maintainer;
+mod move_cli;
+mod pairing;
+mod test_login;
+mod transfer;
+mod tunnel;
 mod version;
 pub mod wait_mail;
 
@@ -138,6 +145,36 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "doctor"
         && let Some(code) = doctor::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if matches!(mode, "export" | "import")
+        && let Some(code) = transfer::run(mode, std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "test-login"
+        && let Some(code) = test_login::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "connect"
+        && let Some(code) = connect::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if matches!(mode, "invite" | "pair")
+        && let Some(code) = pairing::run(mode)
+    {
+        return Some(code);
+    }
+    if mode == "move"
+        && let Some(code) = move_cli::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(ExitCode::from(code));
+    }
+    if mode == "tunnel"
+        && let Some(code) = tunnel::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }

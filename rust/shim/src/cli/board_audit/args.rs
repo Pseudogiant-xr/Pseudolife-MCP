@@ -136,7 +136,6 @@ fn head(value: &str) -> Option<Head> {
     let (seq, digest) = value.split_once(':')?;
     if seq.is_empty()
         || seq.starts_with('0')
-        || seq.len() > 18
         || !seq.bytes().all(|c| c.is_ascii_digit())
         || digest.len() != 64
         || !digest
@@ -152,11 +151,11 @@ fn head(value: &str) -> Option<Head> {
 /// explicit `+HH:MM`/`-HH:MM` offset (never a local-time reading).
 fn time(value: &str) -> Option<f64> {
     let decimal = |text: &str| !text.is_empty() && text.bytes().all(|c| c.is_ascii_digit());
-    if let Some((whole, fraction)) = value.split_once('.') {
-        return (decimal(whole) && decimal(fraction))
-            .then(|| value.parse::<f64>().ok())
-            .flatten()
-            .filter(|v| v.is_finite());
+    if let Some((whole, fraction)) = value.split_once('.')
+        && decimal(whole)
+        && decimal(fraction)
+    {
+        return value.parse::<f64>().ok().filter(|v| v.is_finite());
     }
     if decimal(value) {
         return value.parse::<f64>().ok().filter(|v| v.is_finite());
@@ -165,10 +164,26 @@ fn time(value: &str) -> Option<f64> {
 }
 
 fn iso(value: &str) -> Option<f64> {
+    let offset_start = value.len().checked_sub(6)?;
+    let fraction = value.get(19..offset_start)?;
+    let microseconds = if fraction.is_empty() {
+        0
+    } else {
+        let digits = fraction.strip_prefix('.')?;
+        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        // datetime.fromisoformat truncates sub-microsecond digits.
+        digits
+            .bytes()
+            .take(6)
+            .chain(std::iter::repeat(b'0'))
+            .take(6)
+            .fold(0, |value, byte| value * 10 + i64::from(byte - b'0'))
+    };
+    let whole = format!("{}{}", value.get(..19)?, value.get(offset_start..)?);
+    let value = whole.as_str();
     let bytes = value.as_bytes();
-    if bytes.len() != 25 {
-        return None;
-    }
     let shape = b"dddd-dd-ddTdd:dd:dd+dd:dd";
     for (index, (byte, want)) in bytes.iter().zip(shape).enumerate() {
         let ok = match want {
@@ -213,7 +228,11 @@ fn iso(value: &str) -> Option<f64> {
     let days = era * 146097 + day_of_era - 719468;
     let sign = if bytes[19] == b'-' { -1 } else { 1 };
     let offset = sign * (offset_hours * 3600 + offset_minutes * 60);
-    Some((days * 86400 + hour * 3600 + minute * 60 + second - offset) as f64)
+    let seconds = days * 86400 + hour * 3600 + minute * 60 + second - offset;
+    // Python divides total integer microseconds. Decimal parsing rounds that
+    // ratio once, including dates whose microseconds exceed exact f64 integers.
+    let total_microseconds = seconds * 1_000_000 + microseconds;
+    format!("{total_microseconds}e-6").parse().ok()
 }
 
 #[cfg(test)]
@@ -295,5 +314,40 @@ mod tests {
         assert_eq!(time("2024-02-29T00:00:00-00:30"), Some(1709166600.0));
         assert_eq!(time("2023-02-29T00:00:00+00:00"), None);
         assert_eq!(time("2000.5"), Some(2000.5));
+    }
+
+    #[test]
+    fn canonical_heads_reach_the_sql_bigint_boundary() {
+        let digest = "a".repeat(64);
+        for seq in [1_000_000_000_000_000_000, i64::MAX] {
+            assert_eq!(
+                head(&format!("{seq}:{digest}")),
+                Some((seq, digest.clone()))
+            );
+        }
+        assert!(head(&format!("9223372036854775808:{digest}")).is_none());
+        assert!(head(&format!("01000000000000000000:{digest}")).is_none());
+    }
+
+    #[test]
+    fn fractional_iso_seconds_keep_the_explicit_offset() {
+        // datetime.fromisoformat(...).timestamp(), CPython 3.11, 2026-10-10.
+        for (value, expected) in [
+            ("1970-01-01T00:00:59.999999+00:01", -0.000001),
+            ("2300-01-01T00:00:00.000001+00:00", 10413792000.000002),
+            ("2026-10-10T00:00:00.500000+00:00", 1791590400.5),
+            ("1970-01-01T00:33:20.5+00:00", 2000.5),
+            ("1970-01-01T02:03:20.000001+01:30", 2000.000001),
+            ("1970-01-01T00:33:20.123456789+00:00", 2000.123456),
+        ] {
+            assert_eq!(time(value), Some(expected), "{value}");
+        }
+        for value in [
+            "1970-01-01T00:33:20.+00:00",
+            "1970-01-01T00:33:20.5",
+            "1970-01-01T00:33:20.5+24:00",
+        ] {
+            assert_eq!(time(value), None, "{value}");
+        }
     }
 }

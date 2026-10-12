@@ -1,15 +1,15 @@
-//! Stored-principal refresher (spec section Q): `PrincipalRefresher` and
-//! `load_rows` from `pseudolife_memory/principal_store.py` (master 35b8f5d2).
+//! Stored-principal services and refresher from
+//! `pseudolife_memory/principal_store.py`; see `spec-principals.md`.
 //!
 //! The snapshot itself (normalization, shadowing, collapse by name, the
 //! 60 s staleness rule) lives in `auth::PrincipalStore`, which the bearer
-//! gate reads; this module only reads the table and feeds it.
+//! gate reads; this module owns the SQL operations that feed it.
 
 // Wired by main in W1-A.
 #![allow(dead_code)]
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use tokio::task::JoinHandle;
@@ -89,6 +89,130 @@ pub async fn load_rows(
     Ok((rows, bank_fingerprint(found.as_ref())))
 }
 
+/// `revoke`: retain the original revocation time, and clear every code.
+pub async fn revoke(client: &mut Client, name: &str) -> Result<bool, tokio_postgres::Error> {
+    let tx = client.transaction().await?;
+    let row = tx
+        .query_opt(
+            "UPDATE public.principals SET revoked_at = COALESCE(revoked_at, \
+         EXTRACT(EPOCH FROM clock_timestamp())::double precision), \
+         code_hash = NULL, code_expires_at = NULL, paired_code_hash = NULL \
+         WHERE principal = $1 RETURNING principal",
+            &[&name],
+        )
+        .await?;
+    tx.commit().await?;
+    Ok(row.is_some())
+}
+
+/// `list_principals`/`describe_rows`: public metadata, never hashes or secrets.
+pub async fn list_principals(
+    client: &Client,
+) -> Result<Vec<serde_json::Value>, tokio_postgres::Error> {
+    let rows = client
+        .query(
+            "SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL, \
+         code_expires_at, created_at, paired_at, revoked_at, \
+         EXTRACT(EPOCH FROM clock_timestamp())::double precision \
+         FROM public.principals ORDER BY principal",
+            &[],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            let paired: bool = r.get(3);
+            let pending: bool = r.get(4);
+            let expires: Option<f64> = r.get(5);
+            let revoked: Option<f64> = r.get(8);
+            let now: f64 = r.get(9);
+            let state = if revoked.is_some() {
+                "revoked"
+            } else if pending && expires.is_some_and(|t| t > now) {
+                "pending"
+            } else if pending {
+                "expired"
+            } else if paired {
+                "paired"
+            } else {
+                "unpaired"
+            };
+            serde_json::json!({"principal": r.get::<_, String>(0), "state": state,
+            "paired": paired, "tier": r.get::<_, Option<String>>(1), "board": r.get::<_, bool>(2),
+            "code_expires_at": if pending { expires } else { None },
+            "created_at": r.get::<_, f64>(6), "paired_at": r.get::<_, Option<f64>>(7),
+            "revoked_at": revoked})
+        })
+        .collect())
+}
+
+/// Pairing's store transaction only. The caller validates and hashes input,
+/// supplies the snapshot's exclusions, then adds a committed row immediately.
+/// Invite creation and client pairing remain owned by the CLI slice.
+pub async fn redeem(
+    client: &mut Client,
+    code_hash: &str,
+    token_hash: &str,
+    excluded: &[String],
+) -> Result<Option<StoredPrincipal>, tokio_postgres::Error> {
+    let tx = client.transaction().await?;
+    tx.batch_execute("SET LOCAL statement_timeout = '5s'")
+        .await?;
+    let exclusions = if crate::mutants::active("principal-redeem-excluded") {
+        &[][..]
+    } else {
+        excluded
+    };
+    let expiry = if crate::mutants::active("principal-redeem-expiry") {
+        "TRUE"
+    } else {
+        "code_expires_at > EXTRACT(EPOCH FROM clock_timestamp())::double precision"
+    };
+    let query = format!(
+        "UPDATE public.principals SET token_hash = $1, \
+         paired_at = EXTRACT(EPOCH FROM clock_timestamp())::double precision, \
+         paired_code_hash = code_hash, code_hash = NULL, code_expires_at = NULL \
+         WHERE code_hash = $2 AND {expiry} AND revoked_at IS NULL \
+         AND NOT (principal = ANY($3)) RETURNING principal, tier, board"
+    );
+    let mut row = match tx
+        .query_opt(&query, &[&token_hash, &code_hash, &exclusions])
+        .await
+    {
+        Ok(row) => row,
+        Err(e) if e.code() == Some(&SqlState::UNIQUE_VIOLATION) => {
+            tx.rollback().await?;
+            return Ok(None);
+        }
+        Err(e) => return Err(e),
+    };
+    if row.is_none() && !crate::mutants::active("principal-redeem-retry") {
+        row = tx
+            .query_opt(
+                "SELECT principal, tier, board FROM public.principals \
+             WHERE paired_code_hash = $1 AND token_hash = $2 AND revoked_at IS NULL \
+             AND paired_at > EXTRACT(EPOCH FROM clock_timestamp())::double precision - 600",
+                &[&code_hash, &token_hash],
+            )
+            .await?;
+    }
+    tx.execute(
+        "UPDATE public.principals SET paired_code_hash = NULL \
+         WHERE paired_code_hash IS NOT NULL \
+         AND paired_at <= EXTRACT(EPOCH FROM clock_timestamp())::double precision - 600",
+        &[],
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(row.map(|r| StoredPrincipal {
+        principal: r.get(0),
+        token_hash: Some(token_hash.to_string()),
+        tier: r.get(1),
+        board: r.get(2),
+        revoked: false,
+    }))
+}
+
 /// `PrincipalRefresher` (principal_store.py:251-325): one connection of its
 /// own, reused while it lives.
 pub struct Refresher {
@@ -141,21 +265,21 @@ impl Refresher {
     /// `PrincipalSnapshot.refresh` does), on failure the old snapshot stays
     /// and the connection is dropped. Returns whether it succeeded.
     pub async fn refresh_once(&mut self) -> bool {
-        let started = Instant::now();
+        let read = self.store.begin_refresh();
         match self.read().await {
             Ok((rows, bank)) => {
                 self.store
-                    .refresh(rows, bank, &self.env_principals, started);
+                    .finish_refresh_with_env(read, rows, bank, &self.env_principals);
                 if self.failing {
                     eprintln!("stored principals: refresh recovered");
                 }
                 self.failing = false;
                 true
             }
-            Err(e) => {
+            Err(_e) => {
                 if !self.failing {
                     eprintln!(
-                        "stored principals: refresh failed ({e}); bearers that match nothing \
+                        "stored principals: refresh failed; bearers that match nothing \
                          in the environment get 503 once the view is {}s old",
                         auth::STALE_AFTER.as_secs()
                     );

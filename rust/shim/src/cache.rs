@@ -74,10 +74,14 @@ impl HandshakeCache {
         let _ = (|| -> std::io::Result<()> {
             let parent = self.path.parent().unwrap_or(Path::new("."));
             fs::create_dir_all(parent)?;
-            let mut data = self.load();
-            data.extend(fields);
-            data.insert("url".into(), Value::String(self.url.clone()));
-            fs::write(&scratch, serde_json::to_vec(&data)?)?;
+            let mut cached = self.load();
+            cached.extend(fields);
+            // shim.py writes json.dumps({"url": url, **cached}).
+            let mut data = Map::from_iter([("url".to_owned(), Value::String(self.url.clone()))]);
+            data.extend(cached);
+            let mut text = String::new();
+            python_dumps(&Value::Object(data), &mut text);
+            fs::write(&scratch, text)?;
             fs::rename(&scratch, &self.path)?;
             let mut files = Vec::new();
             for entry in fs::read_dir(parent)? {
@@ -106,5 +110,60 @@ impl HandshakeCache {
     }
     pub fn remember_tools(&self, tools: Vec<Value>) {
         self.store(Map::from_iter([("tools".to_owned(), Value::Array(tools))]));
+    }
+}
+
+/// Python's `json.dumps` defaults: `", "` and `": "` separators and ASCII
+/// escapes. Numbers keep the lexeme they were read with.
+fn python_dumps(value: &Value, out: &mut String) {
+    use std::fmt::Write as _;
+    match value {
+        Value::Null => out.push_str("null"),
+        Value::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
+        Value::Number(number) => out.push_str(&number.to_string()),
+        Value::String(text) => {
+            out.push('"');
+            for c in text.chars() {
+                match c {
+                    '"' => out.push_str(r#"\""#),
+                    '\\' => out.push_str(r"\\"),
+                    '\n' => out.push_str(r"\n"),
+                    '\r' => out.push_str(r"\r"),
+                    '\t' => out.push_str(r"\t"),
+                    '\u{8}' => out.push_str(r"\b"),
+                    '\u{c}' => out.push_str(r"\f"),
+                    ' '..='~' => out.push(c),
+                    c => {
+                        let mut units = [0u16; 2];
+                        for unit in c.encode_utf16(&mut units) {
+                            let _ = write!(out, r"\u{unit:04x}");
+                        }
+                    }
+                }
+            }
+            out.push('"');
+        }
+        Value::Array(values) => {
+            out.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                python_dumps(value, out);
+            }
+            out.push(']');
+        }
+        Value::Object(map) => {
+            out.push('{');
+            for (index, (key, value)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                python_dumps(&Value::String(key.clone()), out);
+                out.push_str(": ");
+                python_dumps(value, out);
+            }
+            out.push('}');
+        }
     }
 }

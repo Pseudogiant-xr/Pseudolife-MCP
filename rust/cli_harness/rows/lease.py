@@ -96,7 +96,7 @@ class Board:
 
     def __init__(self, scenario="free", bank=True):
         from pseudolife_memory.storage.coordination import CoordinationStore
-        self.name = f"pl_cf_lease_{uuid.uuid4().int % 10**18}" if bank else None
+        self.name = _bank.name(f"pl_cf_lease_{uuid.uuid4().int % 10**18}") if bank else None
         self.conn = None
         self.records = []
         self.states = []
@@ -359,6 +359,16 @@ def cases():
             add(f"check-suite-{state}-{slot}" + ("-json" if flag else ""),
                 ["check", "full-suite", *flag], setup=_suite(state, slot))
     add("check-suite-elsewhere", ["check", "full-suite@box", "--json"], setup=_suite("held"))
+    # lease_cli.py:1391 copies these holder fields after json.loads.
+    for suffix, value in (("text", "not a number"), ("numeric", "123")):
+        def private_holder(arm, value=value):
+            from ..producers import write_private
+            _suite("held")(arm)
+            write_private(arm.home / "suite" / "full-suite.holder.json", json.dumps(
+                {"pid": 1, "worktree": {"$serde_json::private::Number": value},
+                 "started": "fixture"}))
+        add(f"check-suite-private-number-{suffix}", ["check", "full-suite", "--json"],
+            setup=private_holder, golden=False)
     for scenario in ("free", "claim", "other-mirror", "same-mirror"):
         for flag in ([], ["--json"]):
             add("check-board-" + scenario + ("-json" if flag else ""),
@@ -374,16 +384,21 @@ def cases():
             "os.environ['PSEUDOLIFE_LEASES_HELD'].encode()); "
             "sys.stdout.buffer.write(b'out\\x00\\xff'); sys.stderr.buffer.write(b'err\\x00\\xfe'); sys.exit(3)")
     command = ["--", "python.exe" if core.WINDOWS else "python3", "-c", code]
+    # These cases deliberately run the host's interpreter from the host PATH.
+    host_python = {"real_programs": (command[1],)}
     add("run-child-status", ["run", NAME, "--no-board", *command],
-        env={"PSEUDOLIFE_LEASES_HELD": "suite"})
-    add("run-hashed-name", ["run", "claim:a/b", "--no-board", *command])
-    add("run-missing-executable", ["run", NAME, "--no-board", "--", "fixture-no-such-program"])
-    add("run-timeout", ["run", NAME, "--no-board", "--timeout", "0", *command], local="held")
+        env={"PSEUDOLIFE_LEASES_HELD": "suite"}, **host_python)
+    add("run-hashed-name", ["run", "claim:a/b", "--no-board", *command], **host_python)
+    add("run-missing-executable", ["run", NAME, "--no-board", "--", "fixture-no-such-program"],
+        programs=("fixture-no-such-program",))
+    add("run-timeout", ["run", NAME, "--no-board", "--timeout", "0", *command], local="held",
+        **host_python)
     add("run-local-wait", ["run", NAME, "--no-board", "--timeout", "10", *command],
-        local="held", before_capture=_release_local)
+        local="held", before_capture=_release_local, **host_python)
     add("run-nested", ["run", NAME, "--no-board", *command], local="held",
-        env={"PSEUDOLIFE_LEASES_HELD": NAME})
-    add("run-child-closed-stdout", ["run", NAME, "--no-board", *command], stdout_closed=True)
+        env={"PSEUDOLIFE_LEASES_HELD": NAME}, **host_python)
+    add("run-child-closed-stdout", ["run", NAME, "--no-board", *command], stdout_closed=True,
+        **host_python)
     for identifier, argv in (("check-closed-stdout", ["check", NAME]),
                              ("list-closed-stdout", ["list", "--json"]),
                              ("help-closed-stdout", ["--help"])):

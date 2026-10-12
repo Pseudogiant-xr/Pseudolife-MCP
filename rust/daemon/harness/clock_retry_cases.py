@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -54,7 +55,7 @@ def dump_phase(phase):
     dsn = os.environ["PL_PGS_CLOCK_RETRY_DSN"]
     name = psycopg.conninfo.conninfo_to_dict(dsn)["dbname"]
     pg._check(name)
-    if not name[len(pg.PREFIX):].isdigit():
+    if not re.fullmatch(r"[0-9]+_[0-9a-f]{16}", name[len(pg.PREFIX):]):
         raise ValueError("clock fixture database must have a numeric owned name")
     with psycopg.connect(dsn, autocommit=True) as conn:
         assert_disposable_database(conn)
@@ -234,7 +235,7 @@ def expectations(result):
 
 
 def cell(binary, number, result, mutant=None):
-    names = [f"{pg.PREFIX}{number + index}" for index in range(3)]
+    names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(3)]
     created = []
     try:
         with tempfile.TemporaryDirectory(prefix="pl-pgs-clock-retry-") as scratch:

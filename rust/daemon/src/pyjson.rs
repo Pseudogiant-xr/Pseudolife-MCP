@@ -11,6 +11,9 @@
 use serde_json::{Number, Value};
 use std::fmt::Write;
 
+#[path = "../../shared/float_repr.rs"]
+mod shared_float;
+
 /// Python `repr(float)`: the shortest round-trip digits, positional for
 /// `1e-4 <= |x| < 1e16`, otherwise `d.ddde+XX` (two exponent digits minimum).
 pub fn float_repr(x: f64) -> String {
@@ -24,18 +27,10 @@ pub fn float_repr(x: f64) -> String {
             "-Infinity".into()
         };
     }
-    let sci = format!("{x:e}"); // shortest round-trip digits, e.g. "-1.5e16"
-    let (mantissa, exp) = sci.split_once('e').expect("LowerExp has an exponent");
-    let exp: i32 = exp.parse().expect("integer exponent");
-    if x != 0.0 && !(-4..16).contains(&exp) {
-        let sign = if exp < 0 { '-' } else { '+' };
-        return format!("{mantissa}e{sign}{:02}", exp.abs());
+    if crate::mutants::active("golden-float-token") && x.to_bits() == 0x430c6bf526340002 {
+        return "1000000000000000.3".into();
     }
-    let mut s = format!("{x}");
-    if !s.contains('.') {
-        s.push_str(".0");
-    }
-    s
+    shared_float::finite_float(x).expect("finite float")
 }
 
 /// A JSON number as Python would hold it after `json.loads`: an int literal
@@ -160,6 +155,37 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn float_repr_matches_full_cpython_table() {
+        let table = include_str!("../../shim/tests/cli_audit_float_repr.tsv");
+        let mut checked = 0;
+        let mut mismatches = Vec::new();
+        for line in table.lines().filter(|line| !line.starts_with('#')) {
+            let (bits, expected) = line.split_once('\t').expect("bits TAB repr");
+            let value = f64::from_bits(u64::from_str_radix(bits, 16).expect("hex bits"));
+            let actual = float_repr(value);
+            if actual != expected {
+                mismatches.push(format!("{bits}: expected {expected}, got {actual}"));
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 5358);
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+    }
+
+    #[test]
+    fn json_float_shortest_ties() {
+        for (bits, expected) in [
+            (0xc308130f222a4572, "-847044394961070.2"),
+            (0x42d526daef896bc8, "93026504287663.12"),
+            (0x430c6bf526340002, "1000000000000000.2"),
+        ] {
+            let value = json!({"timestamp": f64::from_bits(bits)});
+            assert_eq!(dumps(&value), format!("{{\"timestamp\": {expected}}}"));
+            assert_eq!(py_str(&value["timestamp"]), expected);
+        }
+    }
+
+    #[test]
     fn float_repr_matches_python() {
         // repr() in CPython 3.11, probed 2026-10-09.
         for (x, want) in [
@@ -218,5 +244,52 @@ mod tests {
             got,
             vec!["1.1", "True", "None", "it's", "['a']", "{'k': 1}"]
         );
+    }
+
+    #[test]
+    fn all_json_control_escapes_match_python() {
+        // web/api.py:103 uses json.dumps(default=str, ensure_ascii=True).
+        let value = json!({"key\n": "\0\u{1f} \u{7e}\u{7f}\u{80}\r\t\u{08}\u{0c}\\\""});
+        assert_eq!(
+            dumps(&value),
+            "{\"key\\n\": \"\\u0000\\u001f ~\\u007f\\u0080\\r\\t\\b\\f\\\\\\\"\"}"
+        );
+        assert_eq!(dumps(&json!([[], {}, "", false])), "[[], {}, \"\", false]");
+    }
+
+    #[test]
+    fn python_repr_preserves_nested_values_and_key_order() {
+        // cms.py:187-205 formats slot values with Python str().
+        let value = json!({"first": [false,null,"it's"], "second": {"quoted\"": "plain"}});
+        assert_eq!(
+            py_str(&value),
+            "{'first': [False, None, \"it's\"], 'second': {'quoted\"': 'plain'}}"
+        );
+        assert_eq!(py_str(&json!(false)), "False");
+        assert_eq!(py_str(&json!("it's\n")), "it's\n");
+        assert_eq!(py_str(&json!([])), "[]");
+        assert_eq!(py_str(&json!({})), "{}");
+    }
+
+    #[test]
+    fn float_json_allows_nonfinite_values_but_audit_codec_refuses_them() {
+        // web/api.py:103 uses json.dumps' default allow_nan=True;
+        // rust/shim/src/cli/board_audit/codec.rs:15 refuses nonfinite audit numbers.
+        for (value, expected) in [
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+        ] {
+            assert_eq!(float_repr(value), expected);
+            assert!(shared_float::finite_float(value).is_err());
+        }
+        for (input, expected) in [
+            ("1e999", "Infinity"),
+            ("-1e999", "-Infinity"),
+            ("1e-999", "0.0"),
+        ] {
+            let value: Value = serde_json::from_str(input).unwrap();
+            assert_eq!(dumps(&value), expected);
+        }
     }
 }
