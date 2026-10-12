@@ -472,12 +472,27 @@ its limits are deliberate trade-offs, not guarantees:
 - Negation is read only from the three words before a mention in its
   clause: a negation further back, after the value, or in other words
   ("hated", "gave up on") is not seen.
+- A retraction skips the negation rule, so a note that mentions a
+  dream-consolidated member and names the slot can back an extractor's
+  misread removal of it even when the note affirms it. A member added by a
+  direct write is not affected (see below).
+- Only a string value is checked: a `None`, number, boolean, list or dict
+  value stays at `agent` tier. The shipped extractor's parser turns a JSON
+  `null` value into the text `None`, which is checked like any other
+  string.
+- `memory_dream(rollback)` restores the previous value as a direct write,
+  so a restored value the dream had consolidated is protected from later
+  dream claims until it is changed directly.
 
 **A dream claim never replaces a value a direct write set.** When the
 current value's `user` or `action` tier comes from a direct write
 (`memory_fact_set`, a resolve, a store's auto-promote, anything but the
 dream), a dream claim for a different value parks as a contender, whatever
-its own tier and whether or not the quarantine is on. A value the dream
+its own tier and whether or not the quarantine is on. The same holds on the
+set paths: a dream add parks rather than convert such a scalar into a set
+(`member_add_blocked_direct`), and a dream retraction of a member a direct
+write added is dropped (`member_remove_refused`); a retraction aimed at a
+scalar slot finds no member and changes nothing. A value the dream
 itself consolidated from a user note still updates from a later backed
 user note, so changed preferences keep flowing. The record tells the two
 apart by a `dream:<tier>` provenance mark the dream adds when it is the

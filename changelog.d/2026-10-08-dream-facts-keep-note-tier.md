@@ -16,15 +16,19 @@
   attribute name. A retraction (`op: "remove"`) skips the negation rule. A
   claim that fails is treated as unbacked: `agent` tier, the tier every dream
   fact had before this change, and low-trust to the quarantine. A paraphrase
-  therefore stays at `agent` tier. A `source` index that is a boolean is not
-  read as a note number. The check confirms that the note mentions the value
-  and names the slot, not that it asserts the value; the next rule covers
-  that gap for values the user set directly.
+  therefore stays at `agent` tier, as does a claim whose value is not a
+  string (`None`, a number, a boolean, a list or a dict). A `source` index
+  that is a boolean is not read as a note number. The check confirms that
+  the note mentions the value and names the slot, not that it asserts the
+  value; the next rule covers that gap for values the user set directly.
 - A dream claim never replaces a value that a direct user or action write set
   (`memory_fact_set`, a resolve, a store's auto-promote): with
   `protect_provenance` on, a dream claim for a different value parks as a
   contender, with or without the quarantine, and a quarantine promotion
-  cannot replace it either. A value the dream itself consolidated from a user
+  cannot replace it either. On set-valued slots a dream add parks rather
+  than convert such a scalar into a set (`member_add_blocked_direct`), and a
+  dream retraction of a member a direct write added is dropped
+  (`member_remove_refused`). A value the dream itself consolidated from a user
   note still updates from a later backed user note. The dream marks the tiers
   it adds (`dream:<tier>` in the fact's provenance) and a direct write at that
   tier clears the mark; facts written before this release count as direct.
@@ -48,9 +52,18 @@
   never names the slot) parks as a contender instead of being written. A
   dream claim that conflicts with a value set by `memory_fact_set` (or another
   direct write) at user or action tier parks instead of superseding it, so
-  such a change waits for `memory_fact_resolve`. And `memory_fact_set`, whose
+  such a change waits for `memory_fact_resolve`; likewise a dream note can no
+  longer convert such a value into a set or retract a member added by
+  `memory_set_add`. And `memory_fact_set`, whose
   default origin is `agent`, now parks against a fact the dream consolidated
   at `user` tier instead of superseding it; pass `origin="user"` when the
   human stated the change, or settle it with `memory_fact_resolve`.
+- Known limits: the shipped extractor's parser turns a JSON `null` value
+  into the text `None`, which is checked like any other string; a
+  retraction skips the negation rule, so a note that affirms a
+  dream-consolidated member can still back a misread removal of it; and a
+  dream rollback restores the previous value as a direct write, so a
+  restored dream value is protected from later dream claims until it is
+  changed directly.
 - Facts consolidated before this release keep their stored tier until
   restated; nothing is backfilled.
