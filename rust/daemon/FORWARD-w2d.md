@@ -209,3 +209,14 @@ Startup timestamp/tags/surprise fidelity and atomic read access coexist. Expande
 NEEDS OPUS: existing reference-pool/read-route omissions; existing fixed cortex dimension and tokenizer library assumption. No graph traversal or deep-dream work added.
 
 Validation and independent Codex high review are recorded in the private W2P report; initial failures and final reruns are listed separately. Windows evidence is cross compilation, not runtime. Frozen oracle goldens are not re-recorded.
+
+### W2P completed evidence
+
+- Linux code head `24438217f`: fmt, all-targets clippy with warnings denied, tests and mutant build exit 0; 192 passed, 2 ignored. Optional PG unit fixtures were not configured; live differential coverage is separate.
+- Windows GNU cross compilation: daemon and stdio crates, check at `24438217f` and clippy at `c7623ba54`, both exit 0; no Windows runtime claim.
+- Live harness with the owned-name adaptation: cell 3 cases, full live 119 cases in 11 scenarios, zero response differences and zero DB-state difference scenarios, exit 0. All eleven mutant controls caught, no survivors, exit 0. Owned fixture processes stopped and databases dropped by the runner.
+- The frozen head `24438217f` received the required independent Codex high review. Its only finding was fixed database names rejected by master ownership guards; this was watched fail, adapted at `c7623ba54`, and covered by the successful cell/full runs. No production merge-resolution finding.
+- Golden replay remains unavailable: the original slice contains no search goldens. None were recorded. Logs and result JSON are under the private W2P `d/` evidence directory.
+- Initial compile failures in expanded Params fixtures and the initial fixed-name admission failure are retained separately from these passes.
+
+Conflict detail: `bank.rs` keeps master zero-timestamp hydration and mixed JSON tags with atomic access counts; `main.rs` unions read/release modules; `search.rs` keeps D ranking, master surprise precision and adapted master tests; `service.rs` hydrates both cortex and background sessions and preserves cancellable warmup; `spec.md` keeps the precise master memory-shape policy and D contracts; `divergences.md` keeps master graph declarations plus D's declared omissions.
