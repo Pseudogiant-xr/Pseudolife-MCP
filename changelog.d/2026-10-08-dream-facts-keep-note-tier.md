@@ -17,7 +17,9 @@
   claim that fails is treated as unbacked: `agent` tier, the tier every dream
   fact had before this change, and low-trust to the quarantine. A paraphrase
   therefore stays at `agent` tier, as does a claim whose value is not a
-  string (`None`, a number, a boolean, a list or a dict). A `source` index
+  string (a number, a boolean, a list or a dict), including one the shipped
+  extractor's parser turned into text; the value is still stored. A `source`
+  index
   that is a boolean is not read as a note number. The check confirms that
   the note mentions the value and names the slot, not that it asserts the
   value; the next rule covers that gap for values the user set directly.
@@ -27,11 +29,15 @@
   contender, with or without the quarantine, and a quarantine promotion
   cannot replace it either. On set-valued slots a dream add parks rather
   than convert such a scalar into a set (`member_add_blocked_direct`), and a
-  dream retraction of a member a direct write added is dropped
-  (`member_remove_refused`). A value the dream itself consolidated from a user
-  note still updates from a later backed user note. The dream marks the tiers
-  it adds (`dream:<tier>` in the fact's provenance) and a direct write at that
-  tier clears the mark; facts written before this release count as direct.
+  dream retraction of a member a direct user- or action-tier write added is
+  dropped (`member_remove_refused`). Members added by `memory_set_add`, which
+  passes no origin, are agent tier and stay unguarded. A value the dream
+  itself consolidated from a user note still updates from a later backed user
+  note. The dream marks the tiers it adds (`dream:<tier>` in the fact's
+  provenance) and a direct write at that tier, an exact member confirmation
+  included, clears the mark; only the dream writes a mark (a `dream:` token
+  in a caller's provenance or source tag is dropped), and facts written
+  before this release count as direct.
 - A dream restatement that is a shorter form of the current value (a
   compression echo) still confirms it, but no longer raises its tier: only a
   restatement equal to the stored value after normalisation can.
@@ -39,7 +45,8 @@
   witness's tier (it was stamped `agent`), and the promotion check compares
   that same tier, after the assistant-speaker demotion, against the current
   value, so a promotion is never weaker than a direct write of the same
-  claim.
+  claim. The store checks again at promotion time, so a direct write that
+  lands after the quarantine chose to promote is not replaced.
 - A dream write at a user note's tier records no correction signal: those
   remain the record of a human changing a value directly.
 - Set-valued slots get the scalar path's tier guard (with `protect_provenance`
@@ -53,8 +60,8 @@
   dream claim that conflicts with a value set by `memory_fact_set` (or another
   direct write) at user or action tier parks instead of superseding it, so
   such a change waits for `memory_fact_resolve`; likewise a dream note can no
-  longer convert such a value into a set or retract a member added by
-  `memory_set_add`. And `memory_fact_set`, whose
+  longer convert such a value into a set or retract a member a direct user-
+  or action-tier write added. And `memory_fact_set`, whose
   default origin is `agent`, now parks against a fact the dream consolidated
   at `user` tier instead of superseding it; pass `origin="user"` when the
   human stated the change, or settle it with `memory_fact_resolve`.

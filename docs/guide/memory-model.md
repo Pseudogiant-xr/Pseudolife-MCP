@@ -477,7 +477,8 @@ its limits are deliberate trade-offs, not guarantees:
   misread removal of it even when the note affirms it. A member added by a
   direct write is not affected (see below).
 - Only a string value is checked: a `None`, number, boolean, list or dict
-  value stays at `agent` tier. The shipped extractor's parser drops a claim
+  value stays at `agent` tier, and so does a number or other non-string
+  value the shipped extractor's parser turned into text. The shipped extractor's parser drops a claim
   whose value is JSON `null` rather than storing the text `None`.
 - `memory_dream(rollback)` restores the previous value as a direct write,
   so a restored value the dream had consolidated is protected from later
@@ -490,14 +491,19 @@ dream), a dream claim for a different value parks as a contender, whatever
 its own tier and whether or not the quarantine is on. The same holds on the
 set paths: a dream add parks rather than convert such a scalar into a set
 (`member_add_blocked_direct`), and a dream retraction of a member a direct
-write added is dropped (`member_remove_refused`); a retraction aimed at a
-scalar slot finds no member and changes nothing. A value the dream
+user- or action-tier write added is dropped (`member_remove_refused`); a
+retraction aimed at a scalar slot finds no member and changes nothing.
+Members added by `memory_set_add`, which passes no origin, are agent tier
+and stay unguarded. A quarantine promotion checks again when it promotes,
+so a direct write that lands in between is not replaced. A value the dream
 itself consolidated from a user note still updates from a later backed
 user note, so changed preferences keep flowing. The record tells the two
 apart by a `dream:<tier>` provenance mark the dream adds when it is the
 write that first gives a fact that tier; a direct write at the tier clears
-it, so a direct confirmation protects the value from then on (facts
-written before the mark existed count as direct). A dream restatement
+it, so a direct confirmation, an exact member confirmation included,
+protects the value from then on (facts written before the mark existed
+count as direct). Only the dream writes a mark: a `dream:` token in a
+caller's provenance or `source` tag is dropped. A dream restatement
 that is a shorter form of the current value (a compression echo) confirms
 it without raising its tier; only an exact restatement can. With
 `protect_provenance` off, these rules are off as well.
