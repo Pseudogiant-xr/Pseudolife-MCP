@@ -383,7 +383,9 @@ def test_h5_step_budgets_fit_their_jobs():
               if shard["suite"] in H5_SUITES}
     assert set(shards) == set(H5_SUITES)
     for name, shard in shards.items():
-        assert 0 < shard["h5_timeout"] < shard["job_timeout"], name
+        # Checkout, toolchain, pip, artifacts and PostgreSQL prep take about
+        # 15 minutes of the job on Linux, so the h5 step must leave that much.
+        assert 0 < shard["h5_timeout"] and shard["h5_timeout"] + 15 <= shard["job_timeout"], name
         assert 0 < shard["h5_windows_timeout"] < shard["job_timeout"], name
     # Hosted ubuntu 2026-10-12: the audit step ran about 5 minutes and hit a
     # 4-minute budget three times with every compared case matching.
