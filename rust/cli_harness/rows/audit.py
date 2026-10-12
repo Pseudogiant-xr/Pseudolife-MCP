@@ -767,10 +767,13 @@ def _pruned(key):
 def cases() -> list[core.Case]:
     rich_head = _Lazy(lambda: head("rich"))
     out = [
-        # The old 100,000-key scan exceeded five seconds on Linux (2026-10-12).
+        # The old 100,000-key scan exceeded five seconds on Linux (2026-10-12),
+        # so Linux keeps that budget as the regression guard. On hosted Windows
+        # the Python oracle alone exceeded it (batch run 38198996412), so
+        # Windows uses the harness default.
         file_case("input-wide-object", ["verify", "--input", _home("wide.jsonl")],
                   files={"wide.jsonl": lambda: json.dumps({f"key-{n}": None for n in range(100000)}).encode("utf-8")},
-                  timeout=5.0),
+                  timeout=30.0 if os.name == "nt" else 5.0),
         *[read_case(f"defer-export-iso-{name}", "rich", ["export", "--since", value],
                     rules=("rust-deferral",)) for name, value in [
             ("week-date", "2026-W41-1"),
