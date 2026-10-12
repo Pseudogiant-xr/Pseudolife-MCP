@@ -411,7 +411,7 @@ def test_rollback_re_parks_a_contender_the_runs_member_add_settled(svc):
     svc.cortex_write("team", "mascot", "fox", support="user")
     svc.cortex_write("team", "mascot", "owl", support="agent")
     # User-sourced: a weaker-tier add may not convert the user scalar.
-    svc.store("adding an owl to the mascots", source="user")
+    svc.store("adding an owl to the team mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
     assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
     assert _contenders(svc, "team", "mascot") == []
@@ -446,7 +446,7 @@ def test_rollback_readds_removed_member(svc):
 def test_rollback_unwinds_scalar_to_set_conversion(svc):
     svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
     # User-sourced: a weaker-tier add may not convert the user scalar.
-    svc.store("adding an owl to the mascots", source="user")
+    svc.store("adding an owl to the team mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
     # Conversion happened: the scalar became a member alongside owl.
     assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
@@ -457,10 +457,24 @@ def test_rollback_unwinds_scalar_to_set_conversion(svc):
     assert cur["value"] == "fox"
 
 
+def test_rollback_unwinds_an_agent_tier_conversion_at_agent_tier(svc):
+    """The agent-tier path: an agent note's add converts an agent scalar,
+    and the rollback restores the scalar at its journaled agent tier."""
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="agent")
+    svc.store("adding an owl to the team mascots", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
+    assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    cur = svc.cortex_lookup("team", "mascot")
+    assert cur is not None and cur.get("kind") != "set", cur
+    assert cur["value"] == "fox" and cur["origin"] == "agent"
+
+
 def test_rollback_keeps_set_when_other_members_arrived(svc):
     svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
     # User-sourced: a weaker-tier add may not convert the user scalar.
-    svc.store("adding an owl to the mascots", source="user")
+    svc.store("adding an owl to the team mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
     # A member the run did NOT add arrives afterwards.
     svc.set_add("team", "mascot", "crow")

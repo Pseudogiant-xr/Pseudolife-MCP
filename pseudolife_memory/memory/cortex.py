@@ -1299,9 +1299,11 @@ class CortexStore:
                 support: str = "user", hlc: tuple[int, int] | None = None):
         """Resolve the active contender at a slot. ``accept=True`` promotes it to
         current (old current -> superseded; the contender's support gains
-        ``support`` — "user" for the explicit MCP resolve, "agent" when the
-        consolidation quarantine promotes on an independent second witness,
-        so an automated promotion is never stamped as a human act);
+        ``support`` — "user" for the explicit MCP resolve, the promoting
+        claim's write tier when the consolidation quarantine promotes on an
+        independent second witness (its note's source tier, never claim
+        text; the caller promotes only when that tier is not below the
+        current value's));
         ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
         or ``None`` when there is no active contender.
 

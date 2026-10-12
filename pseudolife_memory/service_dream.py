@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import unicodedata
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
@@ -30,7 +31,8 @@ from pseudolife_memory.dream_token import (
 from pseudolife_memory.memory.cortex import _norm_key
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 
-from pseudolife_memory.memory.labels import (INHERIT, contains_verbatim,
+from pseudolife_memory.memory.labels import (_TOKEN_STOP, INHERIT,
+                                             contains_verbatim,
                                              content_tokens)
 
 logger = logging.getLogger(__name__)
@@ -216,27 +218,62 @@ class DreamStallTracker:
                 self.announced_hard = self._hard(self.stall)
 
 
-def _citation_backs(value: str, note: str) -> bool:
-    """Whether a cited note's text carries a claim ``value``: the value as a
-    whole phrase (case-insensitive, whitespace-collapsed, on word
-    boundaries), or every content token of it with no unbacked literal. A
-    value with nothing checkable is not backed. Deterministic, no model.
+def _citation_text(s: str | None) -> str:
+    """NFC, casefolded, whitespace-collapsed: the form the citation check
+    compares in."""
+    return " ".join(unicodedata.normalize("NFC", s or "").casefold().split())
 
-    Guards the write tier in a multi-note dream batch, where the backing
-    note is the extractor's citation (model output): a claim keeps a tier
-    above agent only when its value is in the note it cites. Paraphrase
-    fails safe to agent, the tier every dream claim had before the tier
-    was taken from the note."""
-    from pseudolife_memory.memory.dream import literal_violations
-    v = " ".join((value or "").split()).lower()
-    n = " ".join((note or "").split()).lower()
-    if not v or not n:
+
+def _word_char(ch: str) -> bool:
+    # Letters, digits and combining marks of any script, and "_".
+    return (ch.isalnum() or ch == "_"
+            or unicodedata.category(ch).startswith("M"))
+
+
+def _has_phrase(phrase: str, text: str) -> bool:
+    """``phrase`` occurs in ``text`` with no word character on either side
+    (both already in :func:`_citation_text` form)."""
+    at = text.find(phrase)
+    while at != -1:
+        end = at + len(phrase)
+        if ((at == 0 or not _word_char(text[at - 1]))
+                and (end == len(text) or not _word_char(text[end]))):
+            return True
+        at = text.find(phrase, at + 1)
+    return False
+
+
+def _citation_backs(value: str, note: str, entity: str = "",
+                    attribute: str = "") -> bool:
+    """Whether a cited note's text backs a claim: the whole ``value`` as one
+    phrase (case-insensitive, whitespace-collapsed, on Unicode word
+    boundaries, every token kept, short ones and negators included), AND at
+    least one token of the claim's ``entity`` or ``attribute`` (split on
+    ``- _ .`` and whitespace; stop words and single characters skipped) as a
+    whole word. Anything unchecked is not backed. Deterministic, no model.
+
+    Guards the write tier of every dream claim, whatever the batch size: the
+    backing note is the extractor's citation (model output), so a claim
+    keeps a tier above agent only when the note it cites states both the
+    value and the slot. When unsure it fails closed to agent, the tier
+    every dream claim had before the tier was taken from the note."""
+    v = _citation_text(value)
+    n = _citation_text(note)
+    if not v or not n or not _has_phrase(v, n):
         return False
-    if re.search(r"(?<![a-z0-9])" + re.escape(v) + r"(?![a-z0-9])", n):
-        return True
-    toks = content_tokens(value)
-    return bool(toks) and toks <= content_tokens(note) \
-        and not literal_violations(value, note)
+    slot = re.split(r"[-_.\s]+", _citation_text(f"{entity} {attribute}"))
+    return any(_has_phrase(t, n) for t in slot
+               if len(t) >= 2 and t not in _TOKEN_STOP)
+
+
+def _claim_note_index(c: dict, n: int) -> int | None:
+    """The claim's ``source`` as an index into a batch of ``n`` notes, or
+    None. A bool is not an index, though ``isinstance(True, int)`` holds."""
+    idx = c.get("source")
+    if isinstance(idx, bool) or not isinstance(idx, int) \
+            or not 0 <= idx < n:
+        return None
+    return idx
 
 
 def _stall_tracker(service) -> DreamStallTracker:
@@ -1611,8 +1648,8 @@ class DreamOps:
             # name before anything mints an entity from them (2026-07-26).
             extracted = unflatten_slot_key_claims(extracted, vocab)
             for c in extracted:
-                idx = c.get("source")
-                if isinstance(idx, int) and 0 <= idx < len(entries):
+                idx = _claim_note_index(c, len(entries))
+                if idx is not None:
                     src_entry = entries[idx]
                 elif len(entries) == 1:
                     # Unambiguous: extractors that don't cite sources (stubs,
@@ -1789,10 +1826,9 @@ class DreamOps:
                         literal_dropped += 1
                         return
             actor = str(c.get("actor") or "user")
-            idx = c.get("source")
+            idx = _claim_note_index(c, len(entries))
             episode = (entries[idx].get("episode_id")
-                       if isinstance(idx, int)
-                       and 0 <= idx < len(entries) else None)
+                       if idx is not None else None)
             ev_row = {
                 "occurred_at": (c.get("date") if batch_has_date
                                 else None),
@@ -1841,17 +1877,21 @@ class DreamOps:
                 # stamp every claim "agent", which stored user-sourced notes
                 # at agent tier where any agent note could supersede them.
                 # An unbacked claim, or an unmapped source tag, is agent.
-                # In a multi-note batch the backing note is the extractor's
-                # citation (model output), so a tier above agent also needs
-                # the value to be in the cited note (_citation_backs); a
-                # citation that fails counts as no backing note, for the
-                # tier and the quarantine alike.
+                # The backing note is the extractor's citation (model
+                # output), in a one-note batch too: the extractor can restate
+                # a value the note never states. So a tier above agent also
+                # needs the cited note to state the value and name the slot
+                # (_citation_backs); a citation that fails counts as no
+                # backing note, for the tier and the quarantine alike.
                 tier_entry = src_entry
-                if (src_entry is not None and len(entries) > 1
+                if (src_entry is not None
                         and _origin_from_source(src_entry.get("source"))
                         not in (None, "agent")
-                        and not _citation_backs(str(c.get("value", "")),
-                                                src_entry.get("text", ""))):
+                        and not _citation_backs(
+                            str(c.get("value", "")),
+                            src_entry.get("text", ""),
+                            str(c.get("entity", "")),
+                            str(c.get("attribute", "")))):
                     tier_entry = None
                 claim_origin = ((_origin_from_source(tier_entry.get("source"))
                                  if tier_entry is not None else None)
@@ -2013,7 +2053,8 @@ class DreamOps:
                     q_route, q_low = None, False
                     if quarantine_on:
                         q_route, q_witness, q_low = self._quarantine_route(
-                            ent, attr, c, tier_entry, qt_trusted)
+                            ent, attr, c, tier_entry, qt_trusted,
+                            claim_tier=claim_origin)
                     # Claim-derived kwargs shared by every scalar write
                     # below — one definition, so the next claim field
                     # cannot silently miss one of the routing paths (this
@@ -2041,7 +2082,9 @@ class DreamOps:
                             # value via the contender machinery. Support is
                             # the promoting claim's write tier (its backing
                             # note's source, speaker-demoted), exactly what a
-                            # direct write would store — never the claim's
+                            # direct write would store, and the same tier the
+                            # route's promote check compared against the
+                            # current value — never the claim's
                             # own origin field, which is model output and
                             # steerable by note text (2026-08-09 review). A
                             # fixed "agent" here left a user-confirmed value
@@ -2194,8 +2237,8 @@ class DreamOps:
                     events_pass_failed = True
                     ev_items = []
                 for c in ev_items:
-                    idx = c.get("source")
-                    if isinstance(idx, int) and 0 <= idx < len(entries):
+                    idx = _claim_note_index(c, len(entries))
+                    if idx is not None:
                         ev_src = entries[idx].get("db_id")
                     elif len(entries) == 1:
                         ev_src = entries[0].get("db_id")
@@ -2401,14 +2444,17 @@ class DreamOps:
 
     def _quarantine_route(self, ent: str, attr: str, c: dict,
                           src_entry: dict | None,
-                          trusted: set[str]) -> tuple[str | None, str, bool]:
+                          trusted: set[str], *,
+                          claim_tier: str) -> tuple[str | None, str, bool]:
         """Route one scalar dream claim under the two-man rule.
 
         Returns ``(route, witness, low)``:
 
         * ``"promote"`` — a MARKED parked value gains an independent
-          second witness AND the witness's tier (entry-metadata-derived,
-          never claim text) is not below the current record's origin —
+          second witness AND ``claim_tier`` (the claim's write tier: the
+          backing entry's source tier after the citation check and the
+          assistant-speaker demotion, never claim text) is not below the
+          current record's origin —
           the two-man rule must never be weaker than the provenance
           guard it reinforces (2026-08-09 review: two agent witnesses
           must not supersede a user fact);
@@ -2429,17 +2475,14 @@ class DreamOps:
                                                      _norm_value)
         # Late import: service.py imports this module at load time, so the
         # shared quarantine helpers cannot be imported at module level.
-        from pseudolife_memory.service import (_origin_from_source,
-                                               _quarantine_low_trust,
+        from pseudolife_memory.service import (_quarantine_low_trust,
                                                _quarantine_witness)
 
         low = _quarantine_low_trust(c, src_entry, trusted)
         witness = _quarantine_witness(c, src_entry)
-        # The witness's tier comes from the backing entry's source (the
-        # only trust base the rule stands on); an unbacked claim ranks as
-        # agent regardless of what its text asserts.
-        claim_tier = ((_origin_from_source(src_entry.get("source"))
-                       if src_entry is not None else None) or "agent")
+        # The promote check compares the tier the claim would be written
+        # at (passed in by the caller, demotion applied), so promotion is
+        # never weaker than a direct write of the same claim.
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None

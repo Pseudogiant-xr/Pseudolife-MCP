@@ -127,7 +127,7 @@ def test_agent_member_remove_cannot_retract_user_member(svc):
 
 def test_user_member_remove_still_retracts_user_member(svc):
     svc.set_add("editor-pref", "editor", "vim", origin="user")
-    svc.store("vim is no longer one of my editors", source="user")
+    svc.store("vim is no longer an editor I use", source="user")
     svc.dream_run(StubExtractor([_claim("vim", op="remove")]))
     got = svc.cortex_lookup("editor-pref", "editor")
     assert got is None or got.get("members", []) == []
@@ -187,8 +187,9 @@ def test_member_tier_guards_follow_protect_provenance(svc):
     assert svc.cortex_lookup("editor-pref", "editor")["kind"] == "set"
 
 
-# ── citation check: in a multi-note batch the extractor picks the backing
-# note, so a tier above agent needs the value to appear in the cited note.
+# ── citation check: the extractor picks the backing note (in a one-note
+# batch too), so a tier above agent needs the cited note to state the value
+# and name the slot.
 
 def _batch(svc, *notes):
     for text, source in notes:
@@ -225,12 +226,30 @@ def test_correctly_cited_claim_keeps_user_tier_in_a_batch(svc):
     assert svc.cortex_lookup("editor-pref", "editor")["origin"] == "user"
 
 
-def test_single_note_batch_skips_the_citation_check(svc):
-    """Nothing to mis-cite with one note: a paraphrased value keeps the
-    note's tier."""
+def test_single_note_batch_applies_the_citation_check(svc):
+    """One note is no exemption: the extractor can still restate a value
+    the note never states. A paraphrase stays agent tier."""
     svc.store("I mostly write code in the vi improved editor", source="user")
     svc.dream_run(StubExtractor([_claim("vim")]))
-    assert svc.cortex_lookup("editor-pref", "editor")["origin"] == "user"
+    assert svc.cortex_lookup("editor-pref", "editor")["origin"] == "agent"
+
+
+def _deploy(value):
+    return _claim(value, entity="deploy", attribute="target")
+
+
+def test_unrelated_single_note_cannot_raise_an_agent_facts_tier(svc):
+    """A one-note batch holding an unrelated user note, whose claim restates
+    a known agent fact, must not confirm that fact up to user tier (a later
+    agent update would then be blocked)."""
+    svc.store("the deploy target is staging", source="agent")
+    svc.dream_run(StubExtractor([_deploy("staging")]))
+    svc.store("I had a sandwich for lunch", source="user")
+    svc.dream_run(StubExtractor([_deploy("staging")]))
+    assert svc.cortex_lookup("deploy", "target")["origin"] == "agent"
+    svc.store("deploy target is prod now", source="agent")
+    svc.dream_run(StubExtractor([_deploy("prod")]))
+    assert svc.cortex_lookup("deploy", "target")["value"] == "prod"
 
 
 def test_miscited_claim_is_low_trust_under_quarantine(svc):
@@ -242,15 +261,107 @@ def test_miscited_claim_is_low_trust_under_quarantine(svc):
     assert svc.cortex_lookup("editor-pref", "editor") is None
 
 
-@pytest.mark.parametrize("value,note,backed", [
-    ("vim", "my preferred editor is vim", True),
-    ("Berlin", "I moved to berlin last week", True),
-    ("32", "I turned 32 in May", True),
-    ("33", "I turned 32 in May", False),
-    ("emacs", "I had a sandwich for lunch", False),
-    ("New York office", "the team works from the new york office", True),
-    ("vi", "no editor named here", False),
+def test_cited_note_must_name_the_slot(svc):
+    """The value alone is not enough: a user note that happens to contain
+    the value but says nothing about the slot does not back the claim."""
+    svc.store("the deploy target is staging", source="agent")
+    svc.dream_run(StubExtractor([_deploy("staging")]))
+    _batch(svc, ("I think prod looks fine today", "user"),
+                ("set the deploy target to prod", "agent"))
+    svc.dream_run(_CitingStub(_deploy("prod"), "looks fine"))
+    cur = svc.cortex_lookup("deploy", "target")
+    assert cur["value"] == "prod" and cur["origin"] == "agent"
+
+
+class _BoolCitingStub(StubExtractor):
+    """Cites the note containing ``cite`` with a bool, which ``isinstance``
+    counts as an int (True == 1, False == 0)."""
+
+    def __init__(self, claim, cite):
+        super().__init__([claim])
+        self._cite = cite
+
+    def extract(self, texts, vocab, known_facts=None):
+        idx = next(i for i, t in enumerate(texts) if self._cite in t)
+        assert idx in (0, 1)
+        return [dict(c, source=bool(idx)) for c in self._claims]
+
+
+def test_bool_source_is_not_a_note_index(svc):
+    _batch(svc, ("an agent remark about nothing in particular", "agent"),
+                ("the deploy target is prod", "user"))
+    svc.dream_run(_BoolCitingStub(_deploy("prod"), "deploy target is prod"))
+    assert svc.cortex_lookup("deploy", "target")["origin"] == "agent"
+
+
+@pytest.mark.parametrize("bad", [True, False])
+def test_bool_source_is_dropped_at_the_parse_boundary(bad):
+    """JSON true/false from the model is not a note number (int(True) is 1):
+    the shipped extractor's claim and event parsers carry no source."""
+    from pseudolife_memory.memory.dream import (OpenAICompatExtractor,
+                                                events_from_parsed)
+    from tests.dream_helpers import chat_payload, stub_server
+    raw = {"entity": "e", "attribute": "a", "value": "v",
+           "confidence": 0.8, "source": bad}
+    with stub_server(lambda: (200, chat_payload([raw]))) as url:
+        got = OpenAICompatExtractor(url, "m").extract(["n1", "n2"], [])
+    assert len(got) == 1 and "source" not in got[0]
+    ev = events_from_parsed(
+        {"events": [{"description": "moved house", "source": bad}]}, 2)
+    assert len(ev) == 1 and "source" not in ev[0]
+
+
+def test_assistant_speaker_cannot_promote_a_parked_value_over_user(svc):
+    """Quarantine on: the promote route's tier check uses the claim's
+    write tier after the assistant-speaker demotion, so the two-man rule
+    is never weaker than the direct write's provenance guard."""
+    svc.config.memory.dream.quarantine_low_trust = True
+    svc.cortex_write("editor-pref", "editor", "vim", support="user")
+    svc.store("my preferred editor is emacs", source="agent")
+    svc.dream_run(StubExtractor([_claim("emacs")]))
+    svc.store("assistant: you should use emacs as your editor",
+              source="user")
+    out = svc.dream_run(StubExtractor([dict(_claim("emacs"),
+                                            speaker="assistant")]))
+    assert out.get("quarantine_promoted", 0) == 0
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["value"] == "vim" and cur["origin"] == "user"
+
+
+@pytest.mark.parametrize("protect,action", [
+    (False, "member_removed"), (True, "member_remove_refused")])
+def test_member_remove_tier_guard_follows_protect_provenance(svc, protect,
+                                                            action):
+    svc.config.memory.cortex.protect_provenance = protect
+    svc.set_add("editor-pref", "editor", "vim", origin="user")
+    out = svc.set_remove("editor-pref", "editor", "vim", origin="agent")
+    assert out["action"] == action
+
+
+@pytest.mark.parametrize("value,note,entity,attribute,backed", [
+    ("vim", "my preferred editor is vim", "editor-pref", "editor", True),
+    ("Berlin", "I moved to berlin last week", "user", "moved_to", True),
+    ("Berlin", "I moved to berlin last week", "user", "home", False),
+    ("32", "I turned 32 in May", "user", "age.turned", True),
+    ("33", "I turned 32 in May", "user", "age.turned", False),
+    ("emacs", "I had a sandwich for lunch", "editor-pref", "editor", False),
+    ("New York office", "the team works from the new york office",
+     "team", "office", True),
+    ("vi", "no editor named here", "editor-pref", "editor", False),
+    ("prod", "I think prod looks fine today", "deploy", "target", False),
+    # Short tokens and negators are part of the value.
+    ("US office", "We relocated to the UK office.", "user", "office", False),
+    ("not retired", "The server is retired.", "server", "status", False),
+    ("not retired", "The server status is retired.", "server", "status",
+     False),
+    # Word boundaries are Unicode-aware.
+    ("caf", "I went to the cafe\u0301 for coffee", "user", "went", False),
+    ("caf", "I went to the caf\u00e9", "user", "went", False),
+    ("vi", "We saw a vi\u00f1edo on vacation", "user", "saw", False),
+    ("caf\u00e9", "I went to the CAFE\u0301 again", "user", "went", True),
+    # No slot names given: nothing to check, so not backed.
+    ("vim", "my preferred editor is vim", "", "", False),
 ])
-def test_citation_backs(value, note, backed):
+def test_citation_backs(value, note, entity, attribute, backed):
     from pseudolife_memory.service_dream import _citation_backs
-    assert _citation_backs(value, note) is backed
+    assert _citation_backs(value, note, entity, attribute) is backed

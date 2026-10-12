@@ -703,6 +703,8 @@ def events_from_parsed(parsed: dict, n_texts: int) -> list[dict]:
             idx = int(ev.get("source")) - 1     # 1-based in the prompt
         except (TypeError, ValueError):
             idx = -1
+        if isinstance(ev.get("source"), bool):
+            idx = -1                            # int(True) is 1: not a note
         if 0 <= idx < n_texts:
             item["source"] = idx
         out.append(item)
@@ -1376,6 +1378,8 @@ class OpenAICompatExtractor:
                 idx = int(c.get("source")) - 1     # 1-based in the prompt
             except (TypeError, ValueError):
                 idx = -1
+            if isinstance(c.get("source"), bool):
+                idx = -1                           # int(True) is 1: not a note
             if 0 <= idx < len(texts):
                 claim["source"] = idx
             claims.append(claim)
