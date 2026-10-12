@@ -308,6 +308,7 @@ fn supported(
     root: &Path,
     out: &Path,
     active: &mut HashSet<PathBuf>,
+    #[cfg(windows)] output_ancestors: &HashSet<(u32, u64)>,
 ) -> Option<()> {
     if is_link(path, meta)? {
         let link = read_link(path).ok()?;
@@ -340,12 +341,24 @@ fn supported(
     if !is_directory(meta) {
         return Some(());
     }
+    #[cfg(windows)]
+    if !output_ancestors.is_empty() && output_ancestors.contains(&directory_identity(path)?) {
+        return None;
+    }
     let target = fs::canonicalize(path).ok()?;
     if !target.starts_with(root) || out.starts_with(&target) || !active.insert(target.clone()) {
         return None;
     }
     for (_, child) in children(path, false).ok()? {
-        supported(&child, &metadata(&child).ok()?, root, out, active)?;
+        supported(
+            &child,
+            &metadata(&child).ok()?,
+            root,
+            out,
+            active,
+            #[cfg(windows)]
+            output_ancestors,
+        )?;
     }
     active.remove(&target);
     Some(())
@@ -380,31 +393,71 @@ fn identity(path: &Path, _meta: &Metadata) -> io::Result<((u64, u64), u64)> {
     ))
 }
 
-/// `Path.resolve()` for an output dir that may not exist yet: the deepest
-/// existing ancestor canonicalized, the remaining names appended.
+/// Resolve components and symlink targets in order, including targets that
+/// become reachable after mkdir creates an earlier nonexistent component.
 fn resolved(path: &Path) -> Option<PathBuf> {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir().ok()?.join(path)
-    };
-    let mut tail = Vec::new();
-    let mut cursor = absolute.as_path();
-    loop {
-        match fs::canonicalize(cursor) {
-            Ok(mut base) => {
-                for part in tail.iter().rev() {
-                    base.push(part);
+    fn walk(
+        mut base: PathBuf,
+        path: &Path,
+        links: &mut std::collections::HashSet<PathBuf>,
+    ) -> Option<PathBuf> {
+        use std::path::Component;
+        #[cfg(windows)]
+        let mut crossed_reparse = false;
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    #[cfg(windows)]
+                    if crossed_reparse {
+                        return None;
+                    }
+                    base.pop();
                 }
-                return Some(base);
+                Component::Prefix(_) => base.push(component.as_os_str()),
+                Component::RootDir => {
+                    base.push(component.as_os_str());
+                    base = fs::canonicalize(&base).ok()?;
+                }
+                Component::Normal(_) => {
+                    base.push(component.as_os_str());
+                    match fs::symlink_metadata(&base) {
+                        Ok(meta) => {
+                            #[cfg(windows)]
+                            {
+                                use std::os::windows::fs::MetadataExt;
+                                crossed_reparse |= meta.file_attributes() & 0x400 != 0;
+                            }
+                            if meta.is_symlink() {
+                                let link = base.clone();
+                                if !links.insert(link.clone()) {
+                                    return None;
+                                }
+                                let target = fs::read_link(&base).ok()?;
+                                base.pop();
+                                base = walk(base, &target, links)?;
+                                links.remove(&link);
+                            } else {
+                                base = fs::canonicalize(&base).ok()?;
+                            }
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(_) => return None,
+                    }
+                }
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                tail.push(cursor.file_name()?.to_owned());
-                cursor = cursor.parent()?;
-            }
-            Err(_) => return None,
         }
+        Some(base)
     }
+    #[cfg(windows)]
+    // Win32 resolves ordinary dot components before following reparse points;
+    // verbatim paths keep them, and a parent after a reparse point defers above.
+    let absolute = std::path::absolute(path).ok()?;
+    #[cfg(windows)]
+    let path = absolute.as_path();
+    let base = fs::canonicalize(std::env::current_dir().ok()?).ok()?;
+    let result = walk(base, path, &mut std::collections::HashSet::new())?;
+    result.is_absolute().then_some(result)
 }
 
 /// Admit the data dir's tree before any effect. Defers when the output dir
@@ -413,9 +466,30 @@ fn resolved(path: &Path) -> Option<PathBuf> {
 /// `Path.resolve()` resolves it (a symlink loop), and for unsupported shapes.
 pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
     let out = resolved(bdir)?;
-    let root = fs::canonicalize(data_dir).ok()?;
-    if root == out {
+    let data = fs::canonicalize(data_dir).ok()?;
+    #[cfg(windows)]
+    let output_ancestors = if out.starts_with(&data) {
+        std::collections::HashSet::new()
+    } else {
+        output_ancestor_identities(&out)?
+    };
+    #[cfg(windows)]
+    if !output_ancestors.is_empty() && output_ancestors.contains(&directory_identity(&data)?) {
         return None;
+    }
+    if data == out {
+        return None;
+    }
+    // mkdir creates missing children before tar.add lists them. Containment
+    // must therefore include children that do not exist at preflight time.
+    if let Ok(relative) = out.strip_prefix(&data) {
+        let mut parts = relative.components();
+        if let Some(first) = parts.next()
+            && parts.next().is_some()
+            && !EXCLUDE.contains(&first.as_os_str().to_str()?)
+        {
+            return None;
+        }
     }
     for (name, path) in top_children(data_dir)? {
         if is_excluded(&name) {
@@ -437,9 +511,61 @@ pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
         {
             return None;
         }
-        supported(&path, &meta, &root, &out, &mut HashSet::new())?;
+        supported(
+            &path,
+            &meta,
+            &data,
+            &out,
+            &mut HashSet::new(),
+            #[cfg(windows)]
+            &output_ancestors,
+        )?;
     }
     Some(())
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn directory_identity(path: &Path) -> Option<(u32, u64)> {
+    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, GetFileInformationByHandle,
+    };
+    let file = fs::OpenOptions::new()
+        .access_mode(0)
+        .share_mode(7)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .ok()?;
+    // SAFETY: plain-data output is initialized, and both handle and pointer
+    // remain valid for the synchronous information query.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } == 0 {
+        return None;
+    }
+    Some((
+        info.dwVolumeSerialNumber,
+        (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    ))
+}
+
+#[cfg(windows)]
+fn output_ancestor_identities(out: &Path) -> Option<std::collections::HashSet<(u32, u64)>> {
+    let mut identities = std::collections::HashSet::new();
+    let mut ancestor = out.to_path_buf();
+    loop {
+        match fs::metadata(&ancestor) {
+            Ok(meta) if meta.is_dir() => {
+                identities.insert(directory_identity(&ancestor)?);
+            }
+            Ok(_) => return None,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+        if !ancestor.pop() {
+            return Some(identities);
+        }
+    }
 }
 
 /// `st_mode & 0o7777` as CPython's `os.lstat` reports it.
@@ -478,6 +604,84 @@ fn owner(meta: &Metadata) -> (u64, u64) {
 #[cfg(windows)]
 fn owner(_meta: &Metadata) -> (u64, u64) {
     (0, 0)
+}
+
+/// tarfile resolves uid/gid with pwd/grp on Unix and leaves both names empty
+/// when the id has no NSS record; those modules are absent on Windows.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn owner_name(id: u32, group: bool) -> io::Result<Vec<u8>> {
+    use std::{ffi::CStr, ptr};
+    let mut buffer = vec![0u8; 1024];
+    loop {
+        // SAFETY: both structs are plain C data, initialized by the reentrant
+        // NSS calls; the result pointer and name point into this live buffer.
+        let (code, name) = unsafe {
+            if group {
+                let mut record: libc::group = std::mem::zeroed();
+                let mut result = ptr::null_mut();
+                let code = libc::getgrgid_r(
+                    id,
+                    &mut record,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                );
+                (
+                    code,
+                    if result.is_null() {
+                        ptr::null()
+                    } else {
+                        record.gr_name as *const libc::c_char
+                    },
+                )
+            } else {
+                let mut record: libc::passwd = std::mem::zeroed();
+                let mut result = ptr::null_mut();
+                let code = libc::getpwuid_r(
+                    id,
+                    &mut record,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                );
+                (
+                    code,
+                    if result.is_null() {
+                        ptr::null()
+                    } else {
+                        record.pw_name as *const libc::c_char
+                    },
+                )
+            }
+        };
+        if code == libc::ERANGE {
+            buffer.resize(buffer.len() * 2, 0);
+            continue;
+        }
+        // pwd/grp report an unsuccessful lookup as KeyError; tarfile keeps
+        // numeric ownership and leaves the corresponding name empty.
+        if code != 0 || name.is_null() {
+            return Ok(Vec::new());
+        }
+        // SAFETY: successful NSS call returned a NUL-terminated name in buffer.
+        return Ok(unsafe { CStr::from_ptr(name) }.to_bytes().to_vec());
+    }
+}
+
+fn owner_names(uid: u64, gid: u64) -> io::Result<(Vec<u8>, Vec<u8>)> {
+    #[cfg(unix)]
+    {
+        Ok((
+            owner_name(uid as u32, false)?,
+            owner_name(gid as u32, true)?,
+        ))
+    }
+    #[cfg(windows)]
+    {
+        let _ = (uid, gid);
+        Ok((Vec::new(), Vec::new()))
+    }
 }
 
 /// Python `str(float)`: shortest round-trip digits, `.0` on integral values.
@@ -549,14 +753,22 @@ fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<
     };
     let mtime = super::seconds(member.meta.modified()?);
     let (uid, gid) = owner(member.meta);
+    let (uname, gname) = owner_names(uid, gid)?;
     let mut records = Vec::new();
-    if std::str::from_utf8(&member.name).is_err()
+    if std::str::from_utf8(&uname).is_err()
+        || std::str::from_utf8(&gname).is_err()
+        || std::str::from_utf8(&member.name).is_err()
         || member
             .link
             .as_ref()
             .is_some_and(|link| std::str::from_utf8(link).is_err())
     {
         records.extend(pax_record("hdrcharset", b"BINARY"));
+    }
+    for (key, value) in [("uname", &uname), ("gname", &gname)] {
+        if !value.is_ascii() || value.len() > 32 {
+            records.extend(pax_record(key, value));
+        }
     }
     if !member.name.is_ascii() || member.name.len() > 100 {
         records.extend(pax_record("path", &member.name));
@@ -585,6 +797,9 @@ fn append<W: io::Write>(tar: &mut Builder<W>, member: Member<'_>) -> io::Result<
     header.set_mode(mode(member.path, member.meta));
     header.set_uid(uid);
     header.set_gid(gid);
+    let ustar = header.as_ustar_mut().expect("ustar header");
+    ascii_field(&mut ustar.uname, &uname);
+    ascii_field(&mut ustar.gname, &gname);
     header.set_size(size);
     #[cfg(unix)]
     if matches!(member.kind, EntryType::Char | EntryType::Block) {
@@ -682,8 +897,8 @@ fn add<W: io::Write>(
 }
 
 pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBuf> {
-    let target = bdir.join(format!("{}{ts}.tar.gz", super::STATE_PREFIX));
-    let partial = bdir.join(format!("{}{ts}.tar.gz.part", super::STATE_PREFIX));
+    let target = super::args::join(bdir, &format!("{}{ts}.tar.gz", super::STATE_PREFIX));
+    let partial = super::args::join(bdir, &format!("{}{ts}.tar.gz.part", super::STATE_PREFIX));
     let written = (|| -> io::Result<()> {
         let gz = GzEncoder::new(fs::File::create(&partial)?, Compression::best());
         let mut tar = Builder::new(gz);
@@ -711,6 +926,15 @@ pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBu
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn unassigned_owner_ids_have_empty_names() {
+        assert_eq!(
+            owner_names(u64::from(u32::MAX), u64::from(u32::MAX)).unwrap(),
+            (Vec::new(), Vec::new())
+        );
+    }
+
     #[test]
     fn admission_rejects_a_directory_already_on_the_active_walk() {
         let directory = std::env::temp_dir().join(format!("backup-cycle-{}", uuid::Uuid::new_v4()));
@@ -724,6 +948,8 @@ mod tests {
             &root,
             &root.with_extension("outside"),
             &mut active,
+            #[cfg(windows)]
+            &HashSet::new(),
         );
         fs::remove_dir(directory).unwrap();
         assert_eq!(result, None);

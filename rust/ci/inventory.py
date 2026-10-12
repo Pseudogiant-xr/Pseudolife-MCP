@@ -68,6 +68,35 @@ def exit_propagation(step, invocation):
     assert lines[0] == invocation, 'H5 driver command or failure propagation changed'
 
 
+def backup_zero_retention_scope(exceptions):
+    scoped = exceptions['cli_case_selections']
+    assert set(scoped) == {'windows-backup-zero-retention-clock-race'}, 'backup zero exception scope changed'
+    entry = scoped['windows-backup-zero-retention-clock-race']
+    assert set(entry) == {'platform', 'mode', 'row', 'case', 'reason'} \
+        and (entry['platform'], entry['mode'], entry['row'], entry['case']) \
+        == ('windows', 'both', 'backup', 'file-mode-keep-zero'), 'backup zero exception scope changed'
+    assert all(proof in entry['reason'] for proof in ('GetSystemTimeAsFileTime', '0.015625',
+                                                     '254/deleted 46', '229/deleted 71')), \
+        'backup zero reference measurement missing'
+    tree = ast.parse((ROOT / 'rust/cli_harness/rows/backup.py').read_text(encoding='utf-8'))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Name) and node.func.id == 'Case'
+             and node.args and isinstance(node.args[0], ast.Constant)
+             and node.args[0].value == 'file-mode-keep-zero']
+    assert len(calls) == 1, 'backup zero exception lost or duplicated case'
+    options = {keyword.arg: keyword.value for keyword in calls[0].keywords}
+    assert ast.literal_eval(options['platforms']) == ('linux',) \
+        and ('golden' not in options or ast.literal_eval(options['golden']) is True) \
+        and 'skip_if' not in options, 'backup zero Linux live/record/golden selection changed'
+    assert isinstance(calls[0].args[1], ast.List) \
+        and isinstance(calls[0].args[1].elts[-1], ast.Constant) \
+        and calls[0].args[1].elts[-1].value == '--keep-days=0', 'backup zero argument changed'
+    native = (ROOT / 'rust/shim/src/cli/backup/mod.rs').read_text(encoding='utf-8')
+    for name in ('rotation_keeps_files_equal_to_the_python_clock_cutoff',
+                 'windows_clock_matches_python_within_the_same_clock_tick'):
+        assert re.search(r'#\[test\]\s+fn ' + name + r'\(', native), 'backup zero native proof dropped'
+
+
 def check(workflow):
     from coverage_plan import (SUITES, DAEMON_CONTROLS, GRAPH_CONTROLS, W1A, EXCEPTIONS,
                                SOURCE_SHARDS, PLATFORM_EXCLUSIONS, UNOBSERVED_CONTROLS, BACKGROUND)
@@ -78,6 +107,7 @@ def check(workflow):
     selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
     assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"
     exception_reasons(EXCEPTIONS)
+    backup_zero_retention_scope(EXCEPTIONS)
     exception_reasons(PLATFORM_EXCLUSIONS)
     exception_reasons(UNOBSERVED_CONTROLS)
     all_controls = set().union(*declared.values())

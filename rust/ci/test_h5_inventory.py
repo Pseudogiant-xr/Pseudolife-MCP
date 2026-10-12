@@ -43,6 +43,34 @@ def test_ported_row_and_mutant_ci_inventory():
     check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
 
 
+def test_backup_zero_retention_selection_is_platform_scoped(monkeypatch):
+    from rust.cli_harness import core, runner
+    from rust.cli_harness.rows import backup
+    monkeypatch.setattr(backup, '_have_pg0', lambda: False)
+    loaded = backup.cases()
+    grammar = next(case for case in loaded if case.id == 'argparse-keep-zero')
+    assert grammar.argv == ['backup', '--keep-days=0', '--help']
+    assert grammar.platforms == ('windows', 'linux')
+    for platform in ('windows', 'linux'):
+        monkeypatch.setattr(core, 'PLATFORM', platform)
+        for mode in ('live', 'record', 'golden'):
+            selected = {case.id for case in runner._select(loaded, [], replay=mode != 'live')}
+            assert ('file-mode-keep-zero' in selected) == (platform == 'linux')
+            assert 'argparse-keep-zero' in selected
+
+
+@pytest.mark.parametrize('field,value', [('platform', 'linux'), ('mode', 'golden'),
+                                        ('row', 'audit'), ('case', 'file-mode')])
+def test_backup_zero_exception_rejects_broader_or_partial_scope(monkeypatch, field, value):
+    from coverage_plan import EXCEPTIONS
+    from inventory import backup_zero_retention_scope
+    scoped = copy.deepcopy(EXCEPTIONS['cli_case_selections'])
+    scoped['windows-backup-zero-retention-clock-race'][field] = value
+    monkeypatch.setitem(EXCEPTIONS, 'cli_case_selections', scoped)
+    with pytest.raises(AssertionError, match='backup zero exception scope'):
+        backup_zero_retention_scope(EXCEPTIONS)
+
+
 @pytest.mark.parametrize('event', ['push', 'schedule'])
 def test_inventory_rejects_missing_source_event(event):
     from inventory import check
