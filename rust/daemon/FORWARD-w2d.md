@@ -197,3 +197,15 @@ Latest-head cleanup exited 0 (`http-cleanup.log`): the newly seeded owned
 template was dropped, no owned scenario databases remain, and no active owned
 workload or daemon processes remain. Final publication validation is exit 0 over
 `origin/master..rust-cf/w2d-search-fwd`; the handoff contains no public push or PR.
+
+## W2P preparation, 2026-10-12
+
+- BASE: `aaa652c6f570d02d9b2985acf1b3da5e1c45e92d`.
+- Local branch: `w2p/d`; no publication.
+- Conflicts: `divergences.md`, `spec.md`, `src/bank.rs`, `src/main.rs`, `src/search.rs`, `src/service.rs`.
+
+Startup timestamp/tags/surprise fidelity and atomic read access coexist. Expanded search keeps master test coverage through API adapters. Background sessions and cortex hydrate before publishing Ready; cancellable warmup also keeps the search probe.
+
+NEEDS OPUS: existing reference-pool/read-route omissions; existing fixed cortex dimension and tokenizer library assumption. No graph traversal or deep-dream work added.
+
+Validation and independent Codex high review are recorded in the private W2P report; initial failures and final reruns are listed separately. Windows evidence is cross compilation, not runtime. Frozen oracle goldens are not re-recorded.
