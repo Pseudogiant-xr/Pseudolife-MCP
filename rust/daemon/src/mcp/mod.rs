@@ -299,11 +299,8 @@ fn security(state: &McpState, method: &Method, h: &HeaderMap) -> Option<Response
     None
 }
 
-/// `RequestBodyLimitMiddleware`: a declared Content-Length over the limit is
-/// refused at once, and a body that grows past it as soon as it does. uvicorn
-/// keeps reading what a client sends after such a refusal, so the client can
-/// finish writing and read the 413; here the rest of the body is drained in
-/// the background (bounded in size and time) for the same reason.
+/// `RequestBodyLimitMiddleware`: refuse a declared or observed oversized body.
+/// The HTTP dispatcher owns the bounded cleanup after this refusal.
 /// Keep the MCP limit and refusal body while sharing HTTP frame accounting.
 async fn read_body(
     headers: &HeaderMap,
