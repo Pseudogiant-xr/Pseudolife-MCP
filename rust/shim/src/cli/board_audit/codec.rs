@@ -4,62 +4,7 @@ use serde_json::{Value, ser::Formatter};
 use sha2::{Digest, Sha256};
 use std::{fmt::Write as _, io};
 
-pub(super) fn finite_float(value: f64) -> io::Result<String> {
-    if !value.is_finite() {
-        return Err(io::Error::other("nonfinite audit number is deferred"));
-    }
-    if value == 0.0 {
-        return Ok(if value.is_sign_negative() {
-            "-0.0"
-        } else {
-            "0.0"
-        }
-        .into());
-    }
-    // Locked serde_json supplies shortest digits; this reshapes notation only.
-    // Exact agreement with every CPython binary64 tie is not yet qualified.
-    let text = serde_json::to_string(&value.abs())?;
-    let (mantissa, power) = text
-        .split_once(['e', 'E'])
-        .map_or((text.as_str(), 0), |(m, p)| {
-            (m, p.parse::<i32>().expect("finite float exponent"))
-        });
-    let decimal = mantissa.find('.').unwrap_or(mantissa.len());
-    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
-    let first = digits.find(|c| c != '0').expect("nonzero finite float");
-    let significant = digits[first..].trim_end_matches('0');
-    let exponent = decimal as i32 - first as i32 - 1 + power;
-    let mut out = String::new();
-    if value.is_sign_negative() {
-        out.push('-');
-    }
-    if !(-4..16).contains(&exponent) {
-        out.push(significant.as_bytes()[0] as char);
-        if significant.len() > 1 {
-            out.push('.');
-            out.push_str(&significant[1..]);
-        }
-        let sign = if exponent < 0 { '-' } else { '+' };
-        let _ = write!(out, "e{sign}{:02}", exponent.abs());
-    } else {
-        let point = exponent + 1;
-        if point <= 0 {
-            out.push_str("0.");
-            out.extend(std::iter::repeat_n('0', (-point) as usize));
-            out.push_str(significant);
-        } else if point as usize >= significant.len() {
-            out.push_str(significant);
-            out.extend(std::iter::repeat_n('0', point as usize - significant.len()));
-            out.push_str(".0");
-        } else {
-            let point = point as usize;
-            out.push_str(&significant[..point]);
-            out.push('.');
-            out.push_str(&significant[point..]);
-        }
-    }
-    Ok(out)
-}
+use crate::float_repr::finite_float;
 
 struct AuditFormatter;
 
@@ -126,27 +71,149 @@ pub(super) fn canonical(value: &Value) -> Result<String, serde_json::Error> {
     Ok(String::from_utf8(compact(&value)?).expect("JSON is UTF-8"))
 }
 
-/// CPython's default `int` conversion refuses more than 4,300 digits, so a
-/// value `json.loads` cannot read is a deferral here, never a reading.
-pub(super) fn python_int_domain(value: &Value) -> bool {
-    match value {
-        Value::Number(number) => {
-            let token = number.to_string();
-            token.contains(['.', 'e', 'E']) || token.trim_start_matches('-').len() <= 4300
-        }
-        Value::Array(items) => items.iter().all(python_int_domain),
-        Value::Object(map) => map.values().all(python_int_domain),
-        _ => true,
+pub(super) use super::super::pyjson::J;
+
+pub(super) struct Payload(pub Vec<(J, J)>);
+impl Payload {
+    pub fn get(&self, name: &str) -> Option<&J> {
+        self.0
+            .iter()
+            .find(|(key, _)| key.as_str() == Some(name))
+            .map(|(_, value)| value)
+    }
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.get(name).is_some()
     }
 }
 
-/// `json.loads` of stored payload text, or `None` where Python's reading is
-/// not reproduced (NaN/Infinity tokens, lone surrogates, deep nesting, the
-/// integer digit limit, or text Python would refuse).
-pub(super) fn python_loads(text: &str) -> Option<Value> {
-    super::super::doorbell_seen::json::from_str(text)
-        .ok()
-        .filter(python_int_domain)
+/// Stored JSON uses Python's own value domain, including non-finite floats
+/// and UTF-16 strings. No scalar-JSON gate is imposed on historical payloads.
+// Measured through the pinned CPython 3.11 CLI on 2026-10-11: export
+// accepts 988 containers; bank verify/redact accept 987. The archive reader
+// accepts 987 including its outer row (986 nested payload containers).
+pub(super) const EXPORT_DEPTH: usize = 988;
+pub(super) const BANK_DEPTH: usize = 987;
+pub(super) const ARCHIVE_DEPTH: usize = 987;
+
+pub(super) fn python_loads(text: &str) -> Result<J, super::super::pyjson::Refused> {
+    super::super::pyjson::loads(text, EXPORT_DEPTH)
+}
+
+pub(super) fn payload_text(text: &str) -> Result<Option<Payload>, ()> {
+    let value = match super::super::pyjson::loads(text, BANK_DEPTH) {
+        Ok(value) => value,
+        Err(super::super::pyjson::Refused::NotJson) => return Ok(None),
+        Err(super::super::pyjson::Refused::TooDeep) => return Err(()),
+    };
+    Ok(if let J::Dict(items) = value {
+        Some(Payload(items))
+    } else {
+        None
+    })
+}
+
+pub(super) fn parsed_payload(row: &Value) -> Result<Option<Payload>, ()> {
+    match &row["payload"] {
+        Value::String(text) => payload_text(text),
+        value => payload_text(&value.to_string()),
+    }
+}
+
+fn units(value: &J) -> Vec<u16> {
+    match value {
+        J::Str(text) => text.encode_utf16().collect(),
+        J::Wtf(units) => units.clone(),
+        _ => unreachable!("JSON object keys are strings"),
+    }
+}
+
+fn quote(value: &J, ascii: bool, out: &mut String) -> Option<()> {
+    if let J::Str(text) = value {
+        if ascii {
+            ascii_string(text, out);
+        } else {
+            out.push_str(&serde_json::to_string(text).ok()?);
+        }
+        return Some(());
+    }
+    if !ascii {
+        return None;
+    } // Python's UTF-8 hash cannot encode a lone surrogate.
+    out.push('"');
+    for unit in units(value) {
+        // Escape every unit: also correct for paired surrogate sequences.
+        match unit {
+            0x22 => out.push_str("\\\""),
+            0x5c => out.push_str("\\\\"),
+            0x08 => out.push_str("\\b"),
+            0x0c => out.push_str("\\f"),
+            0x0a => out.push_str("\\n"),
+            0x0d => out.push_str("\\r"),
+            0x09 => out.push_str("\\t"),
+            0x20..=0x7e => out.push(char::from_u32(u32::from(unit))?),
+            unit => {
+                let _ = write!(out, "\\u{unit:04x}");
+            }
+        }
+    }
+    out.push('"');
+    Some(())
+}
+
+/// Python's compact dumps, optionally sorted by Unicode code point.
+pub(super) fn python_compact(value: &J, ascii: bool, sorted: bool, out: &mut String) -> Option<()> {
+    match value {
+        J::Null => out.push_str("null"),
+        J::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
+        J::Int(value) => out.push_str(value),
+        J::Float(value) if value.is_nan() => out.push_str("NaN"),
+        J::Float(value) if value.is_infinite() => out.push_str(if *value > 0.0 {
+            "Infinity"
+        } else {
+            "-Infinity"
+        }),
+        J::Float(value) => out.push_str(&finite_float(*value).ok()?),
+        J::Str(_) | J::Wtf(_) => quote(value, ascii, out)?,
+        J::List(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
+                    python_compact(item, ascii, sorted, out)
+                })?;
+            }
+            out.push(']');
+        }
+        J::Dict(items) => {
+            let mut items: Vec<_> = items.iter().collect();
+            if sorted {
+                let points = |key: &J| {
+                    char::decode_utf16(units(key))
+                        .map(|c| {
+                            c.map(u32::from)
+                                .unwrap_or_else(|e| u32::from(e.unpaired_surrogate()))
+                        })
+                        .collect::<Vec<_>>()
+                };
+                items.sort_by_cached_key(|(key, _)| points(key));
+            }
+            out.push('{');
+            for (index, (key, item)) in items.into_iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                quote(key, ascii, out)?;
+                out.push(':');
+                stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
+                    python_compact(item, ascii, sorted, out)
+                })?;
+            }
+            out.push('}');
+        }
+    }
+    Some(())
 }
 
 fn ascii_string(text: &str, out: &mut String) {

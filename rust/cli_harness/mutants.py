@@ -10,6 +10,7 @@ harness that cannot see a deliberate break proves nothing.
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import shutil
 import subprocess
@@ -90,20 +91,33 @@ def run_mutant(mutant: Mutant, oracle: core.Target, verbose: bool,
     return bool(caught), caught
 
 
-def main(row_names: list[str], only: list[str], oracle: core.Target, verbose: bool) -> int:
+def main(row_names: list[str], only: list[str], oracle: core.Target, verbose: bool,
+         out: Path | None = None) -> int:
     pool = [m for row in rows.ROWS for m in rows.mutants(row)]
     selected = [m for m in pool if m.row in row_names and (not only or m.id in only)
                 and core.PLATFORM in m.platforms]
     if not selected:
         raise SystemExit("no mutants selected")
     escaped = []
+    results = {}
     for mutant in selected:
+        started = time.monotonic()
         killed, cases = run_mutant(mutant, oracle, verbose, pool)
+        results[mutant.id] = {"row": mutant.row, "caught_by": cases,
+                              "seconds": time.monotonic() - started}
         print(f"  {'caught ' if killed else 'ESCAPED'} {mutant.id}"
               + (f" by {', '.join(cases)}" if cases else ""), flush=True)
         if not killed:
             escaped.append(mutant.id)
+        if out:
+            out.write_text(json.dumps({"platform": core.PLATFORM, "mutants": results,
+                                       "survivors": escaped, "complete": False}, indent=2),
+                           encoding="utf-8")
     # Leave the copy unmutated so a later ordinary build of it is clean.
     _sync_source(pool)
     print(f"  {len(selected) - len(escaped)}/{len(selected)} mutants caught")
+    if out:
+        out.write_text(json.dumps({"platform": core.PLATFORM, "mutants": results,
+                                   "survivors": escaped, "complete": True}, indent=2),
+                       encoding="utf-8")
     return 1 if escaped else 0

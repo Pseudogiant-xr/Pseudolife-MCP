@@ -2,6 +2,7 @@
 //! `_vacuum`, as `board_audit_cli._redact` runs them.
 use super::{bank, codec};
 use crate::{pg, sent_json::Json};
+use codec::J;
 use serde_json::{Value, json};
 use tokio_postgres::{GenericClient, error::SqlState};
 
@@ -16,6 +17,7 @@ enum Stop {
     Busy,
     /// Outside the reproduced domain; the transaction is rolled back.
     Deferred,
+    Python,
     /// The commit was not confirmed: the redaction may have landed.
     Unconfirmed,
 }
@@ -24,6 +26,8 @@ impl From<tokio_postgres::Error> for Stop {
     fn from(error: tokio_postgres::Error) -> Self {
         if error.code() == Some(&SqlState::LOCK_NOT_AVAILABLE) {
             Stop::Busy
+        } else if error.as_db_error().is_some() {
+            Stop::Python
         } else {
             Stop::Deferred
         }
@@ -241,10 +245,7 @@ async fn redact_in(
     };
     let sent_seq: i64 = sent.try_get("seq")?;
     let stored: String = sent.try_get("payload")?;
-    let payload = match codec::python_loads(&stored).ok_or(Stop::Deferred)? {
-        Value::Object(map) => Some(map),
-        _ => None,
-    };
+    let payload = codec::payload_text(&stored).map_err(|_| Stop::Python)?;
     let audit_copy = if payload
         .as_ref()
         .is_none_or(|p| !p.contains_key("text_commitment"))
@@ -288,9 +289,9 @@ async fn redact_in(
     let mut siblings = Vec::new();
     if let Some(payload) = payload.as_ref().filter(|p| p.contains_key("fanout")) {
         let request: Option<&str> = match payload.get("request_id") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(text)) => Some(text),
-            Some(_) => return Err(Stop::Deferred),
+            None | Some(J::Null) => None,
+            Some(J::Str(text)) => Some(text),
+            Some(_) => return Err(Stop::Python),
         };
         for row in tx
             .query(
@@ -322,14 +323,15 @@ async fn commit(tx: pg::Transaction<'_>) -> Result<(), Stop> {
 
 /// `_vacuum`: the warnings Postgres raised while skipping a step, or `Err`
 /// when a statement failed.
-async fn vacuum(session: &pg::Session) -> Result<Vec<String>, ()> {
+async fn vacuum(session: &mut pg::Session) -> Result<Vec<String>, ()> {
     let client = session.client();
     let previous: String = client
         .query_one("SHOW client_min_messages", &[])
         .await
         .and_then(|row| row.try_get(0))
         .map_err(|_| ())?;
-    let _ = session.take_notices();
+    let collection = session.collect_notices();
+    let client = collection.client();
     let steps = async {
         client
             .batch_execute("SET client_min_messages TO warning")
@@ -340,13 +342,16 @@ async fn vacuum(session: &pg::Session) -> Result<Vec<String>, ()> {
         client.batch_execute("VACUUM pg_catalog.pg_statistic").await
     }
     .await;
-    let warnings: Vec<String> = session
+    let warnings: Vec<String> = collection
         .take_notices()
         .into_iter()
         .filter(|notice| notice.parsed_severity() == Some(tokio_postgres::error::Severity::Warning))
         .map(|notice| notice.message().to_owned())
         .collect();
-    let restored = client
+    // Python removes its notice handler before restoring the setting.
+    drop(collection);
+    let restored = session
+        .client()
         .execute(
             "SELECT set_config('client_min_messages', $1, false)",
             &[&previous],
@@ -384,6 +389,7 @@ async fn run_in(session: &mut pg::Session, message_id: &str, reason: &str) -> ba
     }
     let redacted = match redact_in(session, message_id, reason).await {
         Ok(redacted) => redacted,
+        Err(Stop::Python) => return bank::Ending::Exit(super::failed()),
         Err(Stop::Deferred) => return bank::Ending::Deferred,
         Err(Stop::Busy) => {
             crate::stderrln!(
@@ -522,6 +528,33 @@ async fn run_in(session: &mut pg::Session, message_id: &str, reason: &str) -> ba
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(dead_code)]
+    mod pg_wire {
+        include!("../../../tests/common/pg_wire.rs");
+    }
+
+    #[tokio::test]
+    async fn driver_side_row_decode_errors_remain_deferred() {
+        let fixture = pg_wire::start().await;
+        let dsn = pg::Dsn::parse(&fixture.dsn).unwrap();
+        let session = pg::Session::open_in(&dsn, &pg::TlsEnvironment::default())
+            .await
+            .unwrap();
+        let row = session
+            .client()
+            .query_one("SELECT true", &[])
+            .await
+            .unwrap();
+        let error = row.try_get::<_, String>(0).unwrap_err();
+        assert!(error.as_db_error().is_none());
+        let stop = Stop::from(error);
+        session.close().await.unwrap();
+        fixture.task.await.unwrap();
+        assert!(
+            matches!(stop, Stop::Deferred),
+            "driver-side conversion errors remain deferred"
+        );
+    }
 
     #[test]
     fn reason_refusals_and_category_deferrals() {

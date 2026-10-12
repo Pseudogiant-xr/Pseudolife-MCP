@@ -1,5 +1,5 @@
 //! Native process leaves at Python lease_cli.py pin 165f4125.
-mod args;
+pub(super) mod args;
 mod board;
 mod hold;
 mod json;

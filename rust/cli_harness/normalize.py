@@ -11,10 +11,11 @@ import base64
 import json
 import re
 import time
-from typing import Callable
+from typing import Any, Callable
 
 Rule = Callable[[dict], None]
 RULES: dict[str, Rule] = {}
+RECORD_RULES: set[str] = set()  # Validated fixture inputs; output rules stay raw in goldens.
 
 
 def rule(name: str):
@@ -101,6 +102,44 @@ _TITLE = re.compile(rb'( - )([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2})(")')
 def _minute_in(stamp: str, lo: float, hi: float, offset: int) -> bool:
     return any(time.strftime("%Y-%m-%d %H:%M", time.gmtime(t + offset)) == stamp
                for t in range(int(lo) - 1, int(hi) + 2))
+
+
+_EXPORT_NAME = re.compile(rb"pseudolife-export-([0-9]{8}-[0-9]{6})\.zip")
+_EXPORT_SPAN = re.compile(rb"(?<![A-Za-z0-9_.-])" + _EXPORT_NAME.pattern
+                          + rb"(?![A-Za-z0-9_.-])")
+
+
+@rule("transfer-default-name")
+def transfer_default_name(obs: dict) -> None:
+    """Validate the default archive's exact name and local timestamp against
+    this arm's window before replacing it in stdout, file keys and mode keys.
+    File contents and mode values stay exact; collisions remain observable."""
+    def valid(match: re.Match) -> bool:
+        stamp = match.group(1).decode()
+        offset = obs.get("utc_offset")
+        return any(time.strftime("%Y%m%d-%H%M%S", time.localtime(t) if offset is None
+                                 else time.gmtime(t + offset)) == stamp
+                   for t in range(int(obs["window"][0]) - 1, int(obs["window"][1]) + 2))
+
+    def swap(match: re.Match) -> bytes:
+        return b"pseudolife-export-<ts>.zip" if valid(match) else match.group(0)
+
+    _put(obs, "stdout", _EXPORT_SPAN.sub(swap, _get(obs, "stdout")))
+    for field in ("files", "modes"):
+        if field not in obs:
+            continue
+        renamed: dict = {}
+        for rel, value in obs[field].items():
+            # A path component must have the complete default filename shape.
+            basename = re.split(r"[/\\]", rel)[-1]
+            match = _EXPORT_NAME.fullmatch(basename.encode())
+            new_rel = rel
+            if match and valid(match):
+                new_rel = rel[:-len(basename)] + "pseudolife-export-<ts>.zip"
+            while new_rel in renamed:
+                new_rel += " <normalized-collision>"
+            renamed[new_rel] = value
+        obs[field] = renamed
 
 
 @rule("episode-title-minute")
@@ -212,6 +251,78 @@ def python_shutdown_flush_silent(obs: dict) -> None:
     _shutdown_flush(obs, 0)
 
 
+# A PostgreSQL SCRAM verifier (a server echoing a CREATE/ALTER ROLE statement).
+# The repo is public and secret scanners flag these, so no golden keeps one:
+# the recorder writes this fixed token instead, and compare-time rules that
+# validate a verifier's shape map it to the same token.
+SCRAM_VERIFIER = re.compile(rb"SCRAM-SHA-256\$\d+:[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+")
+SCRAM_TOKEN = b"<scram-sha-256-verifier>"
+SCRAM_MARK = b"SCRAM-SHA-256$"
+
+
+def redact_scram_verifiers(obs: dict) -> None:
+    """Replace every SCRAM verifier in a recorded observation's streams and
+    files with ``SCRAM_TOKEN`` (the recorder runs this on every row)."""
+    for field in ("stdout", "stderr"):
+        if field in obs:
+            _put(obs, field, SCRAM_VERIFIER.sub(SCRAM_TOKEN, _get(obs, field)))
+    for rel, value in list(obs.get("files", {}).items()):
+        if value.startswith("file:"):
+            _set_file(obs, rel, SCRAM_VERIFIER.sub(SCRAM_TOKEN, base64.b64decode(value[5:])))
+
+
+def _golden_bytes(node: Any, where: str = ""):
+    """Every string in a golden as ``(where, bytes)``: raw, and decoded when it
+    is base64 (streams, ``file:`` contents)."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _golden_bytes(value, f"{where}/{key}")
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _golden_bytes(value, f"{where}[{index}]")
+    elif isinstance(node, str):
+        yield where, node.encode("utf-8", "surrogatepass")
+        text = node[5:] if node.startswith("file:") else node
+        try:
+            yield where, base64.b64decode(text, validate=True)
+        except ValueError:
+            pass
+
+
+def scram_marks(node: Any) -> list[str]:
+    """Where ``SCRAM-SHA-256$`` appears in a golden, raw or inside any base64
+    string, so a writer can refuse it."""
+    return sorted({where for where, data in _golden_bytes(node) if SCRAM_MARK in data})
+
+
+# A test login's secret line holding a value shaped like a drawn one
+# (secrets.token_urlsafe(32): 43 URL-safe characters). A validated drawn value
+# is rewritten to <validated> in the arm; any other must be a row's declared
+# fixture, never a value drawn for that run.
+_DRAWN_LOGIN_SECRET = re.compile(rb"PSEUDOLIFE_TEST_PG_PASSWORD=([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])")
+
+
+def drawn_login_secrets(node: Any, fixtures: tuple[str, ...] = ()) -> list[str]:
+    """Where a golden holds a drawn-shape login secret that is not one of
+    ``fixtures`` (the row's own fixed values), so a writer can refuse it."""
+    allowed = {value.encode() for value in fixtures}
+    return sorted({where for where, data in _golden_bytes(node)
+                   for value in _DRAWN_LOGIN_SECRET.findall(data) if value not in allowed})
+
+
+@rule("python-stdout-closed-trailer")
+def python_stdout_closed_trailer(obs: dict) -> None:
+    """Declared substitution: a run whose stdout refused its buffered prints
+    completes, then CPython's interpreter-shutdown flush fails, prints an
+    ignored-exception trailer and exits 120. The native CLI exits 120 with no
+    synthetic trailer. Only that exact final trailer, with exit 120, is
+    removed; the exit stays 120, so a candidate that returns its ordinary
+    code still differs."""
+    stderr = _get(obs, "stderr")
+    if obs["exit"] == 120 and _SHUTDOWN_FLUSH.search(stderr):
+        _put(obs, "stderr", _SHUTDOWN_FLUSH.sub(b"", stderr))
+
+
 def home_tokens(obs: dict, home: str) -> None:
     """Replace the disposable home path with {HOME} everywhere, so goldens
     recorded under one home compare against a run under another."""
@@ -230,7 +341,8 @@ def home_tokens(obs: dict, home: str) -> None:
         if value.startswith("file:"):
             _set_file(obs, rel, swap(base64.b64decode(value[5:])))
         elif value.startswith("link:"):
-            obs["files"][rel] = "link:" + swap(value[5:].encode()).decode()
+            obs["files"][rel] = "link:" + swap(
+                value[5:].encode("utf-8", "surrogatepass")).decode("utf-8", "surrogatepass")
     for request in obs.get("requests", []):
         request["target"] = swap(request["target"].encode()).decode()
         request["body"] = swap(request["body"].encode()).decode()
@@ -291,6 +403,7 @@ def daemon_tokens(obs: dict, url: str) -> None:
 def apply(obs: dict, rules: tuple[str, ...], home: str | None) -> dict:
     out = json.loads(json.dumps(obs))
     out.setdefault("files", {})
+    bank_names(out)
     if home:
         home_tokens(out, home)
     if out.get("daemon_url"):
@@ -300,3 +413,32 @@ def apply(obs: dict, rules: tuple[str, ...], home: str | None) -> dict:
     for name in rules:
         RULES[name](out)
     return out
+
+
+def bank_names(obs: dict) -> None:
+    """Only identifiers allocated in this run return to their fixture labels."""
+    from .rows import _bank  # noqa: PLC0415
+
+    def swap(data: bytes) -> bytes:
+        # Surrogate escapes preserve arbitrary binary file bytes.
+        return _bank.NAMES.normalize(data.decode("utf-8", "surrogateescape")).encode(
+            "utf-8", "surrogateescape")
+
+    for field in ("stdout", "stderr"):
+        _put(obs, field, swap(_get(obs, field)))
+    for rel, value in list(obs["files"].items()):
+        if value.startswith("file:"):
+            _set_file(obs, rel, swap(base64.b64decode(value[5:])))
+
+    def walk(value):
+        if isinstance(value, str):
+            return _bank.NAMES.normalize(value)
+        if isinstance(value, dict):
+            return {key: walk(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        return value
+
+    for field in ("db", "requests"):
+        if field in obs:
+            obs[field] = walk(obs[field])

@@ -10,10 +10,17 @@ use std::{
 struct DisposableHome(std::path::PathBuf);
 impl DisposableHome {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "pseudolife-version-test-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        // Beside the built binary rather than in the system temp directory,
+        // so `install_shim` can hard-link it: a link cannot cross filesystems,
+        // /tmp is often a separate tmpfs, and Cargo's build-dir (which holds
+        // CARGO_TARGET_TMPDIR) can be configured apart from the binaries.
+        let path = Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
+            .parent()
+            .unwrap()
+            .join(format!(
+                "pseudolife-version-test-{}",
+                uuid::Uuid::new_v4().simple()
+            ));
         fs::create_dir(&path).unwrap();
         Self(path)
     }
@@ -48,8 +55,20 @@ fn native_executable(runtime: &Path) -> std::path::PathBuf {
     } else {
         "pseudolife-stdio"
     });
-    fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+    install_shim(&executable);
     executable
+}
+
+/// Places the built shim at `executable` by hard link, never by copy.
+///
+/// A copy holds a writable descriptor on the new file while it fills it, and
+/// a child that another test forks in that window keeps a duplicate until its
+/// own exec closes it. Linux refuses to exec a file anyone holds open for
+/// writing (ETXTBSY, "Text file busy"), so the copy-then-exec tests here
+/// failed whenever they raced a concurrent spawn. A link opens nothing for
+/// writing, so there is no descriptor to inherit.
+fn install_shim(executable: &Path) {
+    fs::hard_link(env!("CARGO_BIN_EXE_pseudolife-stdio"), executable).unwrap();
 }
 
 fn console_path(runtime: &Path) -> std::path::PathBuf {
@@ -302,7 +321,7 @@ fn a_binary_at_the_runtime_root_does_not_claim_installed_identity() {
     } else {
         "pseudolife-stdio"
     });
-    fs::copy(env!("CARGO_BIN_EXE_pseudolife-stdio"), &executable).unwrap();
+    install_shim(&executable);
     assert_output(
         command(&executable, &home.0)
             .env("PSEUDOLIFE_SHIM_RUNTIMES", runtime.parent().unwrap())
@@ -318,5 +337,39 @@ fn a_binary_at_the_runtime_root_does_not_claim_installed_identity() {
             .output()
             .unwrap(),
         &first_line(),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn multiple_runtime_aliases_match_live_python_selection() {
+    let home = DisposableHome::new();
+    let runtime = home.path("installed");
+    let executable = installed_executable(&runtime);
+    fs::write(runtime.join("runtime.json"), r#"{"source":"fixture"}"#).unwrap();
+    let root = home.path("runtimes");
+    fs::create_dir(&root).unwrap();
+    for name in ["000009", "０００００２", "000002", "manual"] {
+        std::os::unix::fs::symlink(&runtime, root.join(name)).unwrap();
+    }
+    let python = std::env::var_os("PSEUDOLIFE_MCP_PYTHON").unwrap_or_else(|| "python3".into());
+    let oracle = Command::new(python)
+        .env("PYTHONPATH", Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .args(["-c", "import sys; from pathlib import Path; from pseudolife_memory.runtimes import Layout, running_runtime; r = running_runtime(Layout(Path(sys.argv[1]), Path('launcher')), sys.argv[2]); print('runtime ' + str(r.path) + ' (source fixture)')"])
+        .arg(&root)
+        .arg(&runtime)
+        .output()
+        .unwrap();
+    assert_eq!(oracle.status.code(), Some(0));
+    assert!(oracle.stderr.is_empty());
+    let expected = first_line() + std::str::from_utf8(&oracle.stdout).unwrap();
+    assert_output(
+        command(&executable, &home.0)
+            .env("PSEUDOLIFE_SHIM_RUNTIMES", &root)
+            .env("PSEUDOLIFE_SHIM_LAUNCHER", home.path("launcher"))
+            .arg("version")
+            .output()
+            .unwrap(),
+        &expected,
     );
 }

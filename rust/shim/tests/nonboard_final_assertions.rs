@@ -298,8 +298,10 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
     fs::create_dir(&package).unwrap();
     fs::write(package.join("__init__.py"), "").unwrap();
     let sentinel = home.path("updater.json");
+    let release = home.path("finish-updater");
     fs::write(package.join("cli.py"), format!(
-        "import json,pathlib,sys\npathlib.Path(sys.argv[sys.argv.index('--result-file')+1]).write_text('0\\n')\npathlib.Path({}).write_text(json.dumps(sys.argv[1:]))\n",
+        "import json,pathlib,sys,time\ndeadline=time.monotonic()+22\nwhile not pathlib.Path({}).exists():\n if time.monotonic() >= deadline: sys.exit('updater fixture was not released')\n time.sleep(0.005)\npathlib.Path(sys.argv[sys.argv.index('--result-file')+1]).write_text('0\\n')\npathlib.Path({}).write_text(json.dumps(sys.argv[1:]))\n",
+        serde_json::to_string(release.to_str().unwrap()).unwrap(),
         serde_json::to_string(sentinel.to_str().unwrap()).unwrap()
     )).unwrap();
     let health_gate = std::sync::Arc::new(common::ResponseGate::default());
@@ -365,6 +367,21 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
             .contains("99.0.0")
     );
     let deadline = Instant::now() + Duration::from_secs(5);
+    while !attempt.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "first flushed frame did not invoke the updater callback"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The callback creates the attempt synchronously; the Python child is a
+    // separate completion event. Hold its report until invocation is proved.
+    assert!(!sentinel.exists(), "unreleased updater completed");
+    fs::write(&release, b"finish").unwrap();
+    // Hosted Windows job 114203045799 on 2026-10-10 ran four Python updater
+    // fixtures together: successful cases took 6.1-10.9 s. Allow twice that
+    // observed maximum for interpreter completion, not callback invocation.
+    let deadline = Instant::now() + Duration::from_secs(22);
     let argv: Vec<String> = loop {
         if let Ok(bytes) = fs::read(&sentinel)
             && let Ok(argv) = serde_json::from_slice(&bytes)
@@ -373,7 +390,9 @@ fn built_binary_launches_updater_only_after_first_flushed_frame() {
         }
         assert!(
             Instant::now() < deadline,
-            "first flushed frame did not trigger updater callback"
+            "invoked updater did not complete; updater_log={}",
+            fs::read_to_string(shim.state_dir().join(".pseudolife-mcp/update-clients.log"))
+                .unwrap_or_default()
         );
         std::thread::sleep(Duration::from_millis(5));
     };

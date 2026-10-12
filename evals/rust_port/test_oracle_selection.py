@@ -38,6 +38,26 @@ def test_push_uses_after_without_computing_before_merge_base(graph):
     assert not any(arguments[0] == "merge-base" for arguments in graph)
 
 
+def test_schedule_uses_immutable_master_checkout_and_rechecks_receipt(graph, monkeypatch):
+    selection = oracle.select('root', 'schedule', {'schedule': '23 3 * * *'}, HEAD,
+                              github_ref='refs/heads/master')
+    assert selection['event'] == 'schedule' and selection['oracle_head'] == HEAD
+    assert selection['candidate_head'] == HEAD and selection['base_head'] is None
+    assert not any(arguments[0] == 'merge-base' for arguments in graph)
+    monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selection))
+    assert oracle.selected_oracle('root') == selection
+    selection['oracle_head'] = BASE
+    monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selection))
+    with pytest.raises(ValueError, match='immutable event binding'):
+        oracle.selected_oracle('root')
+
+
+@pytest.mark.parametrize('ref', [None, '', 'refs/heads/topic', 'refs/tags/master'])
+def test_schedule_rejects_non_master_ref(graph, ref):
+    with pytest.raises(ValueError, match='schedule requires refs/heads/master'):
+        oracle.select('root', 'schedule', {}, HEAD, github_ref=ref)
+
+
 def test_dispatch_uses_frozen_head_without_new_input(graph):
     selected = oracle.select("root", "workflow_dispatch", {"inputs": {"frozen_head": HEAD}}, HEAD,
                              github_ref="refs/heads/master")
@@ -112,6 +132,7 @@ def test_new_capture_cannot_silently_use_an_old_pin(monkeypatch):
 @pytest.mark.parametrize("name,event,checkout,expected", [
     ("pull_request", {"pull_request": {"base": {"sha": BASE}, "head": {"sha": HEAD}}}, CHECKOUT, MERGE),
     ("push", {"after": HEAD}, HEAD, HEAD),
+    ("schedule", {"schedule": "23 3 * * *"}, HEAD, HEAD),
     ("workflow_dispatch", {"inputs": {"frozen_head": HEAD}}, HEAD, HEAD),
 ])
 def test_selector_writes_the_same_sha_to_receipt_and_github_environment(

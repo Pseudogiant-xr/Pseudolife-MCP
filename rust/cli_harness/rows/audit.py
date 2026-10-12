@@ -208,10 +208,72 @@ def seed_legacy(conn) -> dict:
     return {"legacy": message}
 
 
+def seed_payload_domain(conn) -> dict:
+    """Historical payload shapes, appended and hashed by the oracle writer."""
+    store = _store(conn)
+    with store.storage._txn():
+        event = store._event("register", {
+            "nan": float("nan"), "positive": float("inf"), "negative": -float("inf"),
+            "integer": 10 ** 200, "deep": json.loads("[" * 150 + "0" + "]" * 150),
+            "ordered": {"雪": 1, "😀": 2, "a": 3},
+        })
+        legacy = store._event("send", {"text": "old body", "odd": float("nan")},
+                              message_id="ef12ab34cd5600000000000000000001")
+        surrogate = store._event("register", {})
+        surrogate["payload"] = r'{"odd":"\ud800","text":"ascii 雪"}'
+        store._append([event, legacy, surrogate], T0)
+    return {"legacy": legacy["message_id"]}
+
+
+def seed_payload_send(conn, *, surrogate=False) -> dict:
+    """A real send whose stored payload uses Python's historical JSON domain."""
+    store = _store(conn)
+    a = store.register("alice", project="p")
+    b = store.register("alice", project="p")
+    store.attach(*_creds(b), attachment_id="historical")
+    event = store._event
+
+    def historical_event(kind, payload, **kwargs):
+        result = event(kind, payload, **kwargs)
+        if kind == "send":
+            payload = dict(payload, odd="\ud800" if surrogate else float("nan"))
+            result["payload"] = json.dumps(payload, ensure_ascii=True, sort_keys=True,
+                                           separators=(",", ":"))
+        return result
+
+    store._event = historical_event
+    sent = store.send(*_creds(a), to=b["agent_id"] if surrogate else "project:p",
+                      text="old send", request_id="historical")
+    message = sent["message_id"] if surrogate else sent["receipts"][0]["message_id"]
+    return {"message": message}
+
+
+def seed_invalid_payload(conn) -> dict:
+    """An old stored payload which export cannot decode."""
+    store = _store(conn)
+    with store.storage._txn():
+        event = store._event("register", {})
+        event["payload"] = "{"
+        store._append([store._event("register", {}), event], T0)
+    return {}
+
+
+def seed_fraction_boundary(conn) -> dict:
+    """One oracle-written event between two differently rounded ISO limits."""
+    store = _store(conn)
+    store.test_time[0] = -1.0000000000287557e-6
+    store.register("alice", project="p")
+    return {}
+
+
 # --- disposable banks --------------------------------------------------------
 
 PREFIX = "pl_cf_w1c_audit_"
-SEEDERS = {"rich": seed_rich, "pruned": seed_pruned, "legacy": seed_legacy}
+SEEDERS = {"rich": seed_rich, "pruned": seed_pruned, "legacy": seed_legacy,
+           "fraction": seed_fraction_boundary, "payload": seed_payload_domain,
+           "payload_send": seed_payload_send,
+           "invalid_payload": seed_invalid_payload,
+           "surrogate_send": lambda conn: seed_payload_send(conn, surrogate=True)}
 _IDS: dict[str, dict] = {}
 _BASELINE: dict[str, dict] = {}
 _ARCHIVES: dict[str, bytes] = {}
@@ -219,7 +281,7 @@ _CREATED: set[str] = set()
 
 
 def _name(kind: str) -> str:
-    return PREFIX + kind
+    return _bank.name(PREFIX + kind)
 
 
 def _drop_all() -> None:
@@ -291,6 +353,7 @@ def ids(kind: str) -> dict:
 
 def export_bytes(kind: str) -> bytes:
     """The oracle's own ``board-audit export --out`` of a seeded bank."""
+    _bank.NAMES.require_process()
     if kind not in _ARCHIVES:
         from pseudolife_memory.board_audit_cli import main  # noqa: PLC0415
         name = ensure(kind)
@@ -331,6 +394,41 @@ def _send_index(rows, message_id) -> int:
 
 def archive(variant: str) -> bytes:
     """An export of a seeded bank, unchanged or edited one way."""
+    if variant == "surrogate-before-link":
+        row = export_rows("rich")[0]
+        row["prev_hash"] = "1" * 64
+        row["payload"] = {"odd": "\ud800"}
+        return _lines([row])
+    if variant == "head-19-digits":
+        from pseudolife_memory.storage.coordination import (  # noqa: PLC0415
+            audit_hash, verify_audit_chain)
+        # Lift an oracle-produced retention-anchored chain to a BIGINT head.
+        rows = export_rows("pruned")
+        shift = 1000000000000000000 - rows[-1]["seq"]
+        previous = rows[0]["prev_hash"]
+        for row in rows:
+            row["seq"] += shift
+            row["prev_hash"] = previous
+            if row["event"] == "audit_prune":
+                row["payload"]["through_seq"] += shift
+            row["hash"] = previous = audit_hash(previous, row)
+        assert verify_audit_chain(rows, expect_head=(rows[-1]["seq"], previous))["ok"]
+        return _lines(rows)
+    if variant.startswith("reserved-number-key-"):
+        from pseudolife_memory.storage.coordination import audit_hash  # noqa: PLC0415
+        # Keep one complete exported row, hashed by the oracle with an ordinary
+        # payload key that happens to match serde's internal number transport.
+        row = export_rows("rich")[0]
+        row["payload"]["$serde_json::private::Number"] = "1"
+        row["hash"] = audit_hash(row["prev_hash"], row)
+        raw = _lines([row])
+        if variant == "reserved-number-key-single":
+            return raw
+        key = (b'"\\u0024serde_json::private::\\u004eumber"'
+               if variant == "reserved-number-key-escaped" else
+               b'"$serde_json::private::Number"')
+        return raw.replace(b'"$serde_json::private::Number": "1"',
+                           b'"$serde_json::private::Number": "1", ' + key + b': "1"', 1)
     if variant == "pruned":
         return export_bytes("pruned")
     if variant == "legacy-v45":
@@ -339,6 +437,11 @@ def archive(variant: str) -> bytes:
     raw = export_bytes("rich")
     if variant == "rich":
         return raw
+    if variant in ("broken-before-decode", "decode-before-broken"):
+        rows = export_rows("rich")[:1]
+        rows[0]["task"] = "rewritten"
+        gap = b" " * 9000 if variant == "broken-before-decode" else b""
+        return _lines(rows) + gap + b"\xff\n"
     first = raw.split(b"\n", 1)[0] + b"\n"
     digits = b"9" * 4301
     if variant == "duplicate-truncated":
@@ -499,14 +602,18 @@ def audit_stdout_closed_trailer(obs: dict) -> None:
 
 # --- cases -----------------------------------------------------------------------
 
+SEP = "\\" if core.WINDOWS else "/"
 GUARDS = {
     # Never the daemon container or a lite bank on the host running this.
     "PSEUDOLIFE_DAEMON_EXEC": "1",
     "PSEUDOLIFE_DOCKER": "{HOME}/no-docker",
     "PSEUDOLIFE_MCP_DATA_DIR": "{HOME}/no-bank",
     "PSEUDOLIFE_MCP_DATABASE_URL": None,
+    # No-bank paths re-run in the daemon container through docker
+    # (daemon_exec): a PATH inside the home finds none (core's preflight).
+    "PATH": "{HOME}" + SEP + "no-bin",
 }
-SEP = "\\" if core.WINDOWS else "/"
+PROGRAMS = ("docker",)
 
 
 def _home(rel: str) -> str:
@@ -541,13 +648,15 @@ def _files(arm, files) -> None:
 
 
 def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
-              env=None, note=""):
+              env=None, note="", platforms=("windows", "linux"), prepare=None):
     """A read action against one seeded bank, which must stay unchanged."""
     original = ["board-audit", *argv]
 
     def setup(arm):
         name = ensure(kind)
         _files(arm, files)
+        if prepare is not None:
+            prepare(arm)
         _resolve_argv(case, original)
         arm.state["name"] = name
         _stash(arm)
@@ -560,12 +669,13 @@ def read_case(case_id, kind, argv, *, files=None, rules=(), stdout_closed=False,
     environment = {**GUARDS, "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name(kind))}
     environment.update(env or {})
     case = core.Case(case_id, list(original), env=environment, setup=setup,
-                     after=after, rules=rules, stdout_closed=stdout_closed, note=note)
+                     after=after, rules=rules, stdout_closed=stdout_closed, note=note,
+                     platforms=platforms, programs=PROGRAMS)
     return case
 
 
 def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False,
-              platforms=("windows", "linux"), note=""):
+              platforms=("windows", "linux"), note="", timeout=30.0):
     """A file-only action (no bank in the environment)."""
     original = ["board-audit", *argv]
 
@@ -575,7 +685,8 @@ def file_case(case_id, argv, *, files=None, rules=(), stdout_closed=False,
         _stash(arm)
 
     case = core.Case(case_id, list(original), env=dict(GUARDS), setup=setup, after=_record,
-                     rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note)
+                     rules=rules, stdout_closed=stdout_closed, platforms=platforms, note=note,
+                     programs=PROGRAMS, timeout=timeout)
     return case
 
 
@@ -585,7 +696,7 @@ def archive_case(case_id, variant, *extra, rules=(), stdout_closed=False):
                      stdout_closed=stdout_closed)
 
 
-REDACT_DB = PREFIX + "rd"
+REDACT_DB = _bank.name(PREFIX + "rd")
 
 
 def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock",),
@@ -623,7 +734,7 @@ def redact_case(case_id, source, message, reason, *, rules=("audit-redact-clock"
     case = core.Case(case_id, list(original),
                      env={**GUARDS, "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(REDACT_DB)},
                      setup=setup, after=after, rules=rules, timeout=60,
-                     stdout_closed=stdout_closed, note=note)
+                     stdout_closed=stdout_closed, note=note, programs=PROGRAMS)
     return case
 
 
@@ -656,6 +767,46 @@ def _pruned(key):
 def cases() -> list[core.Case]:
     rich_head = _Lazy(lambda: head("rich"))
     out = [
+        # The old 100,000-key scan exceeded five seconds on Linux (2026-10-12),
+        # so Linux keeps that budget as the regression guard. On hosted Windows
+        # the Python oracle alone exceeded it (batch run 38198996412), so
+        # Windows uses the harness default.
+        file_case("input-wide-object", ["verify", "--input", _home("wide.jsonl")],
+                  files={"wide.jsonl": lambda: json.dumps({f"key-{n}": None for n in range(100000)}).encode("utf-8")},
+                  timeout=30.0 if os.name == "nt" else 5.0),
+        *[read_case(f"defer-export-iso-{name}", "rich", ["export", "--since", value],
+                    rules=("rust-deferral",)) for name, value in [
+            ("week-date", "2026-W41-1"),
+            ("week-datetime", "2026-W41-6T12:00:00"),
+            ("hour", "2026-10-11T12"),
+            ("compact-offset", "2026-10-11T12:00:00+0100"),
+            ("hour-offset", "2026-10-11T12:00:00+01"),
+            ("comma-fraction", "2026-10-11T12:00:00,5+00:00"),
+            ("compact-hour", "20261011T12"),
+            ("second-offset", "2026-10-11T12:00:00-00:00:30"),
+        ]],
+        # The pre-fix 100 MiB newline scan exceeded 10s on Linux (2026-10-12).
+        file_case("input-long-line", ["verify", "--input", _home("long.jsonl")],
+                  files={"long.jsonl": lambda: b" " * (100 * 1024 * 1024) + b"\n"},
+                  timeout=10.0),
+        file_case("input-windows-interior-drive", ["verify", "--input", r"subdir\C:\archive.jsonl"],
+                  platforms=("windows",), note="Windows: pending CI"),
+        file_case("input-windows-verbatim", ["verify", "--input", "\\\\?\\" + _home("./missing//archive.jsonl")],
+                  platforms=("windows",), note="Windows: pending CI"),
+        archive_case("input-surrogate-before-link", "surrogate-before-link"),
+        file_case("root-delimiter", ["--", "verify"]),
+        file_case("short-help-joined-tail", ["verify", "-hello=x"]),
+        file_case("input-head-nondecimal-digit", ["verify", "--expect-head", "²:" + "a" * 64]),
+        file_case("input-head-digit-limit", ["verify", "--expect-head", "0" * 4301 + "1:" + "a" * 64]),
+        file_case("input-windows-leading-dot", ["verify", "--input", "./missing//archive.jsonl/"],
+                  platforms=("windows",), note="Windows: pending CI"),
+        read_case("export-output-loop", "rich", ["export", "--out", _home("loop")],
+                  platforms=("linux",), prepare=lambda arm: (arm.home / "loop").symlink_to("loop")),
+        read_case("export-windows-long-name", "rich", ["export", "--out", _home("x" * 260)],
+                  platforms=("windows",), note="Windows: pending CI"),
+        file_case("defer-export-local-minute", ["export", "--since", "2026-10-10T12:00"],
+                  rules=("rust-deferral",), note="Guard: already deferred on the original base"),
+        read_case("export-invalid-payload-prefix", "invalid_payload", ["export"]),
         # verify --input: every event family the seeded chain carries
         archive_case("input-rich", "rich"),
         archive_case("input-rich-expect-head", "rich", "--expect-head", rich_head),
@@ -666,9 +817,18 @@ def cases() -> list[core.Case]:
                      _Lazy(lambda: head("rich", digest="0" * 64))),
         archive_case("input-head-missing", "rich", "--expect-head",
                      _Lazy(lambda: head("rich", seq=9999))),
+        archive_case("input-head-19-digits", "rich", "--expect-head",
+                     _Lazy(lambda: head("rich", seq=1000000000000000000))),
+        archive_case("input-head-i64-max", "rich", "--expect-head",
+                     _Lazy(lambda: head("rich", seq=9223372036854775807))),
+        archive_case("input-head-19-digits-matches", "head-19-digits", "--expect-head",
+                     _Lazy(lambda: "1000000000000000000:" +
+                           json.loads(archive("head-19-digits").splitlines()[-1])["hash"])),
         archive_case("input-head-earlier", "rich", "--expect-head",
                      _Lazy(lambda: f"3:{export_rows('rich')[2]['hash']}")),
         archive_case("input-rich-crlf", "rich-crlf"),
+        archive_case("input-broken-before-decode", "broken-before-decode"),
+        archive_case("input-decode-before-broken", "decode-before-broken"),
         archive_case("input-rich-cr-blank", "rich-cr-blank"),
         archive_case("input-pruned-start-cut", "pruned"),
         archive_case("input-pruned-head-pruned", "pruned", "--expect-head", "1:" + "a" * 64),
@@ -682,6 +842,15 @@ def cases() -> list[core.Case]:
         archive_case("input-wrong-type-cr", "wrong-type-cr"),
         archive_case("input-seq-string", "seq-string"),
         archive_case("input-duplicate", "duplicate"),
+        file_case("audit-reserved-number-key-duplicates",
+                  ["verify", "--input", _home("archive.jsonl")],
+                  files={"archive.jsonl": b'{"payload":{"$serde_json::private::Number":"1",'
+                         b'"$serde_json::private::Number":"1"}}\n'}),
+        archive_case("audit-reserved-number-key-duplicates-exported",
+                     "reserved-number-key-duplicates"),
+        archive_case("audit-reserved-number-key-duplicates-escaped",
+                     "reserved-number-key-escaped"),
+        archive_case("audit-reserved-number-key-single", "reserved-number-key-single"),
         archive_case("input-payload-edit", "payload-edit"),
         archive_case("input-late-garbage", "late-garbage"),
         archive_case("input-gap", "gap"),
@@ -692,6 +861,58 @@ def cases() -> list[core.Case]:
         file_case("input-empty", ["verify", "--input", _home("archive.jsonl")],
                   files={"archive.jsonl": b""}),
         file_case("input-missing", ["verify", "--input", _home("missing.jsonl")]),
+        file_case("input-pathlib", ["verify", "--input", _home("./missing//archive.jsonl/")]),
+        file_case("input-directory", ["verify", "--input", "{HOME}"]),
+        file_case("input-windows-slashes", ["verify", "--input", "./missing//archive.jsonl/"],
+                  platforms=("windows",)),
+        file_case("input-joined", ["verify", "--input=" + _home("archive.jsonl")],
+                  files={"archive.jsonl": b""}),
+        file_case("input-abbreviated", ["verify", "--in", _home("archive.jsonl")],
+                  files={"archive.jsonl": b""}),
+        file_case("input-repeated", ["verify", "--input", "missing", "--input", _home("archive.jsonl")],
+                  files={"archive.jsonl": b""}),
+        file_case("input-missing-value", ["verify", "--input"]),
+        file_case("input-negative-unicode", ["verify", "--input", "-١.٥"], files={"-١.٥": b""}),
+        file_case("input-unknown-with-space", ["verify", "--input", "--unknown name"], files={"--unknown name": b""}),
+        file_case("input-zero-padded-head", ["verify", "--input", _home("archive.jsonl"), "--expect-head", "٠٠١:" + "a" * 64], files={"archive.jsonl": b""}),
+        file_case("input-option-as-value", ["verify", "--input", "--unknown"]),
+        file_case("input-bad-head", ["verify", "--expect-head=bad"]),
+        file_case("input-unknown-option", ["verify", "--unknown=x"]),
+        file_case("input-unrecognized", ["verify", "extra", "--unknown", "x"]),
+        file_case("redact-required", ["redact"]),
+        read_case("redact-abbreviated", "rich", ["redact", "--m", "x", "--r", "why"]),
+        file_case("export-bad-time", ["export", "--since", "NaN"]),
+        *[file_case(f"export-bad-numeric-{name}", ["export", "--since=" + value])
+          for name, value in [("inf", "inf"), ("negative-inf", "-Infinity"), ("overflow", "1e9999")]],
+        file_case("defer-export-invalid-nonnumeric", ["export", "--since", "not-a-time"],
+                  rules=("rust-deferral",)),
+        file_case("defer-export-iso-overwritten", ["export", "--since", "2026-W41-1", "--since", "0"],
+                  rules=("rust-deferral",)),
+        file_case("audit-missing-action", []),
+        file_case("audit-invalid-action", ["other"]),
+        file_case("audit-root-unknown", ["--unknown", "verify"]),
+        file_case("audit-root-help", ["--help"]),
+        file_case("export-help", ["export", "--he"]),
+        file_case("redact-help", ["redact", "-hello"]),
+        file_case("stats-help", ["stats", "--help"]),
+        file_case("stats-invalid-option", ["stats", "--unknown"]),
+        file_case("help-explicit-value", ["verify", "--help=x"]),
+        read_case("export-repeated-abbreviated", "rich", ["export", "--ta=t2", "--task", "t1"]),
+        read_case("export-negative-time", "rich", ["export", "--since", "-5"]),
+        read_case("export-underscore-time", "rich", ["export", "--since=١_٧٠٠_٠٠٠_٠٠٠"]),
+        read_case("export-payload-domain", "payload", ["export"]),
+        read_case("export-create-before-payload", "invalid_payload",
+                  ["export", "--out", _home("missing/out.jsonl")]),
+        read_case("export-invalid-payload-out", "invalid_payload",
+                  ["export", "--out", _home("out.jsonl")]),
+        read_case("bank-verify-payload-domain", "payload", ["verify"]),
+        read_case("bank-verify-surrogate-send", "surrogate_send", ["verify"]),
+        read_case("export-surrogate-send", "surrogate_send", ["export"]),
+        redact_case("redact-surrogate-send", "surrogate_send", _Lazy(lambda: ids("surrogate_send")["message"]), "old paste"),
+        redact_case("redact-nonfinite-fanout", "payload_send", _Lazy(lambda: ids("payload_send")["message"]), "old paste"),
+        redact_case("redact-payload-domain", "payload", _Lazy(lambda: ids("payload")["legacy"]), "old paste"),
+        file_case("input-payload-domain", ["verify", "--input", _home("archive.jsonl")],
+                  files={"archive.jsonl": lambda: export_bytes("payload")}),
         # verify against the bank
         read_case("bank-verify-rich", "rich", ["verify"]),
         read_case("bank-verify-expect-head", "rich", ["verify", "--expect-head", rich_head]),
@@ -715,12 +936,21 @@ def cases() -> list[core.Case]:
         read_case("export-since-iso", "rich",
                   ["export", "--since", "2023-11-14T22:14:20+00:00", "--until",
                    "2023-11-14T23:15:00+01:00"]),
+        read_case("export-since-iso-fraction", "rich",
+                  ["export", "--since", "2023-11-14T22:14:20.500000+00:00", "--until",
+                   "2023-11-14T23:15:00.000001+01:00"]),
+        read_case("export-since-iso-long-fraction", "rich",
+                  ["export", "--since", "2023-11-14T22:14:20.123456789+00:00"]),
+        read_case("export-until-iso-epoch-boundary", "fraction",
+                  ["export", "--until", "1970-01-01T00:00:59.999999+00:01"]),
         read_case("export-agent-full", "rich", ["export", "--agent", _rich("b")]),
         read_case("export-agent-prefix", "rich", ["export", "--agent", _rich("a", cut=8)]),
         read_case("export-agent-literal", "rich", ["export", "--agent", "alice"]),
         read_case("export-agent-unknown", "rich", ["export", "--agent", "ffffffff0"]),
         read_case("export-agent-unknown-out", "rich",
                   ["export", "--agent", "ffffffff0", "--out", _home("out.jsonl")]),
+        read_case("export-windows-invalid-name", "rich", ["export", "--out", _home("bad<name.jsonl")],
+                  note="Windows: pending CI", platforms=("windows",)),
         read_case("export-out", "rich", ["export", "--out", _home("out.jsonl")]),
         read_case("export-out-filtered", "rich",
                   ["export", "--out", _home("out.jsonl"), "--task", "t3"]),
@@ -752,33 +982,35 @@ def cases() -> list[core.Case]:
         redact_case("redact-nolog", "nolog", "0" * 32, "why"),
         # declared deferrals: the candidate defers and changes nothing
         read_case("defer-stats", "rich", ["stats"], rules=("rust-deferral",)),
-        read_case("defer-help", "rich", ["verify", "--help"], rules=("rust-deferral",)),
-        read_case("defer-joined-option", "rich", ["export", "--task=t1"],
-                  rules=("rust-deferral",)),
-        read_case("defer-float-spelling", "rich", ["export", "--since", "1.7e9"],
-                  rules=("rust-deferral",)),
+        file_case("verify-help", ["verify", "--help"]),
+        read_case("export-joined-option", "rich", ["export", "--task=t1"]),
+        read_case("export-float-spelling", "rich", ["export", "--since", "1.7e9"]),
         read_case("defer-dsn-option", "rich", ["verify"], rules=("rust-deferral",),
                   env={"PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(_name("rich"))
                        + "?application_name=audit"}),
-        read_case("defer-out-missing-dir", "rich",
-                  ["export", "--out", _home("missing/out.jsonl")], rules=("rust-deferral",)),
+        read_case("export-out-missing-dir", "rich",
+                  ["export", "--out", _home("missing/out.jsonl")]),
+        read_case("export-out-missing-dir-before-agent", "rich",
+                  ["export", "--agent", "ffffffff0", "--out", _home("missing/out.jsonl")]),
         file_case("defer-no-bank", ["verify"], rules=("rust-deferral",)),
-        file_case("defer-input-not-utf8", ["verify", "--input", _home("archive.jsonl")],
-                  files={"archive.jsonl": b'{"seq": 1}\n\xff\n'}, rules=("rust-deferral",)),
-        file_case("defer-input-not-json", ["verify", "--input", _home("archive.jsonl")],
-                  files={"archive.jsonl": b"not JSON\n"}, rules=("rust-deferral",)),
+        file_case("input-not-utf8", ["verify", "--input", _home("archive.jsonl")],
+                  files={"archive.jsonl": b'{"seq": 1}\n\xff\n'}),
+        file_case("input-partial-utf8-after-cr", ["verify", "--input", _home("archive.jsonl")],
+                  files={"archive.jsonl": b"{}\r\xf0"}),
+        file_case("input-split-utf8", ["verify", "--input", _home("archive.jsonl")],
+                  files={"archive.jsonl": b" " * 8191 + "雪\n".encode("utf-8")}),
+        file_case("input-not-json", ["verify", "--input", _home("archive.jsonl")],
+                  files={"archive.jsonl": b"not JSON\n"}),
         redact_case("defer-reason-format-char", "rich", _rich("to_redact"),
                     "zero​width", rules=("rust-deferral",)),
         # review round 1 (O1): a repeated key is reported when its object closes
         archive_case("input-duplicate-nested-then-long-int", "duplicate-nested-then-long-int"),
-        archive_case("defer-input-duplicate-truncated", "duplicate-truncated",
-                     rules=("rust-deferral",)),
-        archive_case("defer-input-duplicate-then-long-int", "duplicate-then-long-int",
-                     rules=("rust-deferral",)),
-        # (C3) pathlib reprints a drive-relative spelling: defer it
-        file_case("defer-input-drive-relative",
+        archive_case("input-duplicate-truncated", "duplicate-truncated"),
+        archive_case("input-duplicate-then-long-int", "duplicate-then-long-int"),
+        # pathlib reprints a drive-relative spelling natively
+        file_case("input-drive-relative",
                   ["verify", "--input", "C:.\\missing-audit-archive.jsonl"],
-                  rules=("rust-deferral",), platforms=("windows",)),
+                  platforms=("windows",)),
         # (O2) a stdout that refuses the report
         archive_case("defer-input-stdout-closed", "rich", rules=("rust-deferral",),
                      stdout_closed=True),
@@ -808,6 +1040,19 @@ def cases() -> list[core.Case]:
 
 
 MUTANTS = [
+    Mutant("audit-iso-conversion-admitted", "audit", "shim/src/cli/board_audit/args.rs",
+           "None => iso(value),", "None => iso(value).or(Some(0.0)),",
+           ("defer-export-iso-week-date", "defer-export-iso-hour")),
+    Mutant("audit-repeat-first-wins", "audit", "shim/src/cli/board_audit/args.rs",
+           "slot.1 = value;", "let _ = value;", ("input-repeated", "export-repeated-abbreviated")),
+    Mutant("audit-create-message", "audit", "shim/src/cli/board_audit/bank.rs",
+           "cannot create {out}: {text}", "cannot write {out}: {text}", ("export-out-missing-dir",)),
+    Mutant("audit-read-message", "audit", "shim/src/cli/board_audit/mod.rs",
+           "board-audit: cannot read {input}", "board-audit: unreadable {input}", ("input-directory",)),
+    Mutant("audit-payload-depth-capped", "audit", "shim/src/cli/board_audit/codec.rs",
+           "EXPORT_DEPTH: usize = 988;", "EXPORT_DEPTH: usize = 128;", ("export-payload-domain",)),
+    Mutant("audit-decode-one-byte", "audit", "shim/src/cli/board_audit/mod.rs",
+           "self.at + 8192", "self.at + 1", ("input-decode-before-broken",)),
     Mutant("audit-body-reason-swap", "audit", "shim/src/cli/board_audit/chain.rs",
            '"body_missing"\n            } else {\n                "body_not_exported"',
            '"body_not_exported"\n            } else {\n                "body_missing"',
@@ -838,16 +1083,11 @@ MUTANTS = [
            "            siblings.push(row.try_get::<_, String>(0)?);",
            "            let _ = row;", ("redact-fanout-siblings",)),
     # review round 1
-    Mutant("audit-duplicate-eager", "audit", "shim/src/cli/board_audit/archive.rs",
-           "            repeated |= !keys.insert(key);",
-           "            if !keys.insert(key) {\n                self.0.set(true);\n"
-           "                return Err(de::Error::custom(\"duplicate decoded key\"));\n"
-           "            }",
-           ("defer-input-duplicate-truncated", "defer-input-duplicate-then-long-int")),
-    Mutant("audit-drive-relative-admitted", "audit", "shim/src/cli/board_audit/args.rs",
-           "    if cfg!(windows) && value.contains(':') {",
-           "    if cfg!(windows) && value.contains(':') && false {",
-           ("defer-input-drive-relative",)),
+    Mutant("audit-duplicate-eager", "audit", "shim/src/cli/pyjson.rs",
+           "                dict.push((key, value));\n            }",
+           "                dict.push((key, value));\n            }\n"
+           "            if self.unique && repeated { self.duplicate = true; return Err(Refused::NotJson); }",
+           ("input-duplicate-truncated", "input-duplicate-then-long-int")),
     Mutant("audit-verify-stdout-closed-exit-1", "audit", "shim/src/cli/board_audit/mod.rs",
            "        Err(()) => deferred(),", "        Err(()) => 1,",
            ("defer-input-stdout-closed", "defer-bank-verify-stdout-closed")),
