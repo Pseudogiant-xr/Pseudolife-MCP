@@ -529,7 +529,8 @@ def config_for(scn: Scenario) -> str:
 
 def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
-    dbs = {"python": f"pl_cf_w2d_{tag}_py", "rust": f"pl_cf_w2d_{tag}_rs"}
+    dbs = {side: pg.name(f"pl_cf_w2d_{tag}_{suffix}")
+           for side, suffix in (("python", "py"), ("rust", "rs"))}
     sides = ("python", "rust") if mode != "golden" else ("rust",)
     dsns = {k: pg.create(dbs[k], template=template) for k in sides}
     procs = {}
@@ -547,7 +548,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         for d in procs.values():
             d.start(300)
         wait_settled([d.port for d in procs.values()], timeout=900, token=TOKEN)
-        golden = json.loads((GOLDENS / f"{scn.name}.json").read_text()) if mode == "golden" else None
+        golden = json.loads((GOLDENS / f"{scn.name}.json").read_text(encoding="utf-8")) if mode == "golden" else None
         rows = []
         py_seen = []
         for i, c in enumerate(scn.cases()):
@@ -610,8 +611,8 @@ def main() -> int:
     ap.add_argument("--reuse-template", action="store_true")
     args = ap.parse_args()
     names = args.only or list(SCENARIOS)
-    template = "pl_cf_w2d_template"
-    if args.mode != "golden" and not args.reuse_template:
+    template = pg.name("pl_cf_w2d_template")
+    if args.mode != "golden" and (not args.reuse_template or template not in pg.existing()):
         seed_template(template, args.paragraphs)
     if args.mode == "mutants":
         outcome = {}
@@ -650,4 +651,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    finally:
+        for database in pg.existing():
+            pg.drop(database)
+        print("cleanup: owned disposable databases dropped", flush=True)
