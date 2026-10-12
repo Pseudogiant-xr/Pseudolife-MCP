@@ -442,12 +442,19 @@ Every cortex fact carries a provenance tier: **`user` > `action` >
 dream-consolidated fact takes the tier of its backing note's `source` tag
 (`user` / `conversation` → `user`; an unmapped tag or no backing note →
 `agent`); the claim's own `origin` field is model output and is never read.
-When a dream batch holds several notes the extractor chooses which one a
-claim cites, so a tier above `agent` also needs the claim's value in the
-cited note's text (as a phrase, or all its content words and literals);
-otherwise the claim counts as unbacked: `agent` tier, and low-trust to the
-consolidation quarantine. A write may only *supersede* a slot whose current value is backed by an
-equal-or-weaker tier. A **weaker-tier** write (e.g. an `agent` value
+The extractor chooses which note a claim cites, in a one-note batch as in a
+larger one, so a tier above `agent` also needs the cited note to pass a
+citation check: the claim's whole value appears in it as one phrase
+(case-insensitive, on Unicode word boundaries, every word kept, so
+"retired" does not back `not retired`, nor "UK" back `US`), and it
+contains at least one word of the claim's entity or attribute name (split
+on `-`, `_`, `.` and spaces; a plural or paraphrase does not match).
+Otherwise the claim counts as unbacked: `agent` tier, and low-trust to the
+consolidation quarantine (which then parks it rather than writing it). A
+`source` index that is a boolean is not read as a note number. A write may
+only *supersede* a slot whose current value is backed by an equal-or-weaker
+tier, so a `memory_fact_set` with no `origin` (recorded as `agent`) parks
+against a fact the dream consolidated at `user` tier. A **weaker-tier** write (e.g. an `agent` value
 conflicting with a `user`-stated fact), or one below the confidence margin,
 is **not applied** — it's parked as a *contender*:
 

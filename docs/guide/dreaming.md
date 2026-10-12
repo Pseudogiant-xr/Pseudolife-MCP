@@ -791,11 +791,15 @@ directly:
   **and only when the witness's tier is not below the standing current's
   origin**: the two-man rule is never weaker than the provenance guard
   it reinforces, so two agent witnesses cannot supersede a user-stated
-  fact. The same witness restating merely re-confirms the parked value;
-  an automated promotion is stamped with the promoting witness's own tier
-  (from its note's `source` tag, as every dream write is — never the
-  claim's own origin field), so a value a user-sourced note confirms is
-  as protected as one it wrote directly.
+  fact. The witness's tier here is the tier a direct write of the same
+  claim would get: its note's `source` tag, kept only when the note passes
+  the citation check ("Provenance contenders" in
+  [memory-model.md](memory-model.md)), and lowered to `assistant` for an
+  assistant-stated claim. The same
+  witness restating merely re-confirms the parked value; an automated
+  promotion adds that same tier to the value's support (never the claim's
+  own origin field), so a value a user-sourced note confirms is as
+  protected as one it wrote directly.
 
 Run results carry `quarantine_parked` / `quarantine_held` /
 `quarantine_promoted`; parks and promotions are journaled (a promotion

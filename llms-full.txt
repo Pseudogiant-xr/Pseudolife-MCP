@@ -1953,12 +1953,19 @@ Every cortex fact carries a provenance tier: **`user` > `action` >
 dream-consolidated fact takes the tier of its backing note's `source` tag
 (`user` / `conversation` → `user`; an unmapped tag or no backing note →
 `agent`); the claim's own `origin` field is model output and is never read.
-When a dream batch holds several notes the extractor chooses which one a
-claim cites, so a tier above `agent` also needs the claim's value in the
-cited note's text (as a phrase, or all its content words and literals);
-otherwise the claim counts as unbacked: `agent` tier, and low-trust to the
-consolidation quarantine. A write may only *supersede* a slot whose current value is backed by an
-equal-or-weaker tier. A **weaker-tier** write (e.g. an `agent` value
+The extractor chooses which note a claim cites, in a one-note batch as in a
+larger one, so a tier above `agent` also needs the cited note to pass a
+citation check: the claim's whole value appears in it as one phrase
+(case-insensitive, on Unicode word boundaries, every word kept, so
+"retired" does not back `not retired`, nor "UK" back `US`), and it
+contains at least one word of the claim's entity or attribute name (split
+on `-`, `_`, `.` and spaces; a plural or paraphrase does not match).
+Otherwise the claim counts as unbacked: `agent` tier, and low-trust to the
+consolidation quarantine (which then parks it rather than writing it). A
+`source` index that is a boolean is not read as a note number. A write may
+only *supersede* a slot whose current value is backed by an equal-or-weaker
+tier, so a `memory_fact_set` with no `origin` (recorded as `agent`) parks
+against a fact the dream consolidated at `user` tier. A **weaker-tier** write (e.g. an `agent` value
 conflicting with a `user`-stated fact), or one below the confidence margin,
 is **not applied** — it's parked as a *contender*:
 
@@ -3690,11 +3697,15 @@ directly:
   **and only when the witness's tier is not below the standing current's
   origin**: the two-man rule is never weaker than the provenance guard
   it reinforces, so two agent witnesses cannot supersede a user-stated
-  fact. The same witness restating merely re-confirms the parked value;
-  an automated promotion is stamped with the promoting witness's own tier
-  (from its note's `source` tag, as every dream write is — never the
-  claim's own origin field), so a value a user-sourced note confirms is
-  as protected as one it wrote directly.
+  fact. The witness's tier here is the tier a direct write of the same
+  claim would get: its note's `source` tag, kept only when the note passes
+  the citation check ("Provenance contenders" in
+  [memory-model.md](memory-model.md)), and lowered to `assistant` for an
+  assistant-stated claim. The same
+  witness restating merely re-confirms the parked value; an automated
+  promotion adds that same tier to the value's support (never the claim's
+  own origin field), so a value a user-sourced note confirms is as
+  protected as one it wrote directly.
 
 Run results carry `quarantine_parked` / `quarantine_held` /
 `quarantine_promoted`; parks and promotions are journaled (a promotion
