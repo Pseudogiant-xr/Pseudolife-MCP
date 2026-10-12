@@ -23,7 +23,7 @@ pub(super) fn columns_supported() -> bool {
     else {
         return true;
     };
-    let digits = value.trim_start_matches(['+', '-']);
+    let digits = value.strip_prefix(['+', '-']).unwrap_or(&value);
     !(digits.bytes().all(|byte| byte.is_ascii_digit()) && digits.len() > 4300)
 }
 

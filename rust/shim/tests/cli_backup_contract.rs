@@ -557,6 +557,57 @@ fn local_unc_output_alias_cannot_archive_its_own_partial_file() {
     assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
 }
 
+#[cfg(windows)]
+#[test]
+fn unc_share_rooted_in_archived_child_cannot_include_partial_file() {
+    struct Share(String);
+    impl Share {
+        fn remove(&self) -> Output {
+            Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command",
+                    "$ErrorActionPreference='Stop'; Remove-SmbShare -Name $env:PSEUDOLIFE_TEST_SHARE_NAME -Force"])
+                .env("PSEUDOLIFE_TEST_SHARE_NAME", &self.0)
+                .output().unwrap()
+        }
+    }
+    impl Drop for Share {
+        fn drop(&mut self) {
+            if !self.0.is_empty() {
+                let _ = self.remove();
+            }
+        }
+    }
+    let home = Home::new("unc-child-share");
+    let bank = home.path().join("bank");
+    let child = bank.join("sub").join("nested");
+    fs::create_dir_all(&child).unwrap();
+    let name = format!("pseudolife-backup-{}", uuid::Uuid::new_v4());
+    let creation = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command",
+            "$ErrorActionPreference='Stop'; $sid=[System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'); $account=$sid.Translate([System.Security.Principal.NTAccount]).Value; New-SmbShare -Name $env:PSEUDOLIFE_TEST_SHARE_NAME -Path $env:PSEUDOLIFE_TEST_SHARE_PATH -FullAccess $account | Out-Null"])
+        .env("PSEUDOLIFE_TEST_SHARE_NAME", &name)
+        .env("PSEUDOLIFE_TEST_SHARE_PATH", &child)
+        .output().unwrap();
+    if !creation.status.success() {
+        assert!(
+            std::env::var_os("CI").is_none() && std::env::var_os("GITHUB_ACTIONS").is_none(),
+            "CI child-share fixture must be available: {creation:?}"
+        );
+        eprintln!("UNC child-share fixture unverified locally: SMB share creation unavailable");
+        return;
+    }
+    let mut share = Share(name);
+    let alias = PathBuf::from(format!(r"\\localhost\{}", share.0));
+    let probe = alias.join("write-probe");
+    fs::create_dir(&probe).unwrap();
+    fs::remove_dir(&probe).unwrap();
+    let out = alias.join("bk");
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    let removal = share.remove();
+    assert!(removal.status.success(), "{removal:?}");
+    share.0.clear();
+}
+
 #[cfg(unix)]
 #[test]
 fn non_utf8_discovery_paths_defer_before_output_creation() {
@@ -599,6 +650,45 @@ fn columns_beyond_python_integer_limit_defer_before_effects() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_eq!(home.listing(), before);
+}
+
+#[test]
+fn malformed_columns_with_multiple_signs_keep_fallback_help() {
+    let home = Home::new("malformed-columns");
+    let ordinary = command(home.path()).arg("--help").output().unwrap();
+    let malformed = command(home.path())
+        .env("COLUMNS", format!("++{}", "9".repeat(4301)))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert_eq!(malformed.status.code(), ordinary.status.code());
+    assert_eq!(malformed.stdout, ordinary.stdout);
+    assert_eq!(malformed.stderr, ordinary.stderr);
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_path_discovery_defers_before_output_creation() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let home = Home::new("raw-path-discovery");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    let before = home.listing();
+    let raw_path = home.path().join(OsString::from_vec(b"bin-\xff".to_vec()));
+    let output = command(home.path())
+        .env(
+            "PSEUDOLIFE_MCP_DATABASE_URL",
+            "postgresql://unused@127.0.0.1:9/unused",
+        )
+        .env("PATH", raw_path)
+        .args(["--data-dir", &text(&bank)])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
     assert_eq!(home.listing(), before);
 }
 

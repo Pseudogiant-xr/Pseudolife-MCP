@@ -94,6 +94,9 @@ fn errno_class(code: i32) -> &'static str {
 
 pub(super) fn discovery_paths_supported(home: &Path) -> Option<()> {
     home.to_str()?;
+    if let Some(path) = std::env::var_os("PATH") {
+        path.to_str()?;
+    }
     if let Ok(entries) = fs::read_dir(home.join(".pg0").join("installation")) {
         for entry in entries.flatten() {
             entry.path().to_str()?;

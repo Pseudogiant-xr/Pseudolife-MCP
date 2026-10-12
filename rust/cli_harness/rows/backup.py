@@ -335,6 +335,8 @@ def cases() -> list[Case]:
           for flag in ["--help", "-h"]],
         *[Case(f"help-columns-{width}", ["backup", "-h"], env={"COLUMNS": str(width)})
           for width in (20, 40, 60, 100, 120, "1_00", "１００", "999999999999999999999999999999")],
+        Case("help-columns-malformed-multiple-signs", ["backup", "--help"],
+             env={"COLUMNS": "++" + "9" * 4301}),
         Case("file-mode-argparse-equals-repeat-abbrev",
              ["backup", "--data-dir=absent", f"--data={{HOME}}{sep}bank", "--keep=+1e1", "--keep-days=.5"],
              setup=tree(), rules=RULES),

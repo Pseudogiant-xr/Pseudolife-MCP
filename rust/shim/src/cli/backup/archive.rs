@@ -46,7 +46,11 @@ fn link_count(path: &Path) -> Option<u32> {
 }
 
 /// Every tree shape this port archives exactly; anything else defers first.
-fn supported(path: &Path, meta: &Metadata) -> Option<()> {
+fn supported(
+    path: &Path,
+    meta: &Metadata,
+    #[cfg(windows)] output_ancestors: &std::collections::HashSet<(u32, u64)>,
+) -> Option<()> {
     let kind = meta.file_type();
     #[cfg(windows)]
     {
@@ -57,6 +61,12 @@ fn supported(path: &Path, meta: &Metadata) -> Option<()> {
         }
         // A second link to the same file would become a tar hard-link member.
         if kind.is_file() && link_count(path)? > 1 {
+            return None;
+        }
+        if kind.is_dir()
+            && !output_ancestors.is_empty()
+            && output_ancestors.contains(&directory_identity(path)?)
+        {
             return None;
         }
     }
@@ -82,7 +92,12 @@ fn supported(path: &Path, meta: &Metadata) -> Option<()> {
         let entry = entry.ok()?;
         entry.file_name().to_str()?;
         let child = entry.path();
-        supported(&child, &fs::symlink_metadata(&child).ok()?)?;
+        supported(
+            &child,
+            &fs::symlink_metadata(&child).ok()?,
+            #[cfg(windows)]
+            output_ancestors,
+        )?;
     }
     Some(())
 }
@@ -162,7 +177,13 @@ pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
     let out = resolved(bdir)?;
     let data = fs::canonicalize(data_dir).ok()?;
     #[cfg(windows)]
-    if !out.starts_with(&data) && output_aliases_source(&data, &out)? {
+    let output_ancestors = if out.starts_with(&data) {
+        std::collections::HashSet::new()
+    } else {
+        output_ancestor_identities(&out)?
+    };
+    #[cfg(windows)]
+    if !output_ancestors.is_empty() && output_ancestors.contains(&directory_identity(&data)?) {
         return None;
     }
     if data == out {
@@ -198,7 +219,12 @@ pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
         {
             return None;
         }
-        supported(&path, &meta)?;
+        supported(
+            &path,
+            &meta,
+            #[cfg(windows)]
+            &output_ancestors,
+        )?;
     }
     Some(())
 }
@@ -229,22 +255,20 @@ fn directory_identity(path: &Path) -> Option<(u32, u64)> {
 }
 
 #[cfg(windows)]
-fn output_aliases_source(data: &Path, out: &Path) -> Option<bool> {
-    let identity = directory_identity(data)?;
+fn output_ancestor_identities(out: &Path) -> Option<std::collections::HashSet<(u32, u64)>> {
+    let mut identities = std::collections::HashSet::new();
     let mut ancestor = out.to_path_buf();
     loop {
         match fs::metadata(&ancestor) {
             Ok(meta) if meta.is_dir() => {
-                if directory_identity(&ancestor)? == identity {
-                    return Some(true);
-                }
+                identities.insert(directory_identity(&ancestor)?);
             }
             Ok(_) => return None,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(_) => return None,
         }
         if !ancestor.pop() {
-            return Some(false);
+            return Some(identities);
         }
     }
 }
