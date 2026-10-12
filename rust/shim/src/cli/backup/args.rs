@@ -16,6 +16,17 @@ pub(super) enum Parsed {
 }
 const OPTIONS: [&str; 4] = ["--help", "--data-dir", "--out", "--keep-days"];
 
+pub(super) fn columns_supported() -> bool {
+    let Some(value) = std::env::var("COLUMNS")
+        .ok()
+        .and_then(|raw| normalized_number(&raw))
+    else {
+        return true;
+    };
+    let digits = value.trim_start_matches(['+', '-']);
+    !(digits.bytes().all(|byte| byte.is_ascii_digit()) && digits.len() > 4300)
+}
+
 pub(super) fn width() -> usize {
     std::env::var("COLUMNS")
         .ok()

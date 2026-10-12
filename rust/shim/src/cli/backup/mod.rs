@@ -105,13 +105,16 @@ fn rotation_names_supported(bdir: &Path) -> Option<()> {
 
 /// `None` defers to the dispatcher before any effect.
 pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
+    if !args::columns_supported() {
+        return None;
+    }
     let args = match args::parse(&arguments)? {
         args::Parsed::Args(args) => args,
         args::Parsed::Help => {
             return Some(if write_stream(true, &args::help(args::width())).is_ok() {
                 0
             } else {
-                1
+                120
             });
         }
         args::Parsed::Error(message) => {
@@ -168,7 +171,11 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
     archive::admit(&data_dir, &bdir)?;
     rotation_names_supported(&bdir)?;
     let pg_dump = match &dsn {
-        Some(_) => Some(dump::find(&home()?)),
+        Some(_) => {
+            let home = home()?;
+            dump::discovery_paths_supported(&home)?;
+            Some(dump::find(&home))
+        }
         None => None,
     };
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();

@@ -38,7 +38,10 @@ Deferred by name, before any effect: anything that could need the lite tier's
 embedded instance (no DSN and `<data>/embedded_pg/PG_VERSION` present, or no
 `--data-dir`/`PSEUDOLIFE_MCP_DATA_DIR` while the lite default dir exists);
 an output dir that resolves (symlinks and junctions followed) to the data dir or below
-one of its archived children; a top-level child `Path.resolve()` would refuse
+one of its archived children; on Windows an output alias whose directory identity
+places it inside the source despite a different path spelling;
+non-UTF-8 PostgreSQL discovery paths; a numeric `COLUMNS` with more than 4300
+digits; a top-level child `Path.resolve()` would refuse
 (a symlink loop); trees holding anything but files, directories and
 POSIX symlinks (Windows reparse points, hard links on either OS, devices,
 non-UTF-8 names); and on Windows a

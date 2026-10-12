@@ -161,6 +161,10 @@ fn resolved(path: &Path) -> Option<PathBuf> {
 pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
     let out = resolved(bdir)?;
     let data = fs::canonicalize(data_dir).ok()?;
+    #[cfg(windows)]
+    if !out.starts_with(&data) && output_aliases_source(&data, &out)? {
+        return None;
+    }
     if data == out {
         return None;
     }
@@ -197,6 +201,52 @@ pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
         supported(&path, &meta)?;
     }
     Some(())
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn directory_identity(path: &Path) -> Option<(u32, u64)> {
+    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, GetFileInformationByHandle,
+    };
+    let file = fs::OpenOptions::new()
+        .access_mode(0)
+        .share_mode(7)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .ok()?;
+    // SAFETY: plain-data output is initialized, and both handle and pointer
+    // remain valid for the synchronous information query.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } == 0 {
+        return None;
+    }
+    Some((
+        info.dwVolumeSerialNumber,
+        (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    ))
+}
+
+#[cfg(windows)]
+fn output_aliases_source(data: &Path, out: &Path) -> Option<bool> {
+    let identity = directory_identity(data)?;
+    let mut ancestor = out.to_path_buf();
+    loop {
+        match fs::metadata(&ancestor) {
+            Ok(meta) if meta.is_dir() => {
+                if directory_identity(&ancestor)? == identity {
+                    return Some(true);
+                }
+            }
+            Ok(_) => return None,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+        if !ancestor.pop() {
+            return Some(false);
+        }
+    }
 }
 
 /// `st_mode & 0o7777` as CPython's `os.lstat` reports it.

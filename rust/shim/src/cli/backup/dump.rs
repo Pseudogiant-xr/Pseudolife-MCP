@@ -38,14 +38,68 @@ fn windows_ignorable(code: Option<i32>) -> bool {
     )
 }
 
+#[cfg(any(windows, test))]
 fn windows_class(code: i32) -> &'static str {
     match code {
+        89 | 164 | 215 | 10035..=10037 => "BlockingIOError",
+        128 | 129 => "ChildProcessError",
+        109 | 232 | 10058 => "BrokenPipeError",
+        10053 => "ConnectionAbortedError",
+        10061 => "ConnectionRefusedError",
+        10054 => "ConnectionResetError",
+        10004 => "InterruptedError",
+        10060 => "TimeoutError",
         2 | 3 | 15 | 18 | 53 | 67 | 161 | 206 => "FileNotFoundError",
-        5 | 16 | 19..=36 | 65 | 82 | 83 | 108 | 132 | 158 | 167 => "PermissionError",
+        5 | 16 | 19..=34 | 36 | 65 | 82 | 83 | 108 | 132 | 158 | 167 | 10013 => "PermissionError",
         80 | 183 => "FileExistsError",
         267 => "NotADirectoryError",
         _ => "OSError",
     }
+}
+
+#[cfg(unix)]
+fn errno_class(code: i32) -> &'static str {
+    #[cfg(any(target_vendor = "apple", target_os = "freebsd"))]
+    if code == libc::ENOTCAPABLE {
+        return "PermissionError";
+    }
+    // CPython Objects/exceptions.c: its fixed errno-to-OSError subclass table.
+    for (number, class) in [
+        (libc::EAGAIN, "BlockingIOError"),
+        (libc::EALREADY, "BlockingIOError"),
+        (libc::EINPROGRESS, "BlockingIOError"),
+        (libc::EWOULDBLOCK, "BlockingIOError"),
+        (libc::ECHILD, "ChildProcessError"),
+        (libc::EPIPE, "BrokenPipeError"),
+        (libc::ESHUTDOWN, "BrokenPipeError"),
+        (libc::ECONNABORTED, "ConnectionAbortedError"),
+        (libc::ECONNREFUSED, "ConnectionRefusedError"),
+        (libc::ECONNRESET, "ConnectionResetError"),
+        (libc::EEXIST, "FileExistsError"),
+        (libc::ENOENT, "FileNotFoundError"),
+        (libc::EINTR, "InterruptedError"),
+        (libc::EISDIR, "IsADirectoryError"),
+        (libc::ENOTDIR, "NotADirectoryError"),
+        (libc::EACCES, "PermissionError"),
+        (libc::EPERM, "PermissionError"),
+        (libc::ESRCH, "ProcessLookupError"),
+        (libc::ETIMEDOUT, "TimeoutError"),
+    ] {
+        if number == code {
+            return class;
+        }
+    }
+    "OSError"
+}
+
+pub(super) fn discovery_paths_supported(home: &Path) -> Option<()> {
+    home.to_str()?;
+    if let Ok(entries) = fs::read_dir(home.join(".pg0").join("installation")) {
+        for entry in entries.flatten() {
+            entry.path().to_str()?;
+        }
+    }
+    Some(())
 }
 
 pub(super) struct DiscoveryError {
@@ -60,20 +114,11 @@ impl DiscoveryError {
         }
     }
     pub(super) fn diagnostic(&self) -> String {
-        let mut class = match self.error.kind() {
-            io::ErrorKind::PermissionDenied => "PermissionError",
-            io::ErrorKind::NotFound => "FileNotFoundError",
-            io::ErrorKind::NotADirectory => "NotADirectoryError",
-            io::ErrorKind::TimedOut => "TimeoutError",
-            io::ErrorKind::Interrupted => "InterruptedError",
-            _ => "OSError",
-        };
         let code = self.error.raw_os_error().unwrap_or(0);
-        if cfg!(windows) {
-            // CPython maps the Win32 code to errno before selecting a subclass;
-            // sharing violations, for example, are PermissionError there.
-            class = windows_class(code);
-        }
+        #[cfg(unix)]
+        let class = errno_class(code);
+        #[cfg(windows)]
+        let class = windows_class(code);
         let message = self.error.to_string();
         let message = message
             .strip_suffix(&format!(" (os error {code})"))
@@ -283,8 +328,25 @@ mod windows_tests {
 mod error_map_tests {
     #[cfg(unix)]
     #[test]
-    fn timeout_and_interrupt_keep_python_exception_classes() {
+    fn fixed_errno_table_keeps_python_exception_classes() {
         for (code, class) in [
+            (libc::EAGAIN, "BlockingIOError"),
+            (libc::EALREADY, "BlockingIOError"),
+            (libc::EINPROGRESS, "BlockingIOError"),
+            (libc::EWOULDBLOCK, "BlockingIOError"),
+            (libc::ECHILD, "ChildProcessError"),
+            (libc::EPIPE, "BrokenPipeError"),
+            (libc::ESHUTDOWN, "BrokenPipeError"),
+            (libc::ECONNABORTED, "ConnectionAbortedError"),
+            (libc::ECONNREFUSED, "ConnectionRefusedError"),
+            (libc::ECONNRESET, "ConnectionResetError"),
+            (libc::EEXIST, "FileExistsError"),
+            (libc::ENOENT, "FileNotFoundError"),
+            (libc::EISDIR, "IsADirectoryError"),
+            (libc::ENOTDIR, "NotADirectoryError"),
+            (libc::EACCES, "PermissionError"),
+            (libc::EPERM, "PermissionError"),
+            (libc::ESRCH, "ProcessLookupError"),
             (libc::ETIMEDOUT, "TimeoutError"),
             (libc::EINTR, "InterruptedError"),
         ] {
@@ -303,15 +365,36 @@ mod error_map_tests {
 
     #[test]
     fn win32_codes_follow_cpython_311_errno_classes() {
+        for (code, class) in [
+            (89, "BlockingIOError"),
+            (164, "BlockingIOError"),
+            (215, "BlockingIOError"),
+            (128, "ChildProcessError"),
+            (129, "ChildProcessError"),
+            (109, "BrokenPipeError"),
+            (232, "BrokenPipeError"),
+            (10035, "BlockingIOError"),
+            (10036, "BlockingIOError"),
+            (10037, "BlockingIOError"),
+            (10004, "InterruptedError"),
+            (10013, "PermissionError"),
+            (10058, "BrokenPipeError"),
+            (10053, "ConnectionAbortedError"),
+            (10061, "ConnectionRefusedError"),
+            (10054, "ConnectionResetError"),
+            (10060, "TimeoutError"),
+        ] {
+            assert_eq!(windows_class(code), class, "{code}");
+        }
         // CPython PC/errmap.h: EACCES includes device read failures; EBADF
         // includes both invalid-target and direct-access handles.
         for code in [
-            5, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 65, 82,
-            83, 108, 132, 158, 167,
+            5, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 36, 65, 82, 83,
+            108, 132, 158, 167,
         ] {
             assert_eq!(windows_class(code), "PermissionError", "{code}");
         }
-        for code in [123, 4390] {
+        for code in [35, 123, 4390] {
             assert_eq!(windows_class(code), "OSError", "{code}");
         }
         for code in [6, 114, 130, 267, 1921] {

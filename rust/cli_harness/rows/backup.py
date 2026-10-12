@@ -294,7 +294,9 @@ _DISCOVERY_TRACEBACK = re.compile(
     rb'\ATraceback \(most recent call last\):\r?\n'
     rb'(?:  File "[^\r\n]+", line [0-9]+, in [^\r\n]+\r?\n'
     rb'(?:    [^\r\n]*\r?\n)*)+'
-    rb'(?P<error>(?:PermissionError|OSError|FileNotFoundError|NotADirectoryError|TimeoutError|InterruptedError): '
+    rb'(?P<error>(?:BlockingIOError|ChildProcessError|BrokenPipeError|ConnectionAbortedError|'
+    rb'ConnectionRefusedError|ConnectionResetError|FileExistsError|FileNotFoundError|InterruptedError|'
+    rb'IsADirectoryError|NotADirectoryError|PermissionError|ProcessLookupError|TimeoutError|OSError): '
     rb'\[(?:Errno|WinError) [0-9]+\] [^\r\n]+\r?\n)\Z')
 
 
@@ -328,6 +330,9 @@ def cases() -> list[Case]:
     no_pg_dump = {"PATH": f"{{HOME}}{sep}no-bin"}
     return [
         Case("help", ["backup", "--help"]),
+        *[Case(f"help-stdout-closed-{flag.lstrip('-')}", ["backup", flag],
+               stdout_closed=True, rules=("python-stdout-closed-trailer",))
+          for flag in ["--help", "-h"]],
         *[Case(f"help-columns-{width}", ["backup", "-h"], env={"COLUMNS": str(width)})
           for width in (20, 40, 60, 100, 120, "1_00", "１００", "999999999999999999999999999999")],
         Case("file-mode-argparse-equals-repeat-abbrev",

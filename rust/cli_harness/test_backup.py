@@ -1,6 +1,7 @@
 """Backup observation rules keep durable-state and error differences visible."""
 import base64
 import copy
+import errno
 
 import pytest
 
@@ -19,6 +20,17 @@ def observation(stderr, **changes):
     ("PermissionError", 13, "Permission denied"),
     ("TimeoutError", 110, "Connection timed out"),
     ("InterruptedError", 4, "Interrupted system call"),
+    ("BlockingIOError", errno.EAGAIN, "unavailable"),
+    ("ChildProcessError", errno.ECHILD, "no child"),
+    ("BrokenPipeError", errno.EPIPE, "broken pipe"),
+    ("ConnectionAbortedError", errno.ECONNABORTED, "aborted"),
+    ("ConnectionRefusedError", errno.ECONNREFUSED, "refused"),
+    ("ConnectionResetError", errno.ECONNRESET, "reset"),
+    ("FileExistsError", errno.EEXIST, "exists"),
+    ("FileNotFoundError", errno.ENOENT, "absent"),
+    ("IsADirectoryError", errno.EISDIR, "directory"),
+    ("NotADirectoryError", errno.ENOTDIR, "not directory"),
+    ("ProcessLookupError", errno.ESRCH, "no process"),
 ])
 def test_discovery_traceback_only_removes_interpreter_frames(class_name, code, message):
     final = f"{class_name}: [Errno {code}] {message}: '/fixture/.pg0/installation'\n".encode()

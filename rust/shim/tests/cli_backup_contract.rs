@@ -513,22 +513,93 @@ fn windows_junction_parent_paths_cannot_bypass_output_containment() {
     let home = Home::new("junction-parent");
     let bank = home.path().join("bank");
     fs::create_dir_all(bank.join("sub")).unwrap();
-    fs::create_dir_all(home.path().join("x/y")).unwrap();
+    let target = home.path().join("x").join("y");
+    fs::create_dir_all(&target).unwrap();
     let link = home.path().join("j");
     let output = Command::new("cmd")
-        .args([
-            "/C",
-            "mklink",
-            "/J",
-            &text(&link),
-            &text(&home.path().join("x/y")),
-        ])
+        .args(["/C", "mklink", "/J", &text(&link), &text(&target)])
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     let out = link.join("..").join("bank/sub/bk");
     assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
     fs::remove_dir(link).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn local_unc_output_alias_cannot_archive_its_own_partial_file() {
+    use std::path::{Component, Prefix};
+    let home = Home::new("unc-output-alias");
+    let bank = home.path().join("bank");
+    fs::create_dir_all(bank.join("sub")).unwrap();
+    let canonical = fs::canonicalize(&bank).unwrap();
+    let drive = match canonical.components().next().unwrap() {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive,
+            _ => panic!("fixture requires a local drive"),
+        },
+        _ => panic!("fixture requires an absolute directory"),
+    };
+    let mut alias = PathBuf::from(format!(r"\\localhost\{}$", char::from(drive)));
+    for component in canonical.components().skip(2) {
+        alias.push(component.as_os_str());
+    }
+    if !alias.try_exists().unwrap_or(false) {
+        assert!(
+            std::env::var_os("CI").is_none() && std::env::var_os("GITHUB_ACTIONS").is_none(),
+            "CI UNC alias fixture requires the local administrative share"
+        );
+        eprintln!("UNC alias fixture unverified locally: administrative share unavailable");
+        return;
+    }
+    let out = alias.join("sub").join("bk");
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_discovery_paths_defer_before_output_creation() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let home = Home::new("raw-discovery");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    fs::create_dir_all(
+        home.path()
+            .join(".pg0")
+            .join("installation")
+            .join(OsString::from_vec(b"version-\xff".to_vec())),
+    )
+    .unwrap();
+    let before = home.listing();
+    let output = command(home.path())
+        .env(
+            "PSEUDOLIFE_MCP_DATABASE_URL",
+            "postgresql://unused@127.0.0.1:9/unused",
+        )
+        .env("PATH", home.path().join("no-bin"))
+        .args(["--data-dir", &text(&bank)])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
+    assert_eq!(home.listing(), before);
+}
+
+#[test]
+fn columns_beyond_python_integer_limit_defer_before_effects() {
+    let home = Home::new("long-columns");
+    let before = home.listing();
+    let output = command(home.path())
+        .env("COLUMNS", "9".repeat(4301))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_eq!(home.listing(), before);
 }
 
 #[cfg(unix)]
