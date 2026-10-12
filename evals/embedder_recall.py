@@ -17,6 +17,11 @@ prefixes — instruction-tuned embedders swing on exact wording, so an arm
 run with the wrong prefix understates that model and the comparison stops
 being fair. The first ``--arms`` entry is the paired-McNemar baseline.
 
+``--dataset locomo`` reads ``evals/data/locomo10.json`` (gitignored; from
+https://github.com/snap-research/locomo, ``data/locomo10.json``). It has
+roughly 8x the gold turns of the 150-question LME slice, so it separates
+arms the LME slice cannot.
+
     python evals/embedder_recall.py --questions 30
     python evals/embedder_recall.py --arms minilm bge-base-prefix qwen3-0.6b \
         --out evals/results/embedder-recall-<tag>.json
@@ -35,6 +40,19 @@ RESULTS = Path(__file__).resolve().parent / "results"
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 QWEN3_QUERY_PREFIX = ("Instruct: Given a web search query, retrieve relevant "
                       "passages that answer the query\nQuery:")
+# EmbeddingGemma 2 prefixes both sides; strings are the card's retrieval
+# prompts (config_sentence_transformers.json: "query" / "document").
+EG2_QUERY_PREFIX = "task: search result | query: "
+EG2_PASSAGE_PREFIX = "title: none | text: "
+# Card-verbatim prefixes for the 2026-10-09 shootout arms (read from each
+# repo's config_sentence_transformers.json / README).
+E5_INSTRUCT_QUERY_PREFIX = ("Instruct: Given a web search query, retrieve "
+                            "relevant passages that answer the query\nQuery: ")
+HARRIER_QUERY_PREFIX = E5_INSTRUCT_QUERY_PREFIX
+KALM_MINI_QUERY_PREFIX = ("Instruct: Given a query, retrieve documents that "
+                          "answer the query \n Query: ")
+BGE_GEMMA2_QUERY_PREFIX = ("<instruct>Given a web search query, retrieve "
+                           "relevant passages that answer the query.\n<query>")
 
 # key -> (label, repo, query_prefix, passage_prefix). Prefixes are pinned
 # VERBATIM from each model card because instruction-tuned embedders swing
@@ -60,11 +78,63 @@ CANDIDATES = {
                         "nvidia/Nemotron-3-Embed-1B-BF16", "query: ", "passage: "),
     "nemotron-1b-d1024": ("Nemotron-3-Embed-1B (bf16, truncated 1024d)",
                           "nvidia/Nemotron-3-Embed-1B-BF16", "query: ", "passage: "),
+    # Needs sentence-transformers>=6.1.0 (card requirement).
+    "embeddinggemma-2": ("EmbeddingGemma 2 (native 768d)",
+                         "google/embeddinggemma-2",
+                         EG2_QUERY_PREFIX, EG2_PASSAGE_PREFIX),
+    "embeddinggemma-2-d256": ("EmbeddingGemma 2 (truncated 256d)",
+                              "google/embeddinggemma-2",
+                              EG2_QUERY_PREFIX, EG2_PASSAGE_PREFIX),
+    # ── 2026-10-09 shootout ──
+    "qwen3-0.6b-d512":  ("Qwen3-Embedding-0.6B (truncated 512d)",
+                         "Qwen/Qwen3-Embedding-0.6B", QWEN3_QUERY_PREFIX, ""),
+    "qwen3-0.6b-d256":  ("Qwen3-Embedding-0.6B (truncated 256d)",
+                         "Qwen/Qwen3-Embedding-0.6B", QWEN3_QUERY_PREFIX, ""),
+    "nemotron-1b-d512": ("Nemotron-3-Embed-1B (bf16, truncated 512d)",
+                         "nvidia/Nemotron-3-Embed-1B-BF16", "query: ", "passage: "),
+    "qwen3-8b":         ("Qwen3-Embedding-8B (bf16, native 4096d)",
+                         "Qwen/Qwen3-Embedding-8B", QWEN3_QUERY_PREFIX, ""),
+    "e5-large-instruct": ("multilingual-e5-large-instruct",
+                          "intfloat/multilingual-e5-large-instruct",
+                          E5_INSTRUCT_QUERY_PREFIX, ""),
+    "bge-m3":           ("bge-m3 (dense)", "BAAI/bge-m3", "", ""),
+    "kalm-mini-v2.5":   ("KaLM-embedding-multilingual-mini-instruct-v2.5",
+                         "KaLM-Embedding/KaLM-embedding-multilingual-mini-"
+                         "instruct-v2.5", KALM_MINI_QUERY_PREFIX, ""),
+    "gte-modernbert":   ("gte-modernbert-base", "Alibaba-NLP/gte-modernbert-base",
+                         "", ""),
+    "mxbai-large":      ("mxbai-embed-large-v1 (query prefix)",
+                         "mixedbread-ai/mxbai-embed-large-v1",
+                         BGE_QUERY_PREFIX, ""),
+    "harrier-0.6b":     ("harrier-oss-v1-0.6b", "microsoft/harrier-oss-v1-0.6b",
+                         HARRIER_QUERY_PREFIX, ""),
+    "harrier-270m":     ("harrier-oss-v1-270m", "microsoft/harrier-oss-v1-270m",
+                         HARRIER_QUERY_PREFIX, ""),
+    "granite-311m-r2":  ("granite-embedding-311m-multilingual-r2",
+                         "ibm-granite/granite-embedding-311m-multilingual-r2",
+                         "", ""),
+    "granite-97m-r2":   ("granite-embedding-97m-multilingual-r2",
+                         "ibm-granite/granite-embedding-97m-multilingual-r2",
+                         "", ""),
+    "bge-gemma2":       ("bge-multilingual-gemma2 (bf16)",
+                         "BAAI/bge-multilingual-gemma2",
+                         BGE_GEMMA2_QUERY_PREFIX, ""),
 }
 # ST arms that use card-sanctioned Matryoshka truncation (slice + L2 renorm,
 # handled by sentence-transformers' truncate_dim). pgvector's HNSW index caps
 # at 2000 dims, so a 2048-d native model is only DEPLOYABLE truncated.
-TRUNCATE_DIM = {"nemotron-1b-d1024": 1024}
+TRUNCATE_DIM = {"nemotron-1b-d1024": 1024, "embeddinggemma-2-d256": 256,
+                "qwen3-0.6b-d512": 512, "qwen3-0.6b-d256": 256,
+                "nemotron-1b-d512": 512}
+# Extra SentenceTransformer(...) kwargs per arm (trust_remote_code, dtype)
+# and extra encode(...) kwargs per arm (e.g. a LoRA task adapter). Both are
+# recorded in the artifact so the run is reproducible from it.
+MODEL_KWARGS: dict[str, dict] = {
+    # 8-9B arms only fit a 24GB card in bf16 (fp32 weights are 30+ GB).
+    "qwen3-8b": {"model_kwargs": {"dtype": "bfloat16"}},
+    "bge-gemma2": {"model_kwargs": {"dtype": "bfloat16"}},
+}
+ENCODE_KWARGS: dict[str, dict] = {}
 
 # ── GGUF arms: quantized models served by llama-server ────────────────────
 # Weights quantization is what these arms measure (Q4_K_M vs fp32 vectors).
@@ -180,14 +250,64 @@ def load_questions(n: int) -> list[dict]:
                 gold.append(str(t.get("has_answer", "False")).lower() == "true")
         if any(gold):
             out.append({"qid": q["question_id"], "question": q["question"],
+                        "hid": q["question_id"],
                         "turns": turns, "gold": np.array(gold)})
         if len(out) >= n:
             break
     return out
 
 
+# LoCoMo category 5 is adversarial (unanswerable from the conversation);
+# retrieval recall is undefined for it, so it is excluded as is standard.
+LOCOMO_EXCLUDED_CATEGORIES = {5}
+
+
+def load_locomo(n: int) -> list[dict]:
+    """LoCoMo (snap-research/locomo data/locomo10.json): every non-adversarial
+    question ranks all turns of ITS conversation; gold = the turns named in
+    ``evidence``. All questions of one conversation share one haystack
+    (``hid``), so recall_at encodes each conversation once."""
+    import re
+    rows = json.loads((DATA / "locomo10.json").read_text(encoding="utf-8"))
+    out = []
+    for conv in rows:
+        c = conv["conversation"]
+        turns, ids = [], []
+        s = 1
+        while f"session_{s}" in c:
+            date = c.get(f"session_{s}_date_time", "")
+            for t in c[f"session_{s}"]:
+                text = (t.get("text") or "").strip()
+                if t.get("blip_caption"):
+                    text = f"{text} [shares an image: {t['blip_caption']}]"
+                if not text:
+                    continue
+                turns.append(f"[{date}] {t['speaker']}: {text}")
+                ids.append(t["dia_id"])
+            s += 1
+        pos = {d: i for i, d in enumerate(ids)}
+        for qi, q in enumerate(conv["qa"]):
+            if q.get("category") in LOCOMO_EXCLUDED_CATEGORIES:
+                continue
+            # evidence strings are occasionally joined ("D8:6; D9:17")
+            ev = {m for e in q.get("evidence", [])
+                  for m in re.findall(r"D\d+:\d+", e)}
+            gold = np.zeros(len(turns), dtype=bool)
+            for e in ev:
+                if e in pos:
+                    gold[pos[e]] = True
+            if gold.any():
+                out.append({"qid": f"{conv['sample_id']}#{qi}",
+                            "question": q["question"],
+                            "hid": conv["sample_id"],
+                            "turns": turns, "gold": gold})
+            if len(out) >= n:
+                return out
+    return out
+
+
 def recall_at(model, questions, ks, query_prefix="", passage_prefix="",
-              batch_size=32):
+              batch_size=32, encode_kwargs=None):
     """Returns (recall_by_k, n_gold, per_gold_hits).
 
     ``per_gold_hits[k]`` is one bool per gold turn, in a stable order, so
@@ -198,12 +318,21 @@ def recall_at(model, questions, ks, query_prefix="", passage_prefix="",
     """
     hits = {k: [] for k in ks}
     total = 0
+    cached_hid, docs = None, None
     for q in questions:
-        docs = model.encode([passage_prefix + t for t in q["turns"]],
-                            batch_size=batch_size, show_progress_bar=False,
-                            normalize_embeddings=True, convert_to_numpy=True)
+        # Questions sharing a haystack (LoCoMo: one per conversation) are
+        # adjacent, so a one-entry cache encodes each haystack once.
+        if q["hid"] != cached_hid:
+            docs = model.encode([passage_prefix + t for t in q["turns"]],
+                                batch_size=batch_size,
+                                show_progress_bar=False,
+                                normalize_embeddings=True,
+                                convert_to_numpy=True,
+                                **(encode_kwargs or {}))
+            cached_hid = q["hid"]
         qv = model.encode([query_prefix + q["question"]],
-                          normalize_embeddings=True, convert_to_numpy=True)[0]
+                          normalize_embeddings=True, convert_to_numpy=True,
+                          **(encode_kwargs or {}))[0]
         order = np.argsort(-(docs @ qv))
         gold_idx = sorted(np.where(q["gold"])[0].tolist())
         total += len(gold_idx)
@@ -229,6 +358,10 @@ def mcnemar(a: list[bool], b: list[bool]) -> tuple[int, int, float]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--dataset", choices=["lme", "locomo"], default="lme",
+                    help="lme: LongMemEval s (one haystack per question); "
+                         "locomo: LoCoMo 10 conversations, adversarial "
+                         "category excluded")
     ap.add_argument("--questions", type=int, default=500)
     ap.add_argument("--arms", nargs="+", default=["minilm", "bge-base"],
                     choices=sorted(CANDIDATES) + sorted(GGUF_CANDIDATES),
@@ -254,8 +387,10 @@ def main() -> int:
 
     import embedder_stamp
 
-    questions = load_questions(args.questions)
-    turns = sum(len(q["turns"]) for q in questions)
+    questions = (load_questions(args.questions) if args.dataset == "lme"
+                 else load_locomo(args.questions))
+    turns = sum(len(t) for t in {q["hid"]: q["turns"]
+                                 for q in questions}.values())
     keys = list(args.arms) + (["bge-base-prefix"] if args.with_prefix
                               and "bge-base-prefix" not in args.arms else [])
     print(f"{len(questions)} questions, {turns} haystack turns; "
@@ -265,7 +400,8 @@ def main() -> int:
         """Write after EVERY arm: a crash on arm 5 must not lose arms 1-4's
         paired hit vectors -- they only exist in-process."""
         args.out.write_text(json.dumps(
-            {"questions": len(questions), "haystack_turns": turns,
+            {"dataset": args.dataset,
+             "questions": len(questions), "haystack_turns": turns,
              "gold_turns": n_gold, "max_seq_length": args.max_seq_length,
              "batch_size": args.batch_size,
              "arms": rows, "mcnemar_vs_shipped": tests},
@@ -288,22 +424,36 @@ def main() -> int:
         else:
             label, repo, prefix, passage_prefix = CANDIDATES[key]
             model = SentenceTransformer(repo,
-                                        truncate_dim=TRUNCATE_DIM.get(key))
+                                        truncate_dim=TRUNCATE_DIM.get(key),
+                                        **MODEL_KWARGS.get(key, {}))
             model.max_seq_length = min(int(model.max_seq_length or 512),
                                        args.max_seq_length)
+            # The harness concatenates each card's prefix itself; a model
+            # whose ST config sets default_prompt_name would get a second
+            # prefix on every input, so clear it (and record that it was set).
+            default_prompt = getattr(model, "default_prompt_name", None)
+            if default_prompt is not None:
+                model.default_prompt_name = None
             device = str(getattr(model, "device", "cpu"))
             # A bare SentenceTransformer: no cpu_dtype applies, so the
             # precision is whatever the installed stack loaded. Read back.
             embedder = embedder_stamp.describe_model(model, device=device)
         t0 = time.perf_counter()
         rec, n_gold, per_gold = recall_at(model, questions, args.ks, prefix,
-                                          passage_prefix, args.batch_size)
+                                          passage_prefix, args.batch_size,
+                                          ENCODE_KWARGS.get(key))
         dt = time.perf_counter() - t0
         hit_vectors[label] = per_gold
         rows.append({"arm": label, "model": repo,
                      # exact strings, not bools: instruction-tuned embedders
                      # swing on wording, so the artifact must pin what ran
                      "query_prefix": prefix, "passage_prefix": passage_prefix,
+                     "model_kwargs": {k: str(v) for k, v in
+                                      MODEL_KWARGS.get(key, {}).items()},
+                     "encode_kwargs": ENCODE_KWARGS.get(key, {}),
+                     "cleared_default_prompt_name": (
+                         default_prompt if key not in GGUF_CANDIDATES
+                         else None),
                      "device": device,
                      "embedder": embedder,
                      "max_seq_length": int(model.max_seq_length),
