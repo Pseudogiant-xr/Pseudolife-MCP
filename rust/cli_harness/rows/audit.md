@@ -87,9 +87,11 @@ that the shared native client's DSN grammar admits (`rust/shim/src/pg/`).
 
 ## Coverage notes
 
-- PostgreSQL notices are retained until drained; a Rust unit case checks all
-  4100 notices remain in order beyond the former 4096-entry cap. Audit
-  redaction is the only notice consumer and drains around its vacuum work.
+- Audit vacuum opts into complete notice retention only during its collection
+  window. A PostgreSQL-wire test sends 4100 notices through the real session
+  receiver and checks count, order and draining. Other sessions retain only the
+  newest 4096 notices; dropping an undrained collection restores that bound.
+  Reintroducing a cap at the receiver is the completeness counterexample.
 - Vacuum skips: the test login owns every table, so Postgres never skips for
   it; the harness drives the same path with an expression index whose
   ANALYZE-time `RAISE WARNING` arrives exactly like a skip, with the database

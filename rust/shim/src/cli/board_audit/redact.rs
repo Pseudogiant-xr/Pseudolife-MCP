@@ -323,14 +323,15 @@ async fn commit(tx: pg::Transaction<'_>) -> Result<(), Stop> {
 
 /// `_vacuum`: the warnings Postgres raised while skipping a step, or `Err`
 /// when a statement failed.
-async fn vacuum(session: &pg::Session) -> Result<Vec<String>, ()> {
+async fn vacuum(session: &mut pg::Session) -> Result<Vec<String>, ()> {
     let client = session.client();
     let previous: String = client
         .query_one("SHOW client_min_messages", &[])
         .await
         .and_then(|row| row.try_get(0))
         .map_err(|_| ())?;
-    let _ = session.take_notices();
+    let collection = session.collect_notices();
+    let client = collection.client();
     let steps = async {
         client
             .batch_execute("SET client_min_messages TO warning")
@@ -341,13 +342,16 @@ async fn vacuum(session: &pg::Session) -> Result<Vec<String>, ()> {
         client.batch_execute("VACUUM pg_catalog.pg_statistic").await
     }
     .await;
-    let warnings: Vec<String> = session
+    let warnings: Vec<String> = collection
         .take_notices()
         .into_iter()
         .filter(|notice| notice.parsed_severity() == Some(tokio_postgres::error::Severity::Warning))
         .map(|notice| notice.message().to_owned())
         .collect();
-    let restored = client
+    // Python removes its notice handler before restoring the setting.
+    drop(collection);
+    let restored = session
+        .client()
         .execute(
             "SELECT set_config('client_min_messages', $1, false)",
             &[&previous],

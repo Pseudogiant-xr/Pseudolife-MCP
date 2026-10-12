@@ -87,8 +87,42 @@ pub struct Session {
 /// The SQLSTATE of a server error that ended the connection with no request
 /// pending (a FATAL such as `admin_shutdown`), kept for the caller.
 type Ended = std::sync::Arc<std::sync::Mutex<Option<tokio_postgres::error::SqlState>>>;
-type Notices =
-    std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<tokio_postgres::error::DbError>>>;
+type Notices = std::sync::Arc<std::sync::Mutex<NoticeBuffer>>;
+#[derive(Default)]
+struct NoticeBuffer {
+    kept: std::collections::VecDeque<tokio_postgres::error::DbError>,
+    collecting: bool,
+}
+/// Outside an explicit collection window, retain only the newest notices.
+pub const NOTICE_LIMIT: usize = 4096;
+
+/// Complete notice retention for a caller's collection window. Dropping the
+/// collection, including cancellation, restores the ordinary receiver bound.
+pub struct NoticeCollection<'a> {
+    session: &'a mut Session,
+}
+impl NoticeCollection<'_> {
+    pub fn client(&self) -> &Client {
+        self.session.client()
+    }
+    pub fn take_notices(&self) -> Vec<tokio_postgres::error::DbError> {
+        self.session.take_notices()
+    }
+}
+impl Drop for NoticeCollection<'_> {
+    fn drop(&mut self) {
+        let mut notices = self
+            .session
+            .notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        notices.collecting = false;
+        while notices.kept.len() > NOTICE_LIMIT {
+            notices.kept.pop_front();
+        }
+        notices.kept.shrink_to(NOTICE_LIMIT);
+    }
+}
 impl Session {
     pub async fn open(dsn: &Dsn) -> Result<Self, Error> {
         Self::open_in(dsn, &TlsEnvironment::from_environment()).await
@@ -147,7 +181,10 @@ impl Session {
                     let mut kept = sink
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    keep_notice(&mut kept, notice);
+                    if !kept.collecting && kept.kept.len() == NOTICE_LIMIT {
+                        kept.kept.pop_front();
+                    }
+                    kept.kept.push_back(notice);
                 }
             }
             Ok(())
@@ -172,15 +209,30 @@ impl Session {
         self.client.as_mut().expect("open PostgreSQL session")
     }
     /// Server notices received so far (in order), removed from the session.
-    /// Every notice is retained: audit cleanup must not silently lose warnings.
+    /// Normally only the newest [`NOTICE_LIMIT`] are retained. A collection
+    /// window retains all notices until drained or the window is dropped.
     pub fn take_notices(&self) -> Vec<tokio_postgres::error::DbError> {
         std::mem::take(
-            &mut *self
+            &mut self
                 .notices
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .kept,
         )
         .into()
+    }
+    /// Discard prior notices and retain every notice for this operation.
+    /// Exclusive borrowing prevents overlapping collection windows. The caller
+    /// must drain before dropping the window to claim complete output.
+    pub fn collect_notices(&mut self) -> NoticeCollection<'_> {
+        let mut notices = self
+            .notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        notices.kept.clear();
+        notices.collecting = true;
+        drop(notices);
+        NoticeCollection { session: self }
     }
     /// The SQLSTATE of the server error that ended this connection while no
     /// request was pending, once the connection has ended that way.
@@ -203,22 +255,5 @@ impl Drop for Session {
     fn drop(&mut self) {
         // Cancellation/error closes exactly this connection; never a bank/server.
         self.driver.abort();
-    }
-}
-
-fn keep_notice<T>(kept: &mut std::collections::VecDeque<T>, notice: T) {
-    kept.push_back(notice);
-}
-
-#[cfg(test)]
-mod notice_tests {
-    #[test]
-    fn warnings_past_the_old_limit_are_complete_and_ordered() {
-        let mut kept = std::collections::VecDeque::new();
-        for index in 0..4100 {
-            super::keep_notice(&mut kept, index);
-        }
-        assert_eq!(kept.len(), 4100);
-        assert!(kept.into_iter().eq(0..4100));
     }
 }

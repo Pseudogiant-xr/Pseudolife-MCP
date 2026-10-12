@@ -25,20 +25,27 @@ fn boolean_column() -> Vec<u8> {
 }
 
 pub async fn start() -> Fixture {
-    start_inner(None).await
+    start_inner(None, 0).await
 }
 
 pub async fn fail_after_output_created() -> (Fixture, oneshot::Receiver<()>, oneshot::Sender<()>) {
     let (seen_tx, seen_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     (
-        start_inner(Some((seen_tx, release_rx))).await,
+        start_inner(Some((seen_tx, release_rx)), 0).await,
         seen_rx,
         release_tx,
     )
 }
 
-async fn start_inner(gate: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>) -> Fixture {
+pub async fn notices(count: usize) -> Fixture {
+    start_inner(None, count).await
+}
+
+async fn start_inner(
+    gate: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+    notices: usize,
+) -> Fixture {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let task = tokio::spawn(async move {
@@ -65,6 +72,19 @@ async fn start_inner(gate: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>)
             match tag {
                 b'Q' => {
                     let query = std::str::from_utf8(&data[..data.len() - 1]).unwrap();
+                    if query == "FIXTURE NOTICE BURST" {
+                        for index in 0..notices {
+                            reply(
+                                &mut stream,
+                                b'N',
+                                format!(
+                                    "SWARNING\0VWARNING\0C01000\0Mfixture-warning-{index:04}\0\0"
+                                )
+                                .as_bytes(),
+                            )
+                            .await;
+                        }
+                    }
                     let command = query.split_whitespace().next().unwrap();
                     transaction = match command {
                         "BEGIN" => b'T',
