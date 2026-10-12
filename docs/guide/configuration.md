@@ -1029,11 +1029,11 @@ without attaching a mailbox.
 
 Once a task's mailbox is attached, each later coordination call first
 re-checks the bank's identity with a read-only request that never
-initializes anything. A timeout, an unreachable daemon or a 429/5xx answer
-gets one automatic retry with the same adapter and saved mailbox (each
-check allows six seconds). A refused credential, a different bank or a
-credential that changed meanwhile fails closed at once, and the task's
-hint says whether validation, access or attachment failed. Message
+initializes anything. A timeout, an unreachable daemon or a 429, 500, 502,
+503 or 504 answer gets one automatic retry with the same adapter and saved
+mailbox (each check allows six seconds). A refused credential, a different
+bank or a credential that changed meanwhile fails closed at once, and the
+task's hint says whether validation, access or attachment failed. Message
 operations are never replayed by this retry.
 
 A native subagent (`collaboration.spawn_agent`) is a thread of its own, so it
