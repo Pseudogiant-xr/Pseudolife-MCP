@@ -95,3 +95,15 @@ The scratch merge of store checklist head `0e1481c7` with slots checklist head `
 - `rust/daemon/src/service.rs`
 
 The scratch merge was aborted and both forward worktrees are clean. Neither original branch was modified. Both slot/contradiction implementations remain byte-identical; the conflicting checklists describe the two independent branches. The final follow-up commits change checklist text only.
+
+## W2P preparation, 2026-10-12
+
+- BASE: `aaa652c6f570d02d9b2985acf1b3da5e1c45e92d`.
+- Local branch: `w2p/e-slots`; no publication.
+- Conflicts: `src/main.rs`.
+
+Both contradiction and dream module declarations are retained. Pure slot/contradiction sources and frozen cases are unchanged.
+
+Existing Unicode-runtime exception remains; no DB access is added by this slice.
+
+Validation and independent Codex high review are recorded in the private W2P report; initial failures and final reruns are listed separately. Windows evidence is cross compilation, not runtime. Frozen oracle goldens are not re-recorded.
