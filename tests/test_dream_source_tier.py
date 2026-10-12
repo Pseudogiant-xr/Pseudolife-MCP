@@ -565,12 +565,14 @@ def test_dream_add_cannot_convert_a_direct_scalar(svc, support):
 
 
 def test_dream_add_converts_a_dream_consolidated_scalar(svc):
+    # nano, not emacs: on the real embedding weights (CI's test lane) emacs
+    # sits within MEMBER_DEDUP_COSINE of vim in this slot and only confirms.
     _seed_user_fact(svc, "vim")
-    svc.store("my editor list now includes emacs", source="user")
-    svc.dream_run(StubExtractor([_claim("emacs", op="add")]))
+    svc.store("my editor list now includes nano", source="user")
+    svc.dream_run(StubExtractor([_claim("nano", op="add")]))
     cur = svc.cortex_lookup("editor-pref", "editor")
     assert cur["kind"] == "set"
-    assert sorted(m["value"] for m in cur["members"]) == ["emacs", "vim"]
+    assert sorted(m["value"] for m in cur["members"]) == ["nano", "vim"]
 
 
 # ── only the dream flag ever writes a dream:<tier> mark
@@ -663,12 +665,13 @@ def test_set_conversion_keeps_a_direct_support_tier(svc):
     and its marks, or the member loses that protection."""
     _seed_user_fact(svc, "vim")
     svc.cortex_write("editor-pref", "editor", "vim", support="action")
-    svc.set_add("editor-pref", "editor", "emacs")
+    # nano, not emacs: see test_dream_add_converts_a_dream_consolidated_scalar.
+    svc.set_add("editor-pref", "editor", "nano")
     assert svc.cortex_lookup("editor-pref", "editor")["kind"] == "set"
     svc.store("vim is no longer an editor I use", source="user")
     svc.dream_run(StubExtractor([_claim("vim", op="remove")]))
     members = svc.cortex_lookup("editor-pref", "editor")["members"]
-    assert sorted(m["value"] for m in members) == ["emacs", "vim"]
+    assert sorted(m["value"] for m in members) == ["nano", "vim"]
 
 
 def test_a_refused_promotion_parks_with_its_witness(svc):
