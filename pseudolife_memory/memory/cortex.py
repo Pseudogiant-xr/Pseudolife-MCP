@@ -201,6 +201,32 @@ def _norm_support(s: str | None) -> str | None:
     return s if s in SUPPORT_PRECEDENCE else None
 
 
+# Dream tier marks (a provenance string, no schema change). The dream stamps
+# ``dream:<tier>`` on a record when it is the write that first gives the
+# record user or action support; any direct (non-dream) write at that tier
+# clears it. So a user/action tier WITHOUT its mark came from a direct write
+# (records written before the marks existed included: the dream could not
+# write those tiers then), and a dream claim may not supersede it.
+_DIRECT_TIERS = ("user", "action")
+
+
+def direct_backed(rec: "CortexRecord | None") -> bool:
+    """True when a direct (non-dream) user or action write backs ``rec``."""
+    return rec is not None and any(
+        t in rec.support and f"dream:{t}" not in rec.provenance
+        for t in _DIRECT_TIERS)
+
+
+def _mark_tier(rec: "CortexRecord", sup: str | None, dream: bool) -> None:
+    """Call BEFORE adding ``sup`` to ``rec.support``."""
+    if sup not in _DIRECT_TIERS:
+        return
+    if not dream:
+        rec.provenance.discard(f"dream:{sup}")
+    elif sup not in rec.support:
+        rec.provenance.add(f"dream:{sup}")
+
+
 def _pick(label, rec, field_name: str):
     """v35 label resolution: ``INHERIT`` takes the label of the record the
     write lands on (``None`` when there is nothing to inherit from); an
@@ -422,10 +448,19 @@ class CortexStore:
         stance: str | None = None,
         authority=INHERIT,
         distortion_tolerance=INHERIT,
+        dream: bool = False,
     ) -> WriteResult:
         """Write a scalar fact at ``(slot.entity, slot.attribute)`` — the
         canonical insert/confirm/supersede/contest path (see the module
         docstring).
+
+        ``dream`` (internal): the write is a dream claim. With
+        ``protect_provenance`` on it parks rather than supersede a value a
+        direct user or action write backs (:func:`direct_backed`); a
+        compression echo confirms without raising the retained value's tier;
+        and a user or action tier it is first to add is marked as
+        dream-written (``dream:<tier>`` in provenance), which a direct write
+        at that tier clears.
 
         ``stance`` (v29) follows the latest asserting write on every
         outcome — insert, confirm, supersede, and contend all stamp the
@@ -482,11 +517,12 @@ class CortexStore:
                 return self._contend(None, slot, emb, confidence, prov, t,
                                      sup, "quarantine_low_trust", semb,
                                      freshness_class=freshness_class,
-                                     stance=stance, **lab, **stamp)
+                                     stance=stance, dream=dream,
+                                     **lab, **stamp)
             new = self._insert(
                 slot, emb, confidence, prov, t, support=sup,
                 slot_embedding=semb, freshness_class=freshness_class,
-                stance=stance, **lab, **stamp)
+                stance=stance, dream=dream, **lab, **stamp)
             self._settle_matching_contender(key, new, t, writer_id, session_id)
             return WriteResult("inserted", new)
 
@@ -494,7 +530,8 @@ class CortexStore:
         if _norm_value(cur.value) == _norm_value(slot.value):
             # Same fact reasserted → confirm, never duplicate.
             return self._confirm(cur, prov, sup, confidence, t, txt, hlc,
-                                 writer_id, session_id, semb, stance=stance, **lab)
+                                 writer_id, session_id, semb, stance=stance,
+                                 dream=dream, **lab)
 
         if _is_compression_echo(slot.value, cur.value):
             # A shorter re-statement of the standing value (dream echo) is
@@ -503,8 +540,14 @@ class CortexStore:
             self._log(cur, slot.value, confidence, t, "confirm",
                       "compression_echo", writer_id=writer_id,
                       session_id=session_id)
-            return self._confirm(cur, prov, sup, confidence, t, txt, hlc,
-                                 writer_id, session_id, semb, stance=stance, **lab)
+            # A dream echo confirms the retained value but never raises its
+            # tier: the note stated the shorter form, not the clauses the
+            # retained value adds.
+            echo_sup = (None if dream and _rank(sup) > _rank(cur.origin)
+                        else sup)
+            return self._confirm(cur, prov, echo_sup, confidence, t, txt,
+                                 hlc, writer_id, session_id, semb,
+                                 stance=stance, dream=dream, **lab)
 
         if force_contend:
             # Quarantine: park unconditionally — tier is not consulted,
@@ -513,7 +556,17 @@ class CortexStore:
             return self._contend(cur, slot, emb, confidence, prov, t, sup,
                                  "quarantine_low_trust", semb,
                                  freshness_class=freshness_class,
-                                 stance=stance, **lab, **stamp)
+                                 stance=stance, dream=dream, **lab, **stamp)
+
+        if dream and self.protect_provenance and direct_backed(cur):
+            # A dream claim never replaces a value a direct user or action
+            # write put there (maintainer decision 2026-10-13), whatever
+            # its own tier: it parks for the human to resolve. A value the
+            # dream itself consolidated from a user note still updates.
+            return self._contend(cur, slot, emb, confidence, prov, t, sup,
+                                 "direct_write", semb,
+                                 freshness_class=freshness_class,
+                                 stance=stance, dream=dream, **lab, **stamp)
 
         if sup == "assistant" and cur.origin != "assistant":
             # Assistant-stated values never take a slot some other origin
@@ -528,7 +581,7 @@ class CortexStore:
             return self._contend(cur, slot, emb, confidence, prov, t, sup,
                                  "assistant_origin", semb,
                                  freshness_class=freshness_class,
-                                 stance=stance, **lab, **stamp)
+                                 stance=stance, dream=dream, **lab, **stamp)
 
         # Genuine conflict at the same slot. Provenance guard: only a write whose
         # tier is >= the current value's tier may supersede; a weaker-tier write
@@ -544,7 +597,7 @@ class CortexStore:
             new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value,
                                inherit_from=cur, support=sup, slot_embedding=semb,
                                freshness_class=freshness_class,
-                               stance=stance, **lab, **stamp)
+                               stance=stance, dream=dream, **lab, **stamp)
             self._settle_matching_contender(key, new, t, writer_id, session_id)
             return WriteResult("superseded", new)
 
@@ -556,12 +609,13 @@ class CortexStore:
             return WriteResult("contested", cur)
         return self._contend(cur, slot, emb, confidence, prov, t, sup, reason, semb,
                              freshness_class=freshness_class,
-                             stance=stance, **lab, **stamp)
+                             stance=stance, dream=dream, **lab, **stamp)
 
     def _confirm(self, cur, prov, sup, confidence, t, txt, hlc,
                  writer_id, session_id, semb,
                  stance: str | None = None, authority=INHERIT,
-                 distortion_tolerance=INHERIT) -> WriteResult:
+                 distortion_tolerance=INHERIT,
+                 dream: bool = False) -> WriteResult:
         """Confirm the standing record: union support tier so corroboration
         (agent guess → user confirm) is recorded, and let a higher-tier
         confirmation lift confidence past plain reinforce."""
@@ -575,6 +629,7 @@ class CortexStore:
         cur.last_confirmed = t
         cur.provenance |= prov
         if sup:
+            _mark_tier(cur, sup, dream)
             cur.support.add(sup)
         cur.confidence = min(1.0, max(self._reinforce(cur.confidence), float(confidence)))
         # Backfill slot_embedding on first confirmation via a caller that supplies
@@ -613,6 +668,7 @@ class CortexStore:
         authority=INHERIT,
         distortion_tolerance=INHERIT,
         inherit_from: "CortexRecord | None" = None,
+        dream: bool = False,
     ) -> CortexRecord:
         rec = CortexRecord(
             entity=slot.entity,
@@ -640,6 +696,8 @@ class CortexStore:
             distortion_tolerance=_pick(
                 distortion_tolerance, inherit_from, "distortion_tolerance"),
         )
+        if dream and support in _DIRECT_TIERS:
+            rec.provenance.add(f"dream:{support}")
         self.records.append(rec)
         self._current[rec.key] = len(self.records) - 1
         return rec
@@ -1133,7 +1191,8 @@ class CortexStore:
                  slot_embedding=None, writer_id=None, session_id=None,
                  hlc=None, tx_time=None, valid_time=None,
                  freshness_class="evergreen", stance=None,
-                 authority=INHERIT, distortion_tolerance=INHERIT):
+                 authority=INHERIT, distortion_tolerance=INHERIT,
+                 dream: bool = False):
         """Park a conflicting value as a contender at ``cur``'s slot rather than
         superseding. Keeps the current value canonical. At most one active
         contender per slot: a matching value confirms (reinforces) the existing
@@ -1162,6 +1221,7 @@ class CortexStore:
             existing.last_confirmed = t
             existing.provenance |= prov
             if sup:
+                _mark_tier(existing, sup, dream)
                 existing.support.add(sup)
             existing.confidence = min(
                 1.0, max(self._reinforce(existing.confidence), float(confidence)),
@@ -1212,6 +1272,8 @@ class CortexStore:
             distortion_tolerance=_pick(
                 distortion_tolerance, cur, "distortion_tolerance"),
         )
+        if dream and sup in _DIRECT_TIERS:
+            rec.provenance.add(f"dream:{sup}")
         self.records.append(rec)   # deliberately NOT registered in self._current
         self._log(cur if cur is not None else rec, slot.value, confidence, t,
                   "contested", reason,
@@ -1296,14 +1358,16 @@ class CortexStore:
         return rec
 
     def resolve(self, entity, attribute, accept: bool, now: float | None = None,
-                support: str = "user", hlc: tuple[int, int] | None = None):
+                support: str = "user", hlc: tuple[int, int] | None = None,
+                dream: bool = False):
         """Resolve the active contender at a slot. ``accept=True`` promotes it to
         current (old current -> superseded; the contender's support gains
         ``support`` — "user" for the explicit MCP resolve, the promoting
         claim's write tier when the consolidation quarantine promotes on an
         independent second witness (its note's source tier, never claim
         text; the caller promotes only when that tier is not below the
-        current value's));
+        current value's)); ``dream`` marks that tier as dream-written (see
+        :func:`direct_backed`), and a direct resolve clears the mark;
         ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
         or ``None`` when there is no active contender.
 
@@ -1360,7 +1424,9 @@ class CortexStore:
             # ``support`` lands as "agent" (the weakest asserting tier),
             # never "user" — the promotion path's stamp must not be
             # steerable upward by malformed input (2026-08-09 review).
-            contender.support.add(_norm_support(support) or "agent")
+            sup = _norm_support(support) or "agent"
+            _mark_tier(contender, sup, dream)
+            contender.support.add(sup)
             contender.last_confirmed = t
             contender.tx_time = t
             if hlc is not None:

@@ -3929,6 +3929,7 @@ class MemoryService(DreamOps, MaintainerOps):
         stance: str | None = None,
         authority="auto",
         distortion_tolerance="auto",
+        dream: bool = False,
     ) -> dict[str, Any]:
         """Write / confirm / supersede a canonical fact at the
         ``(entity, attribute)`` slot. The claim is embedded through the same
@@ -3937,6 +3938,10 @@ class MemoryService(DreamOps, MaintainerOps):
         ``force_contend`` (internal; consolidation quarantine): park the
         value as a contender regardless of tier — including at an empty
         slot. Not exposed on the MCP surface.
+        ``dream`` (internal; the dream's claim writes): see
+        :meth:`CortexStore.write_fact` — a dream claim never supersedes a
+        value a direct user or action write backs, and emits no correction
+        signal. Not exposed on the MCP surface.
 
         ``support`` records who asserted the fact — ``"user"`` (the human stated
         it), ``"action"`` (a tool/agent action confirmed it), or ``"agent"`` (the
@@ -3998,6 +4003,7 @@ class MemoryService(DreamOps, MaintainerOps):
                     stance=stance,
                     authority=auth,
                     distortion_tolerance=dt,
+                    dream=dream,
                 )
             except ValueError as exc:
                 if "holds a set" in str(exc):
@@ -4012,9 +4018,10 @@ class MemoryService(DreamOps, MaintainerOps):
             self._save_cortex()
             # Auto-tag a user correction: a user-tier write that REPLACED an older
             # value is a genuine "Y -> Z" correction signal for procedural memory.
-            # Gated to support=="user" so dream/agent consolidation (support=agent)
-            # never feeds itself a correction (no synthesis feedback loop).
-            if (res.action == "superseded"
+            # Gated to a direct support=="user" write so dream consolidation,
+            # which can write at a user note's tier, never feeds itself a
+            # correction (no synthesis feedback loop).
+            if (res.action == "superseded" and not dream
                     and (support or "").strip().lower() == "user"):
                 self._emit_correction_signal(
                     entity, attribute, res.record.supersedes_value, value,
@@ -4451,7 +4458,8 @@ class MemoryService(DreamOps, MaintainerOps):
             return out[:top_k]
 
     def cortex_resolve(self, entity: str, attribute: str, accept: bool,
-                       support: str = "user") -> dict[str, Any]:
+                       support: str = "user",
+                       dream: bool = False) -> dict[str, Any]:
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
         there is nothing parked to resolve, and ``{"resolved": False,
@@ -4472,7 +4480,9 @@ class MemoryService(DreamOps, MaintainerOps):
 
         ``support`` (internal): the tier stamped on an accepted contender —
         "user" for the MCP tool path; the consolidation quarantine passes
-        "agent" so an automated promotion never reads as a human act."""
+        the promoting claim's write tier with ``dream=True``, which marks
+        that tier as dream-written so the promotion never reads as a direct
+        human act."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
@@ -4482,7 +4492,8 @@ class MemoryService(DreamOps, MaintainerOps):
             # retires without competing, so it needs no tick.
             res = self._cortex.resolve(entity, attribute, accept,
                                        support=support,
-                                       hlc=self._hlc.tick() if accept else None)
+                                       hlc=self._hlc.tick() if accept else None,
+                                       dream=dream)
             if res is None:
                 return {"resolved": False, "reason": "no_contender",
                         "entity": entity, "attribute": attribute}

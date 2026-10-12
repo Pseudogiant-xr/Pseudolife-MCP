@@ -361,7 +361,157 @@ def test_member_remove_tier_guard_follows_protect_provenance(svc, protect,
     ("caf\u00e9", "I went to the CAFE\u0301 again", "user", "went", True),
     # No slot names given: nothing to check, so not backed.
     ("vim", "my preferred editor is vim", "", "", False),
+    # Single characters and stop words are not slot words.
+    ("vim", "I use vim", "I", "x", False),
+    ("vim", "the vim and", "the", "and", False),
+    # Casefold, not lower(): "STRASSE" and "stra\u00dfe" are one word.
+    ("Stra\u00dfe", "my street is STRASSE", "user", "street", True),
+    # An affirmative value is unbacked when every mention is negated (a
+    # negator within the three words before it, in the same clause).
+    ("retired", "The server status is not retired.", "server", "status",
+     False),
+    ("retired", "I am not retired yet, status pending", "user", "status",
+     False),
+    ("emacs", "editor: never emacs", "user", "editor", False),
+    ("emacs", "my editor isn't emacs", "user", "editor", False),
+    ("emacs", "my editor is neither emacs nor vim", "user", "editor", False),
+    ("emacs", "an editor without emacs", "user", "editor", False),
+    ("emacs", "no emacs in my editor list", "user", "editor", False),
+    # ... but a negator outside the window or behind a clause break does
+    # not negate, and one mention that is not negated is enough.
+    ("emacs", "editor: no, emacs", "user", "editor", True),
+    ("emacs", "not that I mind, my editor is emacs", "user", "editor",
+     True),
+    ("emacs", "my editor is not vim; it is emacs", "user", "editor", True),
+    ("emacs", "never emacs, I said; editor is emacs now", "user", "editor",
+     True),
+    # A value carrying its own negation is backed by that phrase.
+    ("not retired", "the server status is not retired", "server", "status",
+     True),
 ])
 def test_citation_backs(value, note, entity, attribute, backed):
     from pseudolife_memory.service_dream import _citation_backs
     assert _citation_backs(value, note, entity, attribute) is backed
+
+
+def test_a_retraction_is_backed_by_a_negated_mention(svc):
+    """A remove claim is not affirmative: "no longer serves X" is exactly
+    the note that backs retracting X, so the negation rule skips it."""
+    from pseudolife_memory.service_dream import _citation_backs
+    note = "The Quillon Larder no longer serves kaya toast"
+    args = ("kaya toast", note, "the-quillon-larder", "menu")
+    assert _citation_backs(*args) is False
+    assert _citation_backs(*args, affirmative=False) is True
+    svc.set_add("the-quillon-larder", "menu", "kaya toast", origin="user")
+    svc.store(note, source="user")
+    svc.dream_run(StubExtractor([_claim("kaya toast", op="remove",
+                                        entity="the-quillon-larder",
+                                        attribute="menu")]))
+    assert svc.cortex_lookup("the-quillon-larder", "menu")["members"] == []
+
+
+# ── a dream claim never supersedes a value set by a direct user or action
+# write (maintainer decision 2026-10-13); a value the dream itself
+# consolidated from a user note still updates.
+
+def _direct(svc, value="emacs", support="user"):
+    svc.cortex_write("editor-pref", "editor", value, support=support)
+
+
+def _contender_values(svc):
+    return [c["value"] for c in
+            svc.cortex_contenders("editor-pref", "editor")["contenders"]]
+
+
+@pytest.mark.parametrize("quarantine", [False, True])
+@pytest.mark.parametrize("support", ["user", "action"])
+def test_dream_claim_parks_against_a_direct_write(svc, quarantine, support):
+    svc.config.memory.dream.quarantine_low_trust = quarantine
+    _direct(svc, support=support)
+    svc.store("I tried vim but hated it; my editor is still emacs",
+              source="user")
+    svc.dream_run(StubExtractor([_claim("vim")]))
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["value"] == "emacs" and cur["origin"] == support
+    assert _contender_values(svc) == ["vim"]
+
+
+def test_dream_confirm_keeps_a_direct_value_protected(svc):
+    _direct(svc, "vim")
+    svc.store("my preferred editor is vim", source="user")
+    svc.dream_run(StubExtractor([_claim("vim")]))
+    svc.store("I switched my preferred editor to helix", source="user")
+    svc.dream_run(StubExtractor([_claim("helix")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "vim"
+
+
+def test_direct_confirm_of_a_dream_value_protects_it(svc):
+    _seed_user_fact(svc, "vim")
+    _direct(svc, "vim")
+    svc.store("I switched my preferred editor to helix", source="user")
+    svc.dream_run(StubExtractor([_claim("helix")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "vim"
+
+
+def test_direct_resolve_of_a_dream_contender_protects_it(svc):
+    _direct(svc)
+    svc.store("my preferred editor is vim", source="user")
+    svc.dream_run(StubExtractor([_claim("vim")]))
+    assert svc.cortex_resolve("editor-pref", "editor", accept=True)[
+        "resolved"]
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "vim"
+    svc.store("I switched my preferred editor to helix", source="user")
+    svc.dream_run(StubExtractor([_claim("helix")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "vim"
+
+
+def test_quarantine_witness_cannot_promote_over_a_direct_value(svc):
+    svc.config.memory.dream.quarantine_low_trust = True
+    _direct(svc, "vim")
+    svc.store("my preferred editor is emacs", source="agent")
+    svc.dream_run(StubExtractor([_claim("emacs")]))
+    svc.store("yes, my preferred editor is emacs", source="user")
+    out = svc.dream_run(StubExtractor([_claim("emacs")]))
+    assert out.get("quarantine_promoted", 0) == 0
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["value"] == "vim" and cur["origin"] == "user"
+
+
+def test_a_quarantine_promoted_value_still_updates_from_a_user_note(svc):
+    svc.config.memory.dream.quarantine_low_trust = True
+    svc.store("my preferred editor is emacs", source="agent")
+    svc.dream_run(StubExtractor([_claim("emacs")]))
+    svc.store("yes, my preferred editor is emacs", source="user")
+    assert svc.dream_run(StubExtractor([_claim("emacs")])).get(
+        "quarantine_promoted") == 1
+    svc.store("I switched my preferred editor to helix", source="user")
+    svc.dream_run(StubExtractor([_claim("helix")]))
+    cur = svc.cortex_lookup("editor-pref", "editor")
+    assert cur["value"] == "helix" and cur["origin"] == "user"
+
+
+def test_direct_write_guard_follows_protect_provenance(svc):
+    svc.config.memory.cortex.protect_provenance = False
+    _direct(svc)
+    svc.store("my preferred editor is vim", source="user")
+    svc.dream_run(StubExtractor([_claim("vim")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "vim"
+
+
+# ── a compression echo confirms the richer value without raising its tier
+
+def test_echo_confirm_does_not_raise_the_retained_values_tier(svc):
+    long = "staging in eu region with audit logging disabled"
+    svc.cortex_write("deploy", "target", long, support="agent")
+    svc.store("deploy target: staging in eu region", source="user")
+    svc.dream_run(StubExtractor([_deploy("staging in eu region")]))
+    cur = svc.cortex_lookup("deploy", "target")
+    assert cur["value"] == long and cur["origin"] == "agent"
+
+
+def test_exact_confirm_still_raises_the_tier(svc):
+    svc.cortex_write("deploy", "target", "staging in eu region",
+                     support="agent")
+    svc.store("deploy target: Staging in EU region", source="user")
+    svc.dream_run(StubExtractor([_deploy("staging in eu region")]))
+    assert svc.cortex_lookup("deploy", "target")["origin"] == "user"

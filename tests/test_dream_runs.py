@@ -471,6 +471,67 @@ def test_rollback_unwinds_an_agent_tier_conversion_at_agent_tier(svc):
     assert cur["value"] == "fox" and cur["origin"] == "agent"
 
 
+def _corrections(svc):
+    return [s for s in svc._storage.pending_signals()
+            if s["outcome"] == "correction"]
+
+
+def test_a_user_tier_dream_supersede_emits_no_correction_signal(svc):
+    """A correction signal is a human's "Y -> Z": the dream writing at a
+    user note's tier must not feed lesson synthesis its own output."""
+    svc.store("my preferred editor is vim", source="user")
+    svc.dream_run(_Stub([_scalar("editor-pref", "editor", "vim")]))
+    svc.store("I switched my preferred editor to helix", source="user")
+    svc.dream_run(_Stub([_scalar("editor-pref", "editor", "helix")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "helix"
+    assert _corrections(svc) == []
+    # Control: the same supersede by a direct user write does emit one.
+    svc.cortex_write("editor-pref", "editor", "nano", support="user")
+    assert len(_corrections(svc)) == 1
+
+
+def test_dream_tier_mark_survives_a_reload(pg_conn, pg_url,  # noqa: F811
+                                           tmp_path):
+    """The dream:<tier> provenance mark round-trips through Postgres: after
+    a reload a dream-consolidated user value still updates from a user note,
+    and a direct user value still holds."""
+    from pseudolife_memory.service import MemoryService
+
+    first = MemoryService(data_dir=tmp_path / "first", database_url=pg_url)
+    first.store("my preferred editor is vim", source="user")
+    first.dream_run(_Stub([_scalar("editor-pref", "editor", "vim")]))
+    first.cortex_write("deploy", "target", "prod", support="user")
+    first.flush()
+    first._storage.close()          # one writer per bank: hand it over
+    fresh = MemoryService(data_dir=tmp_path / "reload", database_url=pg_url)
+    try:
+        assert "dream:user" in fresh.cortex_lookup(
+            "editor-pref", "editor")["provenance"]
+        fresh.store("I switched my preferred editor to helix", source="user")
+        fresh.store("set the deploy target to staging", source="user")
+        fresh.dream_run(_CiteStub([
+            ("helix", _scalar("editor-pref", "editor", "helix")),
+            ("staging", _scalar("deploy", "target", "staging"))]))
+        assert fresh.cortex_lookup("editor-pref", "editor")["value"] == "helix"
+        assert fresh.cortex_lookup("deploy", "target")["value"] == "prod"
+    finally:
+        if fresh._storage is not None:
+            fresh._storage.close()
+
+
+class _CiteStub(_Stub):
+    """Cites each claim's note by a word in it (batch order is not
+    insertion order within one clock tick)."""
+
+    def __init__(self, pairs):
+        super().__init__([c for _, c in pairs])
+        self._pairs = pairs
+
+    def extract(self, texts, vocab, known_facts=None):
+        return [dict(c, source=next(i for i, t in enumerate(texts) if w in t))
+                for w, c in self._pairs]
+
+
 def test_rollback_keeps_set_when_other_members_arrived(svc):
     svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
     # User-sourced: a weaker-tier add may not convert the user scalar.

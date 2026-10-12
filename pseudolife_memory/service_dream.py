@@ -230,36 +230,62 @@ def _word_char(ch: str) -> bool:
             or unicodedata.category(ch).startswith("M"))
 
 
-def _has_phrase(phrase: str, text: str) -> bool:
-    """``phrase`` occurs in ``text`` with no word character on either side
-    (both already in :func:`_citation_text` form)."""
+def _phrase_starts(phrase: str, text: str):
+    """Start offsets where ``phrase`` occurs in ``text`` with no word
+    character on either side (both already in :func:`_citation_text`
+    form)."""
     at = text.find(phrase)
     while at != -1:
         end = at + len(phrase)
         if ((at == 0 or not _word_char(text[at - 1]))
                 and (end == len(text) or not _word_char(text[end]))):
-            return True
+            yield at
         at = text.find(phrase, at + 1)
-    return False
+
+
+def _has_phrase(phrase: str, text: str) -> bool:
+    return next(_phrase_starts(phrase, text), None) is not None
+
+
+_NEGATORS = frozenset({"not", "no", "never", "without", "neither", "nor",
+                       "cannot"})
+_CLAUSE_BREAK_RE = re.compile(r"[.;:,!?()\[\]{}\u2013\u2014]")
+_NEG_WORD_RE = re.compile(r"[\w'\u2019]+")
+
+
+def _negated_at(text: str, at: int) -> bool:
+    """A negator among the three words before offset ``at`` in its clause
+    (clause breaks: ``. ; : , ! ?``, brackets and dashes)."""
+    clause = _CLAUSE_BREAK_RE.split(text[:at])[-1]
+    return any(w in _NEGATORS or w.endswith(("n't", "n\u2019t"))
+               for w in _NEG_WORD_RE.findall(clause)[-3:])
 
 
 def _citation_backs(value: str, note: str, entity: str = "",
-                    attribute: str = "") -> bool:
-    """Whether a cited note's text backs a claim: the whole ``value`` as one
-    phrase (case-insensitive, whitespace-collapsed, on Unicode word
-    boundaries, every token kept, short ones and negators included), AND at
-    least one token of the claim's ``entity`` or ``attribute`` (split on
-    ``- _ .`` and whitespace; stop words and single characters skipped) as a
-    whole word. Anything unchecked is not backed. Deterministic, no model.
+                    attribute: str = "", *, affirmative: bool = True) -> bool:
+    """Whether a cited note MENTIONS a claim's value and NAMES its slot: the
+    whole ``value`` as one phrase (case-insensitive, whitespace-collapsed,
+    on Unicode word boundaries, every token kept, short ones and negators
+    included) at least once without a negator among the three words before
+    it in the same clause, AND at least one token of the claim's ``entity``
+    or ``attribute`` (split on ``- _ .`` and whitespace; stop words and
+    single characters skipped) as a whole word. Deterministic, no model.
 
-    Guards the write tier of every dream claim, whatever the batch size: the
-    backing note is the extractor's citation (model output), so a claim
-    keeps a tier above agent only when the note it cites states both the
-    value and the slot. When unsure it fails closed to agent, the tier
-    every dream claim had before the tier was taken from the note."""
+    A mention is not proof that the note ASSERTS the value ("I tried vim
+    but hated it; my editor is emacs" mentions vim and names the editor
+    slot), so this only bounds the tier a claim may borrow from the note
+    it cites; it is not a fact check. Guards the write tier of every dream
+    claim, whatever the batch size: anything it cannot confirm fails closed
+    to agent, the tier every dream claim had before the tier was taken from
+    the note.
+
+    ``affirmative=False`` (a retraction, ``op: "remove"``) skips the
+    negation rule: "no longer serves X" is the note that backs removing X.
+    The value and slot checks still apply."""
     v = _citation_text(value)
     n = _citation_text(note)
-    if not v or not n or not _has_phrase(v, n):
+    if not v or not n or all(affirmative and _negated_at(n, at)
+                             for at in _phrase_starts(v, n)):
         return False
     slot = re.split(r"[-_.\s]+", _citation_text(f"{entity} {attribute}"))
     return any(_has_phrase(t, n) for t in slot
@@ -1891,7 +1917,8 @@ class DreamOps:
                             str(c.get("value", "")),
                             src_entry.get("text", ""),
                             str(c.get("entity", "")),
-                            str(c.get("attribute", "")))):
+                            str(c.get("attribute", "")),
+                            affirmative=c.get("op") != "remove")):
                     tier_entry = None
                 claim_origin = ((_origin_from_source(tier_entry.get("source"))
                                  if tier_entry is not None else None)
@@ -2075,6 +2102,9 @@ class DreamOps:
                         "authority": ((src_entry or {}).get("authority")
                                       or INHERIT),
                         "distortion_tolerance": _source_class(c, src_entry),
+                        # A dream claim: never supersedes a direct user or
+                        # action value, never raises a tier on an echo.
+                        "dream": True,
                     }
                     try:
                         if q_route == "promote":
@@ -2090,7 +2120,8 @@ class DreamOps:
                             # fixed "agent" here left a user-confirmed value
                             # supersedable by the next agent note.
                             rr = self.cortex_resolve(
-                                ent, attr, accept=True, support=claim_origin)
+                                ent, attr, accept=True, support=claim_origin,
+                                dream=True)
                             if rr.get("resolved"):
                                 qt_promoted += 1
                                 res = {"action": "quarantine_promoted"}
@@ -2472,7 +2503,8 @@ class DreamOps:
         """
         from pseudolife_memory.memory.cortex import (_TIER_RANK,
                                                      _is_compression_echo,
-                                                     _norm_value)
+                                                     _norm_value,
+                                                     direct_backed)
         # Late import: service.py imports this module at load time, so the
         # shared quarantine helpers cannot be imported at module level.
         from pseudolife_memory.service import (_quarantine_low_trust,
@@ -2489,6 +2521,10 @@ class DreamOps:
             cur = self._cortex.lookup(ent, attr)
             cur_value = cur.value if cur is not None else None
             cur_origin = cur.origin if cur is not None else None
+            # A dream promotion never replaces a direct user/action value,
+            # the same rule a direct dream write meets in write_fact.
+            cur_direct = (self._cortex.protect_provenance
+                          and direct_backed(cur))
             match = next(
                 (r for r in self._cortex.contenders_for(ent, attr)
                  if _norm_value(r.value) == _norm_value(c["value"])), None)
@@ -2503,7 +2539,7 @@ class DreamOps:
             independent = (not low) or witness not in witnesses
             tier_ok = (cur_origin is None
                        or _TIER_RANK.get(claim_tier, 0)
-                       >= _TIER_RANK.get(cur_origin, 0))
+                       >= _TIER_RANK.get(cur_origin, 0)) and not cur_direct
             if independent and tier_ok:
                 return "promote", witness, low
             return "hold", witness, low
