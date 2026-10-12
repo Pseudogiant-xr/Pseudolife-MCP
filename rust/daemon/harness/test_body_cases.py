@@ -190,3 +190,29 @@ def test_expect_refusal_cannot_hide_an_interim_continue():
     connection.endheaders.assert_called_once_with()
     connection.getresponse.assert_not_called()
     connection.close.assert_called_once()
+
+
+@pytest.mark.parametrize("golden", [False, True])
+@pytest.mark.parametrize("side", ["python", "rust"])
+@pytest.mark.parametrize("mutation", ["status", "json", "raw", "header"])
+def test_invalid_session_end_comparator_rejects_changed_response(side, mutation, golden):
+    c = next(c for c in run.BodyLimits().cases() if c.get("session_end_invalid_json"))
+    headers = {"content-type": "application/json; charset=utf-8",
+               "cache-control": "no-store", "x-content-type-options": "nosniff"}
+    py = {"status": 200, "headers": headers, "json": {"ok": True}, "raw": '{"ok": true}'}
+    rs = {"status": 400, "headers": headers, "json": {"error": "invalid_json"},
+          "raw": '{"error": "invalid_json"}'}
+    if golden:
+        py, rs = run.golden_scrub(py), run.golden_scrub(rs)
+    assert not run.compare_case(c, py, rs, golden=golden)["diffs"]
+    changed = copy.deepcopy(py if side == "python" else rs)
+    if mutation == "status":
+        changed["status"] = 201
+    elif mutation == "json":
+        changed["json"] = {"unexpected": True}
+    elif mutation == "raw":
+        changed["raw"] = "{}"
+    else:
+        changed["headers"].pop("cache-control")
+    assert run.compare_case(c, changed if side == "python" else py,
+                            changed if side == "rust" else rs, golden=golden)["diffs"]

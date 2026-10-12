@@ -16,6 +16,7 @@ pub mod lease;
 pub mod maintainer;
 mod move_cli;
 mod pairing;
+mod pyjson;
 mod test_login;
 mod transfer;
 mod tunnel;

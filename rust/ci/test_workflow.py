@@ -99,6 +99,7 @@ def row_commands(invocations, required_rows, golden):
 
 
 W1C_SUITES = ("w1c-doctor", "w1c-pairing", "w1c-connection")
+H5_SUITES = ("h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants")
 
 
 # The W1-C step passes its rows through PowerShell arrays (@live, @golden), so
@@ -134,9 +135,9 @@ def check_w1c_shards(jobs):
     job = jobs["parity-checks"]
     matrix = job["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS
-    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES]
+    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES, *H5_SUITES]
     assert "exclude" not in matrix
-    shards = matrix["include"]
+    shards = [shard for shard in matrix["include"] if shard["suite"] in W1C_SUITES]
     assert len(shards) == len(W1C_SUITES)
     assert Counter(shard["suite"] for shard in shards) == Counter(W1C_SUITES)
     covered = []
@@ -396,9 +397,9 @@ def test_shards_cover_both_systems_and_build_once():
     assert produced["with"]["name"] == consumed["with"]["name"] == "daemon-bind-fixture-${{ runner.os }}"
     assert produced["with"]["if-no-files-found"] == "error"
     assert "rust/target/debug/pseudolife-daemon" in produced["with"]["path"].splitlines()
-    assert consumed["if"] == "matrix.suite == 'cli'"
+    assert consumed["if"] == "matrix.suite == 'cli' || matrix.suite == 'h5-w1a'"
     assert consumed["with"]["path"] == "rust/target/debug"
-    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "judges", *W1C_SUITES]
+    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "judges", *W1C_SUITES, *H5_SUITES]
     builds = [step for name in ("rust", "candidate", "parity-checks")
               for step in jobs[name]["steps"]
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
@@ -489,19 +490,22 @@ def test_daemon_artifact_is_built_once_and_shared_with_graph():
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
-def test_required_parity_gate_fails_closed(result):
+@pytest.mark.parametrize("dependency", ["parity-checks", "source-mutants"])
+@pytest.mark.parametrize("event", ["pull_request", "push", "schedule", "workflow_dispatch"])
+def test_required_parity_gate_fails_closed(result, dependency, event):
     gate = workflow()["jobs"]["parity"]
-    assert gate["needs"] == ["rust", "candidate", "parity-checks"]
+    assert gate["needs"] == ["rust", "candidate", "parity-checks", "source-mutants"]
     assert gate["if"].startswith("always() &&")
     step = gate["steps"][0]
-    assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}"}
+    assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}", "GATE_EVENT": "${{ github.event_name }}"}
     import os
     needs = {name: {"result": "success"} for name in gate["needs"]}
-    needs["parity-checks"]["result"] = result
+    needs[dependency]["result"] = result
     executed = subprocess.run(["pwsh", "-NoProfile", "-Command", step["run"]],
-                              env=dict(os.environ, GATE_RESULTS=json.dumps(needs)),
+                              env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
                               capture_output=True, text=True)
-    assert executed.returncode == (0 if result == "success" else 1), executed.stderr
+    accepted = result == "success" or (event == "pull_request" and dependency == "source-mutants" and result == "skipped")
+    assert executed.returncode == (0 if accepted else 1), executed.stderr
 
 
 @pytest.mark.parametrize("name", ["CLI lease differential harness", "Daemon background pruning golden"])
@@ -743,12 +747,12 @@ def test_parity_rejects_a_rebuild_in_a_separate_step(monkeypatch, script):
 def test_w1c_rows_run_once_on_parallel_suites():
     jobs = workflow()["jobs"]
     matrix = jobs["parity-checks"]["strategy"]["matrix"]
-    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES]
+    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES, *H5_SUITES]
     assert matrix["os"] == SYSTEMS
     step = next(s for s in jobs["parity-checks"]["steps"]
                 if s.get("name") == "CLI W1-C differential harness")
     assert step["if"] == "startsWith(matrix.suite, 'w1c-')"
-    assert jobs["parity"]["needs"] == ["rust", "candidate", "parity-checks"]
+    assert jobs["parity"]["needs"] == ["rust", "candidate", "parity-checks", "source-mutants"]
     check_executable_coverage(jobs)
 
 
@@ -757,7 +761,7 @@ def test_w1c_rows_run_once_on_parallel_suites():
 def test_w1c_coverage_rejects_each_missing_or_duplicate_row(row, mutation):
     jobs = copy.deepcopy(workflow()["jobs"])
     shards = jobs["parity-checks"]["strategy"]["matrix"]["include"]
-    shard = next(s for s in shards if f"'{row}'" in s["w1c_rows"])
+    shard = next(s for s in shards if f"'{row}'" in s.get("w1c_rows", ""))
     rows = re.findall(r"'([a-z_]+)'", shard["w1c_rows"])
     if mutation == "drop":
         rows.remove(row)

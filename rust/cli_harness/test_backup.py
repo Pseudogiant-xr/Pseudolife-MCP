@@ -189,6 +189,9 @@ struct group *getgrgid(gid_t id) { static struct group p; memset(&p,0,sizeof p);
     bank = tmp_path / "bank"
     bank.mkdir()
     (bank / "state").write_bytes(b"state")
+    raw_name = os.fsdecode(b"state-\xff")
+    (bank / raw_name).write_bytes(b"raw state")
+    os.symlink(b"state-\xff", os.fsencode(bank) + b"/link-\xfe")
     env = {key: value for key, value in os.environ.items() if "DATABASE_URL" not in key}
     env.update(LD_PRELOAD=str(library), PSEUDOLIFE_MCP_DATA_DIR=str(bank))
     for label, command in [("oracle", [sys.executable, "-m", "pseudolife_memory.cli"]),
@@ -198,9 +201,13 @@ struct group *getgrgid(gid_t id) { static struct group p; memset(&p,0,sizeof p);
                                 env=env, capture_output=True, timeout=10)
         assert result.returncode == 0, result.stderr
         with tarfile.open(next(out.glob("*.tar.gz"))) as archive:
-            member = archive.getmember("state")
-            assert (member.uid, member.gid) == (os.getuid(), os.getgid())
-            assert member.uname.encode("utf-8", "surrogateescape") == b"user-\xff"
-            assert member.gname.encode("utf-8", "surrogateescape") == b"group-\xfe"
-            assert member.pax_headers["hdrcharset"] == "BINARY"
-            assert archive.extractfile(member).read() == b"state"
+            for member in archive.getmembers():
+                assert (member.uid, member.gid) == (os.getuid(), os.getgid())
+                assert member.uname.encode("utf-8", "surrogateescape") == b"user-\xff"
+                assert member.gname.encode("utf-8", "surrogateescape") == b"group-\xfe"
+                assert member.pax_headers["hdrcharset"] == "BINARY"
+            assert archive.extractfile("state").read() == b"state"
+            assert archive.extractfile(raw_name).read() == b"raw state"
+            link = archive.getmember(os.fsdecode(b"link-\xfe"))
+            assert link.issym()
+            assert link.linkname.encode("utf-8", "surrogateescape") == b"state-\xff"

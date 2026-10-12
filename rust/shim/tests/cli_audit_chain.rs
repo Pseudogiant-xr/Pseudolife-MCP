@@ -393,8 +393,6 @@ fn bank_actions_without_an_explicit_database_url_defer() {
         vec!["export", "--since", "2026-09-23"],
         vec!["export", "--since", "1e9"],
         vec!["export", "--task=t"],
-        vec!["redact", "--reason", "why"],
-        vec!["verify", "--help"],
     ] {
         for url in [
             None,

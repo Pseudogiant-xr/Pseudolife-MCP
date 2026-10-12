@@ -15,6 +15,23 @@ const DEFERRED: &str = "pseudolife-stdio: mode 'backup' is deferred in this cand
 const SKIPPED: &str =
     "bank dump:     skipped (no database configured — file-mode state archived only)\n";
 
+#[cfg(any(windows, target_os = "linux"))]
+fn in_ci() -> bool {
+    std::env::var_os("CI").is_some() || std::env::var_os("GITHUB_ACTIONS").is_some()
+}
+
+#[cfg(windows)]
+fn symlink_created(result: std::io::Result<()>) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) if error.raw_os_error() == Some(1314) && !in_ci() => {
+            eprintln!("Windows symlink fixture unverified locally: privilege unavailable (1314)");
+            false
+        }
+        Err(error) => panic!("Windows symlink fixture failed: {error}"),
+    }
+}
+
 struct Home(PathBuf);
 
 impl Home {
@@ -269,13 +286,55 @@ fn parent_after_missing_component_still_resolves_later_symlinks() {
 }
 
 #[test]
-fn hard_links_in_the_tree_defer() {
+fn hard_links_in_the_tree_are_archived() {
     let home = Home::new("hardlink");
     let bank = home.path().join("bank");
     fs::create_dir_all(bank.join("sub")).unwrap();
     fs::write(bank.join("sub").join("a"), "x").unwrap();
     fs::hard_link(bank.join("sub").join("a"), bank.join("b")).unwrap();
-    assert_deferred(&home, &["--data-dir", &text(&bank)]);
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let archive = fs::read_dir(bank.join("backups"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let reader = fs::File::open(archive).unwrap();
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(reader));
+    let kinds: Vec<_> = archive
+        .entries()
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (
+                entry.path().unwrap().into_owned(),
+                entry.header().entry_type(),
+                entry.link_name().unwrap().map(|name| name.into_owned()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|(_, kind, _)| *kind == tar::EntryType::Regular)
+            .count(),
+        1
+    );
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|(_, kind, _)| *kind == tar::EntryType::Link)
+            .count(),
+        1
+    );
+    assert!(
+        kinds
+            .iter()
+            .any(|(name, kind, link)| name == Path::new("sub/a")
+                && *kind == tar::EntryType::Link
+                && link.as_deref() == Some(Path::new("b")))
+    );
 }
 
 #[cfg(unix)]
@@ -294,33 +353,210 @@ fn symlink_loops_and_aliased_outputs_defer() {
 }
 
 #[cfg(windows)]
-#[test]
-fn a_tz_override_defers_on_windows() {
-    let home = Home::new("tz");
-    fs::create_dir(home.path().join("bank")).unwrap();
-    let mut command = command(home.path());
-    command
-        .env("TZ", "UTC")
-        .args(["--data-dir", &text(&home.path().join("bank"))]);
-    let before = home.listing();
-    let output = command.output().unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, cli::native_text(DEFERRED));
-    assert_eq!(home.listing(), before);
+fn python() -> PathBuf {
+    std::env::var_os("PSEUDOLIFE_MCP_PYTHON")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("python"))
 }
 
 #[cfg(windows)]
 #[test]
-fn non_ascii_names_in_the_backups_dir_defer_on_windows() {
+fn tz_overrides_match_python_crt_timestamp_names() {
+    for tz in [
+        "",
+        "UTC0",
+        "GMT0",
+        "JST-9",
+        "IST-5:30",
+        "PST8PDT",
+        "Europe/Paris",
+        "nonsense",
+    ] {
+        let home = Home::new("tz");
+        let bank = home.path().join("bank");
+        fs::create_dir(&bank).unwrap();
+        let stamp = || {
+            let output = Command::new(python())
+                .env("TZ", tz)
+                .args(["-c", "import time; print(time.strftime('%Y%m%d-%H%M%S'))"])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        let before = stamp();
+        let output = command(home.path())
+            .env("TZ", tz)
+            .args(["--data-dir", &text(&bank)])
+            .output()
+            .unwrap();
+        let after = stamp();
+        assert_eq!(output.status.code(), Some(0), "TZ={tz:?} {output:?}");
+        let name = fs::read_dir(bank.join("backups"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .file_name()
+            .into_string()
+            .unwrap();
+        let actual = name
+            .strip_prefix("pseudolife_lite_state-")
+            .unwrap()
+            .strip_suffix(".tar.gz")
+            .unwrap();
+        assert!(
+            actual >= before.as_str() && actual <= after.as_str(),
+            "TZ={tz:?}: {before} <= {actual} <= {after}"
+        );
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn unicode_rotation_matches_python_and_preserves_unrelated_files() {
     let home = Home::new("glob");
-    let backups = home.path().join("bank").join("backups");
+    let bank = home.path().join("bank");
+    let backups = bank.join("backups");
     fs::create_dir_all(&backups).unwrap();
-    fs::write(
-        backups.join("pseudolıfe_lite_state-20200101-000000.tar.gz"),
-        "x",
-    )
-    .unwrap();
-    assert_deferred(&home, &["--data-dir", &text(&home.path().join("bank"))]);
+    let matched = [
+        "pseudolıfe_lite_state-old.tar.gz",
+        "pseudolİfe_lite_state-old.tar.gz",
+        "pſeudolife_lite_state-old.tar.gz",
+        "PSEUDOLIFE_LITE_STATE-old.TAR.GZ",
+    ];
+    for name in matched
+        .into_iter()
+        .chain(["注意.txt", "pseudolife_lite_state-old.tar.gż"])
+    {
+        let path = backups.join(name);
+        fs::write(&path, "x").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(std::time::SystemTime::UNIX_EPOCH))
+            .unwrap();
+    }
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    for name in matched {
+        assert!(!backups.join(name).exists(), "{name}");
+    }
+    for name in ["注意.txt", "pseudolife_lite_state-old.tar.gż"] {
+        assert_eq!(fs::read(backups.join(name)).unwrap(), b"x");
+    }
+}
+
+#[cfg(windows)]
+fn junction(link: &Path, target: &Path) {
+    let output = Command::new("cmd")
+        .args(["/C", "mklink", "/J", &text(link), &text(target)])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn internal_junctions_roundtrip_as_python_directories() {
+    let home = Home::new("junction");
+    let bank = home.path().join("bank");
+    fs::create_dir_all(bank.join("directory")).unwrap();
+    fs::write(bank.join("directory/regular"), b"durable state").unwrap();
+    fs::hard_link(bank.join("directory/regular"), bank.join("hardlink")).unwrap();
+    junction(&bank.join("junction"), &bank.join("directory"));
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let archive = fs::read_dir(bank.join("backups"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let restored = home.path().join("restored");
+    let output = Command::new(python()).args(["-c", r#"
+import os, stat, sys, tarfile
+from pathlib import Path
+source, archive, restored = map(Path, sys.argv[1:])
+with tarfile.open(archive) as tar:
+    junction = tar.getmember('junction')
+    assert junction.isdir(), junction
+    tar.extractall(restored, filter='fully_trusted')
+for name in ('directory', 'directory/regular', 'hardlink', 'junction', 'junction/regular'):
+    a, b = os.lstat(source / name), os.lstat(restored / name)
+    assert (stat.S_IFMT(a.st_mode), stat.S_IMODE(a.st_mode), a.st_uid, a.st_gid) == (stat.S_IFMT(b.st_mode), stat.S_IMODE(b.st_mode), b.st_uid, b.st_gid), name
+    if stat.S_ISREG(a.st_mode):
+        assert (source / name).read_bytes() == (restored / name).read_bytes(), name
+assert os.path.samefile(restored / 'directory/regular', restored / 'hardlink')
+assert os.path.samefile(restored / 'directory/regular', restored / 'junction/regular')
+"#, &text(&bank), &text(&archive), &text(&restored)]).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    fs::remove_dir(bank.join("junction")).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_symlinks_roundtrip_without_following_external_targets() {
+    let home = Home::new("windows-links");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    fs::write(home.path().join("outside"), b"outside state").unwrap();
+    if !symlink_created(std::os::windows::fs::symlink_file(
+        home.path().join("outside"),
+        bank.join("file-link"),
+    )) {
+        return;
+    }
+    if !symlink_created(std::os::windows::fs::symlink_file(
+        "absent",
+        bank.join("dangling"),
+    )) || !symlink_created(std::os::windows::fs::symlink_dir(
+        home.path(),
+        bank.join("directory-link"),
+    )) {
+        return;
+    }
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let archive = fs::read_dir(bank.join("backups"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let restored = home.path().join("restored");
+    let output = Command::new(python()).args(["-c", r#"
+import os, stat, sys, tarfile
+from pathlib import Path
+source, archive, restored = map(Path, sys.argv[1:])
+with tarfile.open(archive) as tar:
+    assert all(member.issym() for member in tar.getmembers())
+    tar.extractall(restored, filter='fully_trusted')
+for name in ('file-link', 'dangling', 'directory-link'):
+    a, b = os.lstat(source / name), os.lstat(restored / name)
+    assert (stat.S_IFMT(a.st_mode), stat.S_IMODE(a.st_mode), a.st_uid, a.st_gid) == (stat.S_IFMT(b.st_mode), stat.S_IMODE(b.st_mode), b.st_uid, b.st_gid), name
+    assert os.readlink(source / name) == os.readlink(restored / name), name
+"#, &text(&bank), &text(&archive), &text(&restored)]).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn external_and_cyclic_junctions_defer_before_effects() {
+    let home = Home::new("junction-boundary");
+    let bank = home.path().join("bank");
+    let outside = home.path().join("outside");
+    fs::create_dir(&bank).unwrap();
+    fs::create_dir(&outside).unwrap();
+    for target in [&outside, &bank] {
+        junction(&bank.join("junction"), target);
+        let output = run(home.path(), &["--data-dir", &text(&bank)]);
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert_eq!(output.stderr, cli::native_text(DEFERRED));
+        assert!(!bank.join("backups").exists());
+        fs::remove_dir(bank.join("junction")).unwrap();
+    }
 }
 
 fn members(archive: &Path) -> Vec<(String, Vec<u8>)> {
@@ -727,4 +963,200 @@ fn discovery_permission_errors_preserve_python_diagnostic_and_effects() {
         assert!(bank.join("backups").is_dir());
         assert_eq!(fs::read_dir(bank.join("backups")).unwrap().count(), 0);
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_names_and_symlink_targets_are_preserved() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let home = Home::new("raw-names");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    let raw = OsString::from_vec(b"sort-\xff".to_vec());
+    fs::write(bank.join(&raw), b"raw state").unwrap();
+    fs::write(bank.join("sort-🚀"), b"unicode state").unwrap();
+    std::os::unix::fs::symlink(&raw, bank.join("raw-target")).unwrap();
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let archive = fs::read_dir(bank.join("backups"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let file = fs::File::open(archive).unwrap();
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    let names: Vec<_> = archive
+        .entries()
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            if entry.header().entry_type() == tar::EntryType::Symlink {
+                assert_eq!(entry.link_name_bytes().unwrap().as_ref(), b"sort-\xff");
+            }
+            entry.path_bytes().into_owned()
+        })
+        .collect();
+    assert_eq!(
+        names,
+        [
+            b"raw-target".to_vec(),
+            b"sort-\xff".to_vec(),
+            "sort-🚀".as_bytes().to_vec()
+        ]
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn device_members_roundtrip_when_mknod_is_permitted() {
+    let python = std::env::var_os("PSEUDOLIFE_MCP_PYTHON")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("python3"));
+    let home = Home::new("devices");
+    let output = Command::new(&python).args(["-c", r#"
+import errno, os, shutil, stat, subprocess, sys, tarfile
+from pathlib import Path
+home, executable = map(Path, sys.argv[1:])
+bank = home / 'bank'
+bank.mkdir()
+# This disposable bank contains no database and never opens either device.
+worker = r'''
+import errno, os, shutil, stat, sys, tarfile
+from pathlib import Path
+bank, restored = map(Path, sys.argv[2:])
+if sys.argv[1] == 'create':
+    try:
+        os.mknod(bank / 'character', stat.S_IFCHR | 0o640, os.makedev(1, 3))
+        os.mknod(bank / 'block', stat.S_IFBLK | 0o600, os.makedev(7, 0))
+    except OSError as error:
+        for name in ('character', 'block'):
+            (bank / name).unlink(missing_ok=True)
+        if error.errno in (errno.EPERM, errno.EACCES):
+            sys.exit(77)
+        raise
+elif sys.argv[1] == 'restore':
+    try:
+        archive = next((bank / 'backups').glob('*.tar.gz'))
+        with tarfile.open(archive) as tar:
+            members = {member.name: member for member in tar.getmembers()}
+            assert members['character'].ischr() and members['block'].isblk()
+            tar.extractall(restored, filter='fully_trusted')
+        for name in ('character', 'block'):
+            a, b = os.lstat(bank / name), os.lstat(restored / name)
+            assert (a.st_mode, a.st_uid, a.st_gid, a.st_rdev) == (b.st_mode, b.st_uid, b.st_gid, b.st_rdev), name
+    finally:
+        shutil.rmtree(restored, ignore_errors=True)
+elif sys.argv[1] == 'cleanup':
+    for name in ('character', 'block'):
+        (bank / name).unlink(missing_ok=True)
+'''
+restored = home / 'restored'
+def unavailable(reason):
+    if 'CI' in os.environ or 'GITHUB_ACTIONS' in os.environ:
+        raise RuntimeError('CI device round-trip requires ' + reason)
+    print('device restore unverified locally: ' + reason)
+    sys.exit(77)
+if os.geteuid() == 0:
+    prefix = [sys.executable]
+else:
+    sudo = shutil.which('sudo')
+    if sudo is None:
+        unavailable('sudo availability')
+    prefix = [sudo, '-n', sys.executable]
+    probe = subprocess.run([*prefix, '-c', 'pass'], capture_output=True)
+    if probe.returncode:
+        unavailable('non-interactive sudo permission')
+def run(action):
+    return subprocess.run([*prefix, '-c', worker, action, str(bank), str(restored)])
+created = run('create')
+if created.returncode == 77:
+    unavailable('mknod permission')
+created.check_returncode()
+try:
+    subprocess.run([str(executable), 'backup', '--data-dir', str(bank)], cwd=home,
+        env={'HOME': str(home), 'COLUMNS': '80'}, check=True)
+    run('restore').check_returncode()
+finally:
+    run('cleanup').check_returncode()
+"#, &text(home.path()), env!("CARGO_BIN_EXE_pseudolife-stdio")]).output().unwrap();
+    if output.status.code() == Some(77) && !in_ci() {
+        eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+        return;
+    }
+    assert!(output.status.success(), "{output:?}");
+    if !output.stdout.is_empty() {
+        eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn matching_raw_rotation_names_defer_before_utf8_stdout_failure() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let home = Home::new("raw-rotation-output");
+    let bank = home.path().join("bank");
+    let backups = bank.join("backups");
+    fs::create_dir_all(&backups).unwrap();
+    let raw = OsString::from_vec(b"pseudolife_lite_state-old-\xff.tar.gz".to_vec());
+    fs::write(backups.join(raw), b"old state").unwrap();
+    assert_deferred(&home, &["--data-dir", &text(&bank)]);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
+    use std::os::windows::ffi::OsStrExt;
+    let home = Home::new("link-flags");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    let link = bank.join("link");
+    if !symlink_created(std::os::windows::fs::symlink_dir("absent", &link)) {
+        return;
+    }
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
+    fs::remove_dir(&link).unwrap();
+    fs::create_dir(bank.join("z-directory")).unwrap();
+    if !symlink_created(std::os::windows::fs::symlink_dir("z-directory", &link)) {
+        return;
+    }
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
+    fs::remove_dir(&link).unwrap();
+    let mut long_target = home.path().join("long-target");
+    while long_target.as_os_str().encode_wide().count() < 280 {
+        long_target.push("directory-component");
+    }
+    fs::create_dir_all(&long_target).unwrap();
+    let long_target = fs::canonicalize(long_target).unwrap();
+    if !symlink_created(std::os::windows::fs::symlink_dir(&long_target, &link)) {
+        return;
+    }
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
+    fs::remove_dir(&link).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn nested_self_junction_cycle_defers_with_output_outside_the_bank() {
+    let home = Home::new("nested-cycle");
+    let bank = home.path().join("bank");
+    let directory = bank.join("a");
+    let out = home.path().join("outside-backups");
+    fs::create_dir_all(&directory).unwrap();
+    let link = directory.join("j");
+    junction(&link, &directory);
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    assert!(!out.exists());
+    fs::remove_dir(link).unwrap();
 }
