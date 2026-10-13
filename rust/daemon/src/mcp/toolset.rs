@@ -32,9 +32,8 @@ pub fn run(
         .copied()
         .or_else(|| state.stored_tier_for(store, principal, &norm_key))
         .unwrap_or(state.default_tier);
-    let current = state.resolve_tier(store, principal, key);
-
     if action == Action::Status {
+        let current = state.resolve_tier(store, principal, key);
         let ladder: Vec<&str> = LADDER.iter().map(|t| t.name()).collect();
         return (
             json!({"current": current.name(), "default": default_tier.name(),
@@ -42,11 +41,13 @@ pub fn run(
             false,
         );
     }
-    let new = match action {
-        Action::Expand => current.step(1, Tier::Minimal),
-        _ if crate::mutants::active("mcp-toolset-floor") => current.step(-1, Tier::Minimal),
-        _ => current.step(-1, default_tier),
-    };
+    let (current, new) = state
+        .overrides
+        .transition(key, default_tier, |current| match action {
+            Action::Expand => current.step(1, Tier::Minimal),
+            _ if crate::mutants::active("mcp-toolset-floor") => current.step(-1, Tier::Minimal),
+            _ => current.step(-1, default_tier),
+        });
     if new == current {
         let reason = if action == Action::Expand {
             "already at full".to_string()
@@ -58,7 +59,6 @@ pub fn run(
             false,
         );
     }
-    state.overrides.set(key, new);
     let (before, after) = (catalogue::visible(current), catalogue::visible(new));
     let added: Vec<&str> = after.difference(&before).copied().collect();
     let removed: Vec<&str> = before.difference(&after).copied().collect();
@@ -70,4 +70,40 @@ pub fn run(
                "list_changed_sent": true}),
         true,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::Barrier;
+
+    #[test]
+    fn concurrent_expands_reach_full() {
+        let state = McpState::new(Tier::Minimal, HashMap::new(), true);
+        let store = crate::auth::PrincipalStore::new();
+        let start = Barrier::new(3);
+        let done = Barrier::new(3);
+        let mut lost_updates = 0;
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                scope.spawn(|| {
+                    for _ in 0..512 {
+                        start.wait();
+                        run(&state, &store, Action::Expand, "caller", Some("caller"));
+                        done.wait();
+                    }
+                });
+            }
+            for _ in 0..512 {
+                state.overrides.set(Some("caller"), Tier::Minimal);
+                start.wait();
+                done.wait();
+                if state.resolve_tier(&store, "caller", Some("caller")) != Tier::Full {
+                    lost_updates += 1;
+                }
+            }
+        });
+        assert_eq!(lost_updates, 0, "concurrent expansions lost updates");
+    }
 }

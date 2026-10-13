@@ -125,6 +125,34 @@ impl Overrides {
         Some(tier)
     }
 
+    /// Read, step and write an override in one critical section.
+    pub fn transition(
+        &self,
+        key: Option<&str>,
+        default: Tier,
+        step: impl FnOnce(Tier) -> Tier,
+    ) -> (Tier, Tier) {
+        let k = Self::key(key);
+        let mut map = self.map.lock().expect("tier overrides lock");
+        let now = Instant::now();
+        if map
+            .get(&k)
+            .is_some_and(|(_, ts)| now.duration_since(*ts) >= self.ttl)
+        {
+            map.remove(&k);
+        }
+        let current = map.get(&k).map_or(default, |(tier, _)| *tier);
+        let next = step(current);
+        if next != current {
+            map.insert(k, (next, now));
+            if map.len() > 256 {
+                map.retain(|_, (_, ts)| now.duration_since(*ts) <= self.ttl);
+            }
+        }
+        (current, next)
+    }
+
+    #[cfg(test)]
     pub fn set(&self, key: Option<&str>, tier: Tier) {
         let k = Self::key(key);
         let now = Instant::now();

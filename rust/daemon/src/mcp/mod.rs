@@ -726,6 +726,20 @@ fn params_valid(method: &str, p: &Map<String, Value>) -> bool {
     if !opt("_meta", Value::is_object) {
         return false;
     }
+    // The pinned handshake schema validates only progressToken inside
+    // request metadata; unknown extension keys remain unrestricted.
+    if p.get("_meta")
+        .and_then(|meta| meta.get("progressToken"))
+        .is_some_and(|v| {
+            !(v.is_null()
+                || v.is_boolean()
+                || request_id(v).is_some()
+                || v.as_f64()
+                    .is_some_and(|n| n.is_finite() && n.fract() == 0.0))
+        })
+    {
+        return false;
+    }
     let string = |key: &str| p.get(key).is_some_and(Value::is_string);
     match method {
         "tools/list" | "prompts/list" | "resources/list" | "resources/templates/list" => {
@@ -1095,6 +1109,50 @@ mod sessions {
                 .unwrap();
             let value = crate::http::parse_body_json(std::str::from_utf8(&bytes).unwrap()).unwrap();
             assert_eq!(value["id"].to_string(), expected_id);
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_metadata_refuses_before_toolset_mutation() {
+        for token in [json!([]), json!({}), json!(1.5)] {
+            let app = app();
+            app.mcp.register("s");
+            app.mcp.mark_ready("s");
+            let params = json!({"name":"memory_toolset", "arguments":{"action":"expand"},
+                "_meta":{"progressToken":token}});
+            let result = respond(
+                app.clone(),
+                "caller".into(),
+                "s".into(),
+                HeaderMap::new(),
+                json!(1),
+                "tools/call".into(),
+                params.as_object().unwrap().clone(),
+            )
+            .await;
+            let value: Value = serde_json::from_str(&result).unwrap();
+            assert_eq!(value["error"]["code"], INVALID_PARAMS, "{result}");
+            assert_eq!(
+                app.mcp.resolve_tier(&app.store, "caller", Some("caller")),
+                Tier::Core
+            );
+        }
+        for meta in [
+            json!({"progressToken":null}),
+            json!({"progressToken":true}),
+            json!({"progressToken":1}),
+            json!({"progressToken":1.0}),
+            json!({"progressToken":"x"}),
+            json!({"vendor":[]}),
+            json!({"progress_token":[]}),
+            json!({"io.modelcontextprotocol/related-task":[]}),
+        ] {
+            let params =
+                json!({"name":"memory_toolset", "arguments":{"action":"expand"}, "_meta":meta});
+            assert!(
+                params_valid("tools/call", params.as_object().unwrap()),
+                "{params}"
+            );
         }
     }
 
