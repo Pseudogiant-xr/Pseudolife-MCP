@@ -240,7 +240,10 @@ def check_executable_coverage(jobs):
     require_command(commands(parity["CLI differential harness"]["run"]),
                     ("python", "-m", "pytest"),
                     ("rust/cli_harness/test_cli_harness.py", "rust/cli_harness/test_lease.py",
-                     "rust/cli_harness/test_bank.py"), PYTEST_FILTERS)
+                     "rust/cli_harness/test_bank.py", "rust/cli_harness/test_backup.py"), PYTEST_FILTERS)
+    backup_proofs = parity["CLI differential harness"]["run"]
+    assert '$env:PSEUDOLIFE_RUST_BINARY = $candidate' in backup_proofs
+    assert "$env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'" in backup_proofs
     require_command(commands(parity["Prepare disposable PostgreSQL for CLI lease row"]["run"]),
                     ("python", "rust/cli_harness/lease_ci.py"))
     background = commands(parity["Daemon background pruning golden"]["run"])
@@ -635,6 +638,9 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Daemon schema startup parity", "--out", "--record-goldens --out"),
     ("Daemon schema startup parity", "python rust/daemon/harness/schema_ci.py", "# python rust/daemon/harness/schema_ci.py"),
     ("CLI differential harness", "--row hook", ""),
+    ("CLI differential harness", "rust/cli_harness/test_backup.py", ""),
+    ("CLI differential harness", "$env:PSEUDOLIFE_RUST_BINARY = $candidate", "$env:PSEUDOLIFE_RUST_BINARY = 'debug-only'"),
+    ("CLI differential harness", "$env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'", "$env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '0'"),
     ("Graph store differential and recorded oracle", "python rust/daemon/harness/graph_store.py live", "# python rust/daemon/harness/graph_store.py live"),
     ("CLI differential harness", "--golden", ""),
     ("Run unchanged candidates and differential judges", "--modes help version lease", "--modes help version"),

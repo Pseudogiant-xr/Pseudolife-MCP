@@ -383,6 +383,7 @@ class Scenario:
     seeds_principals = False
     seed_entries = False
     settle = True          # wait until both report db + embedder
+    snapshot_settle = True  # early HTTP witnesses still wait before measuring bank state
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
     loopback_bind_fixture = False
@@ -812,6 +813,7 @@ class DimMismatch(Scenario):
     """entries.embedding is vector(384): init_refusal before any DDL."""
     name = "dim-mismatch"
     settle = False
+    snapshot_settle = False  # schema refusal never reaches healthy initialization
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -829,6 +831,7 @@ class StampedBank(Scenario):
     """Future schema: Python downgrades; Rust deliberately refuses unchanged."""
     name = "stamped"
     settle = False
+    snapshot_settle = False  # timeline settles Python and observes Rust's schema refusal
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -1069,6 +1072,7 @@ class NullEmbedding(Scenario):
     """A stored row with a NULL vector: hydration fails, not_ready, backoff."""
     name = "null-embedding"
     settle = False
+    snapshot_settle = False  # timeline observes failed hydration, not a healthy bank
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -1094,6 +1098,7 @@ class UnconstrainedDims(Scenario):
     guard passes, the hydrated-dimension guard refuses (init_refusal)."""
     name = "unconstrained-dims"
     settle = False
+    snapshot_settle = False  # timeline observes the hydrated-dimension refusal
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -1701,6 +1706,16 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
             rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
+        if not scn.settle and scn.snapshot_settle and not scn.unreachable_database:
+            from pseudolife_memory.principals import env_auth
+            mapped, singular = env_auth(scn.env)
+            # Hosted Windows run 38226818257 matched 22/22 pair-budget
+            # responses but compared initialized/empty bank catalogs.
+            # Keep requests early; settle before shutdown and the bank-state
+            # measurement (including recording). Reuse the recovery wait bound.
+            wait_settled([d.port for d in procs.values()], timeout=240,
+                         token=singular or next(iter(mapped), None),
+                         check_db=not scn.settle_with_search)
     finally:
         release(holders)
         for d in procs.values():
