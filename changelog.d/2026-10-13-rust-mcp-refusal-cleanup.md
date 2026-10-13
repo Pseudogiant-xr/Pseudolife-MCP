@@ -12,3 +12,6 @@
 - Standalone SSE notifications use bounded delivery; DELETE and disconnect
   release blocked producers. Mutation controls now require differences beyond
   an explicit ordinary baseline report.
+- JSON-RPC preserves arbitrary-width integer IDs and real object keys that
+  resemble serde's internal number marker. Fixture runs use separate homes,
+  resolve binary paths before launch and fail on execution or cleanup errors.

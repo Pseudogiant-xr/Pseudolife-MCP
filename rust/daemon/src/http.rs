@@ -439,7 +439,7 @@ fn normalize_pairing_code(v: &Value) -> Option<String> {
 /// Protect real object keys from serde_json's arbitrary-precision Number
 /// transport, as the doorbell reader does. Prefixing every key is injective,
 /// including escaped spellings; normal serde validation still owns syntax.
-fn parse_body_json(text: &str) -> Result<Value, serde_json::Error> {
+pub(crate) fn parse_body_json(text: &str) -> Result<Value, serde_json::Error> {
     let bytes = text.as_bytes();
     let mut encoded = String::with_capacity(text.len());
     let (mut index, mut copied) = (0, 0);

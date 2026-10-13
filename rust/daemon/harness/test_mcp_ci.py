@@ -40,3 +40,24 @@ def test_any_other_difference_or_incomplete_corpus_fails(change):
         report["diffs"][0] = report["diffs"][0].replace(old, new)
     with pytest.raises((AssertionError, ValueError, KeyError)):
         check_baseline(report)
+
+
+def test_rerun_cannot_reuse_reports_when_child_writes_nothing(tmp_path, monkeypatch):
+    import subprocess
+    import mcp_ci
+
+    target = tmp_path / "baseline"
+    target.mkdir()
+    (target / "compare.json").write_text(json.dumps(baseline()), encoding="utf-8")
+    (target / "foundation-mount.json").write_text(
+        json.dumps({"case": "mcp path, auth", "diffs": []}), encoding="utf-8")
+    calls = []
+
+    def failed(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 1)
+
+    monkeypatch.setattr(mcp_ci.subprocess, "run", failed)
+    with pytest.raises(FileNotFoundError):
+        mcp_ci.main(["--default-bin", "unused", "--mutant-bin", "unused", "--out", str(tmp_path)])
+    assert len(calls) == 1

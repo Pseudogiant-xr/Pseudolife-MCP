@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -56,14 +57,37 @@ def seed_stored(dsn):
             assert row is not None and row.principal == name, (name, row)
 
 
+def expected_summary(args):
+    from mcp_compare import UNSERVED
+    if "--config2" in args:
+        return {"responses": 10, "cases": 2, "unserved_checked": []}
+    if "--tokenless" in args:
+        return {"responses": 30, "cases": 3, "unserved_checked": []}
+    return {"responses": 261, "cases": 16, "unserved_checked": sorted(UNSERVED)}
+
+
+def report_complete(report, expected):
+    try:
+        summary, diffs = report["summary"], report["diffs"]
+        if any(summary[key] != expected[key] for key in ("responses", "cases", "unserved_checked")):
+            return False
+        if summary["diffs"] != len(diffs) or not all(isinstance(d, str) for d in diffs):
+            return False
+        return not any('{"exception":' in d or d.startswith(("stub calls raised:", "sanity "))
+                       or re.fullmatch(r"[^:]+: \d+ vs \d+ responses", d) for d in diffs)
+    except (KeyError, TypeError):
+        return False
+
+
 def mutant_caught(code, result, baseline):
-    return (code == 1 and result["summary"]["diffs"] > 0
+    return (code == 1 and report_complete(result, baseline["summary"])
+            and result["summary"]["diffs"] > 0
             and any(diff not in baseline["diffs"] for diff in result["diffs"]))
 
 
 def main():
     args = sys.argv[1:]
-    binary, out = Path(args[0]), Path(args[1])
+    binary, out = Path(args[0]).resolve(), Path(args[1]).resolve()
     mutant = args[args.index("--mutant") + 1] if "--mutant" in args else None
     baseline = None
     if mutant:
@@ -72,8 +96,8 @@ def main():
             return 2
         try:
             baseline = json.loads(Path(args[args.index("--baseline") + 1]).read_text(encoding="utf-8"))
-            if not isinstance(baseline["diffs"], list):
-                raise ValueError("baseline diffs must be a list")
+            if not report_complete(baseline, expected_summary(args)):
+                raise ValueError("baseline comparison is incomplete or contains execution failures")
         except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
             print(f"cannot load mutant baseline: {exc}", file=sys.stderr)
             return 2
@@ -87,7 +111,11 @@ def main():
                    PSEUDOLIFE_MCP_TIER_MAP=" Alice : Minimal ,bad,:core,writer-m:minimal,bob:huge,"
                                            "bob:core, x:y:z")
     out.mkdir(parents=True, exist_ok=True)
-    root = daemons.scratch_root() / "w2g"
+    if not record:
+        (out / (f"mutant-{mutant}.json" if mutant else "compare.json")).unlink(missing_ok=True)
+    if "--mount-probe" in args:
+        (out / "foundation-mount.json").unlink(missing_ok=True)
+    root = Path(tempfile.mkdtemp(prefix="w2g-", dir=daemons.scratch_root()))
     started = []
     dbs = {side: pg.name(f"pl_cf_w2g_{side}") for side in ("py", "rs")}
     try:
@@ -100,10 +128,12 @@ def main():
         if mutant:
             rs_extra["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
         rs_env = daemons.base_env(rs_home, rs_extra)
-        py = daemons.python_daemon(py_home, py_port, py_env).start(wait_s=300)
+        py = daemons.python_daemon(py_home, py_port, py_env)
         started.append(py)
-        rs = daemons.rust_daemon(binary, rs_home, rs_port, rs_env).start(wait_s=60)
+        py.start(wait_s=300)
+        rs = daemons.rust_daemon(binary, rs_home, rs_port, rs_env)
         started.append(rs)
+        rs.start(wait_s=60)
         if "--tokenless" not in args and "--config2" not in args:
             # Both daemons created the principals table at start; seed, then
             # outwait both 10 s snapshot refreshes.
@@ -132,14 +162,33 @@ def main():
             if flag in args:
                 cmd.append(flag)
         code = subprocess.run(cmd).returncode
+    except Exception as exc:  # noqa: BLE001 — infrastructure is never a parity verdict.
+        print(f"MCP harness infrastructure failed: {exc}", file=sys.stderr)
+        code = 2
     finally:
         for d in reversed(started):
-            d.stop()
+            try:
+                d.stop()
+            except Exception as exc:  # noqa: BLE001 — attempt every owned cleanup.
+                print(f"daemon stop failed: {exc}", file=sys.stderr)
+                code = 2
         for name in dbs.values():
             try:
                 pg.drop(name)
             except Exception as exc:  # noqa: BLE001
                 print(f"drop {name} failed: {exc}", file=sys.stderr)
+                code = 2
+    if code not in (0, 1):
+        return 2
+    if not record:
+        report_file = out / (f"mutant-{mutant}.json" if mutant else "compare.json")
+        try:
+            report = json.loads(report_file.read_text(encoding="utf-8"))
+            if not report_complete(report, expected_summary(args)):
+                raise ValueError("comparison is incomplete or contains execution failures")
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"MCP comparison failed: {exc}", file=sys.stderr)
+            return 2
     if mutant:
         # Existing declared differences cannot establish that a mutation ran.
         try:
@@ -155,4 +204,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as exc:  # noqa: BLE001 — setup failures are infrastructure errors too.
+        print(f"MCP harness setup failed: {exc}", file=sys.stderr)
+        sys.exit(2)

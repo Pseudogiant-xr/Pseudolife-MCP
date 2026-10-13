@@ -549,7 +549,14 @@ enum Message {
 fn request_id(v: &Value) -> Option<Value> {
     match v {
         Value::String(_) => Some(v.clone()),
-        Value::Number(n) if n.is_i64() || n.is_u64() => Some(v.clone()),
+        Value::Number(n)
+            if !n
+                .to_string()
+                .bytes()
+                .any(|b| matches!(b, b'.' | b'e' | b'E')) =>
+        {
+            Some(v.clone())
+        }
         _ => None,
     }
 }
@@ -631,7 +638,10 @@ async fn post(
             Some(sid),
         );
     }
-    let raw: Value = match serde_json::from_slice(&body) {
+    let parsed = std::str::from_utf8(&body)
+        .map_err(|error| error.to_string())
+        .and_then(|text| crate::http::parse_body_json(text).map_err(|error| error.to_string()));
+    let raw: Value = match parsed {
         Ok(v) => v,
         Err(e) => {
             return rpc_http_error(400, PARSE_ERROR, &format!("Parse error: {e}"), Some(sid));
@@ -1004,6 +1014,68 @@ mod sessions {
         );
         app.mcp = McpState::new(Tier::Core, HashMap::new(), true);
         Arc::new(app)
+    }
+
+    async fn ping_message(body: &str) -> Response {
+        let app = app();
+        app.mcp.register("s");
+        app.mcp.mark_ready("s");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "accept",
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+        post(
+            &app,
+            "caller",
+            "s",
+            true,
+            headers,
+            Bytes::copy_from_slice(body.as_bytes()),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn arbitrary_width_integer_ids_remain_requests() {
+        for id in ["18446744073709551616", "-18446744073709551617"] {
+            let body = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping","params":{{}}}}"#);
+            let response = ping_message(&body).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let text = std::str::from_utf8(&bytes).unwrap();
+            assert!(
+                text.contains(&format!(r#""id":{id},"result":{{}}"#)),
+                "{text}"
+            );
+        }
+        for id in ["2.0", "2e0"] {
+            let body = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping"}}"#);
+            assert_eq!(ping_message(&body).await.status(), StatusCode::ACCEPTED);
+        }
+    }
+
+    #[tokio::test]
+    async fn reserved_number_object_keys_remain_params() {
+        for params in [
+            r#"{"$serde_json::private::Number":"1"}"#,
+            r#"{"$serde_json::private::Number":"1","other":true}"#,
+        ] {
+            let body = format!(r#"{{"jsonrpc":"2.0","id":1,"method":"ping","params":{params}}}"#);
+            let response = ping_message(&body).await;
+            assert_eq!(response.status(), StatusCode::OK, "{params}");
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            assert!(
+                std::str::from_utf8(&bytes)
+                    .unwrap()
+                    .contains(r#""result":{}"#)
+            );
+        }
     }
 
     #[tokio::test]

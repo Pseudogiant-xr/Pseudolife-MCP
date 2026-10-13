@@ -48,6 +48,11 @@ def main(argv=None):
 
     def run(label, binary, flags, expected):
         target = out / label
+        report_name = (f"mutant-{flags[flags.index('--mutant') + 1]}.json"
+                       if "--mutant" in flags else "compare.json")
+        (target / report_name).unlink(missing_ok=True)
+        if "--mount-probe" in flags:
+            (target / "foundation-mount.json").unlink(missing_ok=True)
         command = [sys.executable, str(HERE / "mcp_run.py"), str(binary.resolve()), str(target), *flags]
         with (out / f"{label}.log").open("w", encoding="utf-8") as log:
             code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT).returncode
