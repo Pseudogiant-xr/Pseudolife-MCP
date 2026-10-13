@@ -35,7 +35,8 @@ Rust first) and requires Python's verifier to accept the whole chain.
 - Wall-clock times become `T<step>+<offset>` inside the arm's own window,
   the offset being one declared per field (0, 60, a TTL, a scenario's ttl).
   A failed window match records a harness error and retains the raw value.
-  An explicit listener deadline must equal a captured request value.
+  An explicit listener deadline must match the captured request value,
+  capped by the producer's 60-second attachment lease inside that request's window.
   Retention cutoffs must match the UTC day boundary for the scenario's
   configured retention interval and captured clock windows before becoming
   `<utc-day>`. HLC stamps become `H<step>:<logical>`.

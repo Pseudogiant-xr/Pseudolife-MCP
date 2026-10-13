@@ -38,8 +38,10 @@ def test_foundation_snapshot_clock_is_validated_per_request(invalid):
     assert bool(foundation.compare_case(case, py, rs)["diffs"]) is invalid
 
 
-@pytest.mark.parametrize("retained_days,has_problem", [(7, False), (90, True)])
-def test_scenario_clock_errors_reach_the_harness_result(monkeypatch, tmp_path, retained_days, has_problem):
+@pytest.mark.parametrize("retained_days,snapshot_at,has_problem", [(7, None, False), (90, None, True),
+                                                                (7, 0.0, True)])
+def test_scenario_clock_errors_reach_the_harness_result(
+        monkeypatch, tmp_path, retained_days, snapshot_at, has_problem):
     monkeypatch.setattr(run.pg, "create", lambda name: name)
     monkeypatch.setattr(run.pg, "drop", lambda name: None)
     monkeypatch.setattr(run, "start", lambda side, *args: SimpleNamespace(port=side, stop=lambda: None))
@@ -51,9 +53,12 @@ def test_scenario_clock_errors_reach_the_harness_result(monkeypatch, tmp_path, r
 
     def response(arm, step):
         arm.windows.steps.append((timestamp, timestamp + 0.5))
-        return {"status": 200, "json": {
+        body = {
             "retention_days": retained_days,
-            "retained_since": (timestamp // 86400 - retained_days) * 86400}}
+            "retained_since": (timestamp // 86400 - retained_days) * 86400}
+        if snapshot_at is not None:
+            body["snapshot_at"] = snapshot_at
+        return {"status": 200, "json": body}
 
     monkeypatch.setattr(run.Arm, "run", response)
     scenario = SimpleNamespace(name="retention", config_yaml="coordination:\n  audit_retention_days: 7\n",

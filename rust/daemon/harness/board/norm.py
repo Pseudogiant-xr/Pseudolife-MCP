@@ -29,7 +29,7 @@ TIME_KEYS = {
     "first_read_at": (0,), "acknowledged_at": (0,), "attempt_at": (0,), "since": (0,),
     "status_set_at": (0,), "snapshot_at": (0,), "redacted_at": (0,), "repudiated_at": (0,),
     "ring_at": (0, 30, 60, 90, 120, 150, 180, 210, 240),
-    "lease_until": (60,), "ring_armed_until": (),  # exact request deadline, or zero
+    "lease_until": (60,), "ring_armed_until": (),  # request deadline capped by the attachment lease
     "expires_at": (86400, 30, 60, 120, 300, 600, 3600, 86400),
     "message_expires_at": (86400,),
     "status_expires_at": (60, 120, 600, 3600), "expected_end": (60, 120, 600, 3600),
@@ -75,7 +75,7 @@ class Normalizer:
     def __init__(self, windows: Windows, retention_days: int = 90):
         self.windows = windows
         self.retention_days = retention_days
-        self.requested_times: dict[tuple[str, float], str] = {}
+        self.listener_deadlines: list[tuple[float, int, bool]] = []
         self.ids: dict[str, int] = {}
         # Audit seqs relabelled inside a fan-out burst: both producers write
         # a burst's send events in raw recipient-id order, which is free.
@@ -161,12 +161,20 @@ class Normalizer:
         return PREFIX.sub(prefix, out)
 
     # -- values -----------------------------------------------------------
-    def request(self, body, started_at):
-        """An explicit listener deadline must round-trip the request value."""
+    def request(self, body, *, relative=True):
+        """Capture input for Python's min(deadline, now + 60) contract."""
         deadline = body.get("ring_armed_until") if isinstance(body, dict) else None
         if type(deadline) in (int, float) and math.isfinite(deadline) and deadline > 0:
-            self.requested_times[("ring_armed_until", deadline)] = (
-                f"T{len(self.windows.steps)}+{deadline - started_at:g}")
+            self.listener_deadlines.append((deadline, len(self.windows.steps), relative))
+
+    def listener_deadline(self, value):
+        for deadline, step, relative in reversed(self.listener_deadlines):
+            t0, t1 = self.windows.steps[step]
+            if min(deadline, t0 + 60) <= value <= min(deadline, t1 + 60):
+                if not relative and deadline <= t0 + 60:
+                    return value
+                return f"T{step}+{min(deadline - t0, 60):g}"
+        return self.unmatched("ring_armed_until", value)
 
     def unmatched(self, key, value):
         self.problems.append(f"{key}: value {value!r} does not match the captured clock windows")
@@ -208,9 +216,11 @@ class Normalizer:
             return "<credential>" if TOKEN.fullmatch(v) else f"<bad credential {len(v)}>"
         if key == "bank_id" and isinstance(v, str):
             return "<bank>" if UUID.fullmatch(v) else f"<bad bank {v}>"
-        if key in TIME_KEYS and isinstance(v, (int, float)) and not isinstance(v, bool) and v != 0:
-            if (key, v) in self.requested_times:
-                return self.requested_times[(key, v)]
+        if key in TIME_KEYS and isinstance(v, (int, float)) and not isinstance(v, bool):
+            if key == "ring_armed_until":
+                if v == 0:
+                    return v  # No listener deadline is armed.
+                return self.listener_deadline(v)
             return self.windows.match(float(v), TIME_KEYS[key]) or self.unmatched(key, v)
         if key in ("cutoff", "retained_since"):
             return self.cutoff(v, key)

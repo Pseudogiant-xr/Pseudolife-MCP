@@ -156,10 +156,36 @@ def test_unlimited_retention_requires_no_cutoff():
 def test_explicit_listener_deadline_must_equal_the_request():
     timestamp = 1_790_000_000.0
     norm = norm_with([])
-    norm.request({"ring_armed_until": timestamp + 30}, timestamp)
+    norm.request({"ring_armed_until": timestamp + 30})
     norm.windows.steps.append((timestamp, timestamp + 0.5))
     assert norm.value(timestamp + 30, "ring_armed_until") == "T0+30"
     assert not norm.problems
     assert norm.value(timestamp + 30.1, "ring_armed_until") == timestamp + 30.1
     assert norm.value(timestamp + 60, "ring_armed_until") == timestamp + 60
     assert norm.problems
+
+
+@pytest.mark.parametrize("reply_offset,valid", [(60.2, True), (90, False)])
+def test_listener_deadline_obeys_the_attachment_lease_cap(reply_offset, valid):
+    timestamp = 1_790_000_000.0
+    norm = norm_with([])
+    norm.request({"ring_armed_until": timestamp + 90})
+    norm.windows.steps.append((timestamp, timestamp + 0.5))
+    value = norm.value(timestamp + reply_offset, "ring_armed_until")
+    assert bool(norm.problems) is not valid
+    if valid:
+        assert value == "T0+60"
+
+
+def test_zero_listener_deadline_is_a_valid_inactive_sentinel():
+    norm = norm_with([])
+    assert norm.value(0, "ring_armed_until") == 0
+    assert not norm.problems
+
+
+def test_literal_listener_deadline_remains_an_exact_value():
+    norm = norm_with([])
+    norm.request({"ring_armed_until": 100.0}, relative=False)
+    norm.windows.steps.append((1_790_000_000.0, 1_790_000_000.5))
+    assert norm.value(100.0, "ring_armed_until") == 100.0
+    assert not norm.problems

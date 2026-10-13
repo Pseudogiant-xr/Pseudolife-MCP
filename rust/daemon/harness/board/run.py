@@ -199,7 +199,7 @@ class Arm:
             method, path, headers, body = step.request(self.ctx)
             if path in ("/api/coordination/attach", "/api/coordination/heartbeat") and body is not None:
                 try:
-                    self.norm.request(json.loads(body), t0)
+                    self.norm.request(json.loads(body), relative=callable(step.body))
                 except (ValueError, UnicodeDecodeError):
                     pass  # Malformed request cases have no deadline to preserve.
             resp = call(self.daemon.port, method, path, headers, body, timeout=step.timeout)
