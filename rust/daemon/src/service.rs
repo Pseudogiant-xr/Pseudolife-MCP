@@ -26,6 +26,7 @@ pub struct Ready {
     /// Lock order: Service.inner, then write, then the storage writer.
     /// Stores and background reaping share this episode state and lock.
     pub write: tokio::sync::Mutex<crate::episodes::WriteState>,
+    pub writes: crate::store::WriteTasks,
     /// Complete durable startup inputs for the read/write slices.
     #[allow(dead_code)] // W2-D/E adopt these inputs when their stores land.
     pub startup: Arc<StartupState>,
@@ -51,6 +52,7 @@ struct Inner {
 }
 
 pub struct Service {
+    pub writes: crate::store::WriteTasks,
     pub session_dream: Arc<dyn crate::background_sessions::SessionDream>,
     pub release_check: Arc<crate::release_check::ReleaseCheck>,
     pub config: Config,
@@ -79,6 +81,7 @@ impl Service {
             .and_then(|v| v.parse().ok())
             .unwrap_or(4);
         Service {
+            writes: crate::store::WriteTasks::default(),
             session_dream: Arc::new(crate::background_sessions::DeferredSessionDream),
             release_check: Arc::new(crate::release_check::ReleaseCheck::default()),
             config,
@@ -243,6 +246,7 @@ impl Service {
                     embedder,
                     bank: Arc::new(std::sync::RwLock::new(bank)),
                     write: tokio::sync::Mutex::new(write),
+                    writes: self.writes.clone(),
                     startup: Arc::new(startup),
                 });
                 inner.ready = Some(ready.clone());

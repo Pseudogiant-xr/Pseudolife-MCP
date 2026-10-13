@@ -181,11 +181,17 @@ pub struct WriteState {
     pub surprise_history: HashMap<String, Vec<f64>>,
 }
 
-fn env_f64(name: &str, default: f64) -> f64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.trim().parse::<f64>().ok())
-        .unwrap_or(default)
+fn duration(raw: Option<&str>, default: f64) -> Result<f64, String> {
+    crate::background::seconds(raw, default).map_err(|_| {
+        format!(
+            "could not convert string to float: {}",
+            crate::storage::py_repr(raw.unwrap_or(""))
+        )
+    })
+}
+
+fn env_f64(name: &str, default: f64) -> Result<f64, String> {
+    duration(std::env::var(name).ok().as_deref(), default)
 }
 
 fn py_str(v: &Value) -> String {
@@ -236,24 +242,26 @@ pub fn from_startup(startup: &crate::startup::StartupState) -> anyhow::Result<Wr
 
 impl WriteState {
     /// `_active_session_id` (`service.py:983-1011`).
-    pub fn active_session_id(&self) -> Option<String> {
-        let (id, ts) = self.active_session.as_ref()?;
-        let ttl = env_f64("PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS", 21600.0);
+    pub fn active_session_id(&self) -> Result<Option<String>, String> {
+        let Some((id, ts)) = self.active_session.as_ref() else {
+            return Ok(None);
+        };
+        let ttl = env_f64("PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS", 21600.0)?;
         if ttl > 0.0 && now() - ts > ttl {
-            return None;
+            return Ok(None);
         }
-        Some(id.clone())
+        Ok(Some(id.clone()))
     }
 
     /// `_resolve_writer`'s session (spec W0.3).
-    pub fn resolve_session(&self, caller: &Caller) -> Option<String> {
+    pub fn resolve_session(&self, caller: &Caller) -> Result<Option<String>, String> {
         if let Some(s) = caller.header_session.as_ref().filter(|s| !s.is_empty()) {
-            return Some(s.clone());
+            return Ok(Some(s.clone()));
         }
-        if let Some(a) = self.active_session_id() {
-            return Some(a);
+        if let Some(a) = self.active_session_id()? {
+            return Ok(Some(a));
         }
-        caller.transport_session.clone().filter(|s| !s.is_empty())
+        Ok(caller.transport_session.clone().filter(|s| !s.is_empty()))
     }
 
     /// `_persist_episodes` (spec W2.4): every episode, one transaction each;
@@ -327,10 +335,14 @@ impl WriteState {
     }
 
     /// `_resume_closed_session_locked` (spec W2.2).
-    async fn resume_closed_session(&mut self, client: &Client, key: &str) -> Option<usize> {
-        let window = env_f64("PSEUDOLIFE_SESSION_RESUME_SECONDS", 21600.0);
+    async fn resume_closed_session(
+        &mut self,
+        client: &Client,
+        key: &str,
+    ) -> Result<Option<usize>, String> {
+        let window = env_f64("PSEUDOLIFE_SESSION_RESUME_SECONDS", 21600.0)?;
         if window <= 0.0 {
-            return None;
+            return Ok(None);
         }
         // `max(closed, key=ended_at)`: the first of equal maxima.
         let mut last: Option<usize> = None;
@@ -343,9 +355,11 @@ impl WriteState {
                 last = Some(i);
             }
         }
-        let i = last?;
+        let Some(i) = last else {
+            return Ok(None);
+        };
         if now() - self.log.episodes[i].ended_at.unwrap_or(0.0) > window {
-            return None;
+            return Ok(None);
         }
         let ep = &mut self.log.episodes[i];
         ep.ended_at = None;
@@ -356,28 +370,33 @@ impl WriteState {
         self.persist_episodes(client).await;
         let key = self.log.episodes[i].session_key.clone();
         Self::reopen_client_session(client, key.as_deref()).await;
-        Some(i)
+        Ok(Some(i))
     }
 
     /// `_ensure_session_episode` (spec W2.2).
-    pub async fn ensure_session_episode(&mut self, client: &Client, key: Option<&str>) {
+    pub async fn ensure_session_episode(
+        &mut self,
+        client: &Client,
+        key: Option<&str>,
+    ) -> Result<(), String> {
         let Some(key) = key.filter(|k| !k.is_empty()) else {
-            return;
+            return Ok(());
         };
         if self.log.open_leaf_for(Some(key)).is_some() {
-            return;
+            return Ok(());
         }
-        if self.resume_closed_session(client, key).await.is_some() {
-            return;
+        if self.resume_closed_session(client, key).await?.is_some() {
+            return Ok(());
         }
         self.log
             .start_session(generic_title(), Some(key.to_string()));
         self.persist_episodes(client).await;
+        Ok(())
     }
 
     /// `_handle_resume_window`: a non-number falls back to 30 days.
     fn handle_resume_window() -> f64 {
-        env_f64("PSEUDOLIFE_HANDLE_RESUME_SECONDS", 2_592_000.0)
+        env_f64("PSEUDOLIFE_HANDLE_RESUME_SECONDS", 2_592_000.0).unwrap_or(2_592_000.0)
     }
 
     /// `_resolve_episode_handle` with `resume=True` (spec W2.3): the root id
@@ -546,6 +565,18 @@ mod tests {
             ws.log.tombstones[&id],
             ("key".into(), 105.0, "fixture".into())
         );
+    }
+
+    #[test]
+    fn duration_settings_preserve_underscores_and_refuse_invalid_values() {
+        assert_eq!(duration(Some("0_0"), 21600.0), Ok(0.0));
+        assert_eq!(duration(Some("2_592_000"), 0.0), Ok(2592000.0));
+        assert_eq!(
+            duration(Some("bad"), 21600.0),
+            Err("could not convert string to float: 'bad'".into())
+        );
+        assert!(duration(Some("2__0"), 21600.0).is_err());
+        assert_eq!(duration(None, 21600.0), Ok(21600.0));
     }
 
     #[test]

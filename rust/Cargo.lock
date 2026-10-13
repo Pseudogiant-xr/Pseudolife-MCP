@@ -1745,6 +1745,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-postgres",
+ "tokio-util",
  "unicode-casefold",
  "uuid",
  "windows-sys 0.61.2",

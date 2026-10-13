@@ -260,6 +260,9 @@ fn main() {
                 1
             }
         };
+        // HTTP admission has stopped. Detached stores must finish before
+        // background shutdown performs the final persistence callback.
+        service.writes.drain().await;
         background.shutdown(service.as_ref()).await;
         code
     });

@@ -61,8 +61,8 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Non-canonical startup metadata | Python coercions can accept arbitrary numeric spellings or non-string identities | supports shipped producer shapes; malformed durable HLC pairs refuse, and unbounded integers or Python-only identity/timestamp coercions remain deferred | W2-D/E for producer evolution |
 | Reconnect after a lost session | heals on next use, rechecks the lease epoch | none: a lost writer session is not replaced | W2-E (write path) |
 | Writer-session probe per call (`verify_writer_session`) | probes at most once a second | none | W2-E |
-| Session reaper integration | closes idle sessions, derives generic titles and preserves resumable roots | reaping, cascade close, deferred-empty sweep and tombstone hydration implemented; generic auto-title and write/resume integration pending | W2-E (episodes) / W3-I |
-| Autosave and exit persistence | changed-state save through resident writer stores | owned scheduling and exit callback implemented; callback has no mutable state to save in the current reader | W2-E (durability) |
+| Session reaper integration | closes idle sessions, derives generic titles and preserves resumable roots | reaping, cascade close, deferred-empty sweep, tombstone hydration and store/resume integration implemented; generic auto-title pending | W2-E (episodes) / W3-I |
+| Autosave and exit persistence | changed-state save through resident writer stores | owned scheduling and exit callback implemented; admitted stores drain before exit, but counters and tensor weights are not saved | W2-E (durability) |
 | Canonical-store compaction | removes selected resident records, marks slots dirty and rewrites their rows | selection policy implemented and checked against Python goldens; resident-store mutation and slot sync await the writer | W2-E / W3-I |
 | Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | session-end trigger interface is a declared no-op; sweep currently runs maintenance only | W3-H |
 | Search knobs `memory.search.{fusion: rrf, candidate_pool_multiplier > 1, contiguity_neighbors, timeline_channel}`, `memory.reranker.enabled`, `?rerank=`, the recency boost on multi-band presets | change `/api/search` | parsed and validated, ignored by search | W2-D (search) |
@@ -114,6 +114,10 @@ the validated startup candidate; no second episode cache is published. This
 closes the preparation's cache-ownership gap without adding another database
 connection or changing the leased writer boundary.
 
+Admitted store tasks are tracked independently of disconnected callers and
+drained before the background exit callback. This completes their write-through
+database operations; it does not implement tensor-state persistence.
+
 The remaining write work is deliberately split into subsequent increments:
 
 | Item | Remaining behavior | Owner / reason |
@@ -126,6 +130,7 @@ The remaining write work is deliberately split into subsequent increments:
 | Frozen store catalog snapshots | Original store recordings predate the catalog instrument's `column_types`, owner/comment and sequence-bound representations; replay retains and reports initialization differences | Historical recordings are retained unchanged; live Python comparison is the current-source proof, not a waiver of frozen replay differences |
 | New reaper recording's startup state | The live fixture inherits Python-seeded relation timestamps, curation metadata and dream acknowledgement state; a fresh Rust-only replay does not reproduce that seed state | W3-H startup/dream integration; the new recording is retained unchanged and its replay differences are reported separately from the matching live reaper behavior |
 | Unicode runtime | Label, meta-filter and slot regexes retain the existing Unicode-14 assigned-character contract; newer assigned characters may follow Rust's newer tables | Explicitly retained runtime substitution; no comparator or frozen expectation is weakened |
+| Malformed hydrated slot rows | Python may raise while unpacking a malformed persisted slot; Rust ignores the entire entry's structured-slot comparison if any row is not four strings, then retains the text/negation paths | W2-E retained substitution for corrupt or noncanonical persisted data; `malformed_rows_and_superseded_entries` pins it, and canonical producers emit four-string rows |
 
 The WRITE-CMS, WRITE-CORTEX and CONTRADICTION parity rows remain deferred;
 this increment does not claim the complete write boundary or cutover readiness.

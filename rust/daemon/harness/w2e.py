@@ -184,6 +184,27 @@ LABEL_TEXTS = [
 ]
 
 SCENARIOS: dict[str, dict] = {
+    "store-resume-invalid": {
+        "config": None,
+        "env": {"PSEUDOLIFE_SESSION_RESUME_SECONDS": "not-a-number"},
+        "seed_env": {"PSEUDOLIFE_SESSION_RESUME_SECONDS": "21600"},
+        "seed": [
+            store("A closed root survives invalid duration settings.", [sess("invalid")]),
+            {"op": "http", "method": "POST", "path": "/api/hook/session-end",
+             "body": {"session_id": "invalid"}},
+        ],
+        "ops": [store("Invalid resume must refuse before mutation.", [sess("invalid")])],
+    },
+    "store-resume-disabled": {
+        "config": None,
+        "env": {"PSEUDOLIFE_SESSION_RESUME_SECONDS": "0_0"},
+        "seed": [
+            store("A durable note in the session that will close.", [sess("disabled")]),
+            {"op": "http", "method": "POST", "path": "/api/hook/session-end",
+             "body": {"session_id": "disabled"}},
+        ],
+        "ops": [store("Disabled resume opens a fresh root.", [sess("disabled")])],
+    },
     "store-reaper": {
         "config": "memory:\n  meta_filter:\n    enabled: true\n  dream:\n    enabled: false\n  retrieval_log:\n    enabled: false\n",
         "env": {"PSEUDOLIFE_SESSION_IDLE_SECONDS": "2",

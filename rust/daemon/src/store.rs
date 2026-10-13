@@ -14,6 +14,27 @@ use crate::service::Ready;
 use crate::slots::{self, Slot};
 use crate::txn;
 
+/// Admitted writes outlive their callers, but must finish before exit.
+#[derive(Clone, Default)]
+pub struct WriteTasks {
+    tasks: tokio_util::task::TaskTracker,
+}
+
+impl WriteTasks {
+    pub fn spawn<F>(&self, task: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.tasks.spawn(task)
+    }
+
+    pub async fn drain(&self) {
+        self.tasks.close();
+        self.tasks.wait().await;
+    }
+}
+
 /// What a tool body returns when it does not return its dict (W0.1).
 #[derive(Debug)]
 pub enum ToolError {
@@ -364,12 +385,14 @@ pub async fn memory_store(
     caller: &Caller,
     args: &Map<String, Value>,
 ) -> Result<Value, ToolError> {
+    let writes = ready.writes.clone();
     let (ready, cfg, caller, args) = (ready.clone(), cfg.clone(), caller.clone(), args.clone());
     let task = async move { store_body(&ready, &cfg, &caller, &args).await };
     if crate::mutants::active("store-cancellable") {
         return task.await;
     }
-    tokio::spawn(task)
+    writes
+        .spawn(task)
         .await
         .map_err(|e| ToolError::Internal(e.to_string()))?
 }
@@ -411,7 +434,7 @@ async fn store_body(
         .map_err(|e| ToolError::Internal(e.to_string()))?
         .map_err(|e| ToolError::Internal(e.to_string()))?;
     let client = ready.storage.client();
-    let mut session = ws.resolve_session(caller);
+    let mut session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
     let resolved = ws.resolve_handle(client, episode).await;
     let warning = episode.is_some_and(|e| !e.is_empty()) && resolved.is_none();
     match &resolved {
@@ -421,7 +444,10 @@ async fn store_body(
             }
         }
         None if crate::mutants::active("store-skip-session-episode") => {}
-        None => ws.ensure_session_episode(client, session.as_deref()).await,
+        None => ws
+            .ensure_session_episode(client, session.as_deref())
+            .await
+            .map_err(ToolError::Invalid)?,
     }
     let new = NewEntry {
         text,
@@ -502,6 +528,32 @@ async fn store_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn shutdown_waits_for_a_store_after_its_caller_disconnects() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+        let writes = WriteTasks::default();
+        let persisted = Arc::new(AtomicBool::new(false));
+        let recorded = persisted.clone();
+        let (release, finish) = tokio::sync::oneshot::channel::<()>();
+        let caller = writes.spawn(async move {
+            finish.await.unwrap();
+            recorded.store(true, Ordering::SeqCst);
+        });
+        drop(caller);
+        let mut shutdown = Box::pin(writes.drain());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut shutdown)
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), shutdown)
+            .await
+            .unwrap();
+        assert!(persisted.load(Ordering::SeqCst));
+    }
 
     /// The harness-only route (spec W0.2) never ships: it is not in
     /// Python's route table, and every line that reaches it is gated.
