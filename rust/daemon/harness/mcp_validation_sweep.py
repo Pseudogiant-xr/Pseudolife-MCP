@@ -12,10 +12,16 @@ import json
 from pathlib import Path
 import time
 
-from mcp_validation_cases import cases
+from mcp_validation_cases import cases, coercion_cases, report_default, wire_json
+from mcp_validation_schema import source_versions
 from mcp_wire import ACCEPT, PROTOCOL, header, request, sse_data
 
-EXPECTED_CASES = 15339
+EXPECTED_CASES = 18515
+EXPECTED_COERCION_CASES = 2134
+
+
+class ValidationMismatch(AssertionError):
+    """A completed live corpus differs from the oracle."""
 
 INIT = {'protocolVersion': PROTOCOL, 'capabilities': {},
         'clientInfo': {'name': 'validation-fixture', 'version': '1'}}
@@ -44,7 +50,7 @@ def observe(port, case, ready, index):
         body = {'jsonrpc': '2.0', 'method': method, 'params': params}
         if not notification:
             body['id'] = 1
-        return request(port, 'POST', body, headers, timeout=30)
+        return request(port, 'POST', wire_json(body).encode('utf-8'), headers, timeout=30)
 
     first = call('initialize', {})
     sid = header(first, 'mcp-session-id')
@@ -67,11 +73,13 @@ def observe(port, case, ready, index):
         request(port, 'DELETE', None, headers, timeout=30)
 
 
-def run(py_port, rs_port, output):
+def run(py_port, rs_port, output, *, coercions_only=False):
     output = Path(output)
     output.unlink(missing_ok=True)
-    all_cases = list(cases())
-    assert len(all_cases) == EXPECTED_CASES, "generated corpus count changed"
+    versions = source_versions()
+    all_cases = coercion_cases() if coercions_only else list(cases())
+    expected = EXPECTED_COERCION_CASES if coercions_only else EXPECTED_CASES
+    assert len(all_cases) == expected, "generated corpus count changed"
     workload = [(index, case, ready) for index, case in enumerate(all_cases) for ready in (False, True)]
     started = time.monotonic()
     failures = []
@@ -97,13 +105,16 @@ def run(py_port, rs_port, output):
                     failures.append({'index': index, 'case': case, 'before_ready': ready,
                                      'python': py, 'rust': rs})
                     if len(failures) <= 3:
-                        print(json.dumps(failures[-1]), flush=True)
+                        print(json.dumps(failures[-1], default=report_default), flush=True)
                 if completed % 100 == 0:
                     print(f'validation sweep: {completed}/{len(workload)}, {len(failures)} differences', flush=True)
-    report = {'generated_cases': len(all_cases), 'expected_observations': len(workload),
+    report = {'mode': 'coercions' if coercions_only else 'full', 'source': versions,
+              'generated_cases': len(all_cases), 'expected_observations': len(workload),
               'completed_observations': completed, 'methods': dict(counts),
               'seconds': round(time.monotonic() - started, 1), 'diffs': failures}
-    output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    output.write_text(json.dumps(report, indent=2, default=report_default) + '\n', encoding='utf-8')
     print(f'validation sweep complete: {completed} observations, {len(failures)} differences', flush=True)
-    assert completed == len(workload) and not failures, f'validation sweep differs: {output}'
+    assert completed == len(workload), 'incomplete validation sweep'
+    if failures:
+        raise ValidationMismatch(f'validation sweep differs: {output}')
     return report

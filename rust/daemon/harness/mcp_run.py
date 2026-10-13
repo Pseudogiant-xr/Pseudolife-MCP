@@ -1,7 +1,7 @@
 """Run the MCP-surface harness end to end on disposable banks.
 
 usage: python mcp_run.py <rust-binary> <out-dir> [--mutant NAME --baseline <compare.json>]
-                         [--tokenless | --config2] [--record <golden.json>] [--mount-probe] [--validation-sweep]
+                         [--tokenless | --config2] [--record <golden.json>] [--mount-probe] [--validation-sweep | --validation-coercions]
 
 Creates pl_cf_w2g_py and pl_cf_w2g_rs through the test login, starts the
 Python oracle (from this checkout) and the Rust daemon on them with the
@@ -106,8 +106,12 @@ def main():
             print(f"cannot load mutant baseline: {exc}", file=sys.stderr)
             return 2
     record = args[args.index("--record") + 1] if "--record" in args else None
-    if "--validation-sweep" in args and (mutant or record or "--tokenless" in args or "--config2" in args):
-        raise ValueError("validation sweep requires the ordinary bearer configuration")
+    validation_flags = [flag for flag in ('--validation-sweep', '--validation-coercions') if flag in args]
+    if validation_flags and (len(validation_flags) != 1 or mutant or record or '--tokenless' in args or '--config2' in args):
+        raise ValueError('validation sweep requires the ordinary bearer configuration and one mode')
+    if validation_flags:
+        from mcp_validation_schema import source_versions
+        source_versions()
     env = dict(ENV)
     if "--tokenless" in args:
         env = {"PSEUDOLIFE_MCP_TIER_MAP": ENV["PSEUDOLIFE_MCP_TIER_MAP"],
@@ -117,11 +121,13 @@ def main():
                    PSEUDOLIFE_MCP_TIER_MAP=" Alice : Minimal ,bad,:core,writer-m:minimal,bob:huge,"
                                            "bob:core, x:y:z")
     out.mkdir(parents=True, exist_ok=True)
-    if not record:
+    if record:
+        Path(record).unlink(missing_ok=True)
+    else:
         (out / (f"mutant-{mutant}.json" if mutant else "compare.json")).unlink(missing_ok=True)
     if "--mount-probe" in args:
         (out / "foundation-mount.json").unlink(missing_ok=True)
-    if "--validation-sweep" in args:
+    if validation_flags:
         (out / "validation-sweep.json").unlink(missing_ok=True)
     root = Path(tempfile.mkdtemp(prefix="w2g-", dir=daemons.scratch_root()))
     started = []
@@ -170,9 +176,14 @@ def main():
             if flag in args:
                 cmd.append(flag)
         code = subprocess.run(cmd).returncode
-        if "--validation-sweep" in args and code in (0, 1):
-            from mcp_validation_sweep import run as validation_sweep
-            validation_sweep(py_port, rs_port, out / "validation-sweep.json")
+        if validation_flags and code in (0, 1):
+            from mcp_validation_sweep import ValidationMismatch, run as validation_sweep
+            try:
+                validation_sweep(py_port, rs_port, out / 'validation-sweep.json',
+                                 coercions_only='--validation-coercions' in args)
+            except ValidationMismatch as exc:
+                print(f'MCP validation parity failed: {exc}', file=sys.stderr)
+                code = 1
     except Exception as exc:  # noqa: BLE001 — infrastructure is never a parity verdict.
         print(f"MCP harness infrastructure failed: {exc}", file=sys.stderr)
         code = 2
@@ -191,7 +202,18 @@ def main():
                 code = 2
     if code not in (0, 1):
         return 2
-    if not record:
+    if record:
+        from mcp_compare import recording_errors
+        try:
+            if code != 0:
+                return 2
+            recorded = json.loads(Path(record).read_text(encoding='utf-8'))
+            if errors := recording_errors(recorded):
+                raise ValueError('; '.join(errors))
+        except (OSError, ValueError, TypeError) as exc:
+            print(f'MCP recording failed: {exc}', file=sys.stderr)
+            return 2
+    else:
         report_file = out / (f"mutant-{mutant}.json" if mutant else "compare.json")
         try:
             report = json.loads(report_file.read_text(encoding="utf-8"))

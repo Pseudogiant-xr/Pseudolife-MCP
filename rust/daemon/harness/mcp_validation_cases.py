@@ -2,12 +2,37 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import json
 from pathlib import Path
 
+@dataclass(frozen=True)
+class RawNumber:
+    """A finite JSON number spelling that overflows a binary float."""
+    text: str
+
+
+def wire_json(value):
+    if isinstance(value, RawNumber):
+        return value.text
+    if isinstance(value, dict):
+        return '{' + ','.join(json.dumps(key) + ':' + wire_json(child)
+                              for key, child in sorted(value.items())) + '}'
+    if isinstance(value, (list, tuple)):
+        return '[' + ','.join(wire_json(child) for child in value) + ']'
+    return json.dumps(value, allow_nan=False)
+
+
+def report_default(value):
+    if isinstance(value, RawNumber):
+        return {'raw_json_number': value.text}
+    raise TypeError(type(value).__name__)
+
+
 TABLE = Path(__file__).resolve().parents[1] / 'src/mcp/validation-schema.json'
 VALUES = (None, False, True, 0, 1, -1, 1.5, 1e20, 100000000000000000000,
-          '', 'fixture', 'bad', '1.0', [], {}, [None])
+          '', 'fixture', 'bad', '1.0', [], {}, [None],
+          *(RawNumber(text) for text in ('1e400', '-1e400', '9e999', '-9e999')))
 INTEGER_STRINGS = ('0-1', '00-1', '-0-1', '+0-1', '0_0-1', '0_-1', '0__1',
                    '0__0', '0_', '00_.0', '0_.0', '1_.0', '1_0.0', '1_0.0_0',
                    '0-1.0', '0-0', '-00', '0-_1', '0-_1_2', '1e0', '+-1', '--1',
@@ -23,6 +48,12 @@ def resolve(schema, defs):
     while '$ref' in schema:
         schema = defs[schema['$ref'].removeprefix('#/$defs/')]
     return schema
+
+
+def numeric_schema(schema, defs):
+    schema = resolve(schema, defs)
+    return schema.get('type') in ('integer', 'number') or any(
+        numeric_schema(branch, defs) for branch in schema.get('anyOf', []))
 
 
 def sample(schema, defs):
@@ -61,16 +92,17 @@ def variants(schema, defs, base=None, path=()):
         base = sample(schema, defs)
     yield path, base
     for value in VALUES:
-        yield path, value
+        marker = 'raw-number-coercion' if numeric_schema(schema, defs) else 'raw-number'
+        yield (*path, marker) if isinstance(value, RawNumber) else path, value
     if schema.get('type') == 'integer':
         for value in INTEGER_STRINGS:
-            yield path, value
+            yield (*path, "integer-coercion"), value
     if schema.get('type') == 'number':
         for value in FLOAT_STRINGS:
-            yield path, value
+            yield (*path, "float-coercion"), value
     if schema.get('format') == 'uri':
         for value in ('file:///fixture', 'https://example.test/resource', 'fixture:opaque'):
-            yield path, value
+            yield (*path, 'uri-coercion'), value
     if 'enum' in schema:
         for value in schema['enum']:
             yield path, value
@@ -125,7 +157,7 @@ def cases(table=None):
                 # validation; this sweep isolates SDK parameter validation.
                 if not isinstance(params, dict):
                     continue
-                key = json.dumps([notification, method, params], sort_keys=True, allow_nan=False)
+                key = wire_json([notification, method, params])
                 if key in seen:
                     continue
                 seen.add(key)
@@ -134,6 +166,11 @@ def cases(table=None):
     for params in ({'_meta': []}, {'_meta': {'progressToken': []}}, {}):
         yield {'method': 'unknown/method', 'notification': False, 'params': params,
                'field': 'unknown-method'}
+
+
+def coercion_cases():
+    markers = {'raw-number-coercion', 'integer-coercion', 'float-coercion', 'uri-coercion'}
+    return [case for case in cases() if markers.intersection(case['field'].split('.'))]
 
 
 if __name__ == '__main__':

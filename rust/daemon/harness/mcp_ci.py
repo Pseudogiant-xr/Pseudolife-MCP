@@ -10,6 +10,7 @@ import time
 
 from mcp_compare import UNSERVED
 from mcp_run import mutant_caught
+from mcp_validation_sweep import EXPECTED_COERCION_CASES
 
 HERE = Path(__file__).resolve().parent
 MUTANTS = ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-hint")
@@ -35,6 +36,14 @@ def check_baseline(report):
     assert seen == expected
 
 
+def check_coercion_report(report):
+    assert report['mode'] == 'coercions'
+    assert report['generated_cases'] == EXPECTED_COERCION_CASES
+    assert report['expected_observations'] == report['completed_observations'] == 2 * EXPECTED_COERCION_CASES
+    assert not report['diffs']
+    assert report['source']['pydantic-core'] == '2.50.0'
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--default-bin", type=Path, required=True)
@@ -51,6 +60,8 @@ def main(argv=None):
         report_name = (f"mutant-{flags[flags.index('--mutant') + 1]}.json"
                        if "--mutant" in flags else "compare.json")
         (target / report_name).unlink(missing_ok=True)
+        if "--validation-coercions" in flags:
+            (target / "validation-sweep.json").unlink(missing_ok=True)
         if "--mount-probe" in flags:
             (target / "foundation-mount.json").unlink(missing_ok=True)
         command = [sys.executable, str(HERE / "mcp_run.py"), str(binary.resolve()), str(target), *flags]
@@ -61,10 +72,12 @@ def main(argv=None):
         assert code == expected, f"{label}: expected exit {expected}, got {code}; see {out / (label + '.log')}"
         return target
 
-    baseline_dir = run("baseline", args.default_bin, ["--mount-probe"], 1)
+    baseline_dir = run("baseline", args.default_bin, ["--mount-probe", "--validation-coercions"], 1)
     baseline_file = baseline_dir / "compare.json"
     baseline = json.loads(baseline_file.read_text(encoding="utf-8"))
     check_baseline(baseline)
+    check_coercion_report(json.loads((baseline_dir / 'validation-sweep.json').read_text(encoding='utf-8')))
+    print(f'SDK coercion gate: {2 * EXPECTED_COERCION_CASES} observations, zero differences', flush=True)
     mount = json.loads((baseline_dir / "foundation-mount.json").read_text(encoding="utf-8"))
     assert mount["case"] == "mcp path, auth" and not mount["diffs"]
     print("strict baseline: five declared 413 close-header differences; foundation mount matches", flush=True)

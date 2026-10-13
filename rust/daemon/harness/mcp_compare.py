@@ -530,6 +530,7 @@ def config_lists(port):
 
 CASES = [handshake, lists, protocol_versions, methods, calls, toolset, stored, list_changed_stream,
          stream_reconnect, init_gate, body_limit, messages, concurrent, transport, paths]
+BASE_CASES = tuple(CASES)
 if "--tokenless" in sys.argv:
     CASES = [rebinding, open_lists]
 if "--config2" in sys.argv:
@@ -628,6 +629,45 @@ def check_stubs(py_stub, rust_stub, diffs, served):
         served.append(name)
 
 
+def recording_errors(data, cases=None):
+    """Require a complete, failure-free oracle corpus before saving goldens."""
+    names = {case.__name__ for case in (CASES if cases is None else cases)}
+    side_config = names in ({'config_lists'}, {'rebinding', 'open_lists'})
+    expected = names if side_config else names | {'stub_tools'}
+    if not isinstance(data, dict):
+        return ['record must be an object']
+    errors = []
+    if missing := expected - data.keys():
+        errors.append('missing cases: ' + ', '.join(sorted(missing)))
+    if extra := data.keys() - expected:
+        errors.append('unexpected cases: ' + ', '.join(sorted(extra)))
+    for name in sorted(names & data.keys()):
+        responses = data[name]
+        if not isinstance(responses, list) or not responses:
+            errors.append(f'{name}: missing response sequence')
+            continue
+        for index, response in enumerate(responses):
+            if not isinstance(response, dict) or 'exception' in response or 'timeout' in response:
+                errors.append(f'{name}[{index}]: oracle case failed')
+    if not side_config:
+        stubs = data.get('stub_tools')
+        if not isinstance(stubs, dict) or set(stubs) != set(UNSERVED):
+            errors.append('stub_tools: incomplete tool corpus')
+        elif any(not isinstance(response, dict) or 'exception' in response or 'timeout' in response
+                 for response in stubs.values()):
+            errors.append('stub_tools: oracle call failed')
+    total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
+    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 261
+    if total != expected_total:
+        errors.append(f'corpus: {total} responses, expected {expected_total}')
+    if not errors:
+        try:
+            sanity(data, errors)
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            errors.append(f'oracle sanity check failed: {type(exc).__name__}')
+    return errors
+
+
 def main():
     mode = sys.argv[1]
     if mode == "record":
@@ -635,6 +675,9 @@ def main():
         data = run_all(port)
         if "--tokenless" not in sys.argv and "--config2" not in sys.argv:
             data["stub_tools"] = stub_tools(port)
+        if errors := recording_errors(data):
+            print('MCP recording rejected: ' + '; '.join(errors), file=sys.stderr)
+            return 2
         Path(out).write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         print(f"recorded {sum(len(v) for v in data.values())} responses to {out}")
         return 0

@@ -19,3 +19,7 @@
   validate metadata, task parameters, client information and nested fields
   before readiness or tier changes. A generated live sweep checks response
   codes and state before and after initialization.
+- The MCP CI gate pins the scalar-validation runtime and exercises integer,
+  float and URL coercions against the live oracle, including overflowing JSON
+  number literals. Failed or incomplete oracle recordings cannot produce
+  new golden fixtures.

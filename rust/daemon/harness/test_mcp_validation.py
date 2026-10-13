@@ -84,3 +84,30 @@ def test_generated_table_preserves_core_url_constraints():
     Root(uri=corpus.sample(uri, {}))
     with pytest.raises(ValidationError):
         Root(uri='https://example.test/resource')
+
+
+def test_generator_refuses_unreviewed_core_version(monkeypatch):
+    version = schema.importlib.metadata.version
+    monkeypatch.setattr(schema.importlib.metadata, 'version',
+                        lambda name: '99.0.0' if name == 'pydantic-core' else version(name))
+    with pytest.raises(AssertionError, match='pydantic-core'):
+        schema.generate()
+
+
+def test_overflow_values_keep_their_json_number_spelling():
+    for value in (v for v in corpus.VALUES if isinstance(v, corpus.RawNumber)):
+        decoded = json.loads(corpus.wire_json({'value': value}),
+                             parse_float=lambda text: {'literal': text})
+        assert decoded == {'value': {'literal': value.text}}
+        assert json.loads(json.dumps(value, default=corpus.report_default)) == {'raw_json_number': value.text}
+
+
+def test_ci_subset_contains_every_scalar_class_and_review_trigger():
+    cases = corpus.coercion_cases()
+    assert len(cases) == sweep.EXPECTED_COERCION_CASES
+    fields = {part for case in cases for part in case['field'].split('.')}
+    assert {'integer-coercion', 'float-coercion', 'uri-coercion', 'raw-number-coercion'} <= fields
+    ttls = [case['params'].get('task', {}).get('ttl') for case in cases
+            if case['method'] == 'tools/call' and isinstance(case['params'].get('task'), dict)]
+    assert '0-1' in ttls and '-' + '9' * 4300 in ttls
+    assert corpus.RawNumber('1e400') in ttls and corpus.RawNumber('-1e400') in ttls

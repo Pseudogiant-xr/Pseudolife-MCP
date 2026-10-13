@@ -115,7 +115,8 @@ fn integer_string(raw: &str) -> bool {
 fn number(value: &Value) -> Option<f64> {
     match value {
         Value::Bool(v) => Some(u8::from(*v) as f64),
-        Value::Number(n) => n.as_f64(),
+        // The SDK preserves overflow literals as infinity for float fields.
+        Value::Number(n) => n.to_string().parse().ok(),
         Value::String(s) => s.trim().parse().ok().or_else(|| {
             // The SDK retries underscore removal on the original string,
             // without trimming again or requiring digit-adjacent separators.

@@ -86,3 +86,74 @@ def test_failed_comparison_cannot_reuse_an_old_report(runner, monkeypatch):
         "diffs": 1, "unserved_checked": []}, "diffs": ["config_lists[0]: old difference"]}), encoding="utf-8")
     monkeypatch.setattr(mcp_run.subprocess, "run", lambda command: SimpleNamespace(returncode=1))
     assert mcp_run.main() == 2
+
+
+@pytest.mark.parametrize('failure', ['exception', 'missing', 'truncated', 'stub'])
+def test_failed_or_incomplete_oracle_record_is_not_written(tmp_path, monkeypatch, capsys, failure):
+    import mcp_compare
+
+    data = {case.__name__: [{'status': 200, 'headers': {}, 'body': {}}]
+            for case in mcp_compare.CASES}
+    # The fixture isolates record completeness from oracle semantic checks.
+    data['handshake'] *= 224 - (len(data) - 1)
+    stubs = {name: {'status': 200, 'headers': {}, 'body': {}} for name in mcp_compare.UNSERVED}
+    if failure == 'exception':
+        def failed_case(port):
+            raise TimeoutError('injected oracle timeout')
+        data['stream_reconnect'] = mcp_compare.run_case(failed_case, 1)
+    elif failure == 'missing':
+        data.pop('stream_reconnect')
+    elif failure == 'truncated':
+        data['handshake'].pop()
+    else:
+        stubs = {'<exception>': {'exception': 'injected stub failure'}}
+    monkeypatch.setattr(mcp_compare, 'run_all', lambda port: data)
+    monkeypatch.setattr(mcp_compare, 'stub_tools', lambda port: stubs)
+    monkeypatch.setattr(mcp_compare, 'sanity', lambda data, errors: None)
+    target = tmp_path / 'record.json'
+    monkeypatch.setattr(sys, 'argv', ['mcp_compare.py', 'record', '1', str(target)])
+    assert mcp_compare.main() != 0
+    assert not target.exists()
+    output = capsys.readouterr()
+    assert 'record' in output.err.lower()
+
+
+def test_completed_sweep_difference_is_parity_failure(runner, monkeypatch, capsys):
+    import time
+    import mcp_validation_sweep as sweep
+    from test_mcp_ci import baseline
+
+    sys.argv.remove('--config2')
+    sys.argv.append('--validation-sweep')
+    monkeypatch.setattr(mcp_run, 'seed_stored', lambda dsn: None)
+    monkeypatch.setattr(time, 'sleep', lambda seconds: None)
+    ports = iter([1, 2])
+    monkeypatch.setattr(mcp_run.daemons, 'free_port', lambda: next(ports))
+    def compared(command):
+        report = baseline()
+        report['summary']['unserved_checked'].sort()
+        Path(command[5]).write_text(json.dumps(report), encoding='utf-8')
+        return SimpleNamespace(returncode=1)
+    monkeypatch.setattr(mcp_run.subprocess, 'run', compared)
+    monkeypatch.setattr(sweep, 'EXPECTED_CASES', 1)
+    monkeypatch.setattr(sweep, 'cases', lambda: iter([{'method': 'ping', 'params': {},
+        'notification': False, 'field': 'fixture'}]))
+    monkeypatch.setattr(sweep, 'observe', lambda port, *args: {'code': port})
+    assert mcp_run.main() == 1
+    assert 'parity failed' in capsys.readouterr().err
+    assert set(runner.stopped) == {'py', 'rs'} and len(runner.dropped) == 2
+
+
+def test_golden_distillation_rejects_failed_transport_case(tmp_path):
+    import mcp_goldens
+    response = {'body': {'sse': ['{"jsonrpc":"2.0","id":1,"result":{}}']}}
+    record = {'lists': [response] * 18, 'protocol_versions': [response] * 7,
+              'toolset': [response] * 53, 'calls': [response] * 4,
+              'stream_reconnect': [{'exception': 'TimeoutError: injected transport failure'}]}
+    source = tmp_path / 'record.json'
+    source.write_text(json.dumps(record), encoding='utf-8')
+    target = tmp_path / 'golden.json'
+    target.write_text('previous golden', encoding='utf-8')
+    with pytest.raises(ValueError, match='stream_reconnect'):
+        mcp_goldens.main(source, target)
+    assert target.read_text(encoding='utf-8') == 'previous golden'

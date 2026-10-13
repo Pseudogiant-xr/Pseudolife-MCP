@@ -266,6 +266,8 @@ def check_executable_coverage(jobs):
     require_command(body, ("python", "-m", "pytest"), ("rust/daemon/harness/test_body_cases.py",), PYTEST_FILTERS)
     assert not any(words[0] == "cargo" for words in body)
     mcp = commands(parity["Daemon MCP live parity and controls"]["run"])
+    require_command(mcp, ("python", "-m", "pip", "install"),
+                    ("pydantic==2.14.0", "pydantic-core==2.50.0"))
     require_command(mcp, ("python", "-m", "pytest"),
                     ("tests/test_rust_mcp_catalogue.py", "rust/daemon/harness/test_mcp_mount.py",
                      "rust/daemon/harness/test_mcp_mutant_verdict.py", "rust/daemon/harness/test_mcp_ci.py", "rust/daemon/harness/test_mcp_runner.py", "rust/daemon/harness/test_mcp_validation.py"), PYTEST_FILTERS)

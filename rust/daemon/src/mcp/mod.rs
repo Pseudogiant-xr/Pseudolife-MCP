@@ -1105,6 +1105,37 @@ mod sessions {
         assert!(!app.mcp.is_ready("s"));
     }
 
+    #[tokio::test]
+    async fn overflow_json_floats_reach_valid_toolset_dispatch() {
+        for literal in ["1e400", "-1e400", "9e999", "-9e999"] {
+            let app = app();
+            app.mcp.register("s");
+            app.mcp.mark_ready("s");
+            let text = format!(
+                r#"{{"name":"memory_toolset","arguments":{{"action":"expand"}},"inputResponses":{{"k":{{"action":"accept","content":{{"x":{literal}}}}}}}}}"#
+            );
+            let params = crate::http::parse_body_json(&text).unwrap();
+            let response: Value = serde_json::from_str(
+                &respond(
+                    app.clone(),
+                    "caller".into(),
+                    "s".into(),
+                    HeaderMap::new(),
+                    json!(1),
+                    "tools/call".into(),
+                    params.as_object().unwrap().clone(),
+                )
+                .await,
+            )
+            .unwrap();
+            assert!(response.get("result").is_some(), "{literal}: {response}");
+            assert_eq!(
+                app.mcp.resolve_tier(&app.store, "caller", Some("caller")),
+                Tier::Full
+            );
+        }
+    }
+
     async fn assert_sdk_ttl_rule(ttl: String, accepted: bool) {
         let app = app();
         app.mcp.register("s");

@@ -14,6 +14,8 @@ import json
 import sys
 from pathlib import Path
 
+from mcp_compare import BASE_CASES, recording_errors
+
 PROTOCOL_CASES = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28",
                   "2030-01-01", "x"]
 # mcp_compare.toolset: per identity, 5 calls, a list, a second session's list,
@@ -45,6 +47,8 @@ def result_text(resp):
 
 def main(record, out):
     rec = json.loads(Path(record).read_text(encoding="utf-8"))
+    if errors := recording_errors(rec, BASE_CASES):
+        raise ValueError('MCP recording rejected: ' + '; '.join(errors))
     lists = rec["lists"]
     tiers = {"minimal": result_text(lists[2]), "core": result_text(lists[0]),
              "full": result_text(rec["toolset"][5])}

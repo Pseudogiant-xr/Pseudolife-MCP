@@ -62,11 +62,16 @@ def collect(models):
     return {'definitions': definitions, 'params': params}
 
 
-def generate():
+def source_versions():
     versions = {name: importlib.metadata.version(name)
                 for name in ('mcp', 'mcp-types', 'pydantic', 'pydantic-core')}
     assert versions['mcp'] == versions['mcp-types'] == '2.1.1', versions
-    out = {'source': versions, 'handshake_versions': VERSIONS,
+    assert versions['pydantic-core'] == '2.50.0', {'pydantic-core': versions['pydantic-core']}
+    return versions
+
+
+def generate():
+    out = {'source': source_versions(), 'handshake_versions': VERSIONS,
            'sealed_state_methods': sorted(methods.INPUT_REQUIRED_METHODS)}
     for name, mapping in [('requests', methods.CLIENT_REQUESTS),
                           ('notifications', methods.CLIENT_NOTIFICATIONS)]:
