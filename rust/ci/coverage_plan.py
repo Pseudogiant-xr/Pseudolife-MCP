@@ -21,7 +21,7 @@ EXCEPTIONS = {
     'w2d_search': {
         'live-and-mutants': 'w2d_search.py needs disposable PostgreSQL plus matching Qwen and cross-encoder exports. Local live and controls are measured; hosted CI currently runs only the offline namespace/control regressions and Rust unit tests.',
         'golden': 'Search recordings require the identical seeded template and clock-compatible ages; no portable committed search golden exists.',
-        'cortex-differential': 'w2d_cortex_check.py and the ignored cortex_fixture_dump need disposable PostgreSQL and query vectors from the provisioned Python embedder; not a hosted CI row.',
+        'cortex-differential': 'w2d_cortex_check.py and the ignored differential_cases_from_harness need disposable PostgreSQL and query vectors from the provisioned Python embedder; not a hosted CI row.',
         'rerank-differential': 'w2d_rerank_check.py needs the matching cross-encoder ONNX export and Python checkpoint; not provisioned in hosted CI.',
         'pg-unit-fixtures': 'PG-backed Rust unit fixtures return early without their DSNs; default nextest is not database parity evidence.',
     },
