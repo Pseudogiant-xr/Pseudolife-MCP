@@ -10,7 +10,7 @@ import sys
 from .oracle_selection import selected_oracle
 
 
-ORACLE_HEAD = "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1"
+ORACLE_HEAD = "1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4"
 ASSET_DIRECTORY = "rust/shim/src/cli/lease/assets"
 ASSETS = tuple(f"{action}_{kind}.txt"
                for action in ("top", "run", "hold", "check", "list", "break", "delegate")
