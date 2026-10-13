@@ -8,9 +8,14 @@ from __future__ import annotations
 
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+import http.client
 import json
+import os
+import socket
+import struct
 from pathlib import Path
 import time
+import threading
 
 from mcp_validation_cases import cases, coercion_cases, report_default, wire_json
 from mcp_validation_schema import source_versions
@@ -18,6 +23,28 @@ from mcp_wire import ACCEPT, PROTOCOL, header, request, sse_data
 
 EXPECTED_CASES = 18515
 EXPECTED_COERCION_CASES = 2137
+
+
+class SweepConnection(http.client.HTTPConnection):
+    """One-shot sweep sockets: reset on close to avoid client TIME_WAIT."""
+
+    def __init__(self, port):
+        super().__init__('127.0.0.1', port, timeout=30)
+        self.opened = 0
+
+    def connect(self):
+        super().connect()
+        self.opened += 1
+
+    def close(self):
+        try:
+            if self.sock is not None:
+                # Winsock's linger fields are u_short; POSIX uses int.
+                layout = 'HH' if os.name == 'nt' else 'ii'
+                self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                                     struct.pack(layout, 1, 0))
+        finally:
+            super().close()
 
 
 class ValidationMismatch(AssertionError):
@@ -40,7 +67,7 @@ def signature(response):
             'is_error': value.get('result', {}).get('isError', False)}
 
 
-def observe(port, case, ready, index):
+def observe(port, case, ready, index, *, connection=None):
     headers = {'Content-Type': 'application/json', 'Accept': ACCEPT,
                'Authorization': 'Bearer tok-default-0001',
                'X-PL-Writer': f'validation-{index}-{int(ready)}',
@@ -50,7 +77,7 @@ def observe(port, case, ready, index):
         body = {'jsonrpc': '2.0', 'method': method, 'params': params}
         if not notification:
             body['id'] = 1
-        return request(port, 'POST', wire_json(body).encode('utf-8'), headers, timeout=30)
+        return request(port, 'POST', wire_json(body).encode('utf-8'), headers, timeout=30, connection=connection)
 
     first = call('initialize', {})
     sid = header(first, 'mcp-session-id')
@@ -70,7 +97,7 @@ def observe(port, case, ready, index):
         result['tier'] = status['result']['structuredContent']['current']
         return result
     finally:
-        request(port, 'DELETE', None, headers, timeout=30)
+        request(port, 'DELETE', None, headers, timeout=30, connection=connection)
 
 
 def run(py_port, rs_port, output, *, coercions_only=False):
@@ -85,32 +112,52 @@ def run(py_port, rs_port, output, *, coercions_only=False):
     failures = []
     completed = 0
     counts = Counter()
+    local = threading.local()
+    connections = []
+    connections_lock = threading.Lock()
+
+    def connection(port):
+        if not hasattr(local, 'clients'):
+            local.clients = {}
+        if port not in local.clients:
+            client = SweepConnection(port)
+            with connections_lock:
+                connections.append(client)
+            local.clients[port] = client
+        return local.clients[port]
 
     def compare(item):
         index, case, ready = item
         try:
-            py = observe(py_port, case, ready, index)
-            rs = observe(rs_port, case, ready, index)
+            py = observe(py_port, case, ready, index, connection=connection(py_port))
+            rs = observe(rs_port, case, ready, index, connection=connection(rs_port))
         except Exception as exc:
             raise RuntimeError(f"validation case {index}, {case['method']}, {case['field']}, ready={ready}: {exc}") from exc
         return index, case, ready, py, rs
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        # Keep at most four observations in flight, including when one fails.
-        for offset in range(0, len(workload), 4):
-            for index, case, ready, py, rs in pool.map(compare, workload[offset:offset + 4]):
-                completed += 1
-                counts[case['method']] += 1
-                if py != rs:
-                    failures.append({'index': index, 'case': case, 'before_ready': ready,
-                                     'python': py, 'rust': rs})
-                    if len(failures) <= 3:
-                        print(json.dumps(failures[-1], default=report_default), flush=True)
-                if completed % 100 == 0:
-                    print(f'validation sweep: {completed}/{len(workload)}, {len(failures)} differences', flush=True)
+    try:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            # Keep at most four observations in flight, including when one fails.
+            for offset in range(0, len(workload), 4):
+                for index, case, ready, py, rs in pool.map(compare, workload[offset:offset + 4]):
+                    completed += 1
+                    counts[case['method']] += 1
+                    if py != rs:
+                        failures.append({'index': index, 'case': case, 'before_ready': ready,
+                                         'python': py, 'rust': rs})
+                        if len(failures) <= 3:
+                            print(json.dumps(failures[-1], default=report_default), flush=True)
+                    if completed % 100 == 0:
+                        print(f'validation sweep: {completed}/{len(workload)}, {len(failures)} differences', flush=True)
+    finally:
+        # Each exchange closes its socket; join workers before final cleanup.
+        for client in connections:
+            client.close()
     report = {'mode': 'coercions' if coercions_only else 'full', 'source': versions,
               'generated_cases': len(all_cases), 'expected_observations': len(workload),
               'completed_observations': completed, 'methods': dict(counts),
+              'tcp_connections': {name: sum(c.opened for c in connections if c.port == port)
+                                  for name, port in [('python', py_port), ('rust', rs_port)]},
               'seconds': round(time.monotonic() - started, 1), 'diffs': failures}
     output.write_text(json.dumps(report, indent=2, default=report_default) + '\n', encoding='utf-8')
     print(f'validation sweep complete: {completed} observations, {len(failures)} differences', flush=True)

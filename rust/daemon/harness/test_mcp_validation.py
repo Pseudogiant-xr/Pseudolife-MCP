@@ -36,7 +36,7 @@ def test_sweep_cannot_pass_when_only_state_differs(tmp_path, monkeypatch):
     monkeypatch.setattr(sweep, 'cases', lambda: iter([{'method': 'tools/call', 'notification': False,
         'params': {}, 'field': 'fixture'}]))
     monkeypatch.setattr(sweep, 'EXPECTED_CASES', 1)
-    monkeypatch.setattr(sweep, 'observe', lambda port, *args: {'http': 200, 'code': -32602,
+    monkeypatch.setattr(sweep, 'observe', lambda port, *args, **kwargs: {'http': 200, 'code': -32602,
         'is_error': False, 'ready': True, 'tier': 'core' if port == 1 else 'full'})
     path = tmp_path / 'report.json'
     with pytest.raises(AssertionError, match='validation sweep differs'):
@@ -50,7 +50,7 @@ def test_sweep_failure_cannot_reuse_previous_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(sweep, 'cases', lambda: iter([{'method': 'ping', 'notification': False,
         'params': {}, 'field': 'fixture'}]))
     monkeypatch.setattr(sweep, 'EXPECTED_CASES', 1)
-    def failed(*args):
+    def failed(*args, **kwargs):
         raise RuntimeError('fixture unavailable')
     monkeypatch.setattr(sweep, 'observe', failed)
     path = tmp_path / 'report.json'
@@ -133,3 +133,134 @@ def test_ci_retains_accepted_file_urls_after_deduplication():
         accepted.append(corpus.wire_json([case['method'], case['params']]))
     assert accepted
     assert set(accepted) & selected
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_sweep_reuses_source_ports_and_cleans_up(tmp_path, monkeypatch, fail):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+    import socket
+
+    class Server(ThreadingHTTPServer):
+        daemon_threads = False
+        block_on_close = True
+        opened = 0
+        sessions_created = 0
+
+        def get_request(self):
+            sock, address = super().get_request()
+            self.opened += 1
+            return sock, address
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
+        def log_message(self, *args):
+            pass
+
+        def handle(self):
+            try:
+                super().handle()
+            except ConnectionResetError:
+                pass
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            writer = self.headers['X-PL-Writer']
+            sid = self.headers.get('Mcp-Session-Id')
+            with self.server.guard:
+                if not sid:
+                    self.server.sessions_created += 1
+                    sid = str(self.server.sessions_created)
+                    self.server.sessions[sid] = [writer, False]
+                owner, ready = self.server.sessions[sid]
+                assert writer == owner
+                if body['method'] == 'initialize' and body['params']:
+                    ready = True
+                    self.server.sessions[sid][1] = True
+            response = ({'result': {'structuredContent': {'current': 'core'}}} if ready
+                        else {'error': {'code': -32602}})
+            self.reply(response, sid)
+
+        def do_DELETE(self):
+            with self.server.guard:
+                del self.server.sessions[self.headers['Mcp-Session-Id']]
+            self.reply({}, None)
+
+        def reply(self, body, sid):
+            data = json.dumps(body).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(data)))
+            if sid:
+                self.send_header('mcp-session-id', sid)
+            self.end_headers()
+            self.wfile.write(data)
+
+    servers, threads = [], []
+    for _ in range(2):
+        server = Server(('127.0.0.1', 0), Handler)
+        server.sessions, server.guard = {}, threading.Lock()
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        servers.append(server)
+        threads.append(thread)
+    reservations = []
+    for _ in range(8):
+        reserved = socket.socket()
+        reserved.bind(('127.0.0.1', 0))
+        reservations.append(reserved)
+    port_lock = threading.Lock()
+    original_connection = sweep.SweepConnection
+    class FixedSourceConnection(original_connection):
+        def __init__(self, port):
+            super().__init__(port)
+            with port_lock:
+                reserved = reservations.pop()
+                self.source_address = reserved.getsockname()
+                reserved.close()
+    monkeypatch.setattr(sweep, 'SweepConnection', FixedSourceConnection)
+    monkeypatch.setattr(sweep, 'EXPECTED_CASES', 8)
+    monkeypatch.setattr(sweep, 'cases', lambda: iter([{'method': 'ping', 'notification': False,
+        'params': {}, 'field': 'fixture'}] * 8))
+    if fail:
+        signature = sweep.signature
+        def failed(response):
+            signature(response)
+            raise RuntimeError('injected response failure')
+        monkeypatch.setattr(sweep, 'signature', failed)
+    try:
+        args = [server.server_port for server in servers] + [tmp_path / 'sweep.json']
+        if fail:
+            with pytest.raises(RuntimeError, match='injected response failure'):
+                sweep.run(*args)
+        else:
+            report = sweep.run(*args)
+            assert report['completed_observations'] == 16 and not report['diffs']
+    finally:
+        for reserved in reservations:
+            reserved.close()
+        for server, thread in zip(servers, threads):
+            server.shutdown()
+            thread.join()
+            server.server_close()
+    assert all(not server.sessions for server in servers)
+    if not fail:
+        assert all(server.sessions_created == 16 for server in servers)
+        assert all(server.opened > server.sessions_created for server in servers)
+
+
+@pytest.mark.parametrize('platform,layout', [('nt', 'HH'), ('posix', 'ii')])
+def test_sweep_reset_close_uses_native_linger_layout(monkeypatch, platform, layout):
+    import socket
+    import struct
+    from types import SimpleNamespace
+
+    options, closed = [], []
+    sock = SimpleNamespace(setsockopt=lambda *args: options.append(args),
+                           close=lambda: closed.append(True))
+    connection = sweep.SweepConnection(1)
+    connection.sock = sock
+    monkeypatch.setattr(sweep, 'os', SimpleNamespace(name=platform))
+    connection.close()
+    assert options == [(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack(layout, 1, 0))]
+    assert closed == [True] and connection.sock is None
