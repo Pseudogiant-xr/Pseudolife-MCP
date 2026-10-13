@@ -15,6 +15,7 @@ def register(harness):
     class SweepPruning(harness.Scenario):
         name = "sweep-pruning"
         settle = False
+        snapshot_settle = False  # model-free timeline observes pruning directly in storage
         golden_replay = True
         golden_db_state = True
         config_yaml = ("memory:\n  dream:\n    enabled: false\n    sweep_interval_seconds: 0.2\n"
