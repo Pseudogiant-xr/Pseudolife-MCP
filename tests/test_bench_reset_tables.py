@@ -21,7 +21,7 @@ from __future__ import annotations
 import inspect
 import re
 
-from pseudolife_memory.storage import schema
+from pseudolife_memory.storage import re_evidence_schema, schema
 
 # `IF NOT EXISTS` is required in the pattern on purpose: without it the
 # regex also matches the prose "before the CREATE TABLE calls" comment.
@@ -29,16 +29,18 @@ _CREATE_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)")
 
 
 def _declared_tables() -> set[str]:
-    """Every table name the schema module creates, DDL string and the
-    additive-migration `cur.execute` tail alike. Include the composed runtime
-    DDL so declarations imported from a subsystem are covered too."""
-    return set(_CREATE_RE.findall(schema.SCHEMA_SQL + inspect.getsource(schema)))
+    """Every table name the Python service initializes, including the proof
+    extension and the canonical additive-migration `cur.execute` tail.
+    Include composed runtime DDL for imported subsystem declarations too."""
+    ddl = (schema.SCHEMA_SQL + inspect.getsource(schema)
+           + inspect.getsource(re_evidence_schema))
+    return set(_CREATE_RE.findall(ddl))
 
 
 def test_every_declared_table_is_in_the_reset_list():
     missing = sorted(_declared_tables() - set(schema.BENCH_RESET_TABLES))
     assert not missing, (
-        "these tables are declared by schema.py but absent from "
+        "these tables are declared by the Python schema but absent from "
         "BENCH_RESET_TABLES, so a bench reset leaves their rows behind:\n  "
         + "\n  ".join(missing))
 
@@ -49,12 +51,25 @@ def test_declared_tables_include_imported_ddl(monkeypatch):
     assert "fixture_imported_ddl" in _declared_tables()
 
 
+def test_declared_tables_include_python_extension_ddl(monkeypatch):
+    getsource = inspect.getsource
+
+    def extension_source(module):
+        source = getsource(module)
+        if module is re_evidence_schema:
+            source += "\nCREATE TABLE IF NOT EXISTS fixture_extension_ddl (id TEXT);"
+        return source
+
+    monkeypatch.setattr(inspect, "getsource", extension_source)
+    assert "fixture_extension_ddl" in _declared_tables()
+
+
 def test_reset_list_names_no_table_the_schema_does_not_declare():
     """The other direction: a renamed or dropped table must not linger in
     the list, or every TRUNCATE fails with `relation does not exist`."""
     extra = sorted(set(schema.BENCH_RESET_TABLES) - _declared_tables())
     assert not extra, (
-        "BENCH_RESET_TABLES names tables schema.py does not create:\n  "
+        "BENCH_RESET_TABLES names tables the Python schema does not create:\n  "
         + "\n  ".join(extra))
 
 
