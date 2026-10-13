@@ -13,6 +13,7 @@ BASE, HEAD, MERGE, CHECKOUT = (character * 40 for character in "abcd")
 @pytest.fixture
 def graph(monkeypatch):
     calls = []
+    monkeypatch.setattr(oracle, "release_cut", lambda *args: None)
 
     def git(root, *arguments):
         calls.append(arguments)

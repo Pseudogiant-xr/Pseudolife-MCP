@@ -1,12 +1,15 @@
 """Additive Phase 1 audit; historical audit assertions are unchanged."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import tomllib
 
 import pytest
+
+from .oracle_selection import SELECTION_ENV, selected_oracle
 
 
 @pytest.fixture(scope="module")
@@ -49,13 +52,19 @@ def test_candidate_summary_does_not_admit_candidate_register_status(inventory, m
 
 def test_candidate_runtime_identity_matches_the_selected_python_pin(inventory):
     root = inventory.ROOT
-    pinned = subprocess.check_output(["git", "show", inventory.PHASE1_ORACLE + ":pyproject.toml"], cwd=root)
-    version = tomllib.loads(pinned.decode())["project"]["version"]
-    crate = tomllib.loads((root / "rust/shim/Cargo.toml").read_text())
-    lock = tomllib.loads((root / "rust/Cargo.lock").read_text())
+    # The inventory's fixed pin owns historical coverage, not today's package
+    # identity. Event CI uses exactly the same oracle as the live byte judge.
+    if os.environ.get(SELECTION_ENV):
+        head = selected_oracle(root)["oracle_head"]
+        metadata = subprocess.check_output(["git", "show", head + ":pyproject.toml"], cwd=root)
+    else:
+        metadata = (root / "pyproject.toml").read_bytes()
+    version = tomllib.loads(metadata.decode("utf-8"))["project"]["version"]
+    crate = tomllib.loads((root / "rust/shim/Cargo.toml").read_text(encoding="utf-8"))
+    lock = tomllib.loads((root / "rust/Cargo.lock").read_text(encoding="utf-8"))
     member = next(item for item in lock["package"] if item["name"] == "pseudolife-stdio")
     runtime = re.search(r'pub const PACKAGE_VERSION: &str = "([^"]+)";',
-                        (root / "rust/shim/src/lifecycle.rs").read_text()).group(1)
+                        (root / "rust/shim/src/lifecycle.rs").read_text(encoding="utf-8")).group(1)
     assert crate["package"]["version"] == member["version"] == runtime == version
 
 
