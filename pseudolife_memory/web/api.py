@@ -23,6 +23,8 @@ import functools
 import json
 import logging
 import mimetypes
+import ntpath
+import os
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -201,6 +203,46 @@ def _parse_query(scope) -> dict[str, str]:
     return out
 
 
+# Names Windows maps to devices in every directory, with or without an
+# extension (``NUL``, ``com1.txt``); opening one reaches the device, not a file.
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"{kind}{n}" for kind in ("COM", "LPT") for n in "123456789¹²³"})
+
+
+def _inside_static_root(root: str, rel: str, pathmod: Any = os.path) -> bool:
+    """Whether ``rel`` joined to ``root`` stays under it, decided from the
+    strings alone. An absolute, drive, UNC or device form replaces the root
+    in the join and so lands outside it. Under Windows path rules a device
+    name or an alternate data stream (``name:stream``) is refused too."""
+    base = pathmod.normcase(pathmod.normpath(root))
+    joined = pathmod.normcase(pathmod.normpath(pathmod.join(root, rel)))
+    try:
+        if pathmod.commonpath([base, joined]) != base:
+            return False
+    except ValueError:  # different drives, or absolute mixed with relative
+        return False
+    # A path that climbs above the root and comes back ("../x/../static/a")
+    # normalizes inside it, but resolving it would still visit the outside
+    # directory on the way. Refuse any ".." that rises above the root.
+    # A same-drive "C:name" joins under the root, so only its tail counts.
+    tail = ntpath.splitdrive(rel)[1] if pathmod is ntpath else rel
+    parts = tail.replace("\\", "/").split("/") if pathmod is ntpath else tail.split("/")
+    depth = 0
+    for part in parts:
+        if part in ("", "."):
+            continue
+        depth += -1 if part == ".." else 1
+        if depth < 0:
+            return False
+    if pathmod is ntpath:
+        for part in tail.replace("/", "\\").split("\\"):
+            stem = part.split(".", 1)[0].rstrip(" .").upper()
+            if ":" in part or stem in _WINDOWS_DEVICE_NAMES:
+                return False
+    return True
+
+
 def _serve_static(rel_path: str) -> tuple[int, bytes, str]:
     """Resolve ``/ui/<rel_path>`` under STATIC_DIR with traversal protection."""
     rel = rel_path.strip("/")
@@ -208,23 +250,27 @@ def _serve_static(rel_path: str) -> tuple[int, bytes, str]:
         rel = "index.html"
     elif rel.startswith("ui/"):
         rel = rel[3:]
+    # Refuse before touching the filesystem: resolving first would open
+    # whatever the join names, which on Windows may be a UNC or pipe path.
+    if not _inside_static_root(str(STATIC_DIR), rel):
+        return 403, b"forbidden", "text/plain"
+    root = STATIC_DIR.resolve()
+
+    def contained(resolved: Path) -> bool:
+        return resolved.is_relative_to(root)
+
     target = (STATIC_DIR / rel).resolve()
-    try:
-        target.relative_to(STATIC_DIR.resolve())
-    except ValueError:
+    if not contained(target):
         return 403, b"forbidden", "text/plain"
     if target.is_dir():
+        # The appended index may itself link outside the folder.
         target = (target / "index.html").resolve()
-        try:
-            target.relative_to(STATIC_DIR.resolve())
-        except ValueError:
+        if not contained(target):
             return 403, b"forbidden", "text/plain"
     if not target.is_file():
         # SPA fallback: unknown sub-route -> index.html (hash router handles it).
         index = (STATIC_DIR / "index.html").resolve()
-        try:
-            index.relative_to(STATIC_DIR.resolve())
-        except ValueError:
+        if not contained(index):
             return 403, b"forbidden", "text/plain"
         if index.is_file():
             return 200, index.read_bytes(), "text/html; charset=utf-8"
