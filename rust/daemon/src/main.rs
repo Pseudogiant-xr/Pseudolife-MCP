@@ -75,6 +75,18 @@ fn fail(code: i32, message: &str) -> ! {
     std::process::exit(code)
 }
 
+fn nodelay_listener(
+    listener: tokio::net::TcpListener,
+) -> impl axum::serve::Listener<Io = tokio::net::TcpStream, Addr = std::net::SocketAddr> {
+    use axum::serve::ListenerExt;
+
+    listener.tap_io(|stream| {
+        if let Err(error) = stream.set_nodelay(true) {
+            eprintln!("set TCP_NODELAY: {error}");
+        }
+    })
+}
+
 fn main() {
     #[cfg(feature = "principal-harness")]
     if std::env::var_os("PSEUDOLIFE_PRINCIPAL_HARNESS").is_some() {
@@ -267,7 +279,7 @@ fn main() {
             }
         };
         eprintln!("daemon: listening on {host}:{port} (auth={auth_configured})");
-        let code = match axum::serve(listener, router)
+        let code = match axum::serve(nodelay_listener(listener), router)
             .with_graceful_shutdown(shutdown_signal())
             .await
         {
@@ -297,5 +309,22 @@ async fn shutdown_signal() {
     {
         let mut break_signal = tokio::signal::windows::ctrl_break().expect("CTRL_BREAK handler");
         tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = break_signal.recv() => {} }
+    }
+}
+
+#[cfg(test)]
+mod listener_tests {
+    use super::*;
+    use axum::serve::Listener;
+
+    #[tokio::test]
+    async fn accepted_tcp_socket_disables_nagle() {
+        let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = tcp.local_addr().unwrap();
+        let mut listener = nodelay_listener(tcp);
+        assert_eq!(listener.local_addr().unwrap(), address);
+        let _client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let (accepted, _) = listener.accept().await;
+        assert!(accepted.nodelay().unwrap());
     }
 }
