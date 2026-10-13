@@ -15,3 +15,7 @@
 - JSON-RPC preserves arbitrary-width integer IDs and real object keys that
   resemble serde's internal number marker. Fixture runs use separate homes,
   resolve binary paths before launch and fail on execution or cleanup errors.
+- Toolset transitions are atomic. SDK-derived request and notification schemas
+  validate metadata, task parameters, client information and nested fields
+  before readiness or tier changes. A generated live sweep checks response
+  codes and state before and after initialization.

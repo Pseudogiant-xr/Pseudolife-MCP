@@ -13,6 +13,7 @@ mod envelope;
 pub mod identity;
 pub mod tiers;
 mod toolset;
+mod validation;
 
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
@@ -540,9 +541,12 @@ enum Message {
         method: String,
         params: Map<String, Value>,
     },
-    /// Notifications and client responses: answered 202, then handled or
-    /// dropped. Holds the method for notifications.
-    Other(Option<String>),
+    Notification {
+        method: String,
+        params: Map<String, Value>,
+    },
+    /// Client responses are acknowledged and dropped.
+    Other,
 }
 
 /// A JSON-RPC request id as the SDK's union takes it: a string or an
@@ -590,11 +594,14 @@ fn classify(v: &Value) -> Option<Message> {
                 params,
             });
         }
-        return Some(Message::Other(Some(m.clone())));
+        return Some(Message::Notification {
+            method: m.clone(),
+            params,
+        });
     }
     let id_ok = o.get("id").and_then(request_id).is_some();
     if id_ok && o.get("result").is_some_and(Value::is_object) {
-        return Some(Message::Other(None));
+        return Some(Message::Other);
     }
     let error_ok = o.get("error").and_then(Value::as_object).is_some_and(|e| {
         e.get("code")
@@ -602,7 +609,7 @@ fn classify(v: &Value) -> Option<Message> {
             && e.get("message").is_some_and(Value::is_string)
     });
     if (id_ok || o.get("id").is_some_and(Value::is_null)) && error_ok {
-        return Some(Message::Other(None));
+        return Some(Message::Other);
     }
     None
 }
@@ -667,12 +674,15 @@ async fn post(
     }
     let (id, method, params) = match message {
         Message::Request { id, method, params } => (id, method, params),
-        Message::Other(m) => {
-            if m.as_deref() == Some("notifications/initialized") {
+        Message::Notification { method, params } => {
+            if validation::notification(&method, &Value::Object(params))
+                && method == "notifications/initialized"
+            {
                 app.mcp.mark_ready(sid);
             }
             return json_bytes(202, Vec::new(), Some(sid));
         }
+        Message::Other => return json_bytes(202, Vec::new(), Some(sid)),
     };
     // The call runs as its own task, so a client that drops the connection
     // does not cancel a tool body mid-write (Python runs bodies on worker
@@ -733,55 +743,10 @@ fn has_handler(method: &str) -> bool {
     )
 }
 
-/// `validate_client_request` for the parameter shapes canonical clients and
-/// the listed methods use: `_meta` an object, `cursor` a string, required
-/// names present. `false` means -32602.
+/// The SDK validates spec fields, then registered handler fields. Unknown
+/// methods fall through to lookup without parameter validation.
 fn params_valid(method: &str, p: &Map<String, Value>) -> bool {
-    // Every handshake version has the same spec-method set. The SDK looks
-    // up unknown methods without validating their metadata or parameters.
-    let served = has_handler(method);
-    if !served
-        && !matches!(
-            method,
-            "resources/subscribe"
-                | "resources/unsubscribe"
-                | "logging/setLevel"
-                | "completion/complete"
-        )
-    {
-        return true;
-    }
-    let opt = |key: &str, ok: fn(&Value) -> bool| p.get(key).is_none_or(|v| v.is_null() || ok(v));
-    if !opt("_meta", Value::is_object) {
-        return false;
-    }
-    // The schema permits null; only a registered typed handler rejects it.
-    // Unknown extension keys stay unrestricted.
-    if p.get("_meta")
-        .and_then(|meta| meta.get("progressToken"))
-        .is_some_and(|v| {
-            !((v.is_null() && !served)
-                || v.is_boolean()
-                || request_id(v).is_some()
-                // Pydantic's float-to-int path excludes both signed 64-bit
-                // endpoints; integer spellings above use arbitrary width.
-                || v.as_f64().is_some_and(|n| {
-                    n.is_finite() && n.fract() == 0.0 && n.abs() < 9223372036854775808.0
-                }))
-        })
-    {
-        return false;
-    }
-    let string = |key: &str| p.get(key).is_some_and(Value::is_string);
-    match method {
-        "tools/list" | "prompts/list" | "resources/list" | "resources/templates/list" => {
-            opt("cursor", Value::is_string)
-        }
-        "tools/call" => string("name") && opt("arguments", Value::is_object),
-        "prompts/get" => string("name") && opt("arguments", Value::is_object),
-        "resources/read" | "resources/subscribe" | "resources/unsubscribe" => string("uri"),
-        _ => true,
-    }
+    validation::request(method, &Value::Object(p.clone()), has_handler(method))
 }
 
 async fn respond(
@@ -860,78 +825,10 @@ async fn respond(
     }
 }
 
-/// The SDK validates known capability fields and ignores unknown extensions.
-fn capabilities_valid(caps: &Map<String, Value>) -> bool {
-    const OBJECT_PATHS: &[&[&str]] = &[
-        &["experimental"],
-        &["extensions"],
-        &["roots"],
-        &["sampling"],
-        &["sampling", "context"],
-        &["sampling", "tools"],
-        &["elicitation"],
-        &["elicitation", "form"],
-        &["elicitation", "url"],
-        &["tasks"],
-        &["tasks", "list"],
-        &["tasks", "cancel"],
-        &["tasks", "requests"],
-        &["tasks", "requests", "sampling"],
-        &["tasks", "requests", "sampling", "createMessage"],
-        &["tasks", "requests", "elicitation"],
-        &["tasks", "requests", "elicitation", "create"],
-    ];
-    for path in OBJECT_PATHS {
-        let mut value = caps.get(path[0]);
-        for part in &path[1..] {
-            value = value.and_then(|v| v.get(*part));
-        }
-        if value.is_some_and(|v| !v.is_null() && !v.is_object()) {
-            return false;
-        }
-    }
-    for key in ["experimental", "extensions"] {
-        if caps
-            .get(key)
-            .and_then(Value::as_object)
-            .is_some_and(|items| items.values().any(|v| !v.is_object()))
-        {
-            return false;
-        }
-    }
-    // Pydantic's non-strict bool accepts its documented JSON spellings.
-    caps.get("roots")
-        .and_then(|v| v.get("listChanged"))
-        .is_none_or(|v| {
-            v.is_null()
-                || v.is_boolean()
-                || v.as_f64().is_some_and(|n| n == 0.0 || n == 1.0)
-                || v.as_str().is_some_and(|s| {
-                    matches!(
-                        s.to_ascii_lowercase().as_str(),
-                        "0" | "1"
-                            | "off"
-                            | "on"
-                            | "f"
-                            | "t"
-                            | "false"
-                            | "true"
-                            | "n"
-                            | "y"
-                            | "no"
-                            | "yes"
-                    )
-                })
-        })
-}
-
 /// `InitializeResult` for valid `InitializeRequestParams`; none otherwise.
 fn initialize_result(p: &Map<String, Value>) -> Option<String> {
     let version = p.get("protocolVersion")?.as_str()?;
-    let caps = p.get("capabilities")?.as_object()?;
-    if !capabilities_valid(caps) {
-        return None;
-    }
+    p.get("capabilities")?.as_object()?;
     let info = p.get("clientInfo")?.as_object()?;
     info.get("name")?.as_str()?;
     info.get("version")?.as_str()?;
@@ -1144,6 +1041,86 @@ mod sessions {
                 .unwrap();
             let value = crate::http::parse_body_json(std::str::from_utf8(&bytes).unwrap()).unwrap();
             assert_eq!(value["id"].to_string(), expected_id);
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_initialized_notification_keeps_gate_closed() {
+        let app = app();
+        app.mcp.register("s");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "accept",
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+        let response = post(
+            &app,
+            "caller",
+            "s",
+            true,
+            headers,
+            Bytes::from_static(
+                br#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{"_meta":5}}"#,
+            ),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert!(!app.mcp.is_ready("s"));
+    }
+
+    #[tokio::test]
+    async fn malformed_task_refuses_before_tier_change() {
+        let app = app();
+        app.mcp.register("s");
+        app.mcp.mark_ready("s");
+        let params = json!({"name":"memory_toolset", "arguments":{"action":"expand"},
+            "task":{"ttl":"bad"}});
+        let value: Value = serde_json::from_str(
+            &respond(
+                app.clone(),
+                "caller".into(),
+                "s".into(),
+                HeaderMap::new(),
+                json!(1),
+                "tools/call".into(),
+                params.as_object().unwrap().clone(),
+            )
+            .await,
+        )
+        .unwrap();
+        assert_eq!(value["error"]["code"], INVALID_PARAMS);
+        assert_eq!(
+            app.mcp.resolve_tier(&app.store, "caller", Some("caller")),
+            Tier::Core
+        );
+    }
+
+    #[tokio::test]
+    async fn malformed_client_info_keeps_gate_closed() {
+        for info in [
+            json!({"name":"fixture","version":"1","title":1}),
+            json!({"name":"fixture","version":"1","icons":"bad"}),
+        ] {
+            let app = app();
+            app.mcp.register("s");
+            let params =
+                json!({"protocolVersion":"2025-11-25", "capabilities":{},"clientInfo":info});
+            let value: Value = serde_json::from_str(
+                &respond(
+                    app.clone(),
+                    "caller".into(),
+                    "s".into(),
+                    HeaderMap::new(),
+                    json!(1),
+                    "initialize".into(),
+                    params.as_object().unwrap().clone(),
+                )
+                .await,
+            )
+            .unwrap();
+            assert_eq!(value["error"]["code"], INVALID_PARAMS);
+            assert!(!app.mcp.is_ready("s"));
         }
     }
 

@@ -130,6 +130,29 @@ for the MCP surface.
 | M16 | memory_toolset's argument binding: an unknown name gives `unknown_parameter`, one sentence per name (`unknown parameter 'K' for memory_toolset; did you mean 'G'?` from difflib at cutoff 0.6, else ending `.`), the last closed by ` Accepted: action`, with `param` the first name and `accepted: ["action"]`. A missing `action` gives `action: Field required`; any other value gives `action: Input should be 'expand', 'collapse' or 'status'` (both `invalid_argument`, `param: "action"`). | `mcp_server.py:358-432` |
 | M17 | The writer is the named principal, else `X-PL-Writer` (non-empty), else `PSEUDOLIFE_WRITER_ID`, else `unknown`; the session is `X-PL-Session` as sent. Tool bodies receive both through `CallIdentity` (`src/mcp/dispatch.rs`). | `writer_context.py:130-205`; `service.py:893` |
 
+### SDK parameter validation
+
+`src/mcp/validation-schema.json` records the MCP and MCP-types 2.1.1
+parameter schemas, including the Pydantic versions used to generate them.
+Regenerate it with `python rust/daemon/harness/mcp_validation_schema.py`.
+The table contains all 13 handshake request methods, four client notification
+methods and the nine registered request handlers. It includes nested metadata,
+task, client implementation, capability and input-response fields. Unknown
+extension keys follow each model's extra-field policy.
+
+Spec parameter validation precedes handler lookup; registered handler validation
+precedes readiness or tier mutation. Unknown methods reach lookup without spec
+validation. Notifications validate before changing readiness. The Rust evaluator
+implements the table's scalar coercions, unions, required fields, nested objects,
+arrays, literals, URL fields and numeric constraints; it does not dispatch Python
+or load schemas from the network.
+
+`mcp_run.py <binary> <output> --validation-sweep` generates field variants from
+both validation layers and compares HTTP/JSON-RPC codes, readiness and tier on
+both live daemons, before and after initialization. The pinned corpus has 13,525
+cases and requires all 27,050 paired observations with zero differences. It
+retains the separate strict transport corpus and its declared differences.
+
 ### Free (MCP surface)
 
 - The text after `Parse error: ` and `Validation error: `.

@@ -1,7 +1,7 @@
 """Run the MCP-surface harness end to end on disposable banks.
 
 usage: python mcp_run.py <rust-binary> <out-dir> [--mutant NAME --baseline <compare.json>]
-                         [--tokenless | --config2] [--record <golden.json>] [--mount-probe]
+                         [--tokenless | --config2] [--record <golden.json>] [--mount-probe] [--validation-sweep]
 
 Creates pl_cf_w2g_py and pl_cf_w2g_rs through the test login, starts the
 Python oracle (from this checkout) and the Rust daemon on them with the
@@ -106,6 +106,8 @@ def main():
             print(f"cannot load mutant baseline: {exc}", file=sys.stderr)
             return 2
     record = args[args.index("--record") + 1] if "--record" in args else None
+    if "--validation-sweep" in args and (mutant or record or "--tokenless" in args or "--config2" in args):
+        raise ValueError("validation sweep requires the ordinary bearer configuration")
     env = dict(ENV)
     if "--tokenless" in args:
         env = {"PSEUDOLIFE_MCP_TIER_MAP": ENV["PSEUDOLIFE_MCP_TIER_MAP"],
@@ -119,6 +121,8 @@ def main():
         (out / (f"mutant-{mutant}.json" if mutant else "compare.json")).unlink(missing_ok=True)
     if "--mount-probe" in args:
         (out / "foundation-mount.json").unlink(missing_ok=True)
+    if "--validation-sweep" in args:
+        (out / "validation-sweep.json").unlink(missing_ok=True)
     root = Path(tempfile.mkdtemp(prefix="w2g-", dir=daemons.scratch_root()))
     started = []
     dbs = {side: pg.name(f"pl_cf_w2g_{side}") for side in ("py", "rs")}
@@ -166,6 +170,9 @@ def main():
             if flag in args:
                 cmd.append(flag)
         code = subprocess.run(cmd).returncode
+        if "--validation-sweep" in args and code in (0, 1):
+            from mcp_validation_sweep import run as validation_sweep
+            validation_sweep(py_port, rs_port, out / "validation-sweep.json")
     except Exception as exc:  # noqa: BLE001 — infrastructure is never a parity verdict.
         print(f"MCP harness infrastructure failed: {exc}", file=sys.stderr)
         code = 2

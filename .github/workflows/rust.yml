@@ -549,7 +549,7 @@ jobs:
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $defaultName)).Path
           $mutants = (Resolve-Path (Join-Path 'rust/target/release' $mutantName)).Path
           $env:PL_HARNESS_SCRATCH = Join-Path $env:RUNNER_TEMP 'daemon-mcp-homes'
-          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py
+          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/mcp_ci.py --default-bin $candidate --mutant-bin $mutants --out (Join-Path $env:RUNNER_TEMP 'daemon-mcp')
           exit $LASTEXITCODE
