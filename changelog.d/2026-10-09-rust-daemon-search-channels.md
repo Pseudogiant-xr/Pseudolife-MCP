@@ -14,3 +14,7 @@
   against the Python daemon on disposable banks that compares responses by
   value and both banks' state after every scenario, with a mutant control;
   declared divergences are listed in `rust/daemon/divergences.md`.
+- Cortex hydration checks the live embedding dimension instead of a fixed
+  1024. Other Console reads, standalone canonical-store searches, briefing,
+  recall and document retrieval remain explicitly deferred; this increment
+  does not establish full read-path parity or a cutover-ready daemon.

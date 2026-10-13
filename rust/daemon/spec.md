@@ -132,7 +132,7 @@ Sources are `memory/reranker.py` and sentence-transformers 5.5.1 (`ST`).
 
 | # | Exact item | Source |
 |---|---|---|
-| C1 | Hydration: every `facts` row `ORDER BY id`; `freshness_class` defaults to `evergreen`, `kind` to `scalar`, a version of 0 or null to 1; the embedding read as `real[]`, a non-1024 vector refuses. | `storage/sync.py:43, 273`; `storage/postgres.py:122, 1918`; `service.py:1170` |
+| C1 | Hydration: every `facts` row `ORDER BY id`; `freshness_class` defaults to `evergreen`, `kind` to `scalar`, a version of 0 or null to 1; the embedding read as `real[]`, a vector whose width differs from the live embedder refuses (W2-D completion correction, 2026-10-13). | `storage/sync.py:43, 273`; `storage/postgres.py:122, 1918`; `service.py:1170` |
 | C2 | Slot key: strip, casefold, runs of `[\s._\-/]+` become `-`, strip `-`; recomputed from `entity` and `attribute`, never read from the `*_norm` columns. | `memory/cortex.py:54, 311` |
 | C3 | Index: current members in record order; a duplicate current or contested scalar keeps the most recently confirmed row (the loser is demoted in memory). | `memory/cortex.py:1797` |
 | C4 | Served `origin`: the strongest tier in `support` (user > action > agent > assistant), else `""`; the `origin` column is not read. | `memory/cortex.py:229` |

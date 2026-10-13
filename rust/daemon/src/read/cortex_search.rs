@@ -1113,7 +1113,15 @@ mod tests {
             ..CortexKnobs::default()
         };
         let now = input["now"].as_f64().unwrap();
-        let store = crate::stores::cortex::hydrate(&db).await.expect("hydrate");
+        let store = crate::stores::cortex::hydrate(
+            &db,
+            input["cases"][0]["vec"]
+                .as_array()
+                .expect("query vector")
+                .len(),
+        )
+        .await
+        .expect("hydrate");
         let mut results = Vec::new();
         for case in input["cases"].as_array().unwrap() {
             let q: Vec<f32> = case["vec"]

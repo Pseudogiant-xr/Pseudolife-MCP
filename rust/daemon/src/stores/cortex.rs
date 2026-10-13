@@ -19,6 +19,7 @@ use anyhow::{Result, bail};
 use serde_json::Value;
 use tokio_postgres::Client;
 
+#[cfg(test)]
 pub const DIM: usize = 1024;
 
 /// `ASSISTANT_FACT_SCORE_MULT` (`memory/cortex.py:229`).
@@ -334,13 +335,26 @@ fn json_strings(v: Option<Value>) -> Vec<String> {
 
 /// `hydrate_cortex` (`storage/sync.py:273`) over `load_facts`
 /// (`storage/postgres.py:1918`): every `facts` row in id order, then the
-/// index rebuild. A row whose vector is not 1024-dim refuses, as
+/// index rebuild. A row whose vector differs from the live dimension refuses, as
 /// `_refuse_on_stale_hydrated_dims` does at service init.
-pub async fn hydrate(client: &Client) -> Result<CortexStore> {
-    crate::txn::with_client(client, |client| async move { hydrate_locked(client).await }).await
+pub async fn hydrate(client: &Client, dim: usize) -> Result<CortexStore> {
+    crate::txn::with_client(
+        client,
+        |client| async move { hydrate_locked(client, dim).await },
+    )
+    .await
 }
 
-async fn hydrate_locked(client: &Client) -> Result<CortexStore> {
+fn check_dimension(id: i64, embedding: Option<&[f32]>, dim: usize) -> Result<()> {
+    if let Some(e) = embedding
+        && e.len() != dim
+    {
+        bail!("fact {id} has a {}-dim vector, expected {dim}", e.len());
+    }
+    Ok(())
+}
+
+async fn hydrate_locked(client: &Client, dim: usize) -> Result<CortexStore> {
     let rows = client
         .query(
             "SELECT id, entity, attribute, entity_norm, attribute_norm, value, polarity, \
@@ -356,11 +370,7 @@ async fn hydrate_locked(client: &Client) -> Result<CortexStore> {
     for r in rows {
         let id: i64 = r.get(0);
         let embedding: Option<Vec<f32>> = r.get(17);
-        if let Some(e) = &embedding
-            && e.len() != DIM
-        {
-            bail!("fact {id} has a {}-dim vector, expected {DIM}", e.len());
-        }
+        check_dimension(id, embedding.as_deref(), dim)?;
         let entity: String = r.get(1);
         let attribute: String = r.get(2);
         let freshness: Option<String> = r.get(20);
@@ -483,6 +493,16 @@ pub(crate) mod tests {
         };
         s.reindex();
         s
+    }
+
+    #[test]
+    fn hydration_dimension_follows_live_embedder() {
+        for dim in [384, 1024] {
+            assert!(check_dimension(1, Some(&vec![0.0; dim]), dim).is_ok());
+            assert!(check_dimension(2, None, dim).is_ok());
+            assert!(check_dimension(3, Some(&vec![0.0; dim + 1]), dim).is_err());
+        }
+        assert!(check_dimension(4, Some(&vec![0.0; 1024]), 384).is_err());
     }
 
     #[test]

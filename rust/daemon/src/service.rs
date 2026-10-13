@@ -229,7 +229,8 @@ impl Service {
             let sessions = crate::background_sessions::Sessions::hydrate(storage.client())
                 .await
                 .map_err(anyhow::Error::msg)?;
-            let cortex = crate::stores::cortex::hydrate(storage.client()).await?;
+            let cortex =
+                crate::stores::cortex::hydrate(storage.client(), embedder.embedding_dim()).await?;
             Ok::<_, anyhow::Error>((bank, startup, sessions, cortex))
         }
         .await;

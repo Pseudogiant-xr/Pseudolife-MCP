@@ -65,7 +65,6 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Autosave and exit persistence | changed-state save through resident writer stores | owned scheduling and exit callback implemented; callback has no mutable state to save in the current reader | W2-E (durability) |
 | Canonical-store compaction | removes selected resident records, marks slots dirty and rewrites their rows | selection policy implemented and checked against Python goldens; resident-store mutation and slot sync await the writer | W2-E / W3-I |
 | Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | session-end trigger interface is a declared no-op; sweep currently runs maintenance only | W3-H |
-| Search knobs `memory.search.{fusion: rrf, candidate_pool_multiplier > 1, contiguity_neighbors, timeline_channel}`, `memory.reranker.enabled`, `?rerank=`, the recency boost on multi-band presets | change `/api/search` | parsed and validated, ignored by search | W2-D (search) |
 | `application_name` fallback | derived from argv | `pseudolife-mcp pid=<pid> pseudolife-daemon serve` | free (not persisted) |
 
 ## Request parsing edges (canonical shapes rule)
@@ -105,3 +104,35 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Legacy transport session (`PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`, header `mcp-session-id`) | the event's session falls back to that header | not read | a one-release rollback switch no shipped client sets |
 | Reranker or BM25 settings Python refuses (`reranker.fusion_weight` outside [0, 1], `reranker.top_n < 1`, `bm25.k1 < 0`, `bm25.b` outside [0, 1]) | init fails (500 on every route) or every BM25 search answers 400 | accepted as given | canonical configs use the shipped defaults; W1-A's early-refusal policy can absorb them |
 | An integer `memory.reranker.fusion_weight` (`fusion_weight: 1`) | logged in `params.reranker` as written (`1`) | logged as a float (`1.0`) | a canonical config writes the default `0.7` |
+
+## W2-D completion boundary (2026-10-13)
+
+This increment serves `GET /api/search`; it does not close HTTP-READS or
+RETRIEVAL as a whole. The following omissions are explicit cutover work,
+not empty successful responses. Unwired HTTP handlers retain 501 after the
+existing gates. The route inventory is `harness/goldens/routes.json`.
+
+| Named divergence | Omitted surface | Reason / owner |
+|---|---|---|
+| `w2d-console-projections` | `/api/stats`, `/api/overview`, `/api/facts`, `/api/facts/history`, `/api/world`, `/api/lessons`, `/api/episodes`, `/api/episodes/summary`, `/api/recent`, `/api/trace`, `/api/chain`, `/api/entry`, `/api/sources`, `/api/consolidation`, `/api/config` | Their service projections, parameter/error contracts and read side effects have no differential coverage in this search increment. W2-D follow-up must port and prove them individually; shared hydration alone is not their implementation. |
+| `w2d-standalone-canonical-search` | Cortex lookup/candidates, world search and lesson search service entry points | Only the cortex block attached to `/api/search` is wired. Standalone return shapes, lesson-search telemetry and world/lesson policy remain W2-D follow-up work, with MCP dispatch owned by W2-G. |
+| `w2d-briefing-hooks` | `/api/briefing`, `/api/hook/session-start`, `/api/hook/memory-policy` | Briefing composition and session-start registration/policy logging are not implemented here; depend on W2-E session writes. W2-D owns the projections, W2-E the writes. |
+| `w2d-recall-graph` | `/api/recall`, `memory_recall`; `/api/graph`, `/api/graph/projects`, `/api/graph/digest`, `/api/graph/communities`, `/api/graph/path`, `/api/graph/review`, `/api/graph/proposal-evidence`, `/api/wiki`, `/api/graph/entity-provenance`, `/api/curation/duplicates`, `/api/curation/retired`, `/api/dream/status` | Recall consumes graph traversal and optional outbound model calls; the graph service, review/curation recovery and dream projections are deferred W3-H work. Existing graph-store helpers do not establish these route contracts. |
+| `w2d-board-projections` | `/api/agents` including coordination view, `/api/maintainer`, `/api/maintainer/sent`, `/api/maintainer/inbox` | Principal-scoped board/maintainer reads and their transaction boundaries belong to W2-F. This search increment does not substitute a generic SQL projection. |
+| `w2d-tokenizer-runtime` | Other SentenceTransformers tokenization semantics | The inherited embedder follows the ST 5.3.0 / transformers 4.57.6 contract in `spec-embedding.md`. ST 5.7.0 changes padded-query cortex scores; supporting that runtime is deferred rather than changing the oracle output or score tolerance. Evidence records the actual runtime versions. |
+| `w2d-model-provisioning` | Default automatic embedding and reranker artifact provisioning | Existing local ONNX graphs are required. The embedding override must contain the configured Qwen/MiniLM layout; the reranker override must be the configured cross-encoder checkpoint. W3-J owns installation/provisioning. No claim is made for arbitrary exported checkpoints. |
+| `w2d-query-cache-lifetime` | Multiple configured embedders in one process | The inherited outer query cache is process-global and keys raw query text; it is valid only for the daemon's single immutable service/model configuration. Per-embedder caching also remains. Hot model replacement or multiple service instances require cache ownership changes before support. |
+
+`no reference hits` remains the separate v56 dependency above: the Python
+Postgres document migration has not landed and no schema change is included.
+The typed cortex loader uses the live embedder dimension, while the shared
+startup and PostgreSQL schema guards still refuse incompatible banks; this
+is not authorization to migrate vectors or change the schema dimension.
+
+Search golden recording stores only Python-oracle responses and bank state.
+The inherited replay needs the identical seeded template in the same harness
+process: seed clocks and generated identities are not portable fixture data,
+and the CLI cleans up the template at exit. `w2d-portable-goldens` remains a
+named W2-D follow-up for committed CI fixtures; recording a candidate response,
+replacing an expected value or widening normalization is not a remedy. Local
+same-template oracle recording/replay is separate evidence, not CI coverage.
