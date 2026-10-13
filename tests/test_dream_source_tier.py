@@ -22,6 +22,7 @@ import pytest
 from pseudolife_memory.memory.dream import RegexExtractor
 from pseudolife_memory.service import MemoryService
 from tests.dream_helpers import StubExtractor
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401 (fixtures)
 
 
 @pytest.fixture()
@@ -455,6 +456,98 @@ def _direct(svc, value="emacs", support="user"):
 def _contender_values(svc):
     return [c["value"] for c in
             svc.cortex_contenders("editor-pref", "editor")["contenders"]]
+
+
+def _dream_editor(svc, value, *, op=None):
+    svc.store(f"my preferred editor is {value}", source="user")
+    out = svc.dream_run(StubExtractor([_claim(value, op=op)]))
+    assert not out.get("extractor_failed"), out
+    return out
+
+
+@pytest.mark.parametrize("quarantine", [False, True])
+@pytest.mark.parametrize("support", ["user", "action"])
+@pytest.mark.parametrize("member", [False, True])
+def test_settled_direct_contender_keeps_direct_support(
+        pg_conn, pg_url, tmp_path, quarantine, support, member):  # noqa: F811
+    # Own database-backed service: persistence of the inherited support is
+    # the subject. Nano stays distinct from vim with the real embedder too.
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    svc.config.memory.dream.quarantine_low_trust = quarantine
+    try:
+        _dream_editor(svc, "vim")
+        parked = svc.cortex_write("editor-pref", "editor", "nano",
+                                  support=support, confidence=0.5)
+        assert parked["action"] == "contested"
+        assert parked["support"] == [support]
+        _dream_editor(svc, "nano", op="add" if member else None)
+        current = svc.cortex_lookup("editor-pref", "editor")
+        adopted = (next(m for m in current["members"] if m["value"] == "nano")
+                   if member else current)
+        assert adopted["value"] == "nano"
+        assert _contender_values(svc) == []
+
+        svc.flush()
+        svc._storage.close()
+        svc = MemoryService(data_dir=tmp_path / "reloaded", database_url=pg_url)
+        svc.config.memory.dream.quarantine_low_trust = quarantine
+        _dream_editor(svc, "nano" if member else "emacs",
+                      op="remove" if member else None)
+        final = svc.cortex_lookup("editor-pref", "editor")
+        retained = (next((m for m in final["members"] if m["value"] == "nano"),
+                         None) if member else final)
+        assert retained is not None and retained["value"] == "nano"
+        assert support in retained["support"]
+        assert f"dream:{support}" not in retained["provenance"]
+    finally:
+        svc.flush()
+        svc._storage.close()
+
+
+@pytest.mark.parametrize("support", ["user", "action"])
+def test_quarantine_promotion_preserves_direct_contender(svc, support):
+    """Resolve-based adoption already keeps the contender's direct backing."""
+    svc.config.memory.dream.quarantine_low_trust = True
+    _dream_editor(svc, "vim")
+    svc.store("my preferred editor is nano", source="agent")
+    svc.dream_run(StubExtractor([_claim("nano")]))
+    parked = svc.cortex_write("editor-pref", "editor", "nano",
+                              support=support, confidence=0.5)
+    assert parked["action"] == "contested"
+    assert "quarantine:low_trust" in parked["provenance"]
+    assert _dream_editor(svc, "nano").get("quarantine_promoted") == 1
+    adopted = svc.cortex_lookup("editor-pref", "editor")
+    assert support in adopted["support"]
+    assert f"dream:{support}" not in adopted["provenance"]
+    _dream_editor(svc, "emacs")
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "nano"
+
+
+@pytest.mark.parametrize("support", ["user", "action"])
+@pytest.mark.parametrize("member", [False, True])
+def test_rollback_restores_settled_contenders_original_support(
+        pg_conn, pg_url, tmp_path, support, member):  # noqa: F811
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    try:
+        _dream_editor(svc, "vim")
+        parked = svc.cortex_write("editor-pref", "editor", "nano",
+                                  support=support, confidence=0.5,
+                                  provenance=["direct-note"])
+        assert parked["action"] == "contested"
+        _dream_editor(svc, "nano", op="add" if member else None)
+        assert _contender_values(svc) == []
+        out = svc.dream_rollback()
+        assert out.get("error") is None, out
+        assert svc.cortex_lookup("editor-pref", "editor")["value"] == "vim"
+        svc.flush()
+        svc._storage.close()
+        svc = MemoryService(data_dir=tmp_path / "reloaded", database_url=pg_url)
+        restored, = svc.cortex_contenders("editor-pref", "editor")["contenders"]
+        for field in ("value", "support", "provenance", "confidence"):
+            assert restored[field] == parked[field]
+    finally:
+        svc.flush()
+        svc._storage.close()
 
 
 @pytest.mark.parametrize("quarantine", [False, True])

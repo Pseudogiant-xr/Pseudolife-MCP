@@ -58,6 +58,8 @@
   parks the claim as a contender and never falls back to a direct write.
 - A dream write at a user note's tier records no correction signal: those
   remain the record of a human changing a value directly.
+- When a dream makes a parked contender current, the value keeps its direct
+  user or action support, including after a restart.
 - Set-valued slots get the scalar path's tier guard (with `protect_provenance`
   on): a weaker-tier dream op can no longer convert a stronger tier's scalar
   into a set (it parks as a contender, `member_add_blocked_tier`) or retract a

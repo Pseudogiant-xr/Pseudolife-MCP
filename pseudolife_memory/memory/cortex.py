@@ -1344,6 +1344,12 @@ class CortexStore:
         if contender is None or (
                 _norm_value(contender.value) != _norm_value(new.value)):
             return
+        # The value keeps every tier that backed its contender. Direct
+        # support on either record wins over a dream mark at the same tier;
+        # leave the contender's support/provenance intact for rollback.
+        for sup in contender.support:
+            _mark_tier(new, sup, dream=f"dream:{sup}" in contender.provenance)
+        new.support |= contender.support
         contender.status = "superseded"
         contender.superseded_at = t
         contender.superseded_by_value = new.value

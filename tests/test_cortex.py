@@ -18,6 +18,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 import torch
 
 from pseudolife_memory.memory.cortex import CortexStore, CortexRecord
@@ -419,6 +420,30 @@ def test_member_add_of_the_parked_contender_value_clears_the_contender():
     assert sorted(m.value for m in store.members("user", "bikes")) == [
         "Gravel Bike", "road bike"]
     assert store.contenders_for("user", "bikes") == []
+
+
+@pytest.mark.parametrize("support", ["user", "action"])
+@pytest.mark.parametrize("contender_dream,new_dream", [
+    (False, True), (True, False), (True, True), (False, False),
+])
+@pytest.mark.parametrize("same_tier", [False, True])
+def test_settling_inherits_support_without_turning_dream_tiers_direct(
+        support, contender_dream, new_dream, same_tier):
+    store = CortexStore()
+    slot = Slot("svc", "region", "us-east-2")
+    parked = store.write_fact(slot, _unit(85), support=support, now=1.0,
+                              force_contend=True, dream=contender_dream).record
+    old_support, old_provenance = set(parked.support), set(parked.provenance)
+    incoming_support = support if same_tier else "agent"
+    res = store.write_fact(slot, _unit(85), support=incoming_support,
+                           now=2.0, dream=new_dream)
+    assert res.action == "inserted"
+    assert res.record.support == {support, incoming_support}
+    # A tier remains dream-written only if neither record held it directly.
+    marked = contender_dream and (not same_tier or new_dream)
+    assert (f"dream:{support}" in res.record.provenance) == marked
+    assert parked.support == old_support
+    assert parked.provenance == old_provenance
 
 
 def test_restore_settled_contender_re_parks_only_what_a_write_settled():
