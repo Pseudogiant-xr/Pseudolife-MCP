@@ -1241,3 +1241,75 @@ def test_rollback_previous_tiers_uses_newest_history_or_journal_fallback(
     assert {p for p in after["provenance"] if p.startswith("dream:")} == (
         set() if compacted else {"dream:action", "dream:user"})
     assert out["reverted"] == 1 and out["partial"] == 0
+
+@pytest.mark.parametrize("contender_tier", ["assistant", "user"])
+def test_rollback_ignores_a_contender_displaced_after_the_run(
+        rollback_svc, contender_tier):
+    """The record a rollback restores tiers from is the one the run
+    displaced, not a same-value contender parked and pushed out later:
+    that one carries tiers the previous value never had."""
+    svc = rollback_svc
+    svc.store("my preferred editor is vim", source="agent")
+    svc.dream_run(StubExtractor([_claim("vim")]))
+    before = svc.cortex_lookup("editor-pref", "editor", track=False)
+    svc.store("my preferred editor is nano", source="user")
+    svc.dream_run(StubExtractor([_claim("nano")]))
+    svc.cortex_write("editor-pref", "editor", "vim", support=contender_tier,
+                     force_contend=True)
+    svc.cortex_write("editor-pref", "editor", "emacs", support="agent",
+                     force_contend=True)
+    svc.dream_rollback()
+    after = svc.cortex_lookup("editor-pref", "editor", track=False)
+    assert after["value"] == "vim"
+    assert after["support"] == before["support"]
+
+def test_rollback_of_a_conversion_keeps_a_survivors_direct_confirmation(
+        rollback_svc):
+    """A dream add converts an agent scalar into a set; the user then
+    confirms the surviving member directly. Rolling the dream back restores
+    the scalar, and the user's direct backing must survive it."""
+    svc = rollback_svc
+    svc.store("my preferred editor is vim", source="agent")
+    svc.dream_run(StubExtractor([_claim("vim")]))
+    svc.store("my editor list now includes nano", source="user")
+    svc.dream_run(StubExtractor([_claim("nano", op="add")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["kind"] == "set"
+    svc.set_add("editor-pref", "editor", "vim", origin="user")
+    svc.dream_rollback()
+    cur = svc.cortex_lookup("editor-pref", "editor", track=False)
+    assert cur["kind"] == "scalar" and cur["value"] == "vim"
+    assert "user" in cur["support"]
+    assert "dream:user" not in cur["provenance"]
+    svc.store("my preferred editor is helix", source="user")
+    svc.dream_run(StubExtractor([_claim("helix")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "vim"
+
+
+def test_a_direct_confirmation_racing_a_rollback_keeps_its_tier(rollback_svc):
+    """A direct user confirmation of the value a rollback is restoring,
+    landing between the rollback's write and its tier restore, keeps its
+    direct tier. (When the rollback's own write needs a resolve, which
+    stamps the user tier itself, a racing user confirmation cannot be told
+    apart; the changelog names that limit.)"""
+    svc = rollback_svc
+    svc.store("my preferred editor is vim", source="agent")
+    svc.dream_run(StubExtractor([_claim("vim")]))
+    svc.store("my preferred editor is nano", source="agent")
+    svc.dream_run(StubExtractor([_claim("nano")]))
+    write = svc.cortex_write
+    raced = []
+
+    def racing_write(entity, attribute, value, *a, **kw):
+        out = write(entity, attribute, value, *a, **kw)
+        if value == "vim" and not raced:
+            raced.append(True)
+            write(entity, attribute, "vim", support="user")
+        return out
+
+    svc.cortex_write = racing_write
+    svc.dream_rollback()
+    svc.cortex_write = write
+    cur = svc.cortex_lookup("editor-pref", "editor", track=False)
+    assert raced and cur["value"] == "vim"
+    assert "user" in cur["support"]
+    assert "dream:user" not in cur["provenance"]

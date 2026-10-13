@@ -88,5 +88,10 @@
   journal's strongest prior tier as a direct write. Confirmations without a
   journaled prior tier remain unchanged. A member confirmation that converted
   a scalar into a set leaves the set in place and reports a partial rollback.
+  A rollback keeps every direct tier that backs the restored value, a
+  surviving set member's included. A direct write of the same value that
+  lands while the rollback restores it is kept too, except at the tier the
+  rollback's own write stamps (the previous tier, and the user tier when it
+  has to resolve a contest), which cannot be told apart.
 - Facts consolidated before this release keep their stored tier until
   restated; nothing is backfilled.

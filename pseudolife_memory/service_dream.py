@@ -2577,7 +2577,8 @@ class DreamOps:
         (design doc 2026-08-01: has_trace gates scalars but never member
         ops, so a rewind would re-add reverted members while suppressing
         reverted scalars)."""
-        from pseudolife_memory.memory.cortex import _TIER_RANK, _norm_value
+        from pseudolife_memory.memory.cortex import (_DIRECT_TIERS, _TIER_RANK,
+                                                     _norm_value)
         import time as _time
 
         if self._storage is None:
@@ -2644,8 +2645,25 @@ class DreamOps:
                         row["entity"], row["attribute"])
                     if (r.kind == kind or r.status == "contested")
                     and _norm_value(r.value) == want]
+            # Only the record THIS run displaced: inside the run's window,
+            # and for a scalar write superseded by the run's own value (a
+            # member op's conversion supersedes it differently). A same-value
+            # contender parked and pushed out (or settled) later is also
+            # "superseded", with tiers the previous value never had.
+            lo = float(target.get("started_at") or 0)
+            hi = float(target.get("finished_at") or rollback_started)
+
+            def _displaced_by_run(r) -> bool:
+                if not lo <= (r.superseded_at or 0) <= hi:
+                    return False
+                return (r.status != "superseded" or r.kind != "scalar"
+                        or row["kind"] != "scalar"
+                        or _norm_value(r.superseded_by_value or "")
+                        == _norm_value(row["new_value"] or ""))
+
             prev = max((r for r in recs
-                        if r.status in ("superseded", "removed")),
+                        if r.status in ("superseded", "removed")
+                        and _displaced_by_run(r)),
                        key=lambda r: r.superseded_at or 0, default=None)
             if prev is None:
                 return None  # Compacted history: keep the journal fallback.
@@ -2665,12 +2683,43 @@ class DreamOps:
                 marks.difference_update(f"dream:{t}" for t in direct)
             return support, marks
 
-        def _restore_tiers(rec, tiers) -> None:
+        def _direct_backing(row: dict, rec, own: set) -> set:
+            # Under the lock, after the rewrite: every direct tier now backing
+            # the restored value survives the restore. Sources: same-value
+            # current or contested records of any kind (a surviving member
+            # included), records this rollback archived (a converted set's
+            # survivor), and the restored record itself minus the tiers the
+            # rollback's own write stamped (``own``), so a direct
+            # confirmation racing the rollback is kept.
+            want = _norm_value(row["prev_value"] or "")
+            keep: set = set()
+            for r in self._cortex.records_for(row["entity"], row["attribute"]):
+                if _norm_value(r.value) != want:
+                    continue
+                direct = {t for t in r.support
+                          if t in _DIRECT_TIERS and f"dream:{t}" not in r.provenance}
+                if r is rec:
+                    keep |= direct - own
+                elif r.status in ("current", "contested") or (
+                        r.status in ("superseded", "removed")
+                        and (r.superseded_at or 0) >= rollback_started):
+                    keep |= direct
+            return keep
+
+        def _restore_tiers(rec, tiers, keep: set = frozenset()) -> None:
             if tiers is not None:
-                rec.support = set(tiers[0])
-                rec.provenance = {p for p in rec.provenance
-                                  if not p.startswith("dream:")} | tiers[1]
-                self._cortex.dirty_slots.add(rec.key)
+                rec.support = set(tiers[0]) | keep
+                rec.provenance = ({p for p in rec.provenance
+                                   if not p.startswith("dream:")}
+                                  | (tiers[1] - {f"dream:{t}" for t in keep}))
+            elif keep:
+                # Compacted history: the journal-tier write stands, and the
+                # direct backing found now still survives on top of it.
+                rec.support |= keep
+                rec.provenance -= {f"dream:{t}" for t in keep}
+            else:
+                return
+            self._cortex.dirty_slots.add(rec.key)
 
         def _rewrite_prev(row: dict) -> str:
             with self._lock:
@@ -2682,16 +2731,18 @@ class DreamOps:
                 stance=_prev_stance(row),
                 authority=_prev_label(row, "authority"),
                 distortion_tolerance=_prev_label(row, "distortion_tolerance"))
+            own = {row["prev_support"] or "agent"}
             if res["action"] == "contested":
                 # Rollback is explicit authority: a low-confidence prev
                 # must still win the slot back (the resolve path).
                 self.cortex_resolve(row["entity"], row["attribute"],
                                     accept=True)
+                own.add("user")  # resolve stamps the user tier
             with self._lock:
                 # Store lookup does not count this verification as a serve.
                 cur = self._cortex.lookup(row["entity"], row["attribute"])
                 if cur and _norm_value(cur.value) == _norm_value(row["prev_value"]):
-                    _restore_tiers(cur, tiers)
+                    _restore_tiers(cur, tiers, _direct_backing(row, cur, own))
                     return "reverted"
                 return "partial:value_not_restored"
 
@@ -2835,7 +2886,8 @@ class DreamOps:
                                 if _norm_value(m.value) == _norm_value(
                                     row["prev_value"] or "")), None)
                             if rec is not None:
-                                _restore_tiers(rec, tiers)
+                                _restore_tiers(rec, tiers, _direct_backing(
+                                    row, rec, {row["prev_support"] or "agent"}))
                         # Re-adding an assistant-origin member into a set
                         # that has since gained a stronger-tier member parks
                         # it as a contender instead (add_member's guard).
