@@ -531,6 +531,13 @@ def config_lists(port):
 CASES = [handshake, lists, protocol_versions, methods, calls, toolset, stored, list_changed_stream,
          stream_reconnect, init_gate, body_limit, messages, concurrent, transport, paths]
 BASE_CASES = tuple(CASES)
+CASE_RESPONSE_COUNTS = {
+    'handshake': 4, 'lists': 18, 'protocol_versions': 10, 'methods': 24,
+    'calls': 4, 'toolset': 53, 'stored': 30, 'list_changed_stream': 2,
+    'stream_reconnect': 3, 'init_gate': 21, 'body_limit': 6,
+    'messages': 13, 'concurrent': 8, 'transport': 21, 'paths': 7,
+    'rebinding': 24, 'open_lists': 6, 'config_lists': 10,
+}
 if "--tokenless" in sys.argv:
     CASES = [rebinding, open_lists]
 if "--config2" in sys.argv:
@@ -646,6 +653,8 @@ def recording_errors(data, cases=None):
         if not isinstance(responses, list) or not responses:
             errors.append(f'{name}: missing response sequence')
             continue
+        if len(responses) != CASE_RESPONSE_COUNTS[name]:
+            errors.append(f'{name}: {len(responses)} responses, expected {CASE_RESPONSE_COUNTS[name]}')
         for index, response in enumerate(responses):
             if not isinstance(response, dict) or 'exception' in response or 'timeout' in response:
                 errors.append(f'{name}[{index}]: oracle case failed')

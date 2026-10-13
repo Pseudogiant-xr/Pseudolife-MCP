@@ -111,3 +111,25 @@ def test_ci_subset_contains_every_scalar_class_and_review_trigger():
             if case['method'] == 'tools/call' and isinstance(case['params'].get('task'), dict)]
     assert '0-1' in ttls and '-' + '9' * 4300 in ttls
     assert corpus.RawNumber('1e400') in ttls and corpus.RawNumber('-1e400') in ttls
+
+
+def test_ci_retains_accepted_file_urls_after_deduplication():
+    from mcp.types import methods
+    from pydantic import ValidationError
+
+    selected = {corpus.wire_json([case['method'], case['params']])
+                for case in corpus.coercion_cases()}
+    accepted = []
+    for case in corpus.cases():
+        encoded = corpus.wire_json(case['params'])
+        if case['method'] != 'tools/call' or 'file:///fixture' not in encoded:
+            continue
+        params = json.loads(encoded)
+        try:
+            methods.validate_client_request('tools/call', '2025-11-25', params)
+            methods.parse_client_request('tools/call', '2025-11-25', params)
+        except ValidationError:
+            continue
+        accepted.append(corpus.wire_json([case['method'], case['params']]))
+    assert accepted
+    assert set(accepted) & selected

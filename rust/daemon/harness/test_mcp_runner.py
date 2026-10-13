@@ -93,9 +93,8 @@ def test_failed_or_incomplete_oracle_record_is_not_written(tmp_path, monkeypatch
     import mcp_compare
 
     data = {case.__name__: [{'status': 200, 'headers': {}, 'body': {}}]
-            for case in mcp_compare.CASES}
+            * mcp_compare.CASE_RESPONSE_COUNTS[case.__name__] for case in mcp_compare.CASES}
     # The fixture isolates record completeness from oracle semantic checks.
-    data['handshake'] *= 224 - (len(data) - 1)
     stubs = {name: {'status': 200, 'headers': {}, 'body': {}} for name in mcp_compare.UNSERVED}
     if failure == 'exception':
         def failed_case(port):
@@ -156,4 +155,37 @@ def test_golden_distillation_rejects_failed_transport_case(tmp_path):
     target.write_text('previous golden', encoding='utf-8')
     with pytest.raises(ValueError, match='stream_reconnect'):
         mcp_goldens.main(source, target)
+    assert target.read_text(encoding='utf-8') == 'previous golden'
+
+
+@pytest.mark.parametrize('consumer', ['producer', 'distiller'])
+def test_compensated_case_truncation_is_rejected(tmp_path, monkeypatch, consumer):
+    import mcp_compare
+    import mcp_goldens
+
+    counts = {'handshake': 4, 'lists': 18, 'protocol_versions': 10, 'methods': 24,
+              'calls': 4, 'toolset': 53, 'stored': 30, 'list_changed_stream': 2,
+              'stream_reconnect': 3, 'init_gate': 21, 'body_limit': 6,
+              'messages': 13, 'concurrent': 8, 'transport': 21, 'paths': 7}
+    response = {'status': 200, 'headers': {},
+                'body': {'sse': ['{"jsonrpc":"2.0","id":1,"result":{}}']}}
+    record = {name: [response] * count for name, count in counts.items()}
+    record['stub_tools'] = {name: response for name in mcp_compare.UNSERVED}
+    monkeypatch.setattr(mcp_compare, 'sanity', lambda data, errors: None)
+    assert not mcp_compare.recording_errors(record)
+    record['protocol_versions'] = record['protocol_versions'][:6]
+    record['handshake'] += [response] * 4
+    assert sum(len(value) for value in record.values()) == 261
+    target = tmp_path / 'output.json'
+    target.write_text('previous golden', encoding='utf-8')
+    if consumer == 'producer':
+        monkeypatch.setattr(mcp_compare, 'run_all', lambda port: record)
+        monkeypatch.setattr(mcp_compare, 'stub_tools', lambda port: record['stub_tools'])
+        monkeypatch.setattr(sys, 'argv', ['mcp_compare.py', 'record', '1', str(target)])
+        assert mcp_compare.main() == 2
+    else:
+        source = tmp_path / 'record.json'
+        source.write_text(json.dumps(record), encoding='utf-8')
+        with pytest.raises(ValueError, match='protocol_versions'):
+            mcp_goldens.main(source, target)
     assert target.read_text(encoding='utf-8') == 'previous golden'

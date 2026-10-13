@@ -17,7 +17,7 @@ from mcp_validation_schema import source_versions
 from mcp_wire import ACCEPT, PROTOCOL, header, request, sse_data
 
 EXPECTED_CASES = 18515
-EXPECTED_COERCION_CASES = 2134
+EXPECTED_COERCION_CASES = 2137
 
 
 class ValidationMismatch(AssertionError):

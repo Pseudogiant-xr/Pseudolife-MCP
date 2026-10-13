@@ -29,6 +29,8 @@ def report_default(value):
     raise TypeError(type(value).__name__)
 
 
+COERCION_MARKERS = {'raw-number-coercion', 'integer-coercion', 'float-coercion', 'uri-coercion'}
+
 TABLE = Path(__file__).resolve().parents[1] / 'src/mcp/validation-schema.json'
 VALUES = (None, False, True, 0, 1, -1, 1.5, 1e20, 100000000000000000000,
           '', 'fixture', 'bad', '1.0', [], {}, [None],
@@ -138,7 +140,7 @@ def variants(schema, defs, base=None, path=()):
 
 def cases(table=None):
     table = table or json.loads(TABLE.read_text(encoding='utf-8'))
-    seen = set()
+    seen = {}
     for layer_name in ('requests', 'handlers', 'notifications'):
         layer = table[layer_name]
         notification = layer_name == 'notifications'
@@ -158,19 +160,22 @@ def cases(table=None):
                 if not isinstance(params, dict):
                     continue
                 key = wire_json([notification, method, params])
+                markers = COERCION_MARKERS.intersection(path)
                 if key in seen:
+                    # A base value may reappear later as a coercion boundary.
+                    markers.update(seen[key]['coercions'])
+                    seen[key]['coercions'] = sorted(markers)
                     continue
-                seen.add(key)
-                yield {'method': method, 'notification': notification, 'params': params,
-                       'field': '.'.join((layer_name, *path))}
+                seen[key] = {'method': method, 'notification': notification, 'params': params,
+                             'field': '.'.join((layer_name, *path)), 'coercions': sorted(markers)}
+    yield from seen.values()
     for params in ({'_meta': []}, {'_meta': {'progressToken': []}}, {}):
         yield {'method': 'unknown/method', 'notification': False, 'params': params,
-               'field': 'unknown-method'}
+               'field': 'unknown-method', 'coercions': []}
 
 
 def coercion_cases():
-    markers = {'raw-number-coercion', 'integer-coercion', 'float-coercion', 'uri-coercion'}
-    return [case for case in cases() if markers.intersection(case['field'].split('.'))]
+    return [case for case in cases() if case['coercions']]
 
 
 if __name__ == '__main__':

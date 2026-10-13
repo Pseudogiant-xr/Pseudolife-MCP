@@ -535,8 +535,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')
           exit $LASTEXITCODE
-      # Linux 2026-10-13: baseline + four controls + disabled control 182.4s,
-      # targeted tests 0.22s; seven minutes rounds up about twice that gate.
+      # Linux 2026-10-13: coercion baseline + four controls + disabled control 204.2s,
+      # targeted tests 14.68s; seven minutes is about twice that gate.
       - name: Daemon MCP live parity and controls
         if: matrix.suite == 'cli'
         timeout-minutes: 7

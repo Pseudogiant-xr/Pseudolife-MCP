@@ -154,13 +154,13 @@ both validation layers and compares HTTP/JSON-RPC codes, readiness and tier on
 both live daemons, before and after initialization. The pinned corpus has 18,515
 cases and requires all 37,030 paired observations with zero differences. It
 retains the separate strict transport corpus and its declared differences. The
-CI driver also runs `--validation-coercions`: 2,134 cases and 4,268 observations
+CI driver also runs `--validation-coercions`: 2,137 cases and 4,274 observations
 covering integer, float and URL spellings, including raw overflowing JSON number
 literals. CI installs Pydantic 2.14.0/core 2.50.0; generation and live sweeps
 refuse an unreviewed core version. Completed sweep differences are parity
 failures; incomplete runs and cleanup failures remain infrastructure failures.
 Oracle recording and golden distillation reject case exceptions, missing cases,
-incomplete tool coverage and incorrect corpus totals before writing outputs.
+incomplete tool coverage and incorrect per-case or corpus totals before writing outputs.
 
 ### Free (MCP surface)
 
