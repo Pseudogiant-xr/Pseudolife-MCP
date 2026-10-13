@@ -862,6 +862,13 @@ leaked email already cost a full history rewrite plus a fresh-repo publish.
 
 ## Memory (Pseudolife MCP tools)
 
+For reverse-engineering collaboration with this fork's `re_evidence` tool,
+read and follow [RE coordination instructions](examples/RE.coordination.md)
+before working or handing off evidence. This is the shared protocol for
+Claude Code and Codex; `AGENTS.md` routes Codex to this file. Its
+[installation scope](docs/guide/re-evidence.md#instructions-for-claude-code-and-codex)
+explains how to make it available in a separate recreation repository.
+
 Log `memory_outcome` at task end — success/failure/correction signals are the
 only feeder for the lessons surfaced at session start. Deploys and eval results
 get a `memory_store` with source `pseudolife-mcp` (status chatter →

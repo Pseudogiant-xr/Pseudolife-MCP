@@ -109,6 +109,30 @@ workflow below when moving them to another bank.
 
 ## Evidence Hub workflow
 
+### Instructions for Claude Code and Codex
+
+The shared [RE coordination instructions](../../examples/RE.coordination.md)
+define the messageboard handoff protocol. In this fork's checkout, Claude Code
+loads `CLAUDE.md`, which requires that protocol; Codex reads `AGENTS.md`, whose
+pointer requires `CLAUDE.md` and the same protocol. Start a fresh session after
+changing standing instructions.
+
+A session in a separate SRFN recreation checkout does not automatically read
+this fork's instruction files. Make the protocol available there through the
+project's loaded standing instructions: Codex's `AGENTS.md` and Claude Code's
+`CLAUDE.md` (which can import `@AGENTS.md`). The template is self-contained, so
+it can instead be appended to the loaded global file for each client:
+`~/.claude/CLAUDE.md` for Claude Code, and the active Codex-home `AGENTS.md`
+(or nonempty `AGENTS.override.md`, which takes precedence) for Codex. Preserve
+existing instructions and make these edits only when the user authorizes them.
+
+The existing installers append `examples/CLAUDE.memory.md` when selected; that
+general memory-loop template is separate from the RE protocol. They skip an
+existing block, and compact session hooks do not load the RE template. Adding
+this protocol to the fork therefore does not refresh already installed files
+or sessions, change client configuration, or enable a wake listener. Use the
+RE protocol only for an authorized RE task with the fork's tools available.
+
 First capture JSON using the project's existing terminal-only evidence helper.
 For the SRFN recreation repository, the checked-in wrapper is:
 
