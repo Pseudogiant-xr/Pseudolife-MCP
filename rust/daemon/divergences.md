@@ -105,3 +105,26 @@ close it, or why it stays.
 | Non-ASCII decimal digits in a generic session title | `\d` matches them | ASCII digits only | titles are `strftime` output or caller text |
 | MCP argument binding and the error envelope | FastMCP / pydantic | not in this slice; the harness reaches the body through a feature-gated route | W2-G |
 | `entries.embedding`, `entries.surprise` | torch fp32 | ONNX Runtime fp32 | compared within measured tolerances (`harness/goldens/w2e-tolerance.json`); an admission decision or reason must never differ |
+
+### W2-E first increment boundaries
+
+Stores and background reaping now use one episode log, touch map, deferred-root
+map and tombstone map under `Ready.write`. Startup constructs that owner from
+the validated startup candidate; no second episode cache is published. This
+closes the preparation's cache-ownership gap without adding another database
+connection or changing the leased writer boundary.
+
+The remaining write work is deliberately split into subsequent increments:
+
+| Item | Remaining behavior | Owner / reason |
+|---|---|---|
+| Canonical writes | Fact set, HLC ticking, contenders, supersession, set-valued slots and world facts remain unimplemented; slot extraction here is a pure text operation, not a canonical write | W2-E cortex increment; scalar and set history require their own response and post-state proof |
+| Outcomes and lessons | Outcome attribution, lesson updates and their persistence remain unimplemented | W2-E outcomes increment |
+| Episode APIs and titles | Standalone episode operations, session-title tools and automatic content titles on idle close remain unimplemented; store-driven open/resume and empty-root reaping share state | W2-E episode increment; content titles also rewrite entry stamps |
+| Autosave and clean-exit flush | Background scheduling exists, but changed-state saving and exit flush remain no-ops; store rows write through, while counters, surprise history and band weights do not survive restart via `weights.pt` | W2-E persistence increment; the Python tensor format and recovery contract need a separate proof |
+| Resident cortex refresh | No canonical write path updates resident canonical stores; auto-promotion stays disabled in this increment | W2-E cortex increment, coordinated with W2-D read-store ownership |
+| Frozen store catalog snapshots | Original store recordings predate the catalog instrument's `column_types`, owner/comment and sequence-bound representations; replay retains and reports initialization differences | Historical recordings are retained unchanged; live Python comparison is the current-source proof, not a waiver of frozen replay differences |
+| Unicode runtime | Label, meta-filter and slot regexes retain the existing Unicode-14 assigned-character contract; newer assigned characters may follow Rust's newer tables | Explicitly retained runtime substitution; no comparator or frozen expectation is weakened |
+
+The WRITE-CMS, WRITE-CORTEX and CONTRADICTION parity rows remain deferred;
+this increment does not claim the complete write boundary or cutover readiness.

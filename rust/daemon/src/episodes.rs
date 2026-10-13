@@ -69,12 +69,8 @@ pub struct Episode {
     pub parent_id: Option<String>,
 }
 
-/// `EpisodeManager`: the log in dict insertion order plus the current leaf.
-#[derive(Debug, Default)]
-pub struct EpisodeLog {
-    pub episodes: Vec<Episode>,
-    pub current_id: Option<String>,
-}
+/// One episode owner shared by stores and background reaping.
+pub use crate::background_sessions::Sessions as EpisodeLog;
 
 impl EpisodeLog {
     pub fn index(&self, id: &str) -> Option<usize> {
@@ -177,12 +173,6 @@ pub struct WriteState {
     pub log: EpisodeLog,
     /// `_active_session`: `(session_id, ts)`.
     pub active_session: Option<(String, f64)>,
-    /// `_episode_tombstones`, insertion order: id -> (session_key, ended_at, title).
-    pub tombstones: Vec<(String, (String, f64, String))>,
-    /// `_deferred_empty_roots`.
-    pub deferred_empty: Vec<(String, f64)>,
-    /// `_episode_touches` (never persisted).
-    pub touches: HashMap<String, f64>,
     /// `ContinuumMemorySystem._last_entity_seen` (never persisted).
     pub last_entity_seen: Option<String>,
     /// `_interaction_count` (persisted only in `weights.pt`).
@@ -220,6 +210,7 @@ pub fn from_startup(startup: &crate::startup::StartupState) -> anyhow::Result<Wr
                 .map(serde_json::from_value)
                 .collect::<Result<_, _>>()?,
             current_id: startup.current_episode.clone(),
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -228,14 +219,14 @@ pub fn from_startup(startup: &crate::startup::StartupState) -> anyhow::Result<Wr
     }
     if let Some(raw) = startup.metadata["episode_tombstones"].as_object() {
         for (id, value) in raw {
-            ws.tombstones.push((
+            ws.log.tombstones.insert(
                 id.clone(),
                 (py_str(&value[0]), py_float(value.get(1)), py_str(&value[2])),
-            ));
+            );
         }
     }
     if let Some(raw) = startup.metadata["deferred_empty_roots"].as_object() {
-        ws.deferred_empty = raw
+        ws.log.deferred = raw
             .iter()
             .map(|(id, ts)| (id.clone(), py_float(Some(ts))))
             .collect();
@@ -324,7 +315,7 @@ impl WriteState {
     /// `_persist_tombstones`: best effort.
     async fn persist_tombstones(&self, client: &Client) {
         let mut map = serde_json::Map::new();
-        for (tid, (key, ended, title)) in &self.tombstones {
+        for (tid, (key, ended, title)) in &self.log.tombstones {
             map.insert(
                 tid.clone(),
                 json!({"session_key": key, "ended_at": ended, "title": title}),
@@ -361,7 +352,7 @@ impl WriteState {
         ep.closed_by_new_start = false;
         let id = ep.id.clone();
         self.log.current_id = Some(id.clone());
-        self.touches.insert(id, now());
+        self.log.touches.insert(id, now());
         self.persist_episodes(client).await;
         let key = self.log.episodes[i].session_key.clone();
         Self::reopen_client_session(client, key.as_deref()).await;
@@ -407,7 +398,7 @@ impl WriteState {
             let e = &self.log.episodes[open[0]];
             e.session_key.as_ref()?;
             let found = (e.id.clone(), e.session_key.clone());
-            self.touches.insert(found.0.clone(), now());
+            self.log.touches.insert(found.0.clone(), now());
             return Some(found);
         }
         if open.len() > 1 {
@@ -438,18 +429,26 @@ impl WriteState {
             ep.ended_at = None;
             ep.closed_by_new_start = false;
             let found = (ep.id.clone(), ep.session_key.clone());
-            self.touches.insert(found.0.clone(), t);
+            self.log.touches.insert(found.0.clone(), t);
             self.persist_episodes(client).await;
             Self::reopen_client_session(client, found.1.as_deref()).await;
             return Some(found);
         }
-        let tomb: Vec<usize> = (0..self.tombstones.len())
-            .filter(|&i| self.tombstones[i].0.starts_with(handle))
+        let tomb: Vec<usize> = (0..self.log.tombstones.len())
+            .filter(|&i| {
+                self.log
+                    .tombstones
+                    .get_index(i)
+                    .unwrap()
+                    .0
+                    .starts_with(handle)
+            })
             .collect();
         let [ti] = tomb[..] else {
             return None;
         };
-        let (tid, (key, ended_at, title)) = self.tombstones[ti].clone();
+        let (tid, (key, ended_at, title)) = self.log.tombstones.get_index(ti)?;
+        let (tid, key, ended_at, title) = (tid.clone(), key.clone(), *ended_at, title.clone());
         if t - ended_at > window {
             return None;
         }
@@ -467,9 +466,9 @@ impl WriteState {
             session_key: Some(key.clone()),
             parent_id: None,
         });
-        self.tombstones.remove(ti);
+        self.log.tombstones.shift_remove_index(ti);
         self.persist_tombstones(client).await;
-        self.touches.insert(tid.clone(), t);
+        self.log.touches.insert(tid.clone(), t);
         self.persist_episodes(client).await;
         Self::reopen_client_session(client, Some(&key)).await;
         Some((tid, Some(key)))
@@ -508,6 +507,7 @@ mod tests {
                 ep("other", Some("j"), None, 3.0, None),
             ],
             current_id: None,
+            ..Default::default()
         };
         assert_eq!(log.open_leaf_for(Some("k")), Some(1));
         log.episodes[1].ended_at = Some(4.0);
@@ -519,6 +519,33 @@ mod tests {
         ];
         assert_eq!(log.open_leaf_for(Some("k")), Some(0));
         assert_eq!(log.open_leaf_for(None), None);
+    }
+
+    #[test]
+    fn store_and_reaper_share_roots_touches_and_tombstones() {
+        let mut ws = WriteState::default();
+        let i = ws.log.start_session("fixture".into(), Some("key".into()));
+        let id = ws.log.episodes[i].id.clone();
+        ws.log.episodes[i].started_at = 1.0;
+        ws.log.touches.insert(id.clone(), 95.0);
+        assert!(
+            ws.log
+                .reap(10.0, 100.0, 100.0, 20.0, 1000.0, &[])
+                .closed
+                .is_empty()
+        );
+        let closed = ws.log.reap(10.0, 105.0, 105.0, 20.0, 1000.0, &[]);
+        assert_eq!(closed.closed, vec![id.clone()]);
+        assert_eq!(ws.log.stamp_target(Some("key")), None);
+        assert_eq!(ws.log.current_id, None);
+        assert_eq!(ws.log.deferred[&id], 105.0);
+        let swept = ws.log.reap(10.0, 126.0, 126.0, 20.0, 1000.0, &[]);
+        assert_eq!(swept.deleted, vec![id.clone()]);
+        assert_eq!(ws.log.get(&id), None);
+        assert_eq!(
+            ws.log.tombstones[&id],
+            ("key".into(), 105.0, "fixture".into())
+        );
     }
 
     #[test]

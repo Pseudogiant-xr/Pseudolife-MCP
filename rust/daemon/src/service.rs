@@ -23,10 +23,9 @@ pub struct Ready {
     pub storage: Arc<Storage>,
     pub embedder: Arc<Embedder>,
     pub bank: Arc<std::sync::RwLock<Bank>>,
+    /// Lock order: Service.inner, then write, then the storage writer.
+    /// Stores and background reaping share this episode state and lock.
     pub write: tokio::sync::Mutex<crate::episodes::WriteState>,
-    /// Lock order: Service.inner, then sessions, then the storage writer.
-    /// A holder of a later lock must never acquire an earlier one.
-    pub sessions: tokio::sync::Mutex<crate::background_sessions::Sessions>,
     /// Complete durable startup inputs for the read/write slices.
     #[allow(dead_code)] // W2-D/E adopt these inputs when their stores land.
     pub startup: Arc<StartupState>,
@@ -226,15 +225,12 @@ impl Service {
                 embedder.embedding_dim(),
             )
             .await?;
-            let sessions = crate::background_sessions::Sessions::hydrate(storage.client())
-                .await
-                .map_err(anyhow::Error::msg)?;
             let write = crate::episodes::from_startup(&startup)?;
-            Ok::<_, anyhow::Error>((bank, startup, sessions, write))
+            Ok::<_, anyhow::Error>((bank, startup, write))
         }
         .await;
         match candidate {
-            Ok((bank, startup, sessions, write)) => {
+            Ok((bank, startup, write)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -247,7 +243,6 @@ impl Service {
                     embedder,
                     bank: Arc::new(std::sync::RwLock::new(bank)),
                     write: tokio::sync::Mutex::new(write),
-                    sessions: tokio::sync::Mutex::new(sessions),
                     startup: Arc::new(startup),
                 });
                 inner.ready = Some(ready.clone());
@@ -398,7 +393,8 @@ impl crate::background::Duties for Service {
             let ready = self.ensure_init_inner().await?;
             // All session mutation is serialized with service operations.
             let _service_lock = self.inner.lock().await;
-            let mut sessions = ready.sessions.lock().await;
+            let mut write = ready.write.lock().await;
+            let sessions = &mut write.log;
             let entries: Vec<_> = ready
                 .bank
                 .read()
@@ -441,7 +437,7 @@ impl crate::background::Duties for Service {
                 },
             );
             sessions.persist_reap(ready.storage.client(), &result).await;
-            drop(sessions);
+            drop(write);
             drop(_service_lock);
             if let Some(error) = result.failure {
                 return Err(error);

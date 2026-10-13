@@ -138,3 +138,21 @@ and `entries.surprise` within the measured tolerance (but never a different
 admission decision or reason); wall-clock values (`ts`, `started_at`,
 `capacity_true_drops.last_at`) and episode ids, which the harness normalizes
 by rule.
+
+## W3. Shared episode ownership
+
+Store-driven open/resume, handle touches, idle close, deferred-empty sweeping
+and tombstones operate on one resident `EpisodeLog` under `Ready.write`.
+Startup hydrates it once from the complete validated startup candidate.
+Lock order is `Service.inner`, then `Ready.write`, then the leased storage
+writer; a later-lock holder must not acquire an earlier lock. Closing a
+session clears the global current leaf, matching `EpisodeManager.end_session`.
+The store's full episode upsert sweep must observe prior reaper closes and
+must never reopen unrelated sessions from an obsolete snapshot.
+
+The live `store-reaper` case creates an empty session through a filtered
+store, waits for idle close and compares the full episode and deferred-root
+state with Python. Native coverage also checks that handle touches postpone
+reaping and that a sweep publishes its tombstone to the same owner.
+Nonempty-session automatic titles, standalone episode APIs and tensor
+autosave/exit persistence remain named follow-ups in `divergences.md`.

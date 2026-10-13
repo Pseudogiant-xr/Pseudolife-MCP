@@ -184,6 +184,19 @@ LABEL_TEXTS = [
 ]
 
 SCENARIOS: dict[str, dict] = {
+    "store-reaper": {
+        "config": "memory:\n  meta_filter:\n    enabled: true\n  dream:\n    enabled: false\n  retrieval_log:\n    enabled: false\n",
+        "env": {"PSEUDOLIFE_SESSION_IDLE_SECONDS": "2",
+                "PSEUDOLIFE_SESSION_REAP_SECONDS": "0.1",
+                "PSEUDOLIFE_SESSION_RESUME_SECONDS": "3600"},
+        "seed": [],
+        "ops": [
+            # Episode creation precedes admission: even a filtered store's
+            # empty root must be visible to the background reaper.
+            store("I don't have any memories about cats saved.", [sess("reaped")]),
+            {"op": "sleep", "s": 4},
+        ],
+    },
     # Shipped defaults: gate inert, meta filter off, auto-promote off.
     "store-defaults": {
         "config": None,
@@ -487,6 +500,7 @@ def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
 def side_env(scn: dict, dsn: str, extra: dict | None = None) -> dict:
     env = {"PSEUDOLIFE_RELEASE_CHECK": "0", "PSEUDOLIFE_PLUGIN_DIR": str(w1a.REPO / "plugin"),
            "PSEUDOLIFE_MCP_DATABASE_URL": dsn, "PSEUDOLIFE_MCP_TOKEN": TOKEN}
+    env.update(scn.get("env", {}))
     env.update(extra or {})
     return env
 
@@ -494,7 +508,7 @@ def side_env(scn: dict, dsn: str, extra: dict | None = None) -> dict:
 def run_op(op: dict, port: int, mcp: Mcp | None, dsn: str, rust: bool) -> dict | None:
     if op["op"] == "sleep":
         time.sleep(op["s"])
-        return None
+        return {"isError": False, "value": None}
     if op["op"] == "http":
         body = json.dumps(op["body"]).encode() if "body" in op else None
         hdrs = [AUTH] + ([("Content-Type", "application/json")] if body else [])
