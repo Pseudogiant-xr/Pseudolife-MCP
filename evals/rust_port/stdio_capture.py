@@ -14,7 +14,7 @@ from .provenance import ROOT, SOURCE_PATHS, runtime_metadata, schema_version, so
 from .stdio import capture
 from .oracle_selection import selected_oracle, stale_pin_report
 
-ORACLE_HEAD = "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1"
+ORACLE_HEAD = "1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4"
 ORACLE_SCHEMA = 55
 BEHAVIOR_TESTS = ("tests/test_shim.py", "tests/test_shim_transport_recovery.py",
     "tests/test_shim_board_retry.py", "tests/test_version_handshake.py", "tests/test_update_offer.py",

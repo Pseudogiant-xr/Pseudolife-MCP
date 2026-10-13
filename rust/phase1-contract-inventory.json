@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "oracle_commit": "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1",
+  "oracle_commit": "1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4",
   "database_schema": 55,
   "config_sections": {
     "EmbeddingConfig": [
@@ -399,6 +399,8 @@
     ],
     "PSEUDOLIFE_BUILD_DIRTY": [
       "ops/Dockerfile.daemon",
+      "ops/Dockerfile.daemon-rust",
+      "ops/docker-compose.rust.yml",
       "ops/docker-compose.yml",
       "pseudolife_memory/compose/docker-compose.yml",
       "pseudolife_memory/daemon.py",
@@ -406,6 +408,8 @@
     ],
     "PSEUDOLIFE_BUILD_GIT_SHA": [
       "ops/Dockerfile.daemon",
+      "ops/Dockerfile.daemon-rust",
+      "ops/docker-compose.rust.yml",
       "ops/docker-compose.yml",
       "pseudolife_memory/compose/docker-compose.yml",
       "pseudolife_memory/daemon.py",
@@ -413,11 +417,14 @@
     ],
     "PSEUDOLIFE_BUILD_SOURCE": [
       "ops/Dockerfile.daemon",
+      "ops/Dockerfile.daemon-rust",
       "pseudolife_memory/daemon.py",
       "pseudolife_memory/web/session_hook.py"
     ],
     "PSEUDOLIFE_BUILD_TIME": [
       "ops/Dockerfile.daemon",
+      "ops/Dockerfile.daemon-rust",
+      "ops/docker-compose.rust.yml",
       "ops/docker-compose.yml",
       "pseudolife_memory/compose/docker-compose.yml",
       "pseudolife_memory/daemon.py",
@@ -500,6 +507,12 @@
       "ops/docker-compose.yml",
       "pseudolife_memory/compose/docker-compose.yml",
       "pseudolife_memory/daemon.py"
+    ],
+    "PSEUDOLIFE_DAEMON_ONNX_DIR": [
+      "ops/Dockerfile.daemon-rust"
+    ],
+    "PSEUDOLIFE_DAEMON_ORT_THREADS": [
+      "ops/Dockerfile.daemon-rust"
     ],
     "PSEUDOLIFE_DESKTOP_TOKENS_SOURCE": [
       "ops/install.ps1",
@@ -710,6 +723,7 @@
     "PSEUDOLIFE_MCP_DATABASE_URL": [
       "ops/backfill_edge_confidence.py",
       "ops/dedup_cortex.py",
+      "ops/docker-compose.rust.yml",
       "ops/docker-compose.yml",
       "ops/install-autostart.ps1",
       "ops/measure_reverify_population.py",
@@ -737,6 +751,7 @@
     ],
     "PSEUDOLIFE_MCP_DATA_DIR": [
       "ops/Dockerfile.daemon",
+      "ops/Dockerfile.daemon-rust",
       "ops/dedup_cortex.py",
       "ops/docker-compose.yml",
       "ops/install-autostart.ps1",
@@ -752,6 +767,7 @@
     ],
     "PSEUDOLIFE_MCP_HOST": [
       "ops/Dockerfile.daemon",
+      "ops/Dockerfile.daemon-rust",
       "ops/docker-compose.yml",
       "ops/install-autostart.ps1",
       "pseudolife_memory/compose/docker-compose.yml",
@@ -773,6 +789,7 @@
     ],
     "PSEUDOLIFE_MCP_PORT": [
       "ops/Dockerfile.daemon",
+      "ops/Dockerfile.daemon-rust",
       "ops/docker-compose.yml",
       "ops/install-autostart.ps1",
       "pseudolife_memory/compose/docker-compose.yml",
@@ -800,6 +817,7 @@
     ],
     "PSEUDOLIFE_MCP_TOKEN": [
       "ops/client_credentials.py",
+      "ops/docker-compose.rust.yml",
       "ops/docker-compose.yml",
       "ops/install-autostart.ps1",
       "ops/install.ps1",
@@ -909,6 +927,7 @@
     ],
     "PSEUDOLIFE_PLUGIN_DIR": [
       "ops/Dockerfile.daemon",
+      "ops/Dockerfile.daemon-rust",
       "pseudolife_memory/plugin_hooks.py"
     ],
     "PSEUDOLIFE_PRIVATE_FILE": [

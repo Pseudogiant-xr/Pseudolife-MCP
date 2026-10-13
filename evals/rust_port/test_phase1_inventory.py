@@ -19,11 +19,11 @@ def inventory():
 
 
 def test_phase1_inventory_has_all_pinned_files_and_pending_function_ownership(inventory):
-    assert inventory.PHASE1_ORACLE == "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1"
+    assert inventory.PHASE1_ORACLE == "1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4"
     result = inventory.validate_phase1()
-    assert result["test_files"] == 425
+    assert result["test_files"] == 426
     assert result["candidate_nodes"] == 18
-    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 355}
+    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 356}
 
 
 def test_legacy_inventory_retains_its_real_pin(inventory):
@@ -59,7 +59,7 @@ def test_candidate_runtime_identity_matches_the_selected_python_pin(inventory):
     assert crate["package"]["version"] == member["version"] == runtime == version
 
 
-@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 425)])
+@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 426)])
 def test_newer_checkout_test_cannot_shift_either_pin(inventory, monkeypatch, tmp_path, phase1, count):
     newer = tmp_path / "test_newer_master_surface.py"
     newer.write_text("def test_newer():\n    pass\n", encoding="utf-8")
