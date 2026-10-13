@@ -36,7 +36,13 @@
     "backup-top-order-windows",
     "backup-hardlink-identity",
     "backup-raw-member-name",
-    "backup-omits-fifo"
+    "backup-omits-fifo",
+    "backup-argparse-repeat-first-wins",
+    "backup-help-ignores-columns",
+    "backup-help-closed-exit-1",
+    "backup-dot-join-keeps-prefix",
+    "backup-discovery-generic-errno-class",
+    "backup-owner-name-windows"
   ],
   "connect": [
     "connect-backup-stamp-millis",

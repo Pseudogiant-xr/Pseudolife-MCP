@@ -24,7 +24,6 @@ EXCEPTIONS = {
         'config': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
         'seeded': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
         'json-float-shortest-ties': 'Python-only retrieval_events writes and sequence differences; live Linux 2026-10-11.',
-        'encodings': 'Three HTTP responses match, but hosted Linux run 38139355489 differs on the bank sequence catalog in live and golden modes; Windows run 38132737537 differs on eleven initialization bank entries. The auth-only scenario does not settle initialization. The separately passing auth-candidate-order control remains selected on both OSes.',
     },
     'daemon_mutants': {
         'del-unescaped': 'Its tokens witness has the named retrieval telemetry bank-state difference; the control baseline is not clean.',
@@ -40,12 +39,7 @@ EXCEPTIONS = {
         'linux': {},
         'windows': {},
     },
-    'w1a_selections': {
-        'windows-map-order-unsettled-bank-init': {
-            'platform': 'windows', 'mode': 'both', 'scenario': 'map-order',
-            'reason': 'Hosted Windows run 38187846311 failed golden and run 38192913404 failed live: the one HTTP response matches, but bank differences (57 golden entries, 50 live entries) compare initialized Python state with an empty Rust catalog. The auth-only scenario has settle=False and snapshots unsettled initialization. Both Linux map-order modes, both reversed-map modes and auth-candidate-order remain selected.',
-        },
-    },
+    'w1a_selections': {},
     'cli_mutants': {
         'linux': {
             'connect-config-not-private': 'Survived Linux 2026-10-11; the file is already created with private POSIX mode before make_private.',
@@ -57,6 +51,13 @@ EXCEPTIONS = {
             'tl-container-db-ignored': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
             'tl-script-lf': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
             'tl-keep-staged-on-failure': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
+        },
+    },
+    'cli_case_selections': {
+        'windows-backup-zero-retention-clock-race': {
+            'platform': 'windows', 'mode': 'both', 'row': 'backup',
+            'case': 'file-mode-keep-zero',
+            'reason': 'CPython 3.11.9 Windows reference measurement (2026-10-12, GetSystemTimeAsFileTime, 0.015625s resolution): 300 zero-retention writes of 64 bytes kept 254/deleted 46; 300 writes of 1 MiB kept 229/deleted 71. Independent live/golden archives can cross different clock ticks even after the clock API repair (run 38221206535: live55/55, golden54/55). Linux zero retention stays live/record/golden; both OSes retain zero-option grammar/help, and mandatory native injected old/equal/new mtime and Windows same-tick API tests cover retention without normalizing observations.',
         },
     },
     'audit_golden': 'Only the stable cases in audit_golden_cases.json replay across processes (29 measured on Linux 2026-10-11; 23 after #730 ported six deferral cases, whose successors are not yet measured for cross-process stability); the rest carry fresh IDs, hashes or redaction state. Every audit case runs live.',
@@ -113,6 +114,7 @@ PLATFORM_EXCLUSIONS = {
         'backup-dotfile-suffix-windows': 'Registered only by the Windows backup source branch.',
         'backup-member-mode-windows': 'Registered only by the Windows backup source branch.',
         'backup-top-order-windows': 'Registered only by the Windows backup source branch.',
+        'backup-owner-name-windows': 'Declared Windows-only empty archive owner-name witness; POSIX names are resolved through NSS.',
         'doctor-json-depth-off-by-one': 'Registered only by the Windows doctor source branch.',
         'doctor-pathlib-keeps-dot-parts': 'Registered only by the Windows doctor source branch.',
         'doctor-which-skips-cwd': 'Registered only by the Windows doctor source branch.',
@@ -126,6 +128,7 @@ PLATFORM_EXCLUSIONS = {
         'backup-member-mode-posix': 'Registered only by the POSIX backup source branch.',
         'backup-omits-fifo': 'Declared Linux-only FIFO member witness.',
         'backup-raw-member-name': 'Declared Linux-only raw-byte member name witness.',
+        'backup-discovery-generic-errno-class': 'Declared Linux-only POSIX permission fixtures exercise the Unix errno-to-exception-class table.',
         'pair-mode-not-owner-only': 'Registered only by the POSIX pairing source branch.',
     },
 }
