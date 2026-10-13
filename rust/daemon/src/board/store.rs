@@ -59,9 +59,22 @@ pub const PARK_FIELDS: [&str; 5] = [
     "park_expires",
 ];
 /// `DONE_STATUS`: `^\W*(done|complete|completed|finished|merged)\b`, case-insensitive.
-static DONE_STATUS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-    regex::Regex::new(r"(?i)^\W*(done|complete|completed|finished|merged)\b").expect("done status")
+static DONE_PREFIX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?i)^(done|completed|complete|finished|merged)").expect("done status")
 });
+
+fn done_status(status: &str) -> bool {
+    // Python's word class is alphanumeric or underscore; regex's Unicode
+    // class also includes combining marks and join controls.
+    let word = |c| text::alnum(c) || c == '_';
+    let status = status.trim_start_matches(|c| !word(c));
+    DONE_PREFIX.find(status).is_some_and(|matched| {
+        status[matched.end()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !word(c))
+    })
+}
 
 pub fn now() -> f64 {
     if crate::mutants::active("board-clock-behind") {
@@ -1845,7 +1858,7 @@ impl Store {
                 return Ok(json!({"gate": "block", "reason": "not_updated_this_turn"}));
             }
         }
-        if DONE_STATUS.is_match(&row.status) {
+        if done_status(&row.status) {
             return Ok(json!({"gate": "allow", "reason": "done"}));
         }
         Ok(json!({"gate": "block", "reason": "no_park"}))
@@ -2012,5 +2025,28 @@ mod proof_tests {
         let input = "[\"a\u{7f}\u{e9}\u{1f600}\"]";
         let want = r#"["a\u007f\u00e9\ud83d\ude00"]"#;
         assert_eq!(super::ascii_escape(input), want);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn done_status_matches_python_word_boundaries() {
+        // Python DONE_STATUS accepts combining marks and join controls as
+        // non-word characters, unlike regex's Unicode \w class.
+        for status in [
+            "Done\u{200c}",
+            "Done\u{200d}",
+            "\u{301}Done",
+            "Done\u{301}",
+            "Completed!",
+        ] {
+            assert!(done_status(status), "Python accepts {status:?}");
+        }
+        for status in ["_Done", "Done_", "Done2", "Done²", "2Done", "undone"] {
+            assert!(!done_status(status), "Python rejects {status:?}");
+        }
     }
 }

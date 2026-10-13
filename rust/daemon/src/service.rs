@@ -584,6 +584,137 @@ mod tests {
             .await;
     }
 
+    #[tokio::test]
+    #[ignore = "requires a disposable board database through board.boundary"]
+    async fn board_send_refuses_an_incomplete_clock_seed() {
+        let dsn = std::env::var("PL_W2F_BOARD_DSN").expect("owned board fixture DSN");
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|n| n.starts_with("pl_cf_w2f_"))
+        );
+        assert_eq!(parsed.get_ports(), &[5434]);
+        assert!(
+            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(h)] if h == "127.0.0.1")
+        );
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::new(),
+            dsn.clone(),
+            true,
+        ));
+        let board = crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn.clone(),
+            service.clone(),
+            Arc::new(crate::auth::PrincipalStore::new()),
+        );
+        let params = |v: Value| v.as_object().unwrap().clone();
+        let mut headers = std::collections::HashMap::new();
+        let sender = board
+            .dispatch(
+                "register",
+                params(json!({"label": "sender"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        let recipient = board
+            .dispatch(
+                "register",
+                params(json!({"label": "recipient"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        headers.insert(
+            "x-pl-agent".into(),
+            sender["agent_id"].as_str().unwrap().into(),
+        );
+        headers.insert(
+            "x-pl-agent-key".into(),
+            sender["credential"].as_str().unwrap().into(),
+        );
+        let storage = service.storage_tier().await.unwrap();
+        let future = (crate::board::store::now() * 1000.0) as i64 + 3_600_000;
+        storage.client().execute(
+            "INSERT INTO facts(entity,attribute,entity_norm,attribute_norm,value,status,confidence,asserted_at,last_confirmed,hlc_phys,hlc_logical) VALUES ('clock','fixture','clock','fixture','future','current',1,0,0,$1,7)",
+            &[&future],
+        ).await.unwrap();
+        // A real query timeout hides a persisted high-water mark from the
+        // first seed attempt. No schema mutation or production bank is used.
+        let (mut locker, connection) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls)
+            .await
+            .unwrap();
+        let driver = tokio::spawn(connection);
+        let lock = locker.transaction().await.unwrap();
+        lock.batch_execute("LOCK TABLE facts IN ACCESS EXCLUSIVE MODE")
+            .await
+            .unwrap();
+        storage
+            .client()
+            .batch_execute("SET statement_timeout = '100ms'")
+            .await
+            .unwrap();
+        let send = params(
+            json!({"to": recipient["agent_id"], "text": "clock proof", "request_id": "clock-proof"}),
+        );
+        let refused = board
+            .dispatch("send", send.clone(), &headers, "default")
+            .await;
+        lock.rollback().await.unwrap();
+        storage
+            .client()
+            .batch_execute("RESET statement_timeout")
+            .await
+            .unwrap();
+        let committed: i64 = storage
+            .client()
+            .query_one("SELECT count(*) FROM coordination_messages", &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(
+            committed, 0,
+            "incomplete clock seed committed mail below bank history"
+        );
+        assert!(refused.is_err());
+        assert!(!board.hlc.lock().unwrap().seeded);
+        board
+            .dispatch("send", send, &headers, "default")
+            .await
+            .unwrap();
+        assert!(board.hlc.lock().unwrap().seeded);
+        let stamp: String = storage
+            .client()
+            .query_one("SELECT hlc FROM coordination_messages", &[])
+            .await
+            .unwrap()
+            .get(0);
+        let (phys, logical) = stamp.split_once(':').unwrap();
+        assert!(
+            (
+                phys.parse::<i64>().unwrap(),
+                logical.parse::<i64>().unwrap()
+            ) > (future, 7)
+        );
+        drop(storage);
+        drop(board);
+        drop(locker);
+        driver.abort();
+        let storage = service.inner.lock().await.storage.take().unwrap();
+        service.update(|s| s.storage = None);
+        Arc::try_unwrap(storage)
+            .ok()
+            .expect("storage released")
+            .close()
+            .await;
+    }
+
     #[test]
     fn backoff_ladder_matches_python() {
         let mut inner = Inner::default();

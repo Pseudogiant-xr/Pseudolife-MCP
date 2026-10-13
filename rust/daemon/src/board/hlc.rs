@@ -56,7 +56,7 @@ async fn stored_high_water_inner(c: &tokio_postgres::Client) -> Result<(i64, i64
              WHERE hlc_phys IS NOT NULL AND hlc_phys <> 0 \
              ORDER BY hlc_phys DESC, hlc_logical DESC NULLS LAST LIMIT 1"
         );
-        if let Ok(Some(row)) = c.query_opt(&sql, &[]).await {
+        if let Some(row) = c.query_opt(&sql, &[]).await? {
             let cand: (i64, i64) = (row.get(0), row.get(1));
             if cand > best {
                 best = cand;

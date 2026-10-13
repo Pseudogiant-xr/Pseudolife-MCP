@@ -12,6 +12,7 @@ python -m board.run golden  --rust-bin PATH [--only NAME ...]
 python -m board.run mutants --rust-bin PATH_BUILT_WITH_--features_mutants
 python -m pytest board/test_norm.py board/test_run.py
 python -m board.boundary
+python -m board.boundary --clock
 ```
 
 Per step it compares the status, the headers clients read (`content-type`,
@@ -68,7 +69,10 @@ is separate from proving replay parity.
 port 5434, then explicitly runs the otherwise ignored Cargo regression: a
 registered, attached agent must heartbeat while full initialization holds the
 service mutex after publishing storage. The normal Cargo suite also covers a
-PostgreSQL server that accepts TCP but never completes authentication.
+PostgreSQL server that accepts TCP but never completes authentication. With
+`--clock`, the fixture stores a canonical fact one hour ahead, makes its
+high-water query time out, and requires no mail commit until seeding can retry
+successfully above that stored clock.
 
 CI runs `test_norm.py` and `test_run.py` on Linux and Windows; the existing
 daemon checks compile the board unconditionally and build the `mutants` feature.
