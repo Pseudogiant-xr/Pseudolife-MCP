@@ -93,8 +93,8 @@ pub struct CortexRecord {
     pub value: String,
     pub polarity: String,
     pub status: String,
-    /// `REAL`; widened exactly, as psycopg reads it.
-    pub confidence: f32,
+    /// PostgreSQL REAL decoded from its decimal text, as psycopg reads it.
+    pub confidence: f64,
     /// The stored `origin` column. Python never reads it back: the served
     /// `origin` is derived from `support` (see [`CortexRecord::origin`]).
     pub origin_column: Option<String>,
@@ -358,7 +358,7 @@ async fn hydrate_locked(client: &Client, dim: usize) -> Result<CortexStore> {
     let rows = client
         .query(
             "SELECT id, entity, attribute, entity_norm, attribute_norm, value, polarity, \
-             status, confidence, origin, support, provenance, asserted_at, last_confirmed, \
+             status, confidence::text, origin, support, provenance, asserted_at, last_confirmed, \
              supersedes_value, superseded_by_value, superseded_at, embedding::real[], \
              entity_id, object_entity_id, freshness_class, kind, value_norm, stance, \
              authority, distortion_tolerance, tx_time, valid_time, hlc_phys, hlc_logical, \
@@ -387,7 +387,7 @@ async fn hydrate_locked(client: &Client, dim: usize) -> Result<CortexStore> {
             value: r.get(5),
             polarity: r.get(6),
             status: r.get(7),
-            confidence: r.get(8),
+            confidence: r.get::<_, String>(8).parse()?,
             origin_column: r.get(9),
             support: json_strings(r.get(10)),
             provenance: json_strings(r.get(11)),

@@ -290,9 +290,19 @@ class PointerExpired(Scenario):
         return [case(f"stale pointer {i}", q(q=t), auth) for i, t in enumerate(CRAFTED[:2])]
 
 
+class ConfidenceRounding(Scenario):
+    """Psycopg reads REAL through decimal text before rounding to four places."""
+    name = "confidence-rounding"
+    require = {"confidence_boundary": 1}
+
+    def cases(self):
+        return [case("hydrated decimal confidence", q(q="rounding boundary confidence"),
+                     [bearer(TOKEN)])]
+
+
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
                                   LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
-                                  PointerExpired)}
+                                  PointerExpired, ConfidenceRounding)}
 
 
 # ---- comparison ----------------------------------------------------------------------
@@ -461,7 +471,7 @@ def coverage(responses: list[dict], state: dict) -> dict:
     cov = {"with_entries": 0, "with_events": 0, "with_cortex": 0, "via": {}, "channels": {},
            "rerank_fired": 0, "rerank_skips": {}, "timeline_fired": 0, "events_rows": 0,
            "recency_boost": 0, "sessions": 0, "episodes": 0, "low_confidence_true": 0,
-           "low_confidence_false": 0, "disconnects": 0, "chronicle_over_limit": 0}
+           "low_confidence_false": 0, "disconnects": 0, "chronicle_over_limit": 0, "confidence_boundary": 0}
     for r in responses:
         body = r.get("json") or {}
         if not isinstance(body, dict):
@@ -470,6 +480,9 @@ def coverage(responses: list[dict], state: dict) -> dict:
         cov["with_events"] += bool(body.get("events"))
         cov["chronicle_over_limit"] += len(body.get("events") or []) > 3
         cov["with_cortex"] += bool(body.get("cortex"))
+        cov["confidence_boundary"] += any(
+            f.get("entity") == "rounding boundary" and f.get("confidence") == 0.0001
+            and f.get("effective_confidence") == 0.0001 for f in body.get("cortex") or [])
         cov["disconnects"] += bool(r.get("disconnected"))
         if "low_confidence" in body and body.get("query"):
             cov["low_confidence_true" if body["low_confidence"] else "low_confidence_false"] += 1
@@ -617,15 +630,35 @@ def main() -> int:
         seed_template(template, args.paragraphs)
     if args.mode == "mutants":
         outcome = {}
-        for m, scn in MUTANTS.items():
-            if args.only and scn not in args.only:
-                continue
-            os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = m
-            res = [run_scenario(SCENARIOS[scn](), args.rust_bin, template, "live", False)]
-            n_diff = sum(1 for r in res for c in r["cases"] if c["diffs"]) + sum(1 for r in res if r["db_diffs"])
-            outcome[m] = n_diff
-            print(f"mutant {m}: {n_diff} diffs", flush=True)
-        os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+        baselines = set()
+        previous_mutant = os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+        try:
+            for m, scn in MUTANTS.items():
+                if args.only and scn not in args.only:
+                    continue
+                if scn not in baselines:
+                    os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+                    baseline = run_scenario(SCENARIOS[scn](), args.rust_bin, template, "live", False)
+                    if (unmet(baseline["coverage"], SCENARIOS[scn].require)
+                            or baseline["db_diffs"]
+                            or any(c["diffs"] for c in baseline["cases"])):
+                        print(f"invalid baseline for {scn}; mutant {m} is not qualified", flush=True)
+                        return 1
+                    baselines.add(scn)
+                    print(f"baseline {scn}: clean and covered", flush=True)
+                os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = m
+                result = run_scenario(SCENARIOS[scn](), args.rust_bin, template, "live", False)
+                if unmet(result["coverage"], SCENARIOS[scn].require):
+                    print(f"invalid oracle coverage for mutant {m}; not a kill", flush=True)
+                    return 1
+                n_diff = sum(bool(c["diffs"]) for c in result["cases"]) + bool(result["db_diffs"])
+                outcome[m] = n_diff
+                print(f"mutant {m}: {n_diff} diffs", flush=True)
+        finally:
+            if previous_mutant is None:
+                os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+            else:
+                os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = previous_mutant
         survivors = [m for m, n in outcome.items() if n == 0]
         print(json.dumps({"mutants": outcome, "survivors": survivors}, indent=1))
         return 1 if survivors else 0

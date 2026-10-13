@@ -56,6 +56,7 @@ EVENTS = [
     ("2026-09-20", None, "agent", "deployed the reranker margin gate to the daemon"),
 ]
 FACTS = [
+    ("rounding boundary", "confidence", "small decimal confidence", 0.00005, "auto"),
     ("homelab box", "os", "Debian 13", 0.9, "auto"),
     ("staging database", "host", "pg-staging-2", 0.8, "auto"),
     ("daemon", "port", "8765", 0.9, "constraint"),

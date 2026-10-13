@@ -143,7 +143,7 @@ fn anchor(r: &CortexRecord) -> f64 {
 /// `CortexRecord.effective_confidence` (`freshness.effective_confidence`).
 fn effective_confidence(r: &CortexRecord, now: f64) -> f64 {
     let age = now - anchor(r);
-    (r.confidence as f64 * decay_factor(&r.freshness_class, age)).clamp(0.0, 1.0)
+    (r.confidence * decay_factor(&r.freshness_class, age)).clamp(0.0, 1.0)
 }
 
 /// `CortexRecord.is_stale` (`freshness.is_stale`): past 2xTTL.
@@ -235,7 +235,7 @@ pub fn record_to_dict(r: &CortexRecord, stale_policy: &str, now: f64) -> Map<Str
     d.insert("polarity".into(), json!(r.polarity));
     d.insert("status".into(), json!(r.status));
     d.insert("kind".into(), json!(r.kind));
-    d.insert("confidence".into(), json!(round4(r.confidence as f64)));
+    d.insert("confidence".into(), json!(round4(r.confidence)));
     d.insert("origin".into(), json!(r.origin()));
     d.insert("support".into(), json!(sorted_unique(&r.support)));
     d.insert("provenance".into(), json!(sorted_unique(&r.provenance)));
@@ -1079,6 +1079,77 @@ mod tests {
         assert_eq!(d["last_known_value"], json!("v"));
     }
 
+    fn fixture_target(config: &tokio_postgres::Config) -> bool {
+        let Some(suffix) = config.get_dbname().unwrap_or("").strip_prefix("pl_cf_w2d_") else {
+            return false;
+        };
+        !suffix.is_empty()
+            && suffix.len() <= 40
+            && suffix
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+            && matches!(config.get_hosts(), [tokio_postgres::config::Host::Tcp(host)] if host == "127.0.0.1")
+            && matches!(config.get_ports(), [port] if *port > 0)
+    }
+
+    async fn fixture_client(dsn: &str) -> anyhow::Result<tokio_postgres::Client> {
+        let config = crate::storage::parse_dsn(dsn).map_err(anyhow::Error::msg)?;
+        anyhow::ensure!(fixture_target(&config), "fixture database refused");
+        let (db, conn) = config.connect(tokio_postgres::NoTls).await?;
+        tokio::spawn(conn);
+        let actual: String = db.query_one("SELECT current_database()", &[]).await?.get(0);
+        anyhow::ensure!(
+            Some(actual.as_str()) == config.get_dbname(),
+            "fixture database refused"
+        );
+        Ok(db)
+    }
+
+    #[test]
+    fn review_fixture_admits_only_explicit_loopback_slice_names() {
+        for (dsn, allowed) in [
+            (
+                "host=127.0.0.1 port=5434 dbname=pl_cf_w2d_cortex_fixture",
+                true,
+            ),
+            ("host=127.0.0.1 port=5434 dbname=pl_cf_w2d_", false),
+            ("host=127.0.0.1 port=5434 dbname=other", false),
+            ("host=example.com port=5434 dbname=pl_cf_w2d_fixture", false),
+            ("host=127.0.0.1 dbname=pl_cf_w2d_fixture", false),
+            ("host=127.0.0.1 port=5434 dbname=pl_cf_w2d_UPPER", false),
+        ] {
+            assert_eq!(
+                fixture_target(&crate::storage::parse_dsn(dsn).unwrap()),
+                allowed
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn review_fixture_refuses_nonfixture_before_connecting() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dsn = format!(
+            "postgresql://fixture@127.0.0.1:{}/not_a_fixture",
+            listener.local_addr().unwrap().port()
+        );
+        tokio::select! {
+            result = fixture_client(&dsn) => {
+                assert!(result.is_err_and(|e| e.to_string().contains("fixture database refused")));
+            }
+            _ = listener.accept() => panic!("nonfixture connection attempted"),
+        }
+    }
+
+    #[test]
+    fn review_confidence_preserves_postgres_decimal_rounding() {
+        let mut r = rec("rounding", "boundary", "small confidence");
+        // PostgreSQL emits REAL 0.00005 as that decimal; Python round(..., 4) is 0.0001.
+        r.confidence = 0.00005;
+        let d = record_to_dict(&r, "annotate", r.asserted_at);
+        assert_eq!(d["confidence"], json!(0.0001));
+        assert_eq!(d["effective_confidence"], json!(0.0001));
+    }
+
     /// The Rust half of `harness/w2d_cortex_check.py`: hydrate the cortex
     /// from `W2D_CORTEX_DSN` (a disposable bank), run every case in
     /// `W2D_CORTEX_IN` with the query vector Python used, attach a non-empty
@@ -1093,10 +1164,7 @@ mod tests {
                 .expect("read input"),
         )
         .expect("input json");
-        let (db, conn) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls)
-            .await
-            .expect("connect");
-        tokio::spawn(conn);
+        let db = fixture_client(&dsn).await.expect("fixture connection");
         let kj = &input["knobs"];
         let knobs = CortexKnobs {
             pin_constraints: kj["pin_constraints"].as_bool().unwrap(),

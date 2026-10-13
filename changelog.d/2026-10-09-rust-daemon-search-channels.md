@@ -18,3 +18,6 @@
   1024. Other Console reads, standalone canonical-store searches, briefing,
   recall and document retrieval remain explicitly deferred; this increment
   does not establish full read-path parity or a cutover-ready daemon.
+- Cortex confidence preserves PostgreSQL's decimal decoding before rounding.
+  Search fixture entry points enforce disposable database admission, and
+  mutant controls require covered, clean baselines before crediting a kill.
