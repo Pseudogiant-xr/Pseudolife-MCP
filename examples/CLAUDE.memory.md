@@ -91,8 +91,8 @@ CAPTURE — as durable things arise (one claim per call):
   (`user`/`action`/`agent`) and use a stable `source` per project/topic.
 - `memory_fact_set(entity, attribute, value)` for a canonical single-value
   fact; correct by re-setting the same slot. Pass `origin="user"` when the
-  human stated the value: a default-origin write parks against a fact taken
-  from the user, rather than replacing it.
+  human stated the value: a default (agent) write is parked as a contender,
+  not applied, when the slot's value is user- or action-backed.
 - Label what must not drift: `distortion_tolerance="constraint"` on a rule
   that must survive verbatim (served first in recall, `pinned`);
   `authority="quoted"` on what a doc or third party said — a quote is
