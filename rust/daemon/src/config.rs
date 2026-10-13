@@ -47,6 +47,9 @@ pub struct MemoryConfig {
     pub search: SearchConfig,
     pub bm25: Bm25Config,
     pub reranker_enabled: bool,
+    pub reranker: RerankerConfig,
+    pub cortex: CortexConfig,
+    pub traces_enabled: bool,
     /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
     /// whether the sweep thread starts and parses its interval.
     pub retrieval_log_enabled: bool,
@@ -63,6 +66,48 @@ pub struct StartupBandSpec {
     pub retention_policy: String,
 }
 
+/// `RerankerConfig` (utils/config.py:208-252), the keys the search reads.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RerankerConfig {
+    pub model_name: String,
+    pub top_n: i64,
+    pub fusion_weight: f64,
+    pub skip_margin: f64,
+}
+
+impl Default for RerankerConfig {
+    fn default() -> Self {
+        RerankerConfig {
+            model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2".to_string(),
+            top_n: 20,
+            fusion_weight: 0.7,
+            skip_margin: 0.0,
+        }
+    }
+}
+
+/// `CortexConfig` (utils/config.py:692-743), the keys the reads use.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CortexConfig {
+    pub enabled: bool,
+    pub search_first: bool,
+    pub guard_min_score: f64,
+    pub read_tracking: bool,
+    pub pin_constraints: bool,
+}
+
+impl Default for CortexConfig {
+    fn default() -> Self {
+        CortexConfig {
+            enabled: true,
+            search_first: true,
+            guard_min_score: 0.2,
+            read_tracking: true,
+            pin_constraints: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchConfig {
     pub min_score: f64,
@@ -70,6 +115,7 @@ pub struct SearchConfig {
     pub candidate_pool_multiplier: i64,
     pub contiguity_neighbors: i64,
     pub timeline_channel: bool,
+    pub stale_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -80,6 +126,7 @@ pub struct Bm25Config {
     pub weight: f64,
     pub top_n: i64,
     pub min_score: f64,
+    pub cortex_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -307,6 +354,7 @@ impl Default for SearchConfig {
             candidate_pool_multiplier: 1,
             contiguity_neighbors: 0,
             timeline_channel: false,
+            stale_policy: "annotate".into(),
         }
     }
 }
@@ -320,6 +368,7 @@ impl Default for Bm25Config {
             weight: 0.3,
             top_n: 20,
             min_score: 0.1,
+            cortex_enabled: false,
         }
     }
 }
@@ -343,6 +392,9 @@ impl Default for MemoryConfig {
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
+            reranker: RerankerConfig::default(),
+            cortex: CortexConfig::default(),
+            traces_enabled: true,
             retrieval_log_enabled: true,
             retrieval_retention_days: 365.0,
             compaction_enabled: true,
@@ -1189,6 +1241,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.band_specs = read_startup_bands(miras, &memory.preset, &memory.bands)?;
         }
         if let Some(traces) = section(m, "traces", "memory.")? {
+            memory.traces_enabled = want_bool(traces, "enabled", "memory.traces", true)?;
             memory.retention_boost = want_float(traces, "retention_boost", "memory.traces", 1.0)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
@@ -1206,6 +1259,7 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 weight: want_float(b, "weight", p, d.weight)?,
                 top_n: want_int(b, "top_n", p, d.top_n)?,
                 min_score: want_float(b, "min_score", p, d.min_score)?,
+                cortex_enabled: want_bool(b, "cortex_enabled", p, d.cortex_enabled)?,
             };
         }
         if let Some(r) = section(m, "retrieval_log", "memory.")? {
@@ -1221,6 +1275,25 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(r) = section(m, "reranker", "memory.")? {
             memory.reranker_enabled = want_bool(r, "enabled", "memory.reranker", false)?;
+            let p = "memory.reranker";
+            let d = RerankerConfig::default();
+            memory.reranker = RerankerConfig {
+                model_name: want_str(r, "model_name", p, &d.model_name)?,
+                top_n: want_int(r, "top_n", p, d.top_n)?,
+                fusion_weight: want_float(r, "fusion_weight", p, d.fusion_weight)?,
+                skip_margin: want_float(r, "skip_margin", p, d.skip_margin)?,
+            };
+        }
+        if let Some(c) = section(m, "cortex", "memory.")? {
+            let p = "memory.cortex";
+            let d = CortexConfig::default();
+            memory.cortex = CortexConfig {
+                enabled: want_bool(c, "enabled", p, d.enabled)?,
+                search_first: want_bool(c, "search_first", p, d.search_first)?,
+                guard_min_score: want_float(c, "guard_min_score", p, d.guard_min_score)?,
+                read_tracking: want_bool(c, "read_tracking", p, d.read_tracking)?,
+                pin_constraints: want_bool(c, "pin_constraints", p, d.pin_constraints)?,
+            };
         }
         if let Some(d) = section(m, "dream", "memory.")? {
             config.dream = read_dream(d)?;
@@ -1406,6 +1479,7 @@ fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
         )?,
         contiguity_neighbors: want_int(s, "contiguity_neighbors", p, d.contiguity_neighbors)?,
         timeline_channel: want_bool(s, "timeline_channel", p, d.timeline_channel)?,
+        stale_policy: want_str(s, "stale_policy", p, &d.stale_policy)?,
     })
 }
 
@@ -1718,6 +1792,7 @@ mod tests {
                 candidate_pool_multiplier: 1,
                 contiguity_neighbors: 0,
                 timeline_channel: false,
+                stale_policy: "annotate".into(),
             }
         );
         assert_eq!(
@@ -1728,7 +1803,8 @@ mod tests {
                 b: 0.75,
                 weight: 0.3,
                 top_n: 20,
-                min_score: 0.1
+                min_score: 0.1,
+                cortex_enabled: false,
             }
         );
         assert!(!c.memory.reranker_enabled);
@@ -1932,7 +2008,8 @@ mod tests {
                 b: 0.5,
                 weight: 0.4,
                 top_n: 30,
-                min_score: 0.2
+                min_score: 0.2,
+                cortex_enabled: false,
             }
         );
         assert!(c.memory.reranker_enabled);

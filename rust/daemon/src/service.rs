@@ -29,6 +29,7 @@ pub struct Ready {
     /// Complete durable startup inputs for the read/write slices.
     #[allow(dead_code)] // W2-D/E adopt these inputs when their stores land.
     pub startup: Arc<StartupState>,
+    pub cortex: Arc<crate::stores::cortex::CortexStore>,
 }
 
 /// Lock-free view for `/health` (it never waits on init, spec L7).
@@ -228,11 +229,13 @@ impl Service {
             let sessions = crate::background_sessions::Sessions::hydrate(storage.client())
                 .await
                 .map_err(anyhow::Error::msg)?;
-            Ok::<_, anyhow::Error>((bank, startup, sessions))
+            let cortex =
+                crate::stores::cortex::hydrate(storage.client(), embedder.embedding_dim()).await?;
+            Ok::<_, anyhow::Error>((bank, startup, sessions, cortex))
         }
         .await;
         match candidate {
-            Ok((bank, startup, sessions)) => {
+            Ok((bank, startup, sessions, cortex)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -246,6 +249,7 @@ impl Service {
                     bank: Arc::new(bank),
                     sessions: tokio::sync::Mutex::new(sessions),
                     startup: Arc::new(startup),
+                    cortex: Arc::new(cortex),
                 });
                 inner.ready = Some(ready.clone());
                 // Python publishes every loaded store before the late reseed.
@@ -312,7 +316,10 @@ impl Service {
                 return;
             }
             match self.ensure_init_inner().await {
-                Ok(_) => return,
+                Ok(ready) => {
+                    crate::read::search_route::warmup_probe(self, &ready).await;
+                    return;
+                }
                 Err(e) => {
                     if *stop.borrow() {
                         return;

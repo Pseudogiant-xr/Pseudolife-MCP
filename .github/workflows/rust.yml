@@ -347,6 +347,15 @@ jobs:
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
           python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
           exit $LASTEXITCODE
+      # Linux 2026-10-13: offline W2-D checks measured below one second;
+      # one minute is the smallest whole-minute timeout above twice that.
+      - name: Offline W2-D search harness regressions
+        if: matrix.suite == 'eval'
+        timeout-minutes: 1
+        shell: pwsh
+        run: |
+          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py
+          exit $LASTEXITCODE
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
         if: matrix.suite == 'eval'

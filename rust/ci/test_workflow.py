@@ -35,6 +35,7 @@ PARITY_CHECKS = {
     "Compare sent YAML startup with PyYAML": "cli",
     "Run every eval harness test": "eval",
     "Offline embedding golden and mutant row": "eval",
+    "Offline W2-D search harness regressions": "eval",
     "CLI differential harness": "cli",
     "Prepare disposable PostgreSQL for CLI lease row": "cli",
     "CLI lease differential harness": "cli",
@@ -232,6 +233,11 @@ def check_executable_coverage(jobs):
                     ("python", "-m", "pytest"),
                     ("evals/rust_port", "evals/rust_baseline", "-p",
                      "evals.rust_port.collection_guard", "--eval-collection-guard"), PYTEST_FILTERS)
+    search = parity["Offline W2-D search harness regressions"]
+    require_command(commands(search["run"]), ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/test_w2d_controls.py",
+                     "rust/daemon/harness/test_w2d_namespace.py"), PYTEST_FILTERS)
+    assert search["timeout-minutes"] == 1
     for name, rows in (("CLI differential harness", ("mail", "hook", "episode")),
                        ("CLI lease differential harness", ("lease",))):
         invocations = commands(parity[name]["run"])
@@ -656,6 +662,8 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Offline embedding golden and mutant row", "--fixture", ""),
     ("Offline embedding golden and mutant row", "--golden", "--record"),
     ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
+    ("Offline W2-D search harness regressions", "rust/daemon/harness/test_w2d_controls.py", ""),
+    ("Offline W2-D search harness regressions", "rust/daemon/harness/test_w2d_namespace.py", ""),
     ("CLI W1-C differential harness", "$rows = @(${{ matrix.w1c_rows }})", "$rows = @('move')"),
     ("CLI W1-C differential harness", "python rust/cli_harness @golden",
      "# python rust/cli_harness @golden"),

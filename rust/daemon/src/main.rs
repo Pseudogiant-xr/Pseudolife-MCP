@@ -23,6 +23,7 @@ mod onnx_runtime;
 mod principal_probe;
 mod principals;
 mod pyjson;
+mod read;
 mod release_check;
 mod routes;
 mod search;
@@ -30,6 +31,7 @@ mod service;
 mod startup;
 mod static_files;
 mod storage;
+mod stores;
 mod txn;
 
 use std::path::PathBuf;

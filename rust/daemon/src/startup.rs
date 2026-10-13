@@ -439,15 +439,14 @@ mod tests {
                                 .then(|| ["valid".to_string()].into()),
                             min_score: Some(0.0),
                             default_floor: 0.0,
-                            bm25: None,
-                            hide_superseded: false,
-                            bands: None,
+                            count_access: false,
+                            ..crate::search::fixture_params("", 12)
                         };
                         output["search_entries"] = json!(
-                            crate::search::rank(&bank, &query, &params)
+                            crate::search::rank(&bank, &query, &params, None)
+                                .hits
                                 .iter()
                                 .map(|hit| crate::search::entry_json(
-                                    &bank,
                                     &bank.entries[hit.idx],
                                     hit.score
                                 ))
