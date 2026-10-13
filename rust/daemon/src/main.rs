@@ -7,6 +7,7 @@ mod auth;
 mod background;
 mod background_sessions;
 mod bank;
+mod board;
 mod config;
 mod contradiction;
 mod dream;
@@ -223,6 +224,7 @@ fn main() {
             env_principals.clone(),
         ));
         principals::spawn_refresher(dsn.clone(), store.clone(), env_principals);
+        let service_dsn = dsn.clone();
         let service = Arc::new(service::Service::new(
             config,
             env,
@@ -241,7 +243,19 @@ fn main() {
         );
         background.start_release_check(service.release_check.clone(), &service.config.updates);
         background.start_heap_trim(trim_every);
-        let app = Arc::new(http::App::new(service.clone(), tokens, store, static_dir));
+        let board = Arc::new(board::Board::new(
+            service.config.coordination.clone(),
+            service_dsn,
+            service.clone(),
+            store.clone(),
+        ));
+        let app = Arc::new(http::App::new(
+            service.clone(),
+            tokens,
+            store,
+            static_dir,
+            board,
+        ));
         let router = axum::Router::new().fallback(http::handle).with_state(app);
         let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {
             Ok(l) => l,

@@ -883,3 +883,14 @@ def test_w1c_network_setup_has_a_five_minute_floor(name):
     job = workflow()["jobs"]["parity-checks"]
     step = next(s for s in job["steps"] if s.get("name") == name)
     assert step["timeout-minutes"] == 5
+
+
+def test_board_runner_checks_execute_on_both_platforms():
+    job = workflow()["jobs"]["rust"]
+    assert set(job["strategy"]["matrix"]["os"]) == {"ubuntu-latest", "windows-latest"}
+    step = next(step for step in job["steps"] if step.get("name") == "Board harness lifecycle and normalization")
+    assert "if" not in step
+    assert step["working-directory"] == "."
+    require_command(commands(step["run"]), ("python", "-m", "pytest"),
+                    ("rust/daemon/harness/board/test_norm.py",
+                     "rust/daemon/harness/board/test_run.py"), PYTEST_FILTERS)

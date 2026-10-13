@@ -10,13 +10,12 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 | Surface | Python behaviour | Owner |
 |---|---|---|
-| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
-| `POST /api/coordination/*` after the body checks | the board hub | W2-F |
+| Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents` and `POST /api/daemon-notice`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
 | `/mcp`, `/mcp/*` after the bearer gate | the MCP transport | W2-G |
 | Tokenless MCP Host/Origin rebinding policy and bound-identity validation | SDK transport policy and durable board binding checks before tool dispatch | **CUTOVER BLOCKER — W2-G**; MCP stays unmounted (501) until these gates are ported |
 | Credential-bearing extractor/recall redirect refusal | `utils/no_redirect.py`, extractor and recall transports | W3-H / W2-D; outbound transports are not implemented in this slice |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
-| Authorized `memory-changes`, `park-gate`, `woke`, `subagent`, and `session-end` after its gates | change note, park gate, woke and subagent writes, episode close | W2-E / W2-F |
+| Authorized `memory-changes` and `session-end` after its gates | change note and episode close | W2-E |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
 | Stored callers' POST `/api/config` and `/api/daemon-notice` gate | HTTP already returns 403 `operator_principal_required` by stored-name inference; method-aware source policy is implemented for HTTP-SECURITY to consume with `resolve_detailed` | HTTP-SECURITY |
 
@@ -118,7 +117,7 @@ existing gates. The route inventory is `harness/goldens/routes.json`.
 | `w2d-standalone-canonical-search` | Cortex lookup/candidates, world search and lesson search service entry points | Only the cortex block attached to `/api/search` is wired. Standalone return shapes, lesson-search telemetry and world/lesson policy remain W2-D follow-up work, with MCP dispatch owned by W2-G. |
 | `w2d-briefing-hooks` | `/api/briefing`, `/api/hook/session-start`, `/api/hook/memory-policy` | Briefing composition and session-start registration/policy logging are not implemented here; depend on W2-E session writes. W2-D owns the projections, W2-E the writes. |
 | `w2d-recall-graph` | `/api/recall`, `memory_recall`; `/api/graph`, `/api/graph/projects`, `/api/graph/digest`, `/api/graph/communities`, `/api/graph/path`, `/api/graph/review`, `/api/graph/proposal-evidence`, `/api/wiki`, `/api/graph/entity-provenance`, `/api/curation/duplicates`, `/api/curation/retired`, `/api/dream/status` | Recall consumes graph traversal and optional outbound model calls; the graph service, review/curation recovery and dream projections are deferred W3-H work. Existing graph-store helpers do not establish these route contracts. |
-| `w2d-board-projections` | `/api/agents` including coordination view, `/api/maintainer`, `/api/maintainer/sent`, `/api/maintainer/inbox` | Principal-scoped board/maintainer reads and their transaction boundaries belong to W2-F. This search increment does not substitute a generic SQL projection. |
+| `w2d-board-projections` | `/api/agents` outside the coordination view, `/api/maintainer`, `/api/maintainer/sent`, `/api/maintainer/inbox` | Principal-scoped board/maintainer reads and their transaction boundaries belong to W2-F. The coordination view is supplied by W2-F in this batch; the other listed projections remain deferred. |
 | `w2d-tokenizer-runtime` | Other SentenceTransformers tokenization semantics | The inherited embedder follows the ST 5.3.0 / transformers 4.57.6 contract in `spec-embedding.md`. ST 5.7.0 changes padded-query cortex scores; supporting that runtime is deferred rather than changing the oracle output or score tolerance. Evidence records the actual runtime versions. |
 | `w2d-model-provisioning` | Default automatic embedding and reranker artifact provisioning | Existing local ONNX graphs are required. The embedding override must contain the configured Qwen/MiniLM layout; the reranker override must be the configured cross-encoder checkpoint. W3-J owns installation/provisioning. No claim is made for arbitrary exported checkpoints. |
 | `w2d-query-cache-lifetime` | Multiple configured embedders in one process | The inherited outer query cache is process-global and keys raw query text; it is valid only for the daemon's single immutable service/model configuration. Per-embedder caching also remains. Hot model replacement or multiple service instances require cache ownership changes before support. |
@@ -186,3 +185,25 @@ The remaining write work is deliberately split into subsequent increments:
 
 The WRITE-CMS, WRITE-CORTEX and CONTRADICTION parity rows remain deferred;
 this increment does not claim the complete write boundary or cutover readiness.
+
+## Coordination board completion (W2-F)
+
+| Name | Disposition and evidence | Remaining gate |
+|---|---|---|
+| W2F-MAIL-PACING | The original mail golden is retained unchanged in the completion evidence; the supplied recordings are not committed as portable expectations because they omit the elapsed input schedule. It was captured with two interleaved daemon arms and `active_seconds: 1`; standalone replay sends sooner. Both `wake.rs` and Python `CoordinationStore._wake_decision` compare `last_activity > now - active_seconds`. The initial completion baseline reproduces four response differences and 180 downstream state differences: project mail and replies remain `hinted/active` in Rust where the recording says `not_needed/no_park`, affecting delivery reads and audited payloads. This is an unsynchronized input-clock limitation, not permission to change wake semantics or ignore diffs. | Strict golden replay remains nonzero when the boundary differs. A future clock-controlled oracle capture must prove both sides of the activity boundary; no comparator, tolerance or recorded expectation is changed here. |
+| W2F-CONSOLE-STARTUP | Both implementations return `available: false, reason: not_initialized` before storage exists. Golden replay previously started after the first HTTP health response while only the live Python arm waited for warmup. The runner now waits for `db: ok` on both arms, and for Python's embedding warmup before the scenario; Console remains read-only and does not initialize the bank. | Runner regression covers both modes; the original Console recording is retained in the completion evidence. Cold-start Console behavior remains unchanged. |
+| W2F-PAIRING-HTTP | The authenticated valid-body `/api/pair` route remains a deliberate 501 refusal. The SQL redemption primitive exists, but the HTTP two-slot non-queueing gate, attempt refunds, disconnect ownership and immediate principal-cache publication are not integrated. Wiring only the SQL call would expose an incomplete credential-enrolment path. This slice retains the refusal rather than treating store-level coverage as endpoint coverage. | **Cutover blocker:** HTTP-SECURITY / CLI-PAIRING must cover success, same-token retry, conflicts, expiry/revocation, environment-name exclusion, saturation, failure budgets and cancellation before enabling BK4 at HTTP. |
+| W2F-CLOCK-RETRY | After a send detects an epoch change, Python clears the cached session-probe timestamp and calls `_ensure_init()` under the service lock before retrying. Rust only marks the board clock unseeded, reloads its high-water value and retries with the existing storage lease epoch. The database epoch check still refuses the stale write, but the retry cannot heal the writer session. | **Cutover blocker:** integrate W2-E writer-session refresh and prove a changed-epoch send either recovers once or refuses without a partial write. |
+| W2F-SHARED-HLC | Python board and memory writes use the service clock. Rust currently owns a separate board clock; board-only and mixed Python/Rust board audit checks do not establish ordering across Rust board and memory writes. | **Cutover blocker:** adopt W2-E's shared service clock, then test interleaved board/memory writes, restart reseeding and lease-epoch changes. |
+
+The board transaction boundary is independent of the shared writer adapter:
+`Board::conn` serializes the dedicated client, driver transactions roll back
+when dropped, and `board::db::commit` probes for an aborted block before
+reporting success. A failed connection is replaced only on the next call;
+no uncertain write is retried. This does not use the writer's global recovery
+marker, which belongs to a different PostgreSQL session.
+
+Once storage is published, board calls bypass the full initialization mutex,
+matching Python’s storage-tier fast path. The dedicated connection reuses the
+shared connector’s ten-second socket-and-startup deadline without acquiring
+the leased writer’s transaction lock.

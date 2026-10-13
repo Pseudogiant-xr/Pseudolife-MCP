@@ -219,3 +219,106 @@ state with Python. Native coverage also checks that handle touches postpone
 reaping and that a sweep publishes its tombstone to the same owner.
 Nonempty-session automatic titles, standalone episode APIs and tensor
 autosave/exit persistence remain named follow-ups in `divergences.md`.
+
+
+# Contract spec: coordination board (slice W2-F)
+
+What the Rust daemon reproduces exactly from the Python board: the
+`/api/coordination/<action>` surface, the store behind it, the audit chain,
+wake decisions, the async receive hub and the four board hooks. The pairing
+write below is the target contract; its HTTP integration remains the named
+W2F-PAIRING-HTTP cutover blocker in `divergences.md`. References are to `pseudolife_memory/` at master `28c1f23c`
+(`co` = `coordination.py`, `sc` = `storage/coordination.py`, `api` =
+`web/api.py`, `hub` = `web/coordination.py`). W1-A's gate
+(`spec-w1a-foundation.md`, section R) runs first; this slice owns
+everything after the parsed body. "Exact" covers response values,
+statuses and every row the board writes; the free list is at the end.
+
+## BT. Transport (after W1-A's gate)
+
+| # | Exact item | Source |
+|---|---|---|
+| BT1 | `POST /api/coordination/<action>`: `authenticated_principal` first. No env token and no map gives 401 `authentication_required`; a store that cannot vouch gives 503 `principals_unavailable`; no principal gives 401 `unauthorized`. | `api:774-779`, `co:407-426` |
+| BT2 | A refusal is `{"error": code}`, plus `"detail"` only for a public code whose detail is a string. Status: 401 for `unauthorized`, `authentication_required`, `instance_authentication_required`; 403 for `principal_not_allowed`, `invalid_credential`, `child_send_refused`; 404 `instance_not_found`; 409 `bank_identity_mismatch`; 429 for `wait_capacity_exceeded`, `rate_limited`, `queue_full`, `lease_queue_full`; 500 for `coordination_unavailable`, `invalid_bank_identity`; 503 `principals_unavailable`; else 400. A code outside `PUBLIC_ERROR_CODES` becomes `invalid_request` (a ValueError or TypeError) or `coordination_unavailable` (anything else, such as a database error). | `api:170-189`, `co:67-114, 380-404` |
+| BT3 | Success is 200 with the action's result object. | `api:787` |
+
+## BD. Dispatch (`_dispatch`)
+
+| # | Exact item | Source |
+|---|---|---|
+| BD1 | Order: the hub's `wait_seconds` check (receive only; any other action keeps the key, and it is refused as unexpected), then `coordination.enabled` false gives 200 `{"enabled": false}`, then `principal_admitted` (listed in `allowed_principals`, or a stored principal with `board` true; never `daemon` or `maintainer`), then an unknown action (`unknown_coordination_action`, detail `use one of <sorted actions>`), then the `x-pl-bank`/`x-pl-principal` binding parse (not for `context`), then unexpected parameters, missing parameters, the `context` shape rules, `generation` (an int >= 1, not a bool), the receive attachment pair, and then the instance headers `x-pl-agent` and `x-pl-agent-key` for every action but `context`, `register` and `leases`. | `co:556-612`, `hub:44-49` |
+| BD2 | Parameter whitelists and required sets as `_PARAMETERS` and `_REQUIRED`. The `unexpected_parameter` detail is `<action> does not take <sorted identifier-shaped names, or "these parameters">; it takes <accepted, comma-joined>` (or `; it takes no parameters`). The `missing_parameter` detail is `<action> needs <sorted missing>`. | `co:31-64, 536-583` |
+| BD3 | A binding (both headers; the principal percent-encoded exactly as `quote(safe="")` gives it; 1-256 characters, no C0) must equal the store's `context` `(bank_id, principal)`, else 409 `bank_identity_mismatch`. | `co:434-454, 621-626` |
+| BD4 | `register`, `send` and `heartbeat` run `prune(audit_retention_days)` first, at most once a minute per process. | `co:632-636` |
+| BD5 | `receive` with an attachment passes `check_attachment` and reads `for_delivery`. Its result gains `note` = `RECEIVE_NOTE`, plus `maintainer_note` when a message has origin `maintainer` and `verified`. `history` gains its fixed `note`. | `co:641-666, 138-148` |
+| BD6 | After `send`, `attach` and `detach`, the hub's waiters for each recipient (a send's receipts) are woken. | `co:667-673` |
+
+## BH. Async receive hub
+
+| # | Exact item | Source |
+|---|---|---|
+| BH1 | `wait_seconds` must be a finite int or float in [0, 30] (a bool is refused), else `invalid_wait_seconds`. At most 64 calls are in flight, else `wait_capacity_exceeded`. | `hub:14-15, 43-52` |
+| BH2 | A wait needs `x-pl-agent` (`instance_authentication_required`), a truthy `attachment_id` and an int `generation` (`attachment_required`). One wait per (agent, attachment, generation) (`attachment_already_waiting`), and at most 64 waiters in all. | `hub:82-90` |
+| BH3 | Loop: subscribe, read; return when there are messages or `enabled` is false; otherwise wait until notified or the deadline, then read once more. A client disconnect cancels the wait without a response. The capacity stays held until the synchronous read ends. | `hub:91-117`, `api:117-140, 782-786` |
+
+## BS. Store
+
+| # | Exact item | Source |
+|---|---|---|
+| BS1 | Validation: `_string` (type, length in characters, no C0 or surrogate, optional nonblank), `_fields` (label, project and task 120; status 240; episode 120; capabilities at most 8 names of up to 40 with bool values; children; the park fields and their exact refusal details), `_check_label`, `_check_name`, `_lease_args`, `_limit` (int 1..50, not a bool). Every hashed text runs the credential-shape guard `secret_kind` (`secret_like_body`, detail `<field> looks like a credential, which the board never keeps; remove it and retry`). | `sc:615-620, 792-946, 1379-1406, 1541-1616, 1947-1966, 3490-3492` |
+| BS2 | `reserved_name`: NFKD minus combining marks, confusables folded, casefold, alphanumerics only; `maintainer` refused anywhere in the label and within one OSA edit, `daemon` within one edit of the whole label, `passkey` and `verified` exactly. | `sc:396-422, 529-569` |
+| BS3 | `context`: insert the bank id (`str(uuid4())`) when it is absent and not `read_only`, logging `bank_identity` once; the proof is the HMAC-SHA256, keyed by the hex-decoded credential hash, of `["pseudolife-context-v1",bank,principal,agent,nonce]` (ASCII, compact). | `sc:1292-1337` |
+| BS4 | `register`, `update` (park record, expect, children, names, status history), `authenticate`/`_public` (every key; `children` without hook entries past 3 h; `adapter_available`; `name` = the name, else `label short8`, else `short8`), `attach` (the generation rule, `last_activity` only for a new attachment, `ring`, `ring_armed_until` capped at now + 60), `heartbeat` (`active`, the harness name), `detach` (drops hook children), the subagent hooks, `park_gate`, `woke`. | `sc:1355-1789, 2503-2632, 2999-3088` |
+| BS5 | Roster (`agents`): peers active within 1 h, or 3 h while attached; reachable first, then `last_activity` descending, then id; `idle_omitted`, `truncated`, `status_expires_at`, `status_overdue`, the status age (`_relative_time` buckets, `more than ...` from the log's oldest row, `unknown`), `status_stale` (2 h, non-blank status), and the settled lease page. | `sc:1791-1829, 1901-1934`, `memory/context_builder.py:14-33` |
+| BS6 | Mail: `send` (every refusal in order, prefix resolution, routed replies, bursts with `FANOUT_MAX` 50, request replay and `request_conflict`, the 60-per-minute rate, the 256 pending cap, the writer-epoch check, the HLC high-water upsert), `receive` (the cursor, the `for_delivery` filter, continuity, first-read events), `ack` (batches and prefixes), `attempt`, `history`, `prune`. | `sc:3090-3925` |
+| BS7 | Wake: `_wake_decision` and its maintainer branch (every decision, reason, cap, stagger and receipt field), `_serve_wake`, `_listener_path`, `_live_park`, `_authority`, `_lease_clearer`, `_need_matches`. | `sc:500-513, 2551-2579, 2662-2997` |
+| BS8 | Leases: `acquire_lease`, `release_lease`, `list_leases`, settle and grant (one fence sequence, the 300 s grant window, departed and reserved waiters), `reserved_lease`, `already_delegate`, `lease_queue_full`. | `sc:1947-2268, 2285-2298` |
+| BS9 | Every mutation takes its row locks in Python's order, ending with the audit-chain advisory lock. Every board row equals Python's after the same operation sequence, apart from the free fields. | `sc:1-21, 441-447` |
+
+## BA. Audit chain (byte-exact)
+
+| # | Exact item | Source |
+|---|---|---|
+| BA1 | `payload` is `json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))`, stored as TEXT: keys in code-point order, non-ASCII raw, `\uXXXX` in lowercase for C0, Python `repr` for floats (`1e+16`, `1e-05`, `60.0`). | `sc:953-954` |
+| BA2 | `hash = sha256(prev_hash + json.dumps(["pseudolife-coordination-audit-v1", seq, event, actor, principal, agent_id, recipient_agent_id, project, task, message_id, float(created_at), hlc, payload], ensure_ascii=False, separators=(",", ":")))`; genesis `"0"*64`; `seq` dense under `pg_advisory_xact_lock(hashtextextended('coordination-audit-chain', 0))`, taken last in the mutation's own transaction. | `sc:439-447, 957-971, 1235-1272` |
+| BA3 | A send event keeps `body` and a 16-byte hex `body_salt` outside the hash; its payload holds `text_commitment = sha256(bytes.fromhex(salt) + utf8(body))`. | `sc:448-472, 516-525, 3461-3475` |
+| BA4 | Which events each mutation logs, with which actor, columns and payload. Heartbeats and plain renewals log nothing, apart from a heartbeat's name change. `audit_prune` cuts on UTC day boundaries. | `sc:1-21, 978-985, 3816-3925` |
+| BA5 | Python's `verify_audit_chain` accepts a chain written by any mix of Python and Rust appends. | `sc:1035-1150` |
+
+## BK. Hooks and pairing
+
+| # | Exact item | Source |
+|---|---|---|
+| BK1 | `GET /api/hook/coordination-start`: 200 `text/plain; charset=utf-8`, `cache-control: no-store`, body `CHECKIN_TEXT + "\n"` or empty, and `x-pl-board: on` or `off; reason=<unavailable_reason>` (`disabled`, `authentication_required`, `unauthorized`, `principals_unavailable`, `principal_not_allowed`). | `api:598-621`, `co:192-212, 360-377` |
+| BK2 | `GET /api/hook/park-gate?agent&since`: `allow\n`, or `block\n<PARK_GATE_MESSAGE>\n`; `allow` on any failure or a malformed agent; `since` counts only as a float in [0, 1e12). | `co:259-303`, `sc:2999-3042` |
+| BK3 | `POST /api/hook/woke?agent` and `POST /api/hook/subagent?agent&event&child&type`: `ok\n` when recorded, else empty; every failure is empty. | `co:306-357`, `sc:1741-1789, 3044-3064` |
+| BK4 | Pairing write: one conditional UPDATE on the database clock (`token_hash`, `paired_at`, `paired_code_hash`; the code cleared), a same-token retry inside the window answering the same row, the spent-code cleanup, and `store.add` of the result. | `principal_store.py:407-454`, `api:394-408` |
+
+## Free, and therefore not compared byte for byte
+
+- Random values: agent and message ids, credentials, bank ids, body salts.
+  The harness maps each one to an ordinal by first appearance and checks
+  its shape (32 hex, a 43-character URL-safe token, a canonical UUID, 32
+  hex), and that each credential hashes to its stored `credential_hash`.
+- Wall-clock times and HLC physical parts: compared as (step, offset), the
+  offset being a declared constant (0, 25, 60, 300, a ttl, a TTL), inside
+  each arm's own captured window.
+- Audit `hash` and `prev_hash`, which depend on the above: checked by
+  recomputing them with Python's `audit_hash` and by `verify_audit_chain`
+  (BA2, BA5), not by cross-arm equality.
+- JSON key order and whitespace in responses.
+- Log lines.
+
+## Declared divergences (W2-F)
+
+| Item | Python | Rust | Why |
+|---|---|---|---|
+| Unicode tables for names, labels, lease names and excerpts (NFKD, combining marks, casefold, category C, alphanumerics) | the production oracle is python:3.12-slim (Unicode 15.0); the local oracle is CPython 3.11 (Unicode 14.0) | the crates' Unicode tables | the canonical shapes are ASCII plus the listed confusables; only code points whose properties differ between versions behave differently (ruling d, 2026-10-09) |
+| `send` readiness | waits for the full service (embedder and hydration), so an embedder failure refuses sends | needs the storage tier and the board's HLC reseed only | the full init exists to reseed the HLC, which the board reseeds from SQL itself (ruling a) |
+| Lone surrogates in a JSON body | `json.loads` accepts `"\ud800"`, then a field check refuses it with that field's code | `400 invalid_json` | Rust strings cannot hold one; no producer sends one |
+| #639: a `no_path` receipt can still ring a Codex doorbell | rings | rings (ported as is) | deferred until after cutover by decision; ported, not fixed |
+| `lease` with an explicit `"ttl": null` | depends on state: `reserved_lease`, an auth refusal, 200 for a caller already queued, a 500 from the NOT NULL column, or `invalid_request` from `now + None` | `400 invalid_request` before any check | no producer sends a null ttl; the shim and the MCP tool always send an int (Opus review, finding 2) |
+| A cursor or Console `limit` integer beyond i64, and non-ASCII digits in a cursor | Python's unbounded `int()` (a receive cursor answers `cursor_ahead`; a history cursor with no retained sends answers 200) | a receive or history cursor is `invalid_cursor` without detail; a Console limit beyond i64 is `invalid_limit` as in Python | cursors are produced by the daemon itself (Opus review, finding 6) |
+| A 400-digit integer `park_expires` | `math.isfinite` overflows: 500 | `400 invalid_park` | no producer sends one (Opus review, finding 11) |
+| `NaN`, `Infinity` and nesting deeper than 128 in a JSON body | `json.loads` accepts them, so the board's own type checks refuse them | `400 invalid_json` from the gate's parser | body parsing is W1-A's gate; no producer sends them (Opus review, finding 10) |
+| Receive-wait key for `attachment_id` `true` vs `1` | equal in Python's tuple key (`attachment_already_waiting`) | distinct | no producer sends a non-string attachment id (Opus review, finding 5) |

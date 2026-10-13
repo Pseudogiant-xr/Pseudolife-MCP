@@ -38,6 +38,7 @@ pub struct App {
     pub env_tokens: auth::EnvTokens,
     pub store: Arc<auth::PrincipalStore>,
     pub static_dir: Option<PathBuf>,
+    pub board: Arc<crate::board::Board>,
     pair_failures: Mutex<VecDeque<Instant>>,
 }
 
@@ -47,12 +48,14 @@ impl App {
         env_tokens: auth::EnvTokens,
         store: Arc<auth::PrincipalStore>,
         static_dir: Option<PathBuf>,
+        board: Arc<crate::board::Board>,
     ) -> App {
         App {
             service,
             env_tokens,
             store,
             static_dir,
+            board,
             pair_failures: Mutex::new(VecDeque::new()),
         }
     }
@@ -436,7 +439,7 @@ fn normalize_pairing_code(v: &Value) -> Option<String> {
 /// Protect real object keys from serde_json's arbitrary-precision Number
 /// transport, as the doorbell reader does. Prefixing every key is injective,
 /// including escaped spellings; normal serde validation still owns syntax.
-fn parse_body_json(text: &str) -> Result<Value, serde_json::Error> {
+pub(crate) fn parse_body_json(text: &str) -> Result<Value, serde_json::Error> {
     let bytes = text.as_bytes();
     let mut encoded = String::with_capacity(text.len());
     let (mut index, mut copied) = (0, 0);
@@ -537,6 +540,7 @@ async fn hook(
     path: &str,
     method: &str,
     h: &HeaderMap,
+    raw_query: Option<&str>,
     body: &mut RequestBody,
 ) -> Response {
     match browser_gate(app, h) {
@@ -552,16 +556,25 @@ async fn hook(
         return method_not_allowed();
     }
     match path {
-        "/api/hook/memory-changes"
-        | "/api/hook/park-gate"
-        | "/api/hook/woke"
-        | "/api/hook/subagent" => {
+        "/api/hook/memory-changes" => {
             if authorized(app, h) {
                 not_implemented(path)
             } else {
                 hook_text("")
             }
         }
+        "/api/hook/park-gate" | "/api/hook/woke" | "/api/hook/subagent" => {
+            if !authorized(app, h) {
+                return hook_text("");
+            }
+            let query = parse_query(raw_query);
+            match path {
+                "/api/hook/park-gate" => crate::board::http::hook_park_gate(app, h, &query).await,
+                "/api/hook/woke" => crate::board::http::hook_woke(app, h, &query).await,
+                _ => crate::board::http::hook_subagent(app, h, &query).await,
+            }
+        }
+        "/api/hook/coordination-start" => crate::board::http::hook_coordination_start(app, h),
         "/api/hook/session-end" => {
             match resolve(app, h) {
                 Resolved::Unavailable => return principals_unavailable(),
@@ -599,62 +612,10 @@ async fn hook(
                 json_response(200, &json!({"ok": true}))
             }
         }
-        "/api/hook/coordination-start" => {
-            // `coordination.unavailable_reason`: config, the bearer and the
-            // stored-principal view only, never the board's storage.
-            let reason = board_unavailable_reason(app, h);
-            let text = if reason.is_some() {
-                String::new()
-            } else {
-                format!("{CHECKIN_TEXT}\n")
-            };
-            let state = match &reason {
-                Some(r) => format!("off; reason={r}"),
-                None => "on".to_string(),
-            };
-            let mut r = hook_text(&text);
-            r.headers_mut().insert(
-                "x-pl-board",
-                HeaderValue::from_str(&state).expect("ascii reason codes"),
-            );
-            r
-        }
         // session-start, memory-policy: their bodies (briefing and policy
         // text) belong to a later slice (W2-D).
         _ => not_implemented(path),
     }
-}
-
-/// `coordination.CHECKIN_TEXT`, recorded from Python (`harness/record_routes.py`).
-const CHECKIN_TEXT: &str = include_str!("../harness/goldens/checkin.txt");
-
-/// `coordination.unavailable_reason` (coordination.py:360-377).
-fn board_unavailable_reason(app: &App, h: &HeaderMap) -> Option<&'static str> {
-    if !app.service.config.coordination.enabled {
-        return Some("disabled");
-    }
-    // `authenticated_principal`: an open install never authenticates.
-    if !app.auth_configured() {
-        return Some("authentication_required");
-    }
-    let principal = match resolve(app, h) {
-        Resolved::Unavailable => return Some("principals_unavailable"),
-        Resolved::None => return Some("unauthorized"),
-        Resolved::Principal(p) => p,
-    };
-    // `principal_admitted` (principals.py:199-210).
-    let admitted = !matches!(principal.as_str(), "daemon" | "maintainer")
-        && (app
-            .service
-            .config
-            .coordination
-            .allowed_principals
-            .contains(&principal)
-            || app.store.admitted(&principal));
-    if !admitted {
-        return Some("principal_not_allowed");
-    }
-    None // a DSN is always configured in this port
 }
 
 fn body_limit(path: &str) -> usize {
@@ -718,6 +679,7 @@ async fn api(
     if coordination_path && method != "POST" {
         return method_not_allowed();
     }
+    let mut parsed_body = serde_json::Map::new();
     if method == "POST" {
         let Some(raw) = read_body(body, body_limit(path)).await else {
             return json_response(413, &json!({"error": "request_too_large"}));
@@ -742,17 +704,13 @@ async fn api(
                 Ok(v) if !v.is_object() => {
                     return json_response(400, &json!({"error": "body_must_be_object"}));
                 }
+                Ok(Value::Object(m)) => parsed_body = m,
                 Ok(_) => {}
             }
         }
     }
     if coordination_path {
-        // `authenticated_principal` runs before the hub: an open install is
-        // refused (api.py:775-778); the hub itself is a later slice (W2-F).
-        if !app.auth_configured() && !crate::mutants::active("tokenless-maintainer-open") {
-            return json_response(401, &json!({"error": "authentication_required"}));
-        }
-        return not_implemented(path);
+        return crate::board::http::coordination(app, path, h, parsed_body).await;
     }
     if (coordination_errors || maintainer_path)
         && !app.auth_configured()
@@ -776,6 +734,15 @@ async fn api(
         && let Some(r) = crate::read::get(app, path, raw_query, h).await
     {
         return r;
+    }
+    if method == "GET"
+        && path == "/api/agents"
+        && params.get("view").map(String::as_str) == Some("coordination")
+    {
+        return crate::board::http::console(app, h, &params).await;
+    }
+    if method == "POST" && path == "/api/daemon-notice" {
+        return crate::board::http::daemon_notice(app, h, parsed_body).await;
     }
     not_implemented(path)
 }
@@ -919,7 +886,7 @@ async fn dispatch(
                 | "/api/hook/subagent"
         )
     {
-        return hook(app, path, method, h, body).await;
+        return hook(app, path, method, h, raw_query, body).await;
     }
     if path == "/api/pair" {
         return pair(app, method, h, body).await;
