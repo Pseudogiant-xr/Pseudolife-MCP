@@ -1,5 +1,6 @@
 """Safety controls for the static harness's loopback-only bind fixture."""
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 from unittest.mock import patch
 import os
@@ -55,3 +56,25 @@ def test_directory_index_parity_compares_oracle_response():
     row = run.compare_case(c, py, rs)
     assert row["diffs"]
     assert "substitution" not in row
+
+
+@pytest.mark.parametrize("platform,path", [
+    ("posix", "/ui/../static/index.html"),
+    ("posix", "/ui/../outside/../static/index.html"),
+    ("posix", "/ui/a/../../static/js/app.js"),
+    ("nt", "/ui/NUL"),
+    ("nt", "/ui/index.html:private"),
+    ("nt", "/ui/C:index.html"),
+])
+def test_lexical_path_rows_compare_the_oracle_without_substitution(monkeypatch, platform, path):
+    monkeypatch.setattr(run, "os", SimpleNamespace(name=platform))
+    c = next(c for c in run.StaticPaths().cases() if c["path"] == path)
+    response = {"status": 200, "bytes": "shell", "headers": {
+        "content-type": "text/html; charset=utf-8", "cache-control": "no-store"}}
+    refused = {"status": 403, "bytes": "forbidden", "headers": {
+        "content-type": "text/plain", "cache-control": "no-store"}}
+    # Either direction must differ: the current oracle remains authoritative.
+    for py, rs in [(response, refused), (refused, response)]:
+        row = run.compare_case(c, py, rs)
+        assert row["diffs"]
+        assert "substitution" not in row

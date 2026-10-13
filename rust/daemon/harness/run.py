@@ -1271,8 +1271,11 @@ class StaticPaths(StaticBuild):
             import subprocess
             subprocess.run(["cmd", "/c", "mklink", "/J", str(root / "escape"), str(outside)],
                            check=True, capture_output=True)
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(root / "prefix-escape"), str(sibling)],
+                           check=True, capture_output=True)
         else:
             (root / "escape").symlink_to(outside, target_is_directory=True)
+            (root / "prefix-escape").symlink_to(sibling, target_is_directory=True)
             (root / "notice.js").symlink_to(root / "notice.txt")
             (root / "loop-a").symlink_to("loop-b")
             (root / "loop-b").symlink_to("loop-a")
@@ -1301,6 +1304,18 @@ class StaticPaths(StaticBuild):
                   "/ui/%5c%5c.%5cpipe%5cpl_http_missing_pipe"]
         paths += ["/ui/a*b", "/ui/a%7Cb", "/ui/%3C", "/ui/..%20/outside/secret.txt",
                   "/ui/..%20/static/index.html", "/ui/sub/..%20/notice.txt"]
+        paths += ["/ui/../static/index.html", "/ui/../outside/../static/index.html",
+                  "/ui/a/../../static/js/app.js", "/ui/js/../index.html",
+                  "/ui/a/./b/../c.css", "/ui/COM0.js", "/ui/lpt0.css",
+                  "/ui/prefix-escape/secret.txt"]
+        if os.name == "nt":
+            other = "R" if daemons.scratch_root().drive.upper() == "Q:" else "Q"
+            paths += [f"/ui/{other}:x", f"/ui/{other}:%5capp%5cstatic%5cx",
+                      f"/ui/%5c%5c%3f%5c{other}:%5cx"]
+            paths += ["/ui/NUL", "/ui/nul.txt", "/ui/a/CON", "/ui/COM1.js",
+                      "/ui/lpt9.css", "/ui/COM%C2%B9", "/ui/AUX%20.txt", "/ui/CONOUT$",
+                      "/ui/index.html:private", "/ui/a:b/index.html",
+                      "/ui/..%5cstatic%5cindex.html", "/ui/C:..%5cstatic%5cindex.html"]
         odd_segments = (".. .", ".. ..", "... ", ".... ", ". .")
         paths += ["/ui/" + urllib.parse.quote(p) + "/notice.txt" for p in odd_segments]
         if os.name != "nt":
@@ -1311,8 +1326,6 @@ class StaticPaths(StaticBuild):
         out = [case("path " + p, "GET", p) for p in paths]
         if os.name == "nt":
             for c in out:
-                if c["path"] == "/ui/C:index.html":
-                    c["refusal_policy"] = "lexical-outside-root"
                 if "..%20/" in c["path"]:
                     c["refusal_policy"] = "parent-space-refusal"
                 if any("/" + urllib.parse.quote(p) + "/" in c["path"] for p in odd_segments):
@@ -1357,10 +1370,6 @@ class StaticRootLink(StaticPaths):
         out = [case("linked root " + p, "GET", p) for p in
                 ("/ui", "/ui/notice.txt", "/ui/missing", "/ui/escape/missing",
                  "/ui/../static/index.html", "/ui/%2e%2e/static/index.html")]
-        if os.name != "nt":
-            for c in out:
-                if "/../" in c["path"] or "%2e%2e" in c["path"]:
-                    c["refusal_policy"] = "lexical-outside-root"
         return out
 
 
