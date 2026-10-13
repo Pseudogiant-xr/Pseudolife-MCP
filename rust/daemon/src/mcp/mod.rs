@@ -437,8 +437,9 @@ pub async fn handle(
 /// envelope (recorded from the oracle); every other modern request is a
 /// declared divergence.
 fn modern_era_refusal(body: &[u8]) -> Response {
-    let id = serde_json::from_slice::<Value>(body)
+    let id = std::str::from_utf8(body)
         .ok()
+        .and_then(|text| crate::http::parse_body_json(text).ok())
         .and_then(|v| v.get("id").cloned())
         .unwrap_or(Value::Null);
     let out = json!({"jsonrpc": "2.0", "id": id, "error": {"code": INVALID_PARAMS,
@@ -1075,6 +1076,25 @@ mod sessions {
                     .unwrap()
                     .contains(r#""result":{}"#)
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn modern_refusal_preserves_reserved_keys_and_ids() {
+        for (body, expected_id) in [
+            (r#"{"$serde_json::private::Number":"1","id":7}"#, "7"),
+            (
+                r#"{"id":{"$serde_json::private::Number":"1"}}"#,
+                r#"{"$serde_json::private::Number":"1"}"#,
+            ),
+        ] {
+            let response = modern_era_refusal(body.as_bytes());
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let value = crate::http::parse_body_json(std::str::from_utf8(&bytes).unwrap()).unwrap();
+            assert_eq!(value["id"].to_string(), expected_id);
         }
     }
 

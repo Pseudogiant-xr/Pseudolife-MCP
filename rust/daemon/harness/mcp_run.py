@@ -11,6 +11,10 @@ sets PSEUDOLIFE_DAEMON_MUTANT for the Rust side (a `--features mutants`
 build) and requires an ordinary baseline report: the run passes only if the
 strict comparison finds changed or additional differences beyond that baseline.
 Exit 0 means the expected verdict.
+
+Each invocation retains its unique directory under PL_HARNESS_SCRATCH for
+diagnostics, including after success. These directories accumulate; callers
+may remove their own completed runs after collecting the evidence they need.
 """
 from __future__ import annotations
 
