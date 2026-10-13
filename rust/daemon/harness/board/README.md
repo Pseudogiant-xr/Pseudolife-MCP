@@ -69,3 +69,11 @@ port 5434, then explicitly runs the otherwise ignored Cargo regression: a
 registered, attached agent must heartbeat while full initialization holds the
 service mutex after publishing storage. The normal Cargo suite also covers a
 PostgreSQL server that accepts TCP but never completes authentication.
+
+CI runs `test_norm.py` and `test_run.py` on Linux and Windows; the existing
+daemon checks compile the board unconditionally and build the `mutants` feature.
+The live corpus and eight controls currently run on the development test service.
+Hosted live coverage remains a follow-up: the proven runner warms the Python
+arm with a cached model, while a portable offline fixture has not yet been
+integrated and validated for this board runner. The original timing-sensitive
+goldens remain strict failing evidence, not CI expectations.

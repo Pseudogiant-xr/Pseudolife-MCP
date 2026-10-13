@@ -62,6 +62,15 @@ pub struct Hub {
     workers: Arc<Semaphore>,
 }
 
+/// The spawned job owns admission until completion, cancellation, or panic.
+struct PendingCall(Arc<AtomicUsize>);
+
+impl Drop for PendingCall {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 impl Default for Hub {
     fn default() -> Self {
         Hub {
@@ -143,16 +152,13 @@ impl Board {
         }
         let board = self.clone();
         let workers = hub.workers.clone();
-        let pending = hub.pending_calls.clone();
+        let pending = PendingCall(hub.pending_calls.clone());
         let (action, headers, principal) =
             (action.to_string(), headers.clone(), principal.to_string());
         let job = tokio::spawn(async move {
-            let result = {
-                let _permit = workers.acquire().await.expect("semaphore open");
-                board.dispatch(&action, params, &headers, &principal).await
-            };
-            pending.fetch_sub(1, Ordering::SeqCst);
-            result
+            let _pending = pending;
+            let _permit = workers.acquire().await.expect("semaphore open");
+            board.dispatch(&action, params, &headers, &principal).await
         });
         job.await
             .unwrap_or_else(|e| Err(BoardError::Internal(e.to_string())))
@@ -241,5 +247,82 @@ impl Board {
                     .await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, DaemonEnv};
+    use crate::service::Service;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    fn board() -> Arc<Board> {
+        let config = Config::default();
+        let service = Arc::new(Service::new(
+            config.clone(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::new(),
+            String::new(),
+            true,
+        ));
+        Arc::new(Board::new(
+            config.coordination,
+            String::new(),
+            service,
+            Arc::new(crate::auth::PrincipalStore::new()),
+        ))
+    }
+
+    #[tokio::test]
+    async fn panicking_job_releases_its_pending_slot() {
+        let board = board();
+        board.hub.workers.close();
+        let result = board
+            .invoke("unknown", Map::new(), &HashMap::new(), "default")
+            .await;
+        assert!(result.is_err());
+        assert_eq!(
+            board.hub.pending_calls.load(Ordering::SeqCst),
+            0,
+            "a worker panic leaked an admission slot"
+        );
+    }
+
+    #[tokio::test]
+    async fn caller_cancellation_retains_slot_until_queued_job_finishes() {
+        let board = board();
+        let permits = board
+            .hub
+            .workers
+            .clone()
+            .acquire_many_owned(WORKERS as u32)
+            .await
+            .unwrap();
+        let caller_board = board.clone();
+        let caller = tokio::spawn(async move {
+            caller_board
+                .invoke("unknown", Map::new(), &HashMap::new(), "default")
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while board.hub.pending_calls.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        assert_eq!(board.hub.pending_calls.load(Ordering::SeqCst), 1);
+        drop(permits);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while board.hub.pending_calls.load(Ordering::SeqCst) != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("finished worker retained its admission slot");
     }
 }
