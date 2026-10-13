@@ -16,6 +16,8 @@ SELECTION_ENV = "PSEUDOLIFE_PORT_ORACLE_SELECTION"
 VERSION_FILES = {
     "plugin/release.json", "server.json", "ops/docker-compose.yml",
     "pseudolife_memory/compose/docker-compose.yml",
+    "rust/shim/Cargo.toml", "rust/Cargo.lock",
+    "rust/shim/src/lifecycle.rs", "rust/shim/tests/auth_lifecycle_http.rs",
 }
 DOCUMENTS = {
     "CHANGELOG.md", "CONTRIBUTING.md", "README.md", "SECURITY.md",
@@ -40,6 +42,20 @@ def blob(root, entry):
 
 
 def version_metadata_matches(path, before, after, previous, current):
+    if path in ("rust/shim/src/lifecycle.rs", "rust/shim/tests/auth_lifecycle_http.rs"):
+        return before.replace(previous.encode(), current.encode()) == after
+    if path in ("rust/shim/Cargo.toml", "rust/Cargo.lock"):
+        old, new = tomllib.loads(before.decode("utf-8")), tomllib.loads(after.decode("utf-8"))
+        packages = old["package"] if path.endswith(".lock") else [old["package"]]
+        members = [package for package in packages if package["name"] == "pseudolife-stdio"]
+        if len(members) != 1 or members[0]["version"] != previous:
+            return False
+        members[0]["version"] = current
+        # Replace only this package's canonical Cargo stanza, not dependencies
+        # that happen to have the same version number.
+        pattern = rb'(?m)^(name = "pseudolife-stdio"\r?\nversion = ")' + re.escape(previous.encode()) + rb'("\r?$)'
+        return old == new and re.sub(
+            pattern, lambda match: match[1] + current.encode() + match[2], before, count=1) == after
     if path.endswith(".json"):
         old, new = json.loads(before), json.loads(after)
         if old.get("version") == previous:
@@ -58,9 +74,9 @@ def version_metadata_matches(path, before, after, previous, current):
 def release_cut(root, base, head):
     """Return release evidence only when Python behavior and tests are unchanged.
 
-    Rust is the candidate, not the Python oracle. Documentation may be folded
-    during a release, but unknown paths, executable documentation, original
-    tests, instruments and dependency changes retain the ordinary merge base.
+    Only the named native version literals and package metadata may accompany
+    a cut. Documentation may be folded, but unknown paths, executable docs,
+    original tests, instruments and dependency changes retain the merge base.
     """
     before, after = tree(root, base), tree(root, head)
     metadata = "pyproject.toml"
@@ -82,11 +98,11 @@ def release_cut(root, base, head):
         return None
     for path in before.keys() | after.keys():
         left, right = before.get(path), after.get(path)
-        if left == right or path == metadata or path.startswith("rust/"):
+        if left == right or path == metadata:
             continue
         # Only ordinary documentation files may be added, removed or rewritten.
         if (path in DOCUMENTS
-                or path.startswith(("docs/", "changelog.d/")) and path.endswith(".md")):
+                or path.startswith(("docs/", "changelog.d/", "rust/")) and path.endswith(".md")):
             if all(entry is None or entry[:2] == (b"100644", b"blob") for entry in (left, right)):
                 continue
         if (path in VERSION_FILES and left and right

@@ -289,9 +289,11 @@ ordering for changes to `pseudolife_memory/`.
 
 A version-only release is the narrow exception: the selector uses the immutable
 PR head when `pyproject.toml` changes only `project.version`, all Python behavior
-and original tests stay unchanged, and every other changed path is native Rust,
-recognized documentation, or an allowlisted release-metadata file changed only
-by that same version substitution. Dependency, workflow, instrument, script,
+and original tests stay unchanged, and every other changed path is recognized
+documentation or an allowlisted version-bearing file. Native changes are limited
+to the shim's Cargo package/lock version, `lifecycle.rs` version literals and
+`auth_lifecycle_http.rs` version fixtures, with all other bytes unchanged.
+Dependency, workflow, instrument, script,
 hook or unknown-path changes keep the merge-base rule. The receipt records
 `release_cut` with the old and new versions, and loading it recomputes eligibility.
 No stderr, frame, instruction or version text is removed from comparisons.

@@ -92,6 +92,12 @@ def test_local_runtime_identity_is_not_tied_to_historical_inventory(release):
     ("ops/docker-compose.yml", "image: different/daemon:0.18.1\n"),
     ("pseudolife_memory/compose/docker-compose.yml", "image: different/daemon:0.18.1\n"),
     ("unknown.txt", "new input\n"),
+    ("rust/cli_harness/normalize.py", "print('changed comparator')\n"),
+    ("rust/ci/run_coverage.py", "print('changed CI gate')\n"),
+    ("rust/unknown.sh", "echo changed\n"),
+    ("rust/shim/build.rs", "fn main() {}\n"),
+    ("rust/shim/Cargo.toml", '[package]\nname = "pseudolife-stdio"\nversion = "0.18.1"\n[dependencies]\nnew = "1"\n'),
+    ("rust/Cargo.lock", '[[package]]\nname = "pseudolife-stdio"\nversion = "0.18.1"\n[[package]]\nname = "new"\nversion = "1.0.0"\n'),
     ("docs/helper.py", "print('new executable input')\n"),
     ("evals/rust_port/instrument.py", "print('changed instrument')\n"),
 ])
@@ -205,3 +211,26 @@ def test_release_without_native_bump_still_fails_identity(release, monkeypatch):
     monkeypatch.setenv(oracle.SELECTION_ENV, json.dumps(selected))
     with pytest.raises(AssertionError):
         check_identity(SimpleNamespace(ROOT=root, PHASE1_ORACLE=base))
+
+
+def test_native_version_bump_preserves_dependencies_with_same_old_version(release):
+    root, _, _ = release
+    dependency = '[[package]]\nname = "other"\nversion = "0.18.0"\n'
+    bump(root, "0.18.0")
+    lock = root / "rust/Cargo.lock"
+    write(root, "rust/Cargo.lock", lock.read_text(encoding="utf-8") + dependency)
+    write(root, "rust/shim/tests/auth_lifecycle_http.rs", 'const EXPECTED: &str = "0.18.0";\n')
+    base = commit(root)
+    bump(root, "0.18.1")
+    write(root, "rust/Cargo.lock", lock.read_text(encoding="utf-8") + dependency)
+    write(root, "rust/shim/tests/auth_lifecycle_http.rs", 'const EXPECTED: &str = "0.18.1";\n')
+    head = commit(root)
+    assert select_release(root, base, head)["oracle_head"] == head
+
+
+def test_native_implementation_edit_cannot_accompany_release_exception(release):
+    root, base, _ = release
+    path = root / "rust/shim/src/lifecycle.rs"
+    write(root, "rust/shim/src/lifecycle.rs", path.read_text(encoding="utf-8") + "// Unrelated edit.\n")
+    head = commit(root)
+    assert select_release(root, base, head)["oracle_head"] == base
