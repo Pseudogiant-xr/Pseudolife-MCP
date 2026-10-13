@@ -189,3 +189,12 @@ def test_literal_listener_deadline_remains_an_exact_value():
     norm.windows.steps.append((1_790_000_000.0, 1_790_000_000.5))
     assert norm.value(100.0, "ring_armed_until") == 100.0
     assert not norm.problems
+
+
+def test_oversized_integer_listener_deadline_is_captured_and_capped():
+    timestamp = 1_790_000_000.0
+    norm = norm_with([])
+    norm.request({"ring_armed_until": 10**400})
+    norm.windows.steps.append((timestamp, timestamp + 0.5))
+    assert norm.value(timestamp + 60.2, "ring_armed_until") == "T0+60"
+    assert not norm.problems

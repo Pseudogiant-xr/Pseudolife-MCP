@@ -164,7 +164,7 @@ class Normalizer:
     def request(self, body, *, relative=True):
         """Capture input for Python's min(deadline, now + 60) contract."""
         deadline = body.get("ring_armed_until") if isinstance(body, dict) else None
-        if type(deadline) in (int, float) and math.isfinite(deadline) and deadline > 0:
+        if (type(deadline) is int or type(deadline) is float and math.isfinite(deadline)) and deadline > 0:
             self.listener_deadlines.append((deadline, len(self.windows.steps), relative))
 
     def listener_deadline(self, value):
@@ -173,7 +173,7 @@ class Normalizer:
             if min(deadline, t0 + 60) <= value <= min(deadline, t1 + 60):
                 if not relative and deadline <= t0 + 60:
                     return value
-                return f"T{step}+{min(deadline - t0, 60):g}"
+                return f"T{step}+{min(deadline, t0 + 60) - t0:g}"
         return self.unmatched("ring_armed_until", value)
 
     def unmatched(self, key, value):
