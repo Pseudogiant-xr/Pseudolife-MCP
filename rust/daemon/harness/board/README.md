@@ -34,7 +34,11 @@ Rust first) and requires Python's verifier to accept the whole chain.
   order, object keys sorted); prefixes and cursors map to their id.
 - Wall-clock times become `T<step>+<offset>` inside the arm's own window,
   the offset being one declared per field (0, 60, a TTL, a scenario's ttl).
-  HLC stamps become `H<step>:<logical>`.
+  A failed window match records a harness error and retains the raw value.
+  An explicit listener deadline must equal a captured request value.
+  Retention cutoffs must match the UTC day boundary for the scenario's
+  configured retention interval and captured clock windows before becoming
+  `<utc-day>`. HLC stamps become `H<step>:<logical>`.
 - Digests, salts, credentials and the bank id are replaced after a shape
   check; a value of the wrong shape stays visible as a diff.
 - Lists both producers sort by a raw random id (`participants`, prune's
@@ -82,6 +86,12 @@ Hosted live coverage remains a follow-up: the proven runner warms the Python
 arm with a cached model, while a portable offline fixture has not yet been
 integrated and validated for this board runner. The original timing-sensitive
 goldens remain strict failing evidence, not CI expectations.
+
+The foundation `tokens` scenario now compares the implemented board routes;
+its Console timestamp is checked against the captured request window. The
+existing H5 coverage plan excludes this whole scenario for retrieval telemetry
+and sequence differences, so that lane cannot validate these board cases.
+The board harness CI tests cover their comparator behavior independently.
 
 `--json-keys` registers the serde-reserved capability key, updates the agent,
 and checks byte-identical capabilities through roster and Console reads. Board

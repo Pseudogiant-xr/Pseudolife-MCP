@@ -9,6 +9,7 @@ shape of what it replaces, so a malformed value shows as a diff.
 from __future__ import annotations
 
 import json
+import math
 import re
 
 HEX32 = re.compile(r"[0-9a-f]{32}")
@@ -28,7 +29,7 @@ TIME_KEYS = {
     "first_read_at": (0,), "acknowledged_at": (0,), "attempt_at": (0,), "since": (0,),
     "status_set_at": (0,), "snapshot_at": (0,), "redacted_at": (0,), "repudiated_at": (0,),
     "ring_at": (0, 30, 60, 90, 120, 150, 180, 210, 240),
-    "lease_until": (60,), "ring_armed_until": (60, 0),
+    "lease_until": (60,), "ring_armed_until": (),  # exact request deadline, or zero
     "expires_at": (86400, 30, 60, 120, 300, 600, 3600, 86400),
     "message_expires_at": (86400,),
     "status_expires_at": (60, 120, 600, 3600), "expected_end": (60, 120, 600, 3600),
@@ -71,8 +72,10 @@ class Windows:
 
 
 class Normalizer:
-    def __init__(self, windows: Windows):
+    def __init__(self, windows: Windows, retention_days: int = 90):
         self.windows = windows
+        self.retention_days = retention_days
+        self.requested_times: dict[tuple[str, float], str] = {}
         self.ids: dict[str, int] = {}
         # Audit seqs relabelled inside a fan-out burst: both producers write
         # a burst's send events in raw recipient-id order, which is free.
@@ -158,6 +161,29 @@ class Normalizer:
         return PREFIX.sub(prefix, out)
 
     # -- values -----------------------------------------------------------
+    def request(self, body, started_at):
+        """An explicit listener deadline must round-trip the request value."""
+        deadline = body.get("ring_armed_until") if isinstance(body, dict) else None
+        if type(deadline) in (int, float) and math.isfinite(deadline) and deadline > 0:
+            self.requested_times[("ring_armed_until", deadline)] = (
+                f"T{len(self.windows.steps)}+{deadline - started_at:g}")
+
+    def unmatched(self, key, value):
+        self.problems.append(f"{key}: value {value!r} does not match the captured clock windows")
+        return value
+
+    def cutoff(self, value, key):
+        if value is None and self.retention_days == 0:
+            return None
+        if type(value) is int and self.retention_days > 0 and value % 86400 == 0:
+            offset = self.retention_days * 86400
+            for t0, t1 in self.windows.steps:
+                low = math.floor((t0 - offset) / 86400) * 86400
+                high = math.floor((t1 - offset) / 86400) * 86400
+                if low <= value <= high:
+                    return "<utc-day>"
+        return self.unmatched(key, value)
+
     def value(self, v, key: str | None = None):
         if isinstance(v, dict):
             return {k: self.value(v[k], k) for k in v}
@@ -182,10 +208,12 @@ class Normalizer:
             return "<credential>" if TOKEN.fullmatch(v) else f"<bad credential {len(v)}>"
         if key == "bank_id" and isinstance(v, str):
             return "<bank>" if UUID.fullmatch(v) else f"<bad bank {v}>"
-        if key in TIME_KEYS and isinstance(v, (int, float)) and not isinstance(v, bool) and v > 1e9:
-            return self.windows.match(float(v), TIME_KEYS[key]) or f"<unmatched {key}>"
-        if key in ("cutoff", "retained_since") and isinstance(v, int):
-            return "<utc-day>" if v % 86400 == 0 else f"<bad day {v}>"
+        if key in TIME_KEYS and isinstance(v, (int, float)) and not isinstance(v, bool) and v != 0:
+            if (key, v) in self.requested_times:
+                return self.requested_times[(key, v)]
+            return self.windows.match(float(v), TIME_KEYS[key]) or self.unmatched(key, v)
+        if key in ("cutoff", "retained_since"):
+            return self.cutoff(v, key)
         if key == "hlc" and isinstance(v, str) and v:
             m = HLC.fullmatch(v)
             if not m:

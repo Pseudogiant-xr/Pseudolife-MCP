@@ -7,6 +7,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from board.norm import Normalizer, Windows  # noqa: E402
@@ -54,8 +56,9 @@ def test_times_need_their_declared_offset_inside_the_window():
     n = norm_with([(t, t + 0.5), (t + 1000, t + 1000.2)])
     assert n.value(t + 1000.1, "created_at") == "T1+0"
     assert n.value(t + 60.2, "lease_until") == "T0+60"
-    assert n.value(t + 61.0, "lease_until").startswith("<unmatched")
-    assert n.value(t + 0.2, "lease_until").startswith("<unmatched")
+    assert n.value(t + 61.0, "lease_until") == t + 61.0
+    assert n.value(t + 0.2, "lease_until") == t + 0.2
+    assert len(n.problems) == 2
 
 
 def test_digests_salts_credentials_are_shape_checked():
@@ -110,3 +113,53 @@ def test_hlc_maps_to_its_step():
     assert n.value("1790000000250:3", "hlc") == "H0:3"
     assert n.value("9999999999999:0", "hlc") == "<unmatched hlc>"
     assert n.value("abc", "hlc").startswith("<bad hlc")
+
+
+@pytest.mark.parametrize("key,python_value,rust_value", [
+    ("lease_until", 1_790_000_061, 1_790_000_062),
+    ("lease_until", 1_790_000_061, 1_790_000_061),
+    ("lease_until", 1.0, 1.0),
+    ("cutoff", (1_790_000_000 // 86400 - 90) * 86400,
+     (1_790_000_000 // 86400 - 91) * 86400),
+    ("retained_since", (1_790_000_000 // 86400 - 90) * 86400,
+     (1_790_000_000 // 86400 - 89) * 86400),
+])
+def test_invalid_clock_values_cannot_compare_clean(key, python_value, rust_value):
+    from board.run import diff_values
+
+    py, rs = norm_with([(1_790_000_000, 1_790_000_000.5)]), norm_with([(1_790_000_000, 1_790_000_000.5)])
+    left, right = py.value(python_value, key), rs.value(rust_value, key)
+    assert diff_values(left, right) or py.problems or rs.problems, "invalid clocks compared equal"
+
+
+def test_retention_cutoffs_use_configured_days_and_allow_a_midnight_window():
+    midnight = (1_790_000_000 // 86400) * 86400
+    windows = Windows()
+    windows.steps = [(midnight - 0.5, midnight + 0.5)]
+    norm = Normalizer(windows, retention_days=7)
+    for value in (midnight - 8 * 86400, midnight - 7 * 86400):
+        assert norm.value(value, "retained_since") == "<utc-day>"
+    assert not norm.problems
+    invalid = midnight - 90 * 86400
+    assert norm.value(invalid, "cutoff") == invalid
+    assert norm.problems
+
+
+def test_unlimited_retention_requires_no_cutoff():
+    norm = Normalizer(Windows(), retention_days=0)
+    assert norm.value(None, "retained_since") is None
+    assert not norm.problems
+    norm.value(0, "retained_since")
+    assert norm.problems
+
+
+def test_explicit_listener_deadline_must_equal_the_request():
+    timestamp = 1_790_000_000.0
+    norm = norm_with([])
+    norm.request({"ring_armed_until": timestamp + 30}, timestamp)
+    norm.windows.steps.append((timestamp, timestamp + 0.5))
+    assert norm.value(timestamp + 30, "ring_armed_until") == "T0+30"
+    assert not norm.problems
+    assert norm.value(timestamp + 30.1, "ring_armed_until") == timestamp + 30.1
+    assert norm.value(timestamp + 60, "ring_armed_until") == timestamp + 60
+    assert norm.problems

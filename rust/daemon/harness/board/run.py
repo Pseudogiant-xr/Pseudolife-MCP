@@ -178,10 +178,10 @@ def credential_check(responses: list[dict], state: dict) -> list[str]:
 # ---- running ---------------------------------------------------------------------
 
 class Arm:
-    def __init__(self, name: str, daemon, dsn: str):
+    def __init__(self, name: str, daemon, dsn: str, retention_days: int = 90):
         self.name, self.daemon, self.dsn = name, daemon, dsn
         self.windows = Windows()
-        self.norm = Normalizer(self.windows)
+        self.norm = Normalizer(self.windows, retention_days)
         self.ctx = S.Ctx()
         self.responses: list[dict] = []
 
@@ -197,6 +197,11 @@ class Arm:
             resp = {"status": 0}
         else:
             method, path, headers, body = step.request(self.ctx)
+            if path in ("/api/coordination/attach", "/api/coordination/heartbeat") and body is not None:
+                try:
+                    self.norm.request(json.loads(body), t0)
+                except (ValueError, UnicodeDecodeError):
+                    pass  # Malformed request cases have no deadline to preserve.
             resp = call(self.daemon.port, method, path, headers, body, timeout=step.timeout)
         self.windows.steps.append((t0, time.time()))
         if step.save and resp.get("json") is not None:
@@ -276,6 +281,10 @@ def wait_ready(port: int, timeout: float = 600.0, *, require_embedder: bool = Tr
 
 
 def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
+    import yaml
+
+    config = yaml.safe_load(scn.config_yaml or "") or {}
+    retention_days = config.get("coordination", {}).get("audit_retention_days", 90)
     tag = scn.name.replace("-", "_")
     names = {side: pg.name(f"pl_cf_w2f_{tag}_{suffix}")
              for side, suffix in (("python", "py"), ("rust", "rs"))}
@@ -289,7 +298,7 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
             dsn = pg.create(names[side])
             procs[side] = start(side, scn, binary, root, dsn, tag)
             cleanup.callback(procs[side].stop)
-            arms[side] = Arm(side, procs[side], dsn)
+            arms[side] = Arm(side, procs[side], dsn, retention_days)
         for side, proc in procs.items():
             # Both arms need storage before read-only Console snapshots.
             # Python also finishes embedding warmup, which holds its service

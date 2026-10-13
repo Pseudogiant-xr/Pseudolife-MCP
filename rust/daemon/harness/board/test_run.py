@@ -9,6 +9,59 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from board import run  # noqa: E402
 
 
+@pytest.mark.parametrize("name,status,body", [
+    ("coordination hub (authenticated)", 401, {"error": "agent_required"}),
+    ("api agents coordination view", 200, {"agents": []}),
+])
+def test_foundation_compares_implemented_board_routes(name, status, body):
+    import run as foundation
+
+    case = next(c for c in foundation.Tokens().cases() if c["name"] == name)
+    response = {"status": status, "headers": {}, "json": body}
+    result = foundation.compare_case(case, response, response)
+    assert not result["diffs"], result["diffs"]
+    assert result["declared"] is None
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_foundation_snapshot_clock_is_validated_per_request(invalid):
+    import run as foundation
+
+    case = next(c for c in foundation.Tokens().cases() if c["name"] == "api agents coordination view")
+    py = {"status": 200, "headers": {}, "json": {"snapshot_at": 1000.2},
+          "_clock_window": [1000.0, 1000.5]}
+    rs = {"status": 200, "headers": {}, "json": {"snapshot_at": 2000.2},
+          "_clock_window": [2000.0, 2000.5]}
+    if invalid:
+        py["json"]["snapshot_at"] = rs["json"]["snapshot_at"] = 99.0
+        rs["_clock_window"] = py["_clock_window"]
+    assert bool(foundation.compare_case(case, py, rs)["diffs"]) is invalid
+
+
+@pytest.mark.parametrize("retained_days,has_problem", [(7, False), (90, True)])
+def test_scenario_clock_errors_reach_the_harness_result(monkeypatch, tmp_path, retained_days, has_problem):
+    monkeypatch.setattr(run.pg, "create", lambda name: name)
+    monkeypatch.setattr(run.pg, "drop", lambda name: None)
+    monkeypatch.setattr(run, "start", lambda side, *args: SimpleNamespace(port=side, stop=lambda: None))
+    monkeypatch.setattr(run, "wait_ready", lambda *args, **kw: None)
+    monkeypatch.setattr(run, "dump", lambda dsn: {})
+    monkeypatch.setattr(run, "credential_check", lambda *args: [])
+    monkeypatch.setattr(run, "chain_check", lambda dsn: [])
+    timestamp = 1_790_000_000
+
+    def response(arm, step):
+        arm.windows.steps.append((timestamp, timestamp + 0.5))
+        return {"status": 200, "json": {
+            "retention_days": retained_days,
+            "retained_since": (timestamp // 86400 - retained_days) * 86400}}
+
+    monkeypatch.setattr(run.Arm, "run", response)
+    scenario = SimpleNamespace(name="retention", config_yaml="coordination:\n  audit_retention_days: 7\n",
+                               steps=lambda: [SimpleNamespace(kind="http", name="history", write=False)])
+    result = run.run_scenario(scenario, Path("unused"), tmp_path, "live", False)
+    assert bool(run.summarize([result])[3]) is has_problem
+
+
 @pytest.mark.parametrize("mode", ["live", "golden"])
 def test_every_arm_waits_for_storage_before_board_reads(monkeypatch, tmp_path, mode):
     ready = set()
@@ -27,7 +80,7 @@ def test_every_arm_waits_for_storage_before_board_reads(monkeypatch, tmp_path, m
         return []
 
     monkeypatch.setattr(run, "chain_check", check)
-    scenario = SimpleNamespace(name="startup", steps=lambda: [])
+    scenario = SimpleNamespace(name="startup", config_yaml=None, steps=lambda: [])
     run.run_scenario(scenario, Path("unused"), tmp_path, mode, False)
 
 
@@ -73,7 +126,7 @@ def test_failed_scenarios_clean_up_every_owned_bank(monkeypatch, tmp_path, failu
 
     monkeypatch.setattr(run, "start", start)
     monkeypatch.setattr(run, "wait_ready", ready)
-    scenario = SimpleNamespace(name="cleanup", steps=lambda: [])
+    scenario = SimpleNamespace(name="cleanup", config_yaml=None, steps=lambda: [])
     with pytest.raises(RuntimeError, match="fixture"):
         run.run_scenario(scenario, Path("unused"), tmp_path, "live", False)
     assert set(dropped) == set(created)
