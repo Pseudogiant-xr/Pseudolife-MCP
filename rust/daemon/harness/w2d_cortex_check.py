@@ -34,8 +34,8 @@ diffs. ``--mutant NAME`` builds Rust with ``--features mutants`` and sets
 ``PSEUDOLIFE_DAEMON_MUTANT``; that run must exit non-zero.
 
 Every database this script creates, clones or drops must match
-``pl_cf_w2d_cortex_[a-z0-9_]+``; anything else is refused before a
-connection opens. Logs in only with the test login
+the process-owned randomized ``pl_cf_w2d_*`` namespace; foreign names
+are refused before a connection opens. Logs in only with the test login
 (``~/.pseudolife-mcp/test-pg.env``). Needs ``CARGO_TARGET_DIR`` set by the
 caller; builds with ``-j 2``.
 """
@@ -44,16 +44,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import quote
 
 import psycopg
-from psycopg import sql
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -61,11 +58,10 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(REPO))
 import dbstate  # noqa: E402
 
-HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
-LOGIN_FILE = Path(os.environ.get("PSEUDOLIFE_TEST_PG_LOGIN_FILE")
-                  or Path.home() / ".pseudolife-mcp" / "test-pg.env")
-DISPOSABLE = re.compile(r"pl_cf_w2d_cortex_[a-z0-9_]{1,40}")
-SEED = "pl_cf_w2d_cortex_seed"
+os.environ["PL_HARNESS_SLICE"] = "w2d"
+import pgdisposable as pg  # noqa: E402
+
+SEED = pg.name("pl_cf_w2d_cortex_seed")
 RUST_TEST = "read::cortex_search::tests::differential_cases_from_harness"
 
 BM25 = {"k1": 1.5, "b": 0.75, "weight": 0.3, "top_n": 20, "min_score": 0.1}
@@ -113,61 +109,12 @@ QUERIES = [
 
 # ---- disposable databases ------------------------------------------------------------
 
-def _login() -> tuple[str, str]:
-    values = {}
-    for line in LOGIN_FILE.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip()
-    try:
-        return values["PSEUDOLIFE_TEST_PG_USER"], values["PSEUDOLIFE_TEST_PG_PASSWORD"]
-    except KeyError:
-        raise SystemExit(f"{LOGIN_FILE}: no test login; run `pseudolife-mcp test-login create`")
-
-
-def _check(name: str) -> str:
-    if not DISPOSABLE.fullmatch(name):
-        raise ValueError(f"refusing non-disposable database name {name!r}")
-    return name
-
-
-def dsn(name: str) -> str:
-    user, password = _login()
-    host, port = HOST_PORT.rsplit(":", 1)
-    return (f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
-            f"@{host}:{port}/{_check(name)}")
-
-
-def _admin():
-    user, password = _login()
-    host, port = HOST_PORT.rsplit(":", 1)
-    return psycopg.connect(host=host, port=int(port), user=user, password=password,
-                           dbname="postgres", autocommit=True, connect_timeout=10)
-
-
-def create(name: str, template: str | None = None) -> str:
-    drop(name)
-    with _admin() as conn:
-        if template is None:
-            conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(_check(name))))
-        else:
-            conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
-                sql.Identifier(_check(name)), sql.Identifier(_check(template))))
-    return dsn(name)
-
-
-def drop(name: str) -> None:
-    with _admin() as conn:
-        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
-            sql.Identifier(_check(name))))
-
-
-def existing() -> list[str]:
-    with _admin() as conn:
-        rows = conn.execute(
-            "SELECT datname FROM pg_database WHERE datname LIKE 'pl_cf_w2d_cortex_%'")
-        return sorted(r[0] for r in rows if DISPOSABLE.fullmatch(r[0]))
+# Shared helpers refuse foreign names before connecting and enumerate only
+# this process's randomized names, including its seed template.
+create = pg.create
+drop = pg.drop
+dsn = pg.dsn
+existing = pg.existing
 
 
 # ---- seeding through Python's own write path ------------------------------------------
@@ -334,7 +281,7 @@ def run_rust(mode: str, rs_dsn: str, work: Path, frozen: float, cases: list[dict
     before = dbstate.dump(rs_dsn)
     env = dict(os.environ, W2D_CORTEX_DSN=rs_dsn, W2D_CORTEX_IN=str(inp),
                W2D_CORTEX_OUT=str(out))
-    cmd = ["cargo", "test", "-j", "2", "-p", "pseudolife-daemon",
+    cmd = ["cargo", "test", "--locked", "-j", "2", "-p", "pseudolife-daemon",
            "--manifest-path", str(REPO / "rust" / "Cargo.toml")]
     if mutant:
         cmd += ["--features", "mutants"]
@@ -452,7 +399,8 @@ def main() -> int:
         t0, events = seed(work)
         frozen = t0 + 7200.0
         for mode in modes:
-            py_name, rs_name = f"pl_cf_w2d_cortex_py_{mode}", f"pl_cf_w2d_cortex_rs_{mode}"
+            py_name = pg.name(f"pl_cf_w2d_cortex_py_{mode}")
+            rs_name = pg.name(f"pl_cf_w2d_cortex_rs_{mode}")
             created += [py_name, rs_name]
             py_dsn, rs_dsn = create(py_name, SEED), create(rs_name, SEED)
             cases, py_before, py_after = run_python(mode, py_dsn, work, frozen, events)
