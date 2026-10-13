@@ -718,20 +718,50 @@ fn invalid_params(id: &Value) -> String {
     rpc_error(id, INVALID_PARAMS, "Invalid request parameters", json!(""))
 }
 
+fn has_handler(method: &str) -> bool {
+    matches!(
+        method,
+        "initialize"
+            | "ping"
+            | "tools/list"
+            | "tools/call"
+            | "prompts/list"
+            | "prompts/get"
+            | "resources/list"
+            | "resources/templates/list"
+            | "resources/read"
+    )
+}
+
 /// `validate_client_request` for the parameter shapes canonical clients and
 /// the listed methods use: `_meta` an object, `cursor` a string, required
 /// names present. `false` means -32602.
 fn params_valid(method: &str, p: &Map<String, Value>) -> bool {
+    // Every handshake version has the same spec-method set. The SDK looks
+    // up unknown methods without validating their metadata or parameters.
+    let served = has_handler(method);
+    if !served
+        && !matches!(
+            method,
+            "resources/subscribe"
+                | "resources/unsubscribe"
+                | "logging/setLevel"
+                | "completion/complete"
+        )
+    {
+        return true;
+    }
     let opt = |key: &str, ok: fn(&Value) -> bool| p.get(key).is_none_or(|v| v.is_null() || ok(v));
     if !opt("_meta", Value::is_object) {
         return false;
     }
-    // The pinned handshake schema and typed handler validate progressToken;
-    // the handler also rejects null. Unknown extension keys stay unrestricted.
+    // The schema permits null; only a registered typed handler rejects it.
+    // Unknown extension keys stay unrestricted.
     if p.get("_meta")
         .and_then(|meta| meta.get("progressToken"))
         .is_some_and(|v| {
-            !(v.is_boolean()
+            !((v.is_null() && !served)
+                || v.is_boolean()
                 || request_id(v).is_some()
                 // Pydantic's float-to-int path excludes both signed 64-bit
                 // endpoints; integer spellings above use arbitrary width.
@@ -766,6 +796,9 @@ async fn respond(
     let state = &app.mcp;
     if !params_valid(&method, &params) {
         return invalid_params(&id);
+    }
+    if !has_handler(&method) {
+        return rpc_error(&id, METHOD_NOT_FOUND, "Method not found", json!(method));
     }
     if method == "initialize" {
         return match initialize_result(&params) {
@@ -1111,6 +1144,66 @@ mod sessions {
                 .unwrap();
             let value = crate::http::parse_body_json(std::str::from_utf8(&bytes).unwrap()).unwrap();
             assert_eq!(value["id"].to_string(), expected_id);
+        }
+    }
+
+    #[tokio::test]
+    async fn metadata_validation_follows_method_dispatch_order() {
+        for ready in [false, true] {
+            for (method, params, expected) in [
+                (
+                    "resources/subscribe",
+                    json!({"uri":"x", "_meta":{"progressToken":null}}),
+                    METHOD_NOT_FOUND,
+                ),
+                (
+                    "resources/unsubscribe",
+                    json!({"uri":"x", "_meta":{"progressToken":null}}),
+                    METHOD_NOT_FOUND,
+                ),
+                (
+                    "unknown/method",
+                    json!({"_meta":{"progressToken":[]}}),
+                    METHOD_NOT_FOUND,
+                ),
+                ("unknown/method", json!({"_meta":[]}), METHOD_NOT_FOUND),
+                (
+                    "resources/subscribe",
+                    json!({"uri":"x", "_meta":{"progressToken":[]}}),
+                    INVALID_PARAMS,
+                ),
+                (
+                    "tools/list",
+                    json!({"_meta":{"progressToken":null}}),
+                    INVALID_PARAMS,
+                ),
+                (
+                    "ping",
+                    json!({"_meta":{"progressToken":null}}),
+                    INVALID_PARAMS,
+                ),
+            ] {
+                let app = app();
+                app.mcp.register("s");
+                if ready {
+                    app.mcp.mark_ready("s");
+                }
+                let result = respond(
+                    app,
+                    "caller".into(),
+                    "s".into(),
+                    HeaderMap::new(),
+                    json!(1),
+                    method.into(),
+                    params.as_object().unwrap().clone(),
+                )
+                .await;
+                let value: Value = serde_json::from_str(&result).unwrap();
+                assert_eq!(
+                    value["error"]["code"], expected,
+                    "{method}, ready={ready}: {result}"
+                );
+            }
         }
     }
 
