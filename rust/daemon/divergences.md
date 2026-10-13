@@ -95,7 +95,7 @@ close it, or why it stays.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| `memory.cortex.auto_promote: true` | slot-shaped facts promoted into the cortex on every store | never promotes; `cortex_promoted` stays 0 | W2-E cortex PR (needs the cortex write path) |
+| `memory.cortex.auto_promote: true` | slot-shaped facts promoted into the cortex on every store | the client receives successful store admission with `cortex_promoted: 0`, but no cortex rows are written; the configuration is not refused | W2-E cortex PR (needs the cortex write path) |
 | Presets with more than one band (`continuum` and aliases, multi-band `custom`) | store lands in `bands[0]`, the promotion walk moves entries down the chain, and eviction relocates to the next band | store lands in `bands[0]`; no promotion walk; every eviction is a true drop | the opt-in presets; flat is the default since 2026-08-15 |
 | `custom` band `retention_policy` other than `balanced` | its own eviction score | scored as `balanced` | same |
 | Entry insert fails after eviction | the entry stays resident (served until restart) and the error propagates | the entry is not kept; the error propagates | failure path only; keeps bank and table aligned |
@@ -131,6 +131,9 @@ The remaining write work is deliberately split into subsequent increments:
 | New reaper recording's startup state | The live fixture inherits Python-seeded relation timestamps, curation metadata and dream acknowledgement state; a fresh Rust-only replay does not reproduce that seed state | W3-H startup/dream integration; the new recording is retained unchanged and its replay differences are reported separately from the matching live reaper behavior |
 | Unicode runtime | Label, meta-filter and slot regexes retain the existing Unicode-14 assigned-character contract; newer assigned characters may follow Rust's newer tables | Explicitly retained runtime substitution; no comparator or frozen expectation is weakened |
 | Malformed hydrated slot rows | Python may raise while unpacking a malformed persisted slot; Rust ignores the entire entry's structured-slot comparison if any row is not four strings, then retains the text/negation paths | W2-E retained substitution for corrupt or noncanonical persisted data; `malformed_rows_and_superseded_entries` pins it, and canonical producers emit four-string rows |
+| Shutdown deadline | Admitted stores drain without a timeout; a store stuck on an unresponsive PostgreSQL connection can block graceful exit indefinitely | W2-E lifecycle follow-up; a deadline and cancellation recovery need proof that eviction and subsequent insert cannot be torn apart |
+| Exact-duplicate boundary | The fixed-order Rust dot product and Python BLAS reduction are not proven identical at the exact `1.0` duplicate threshold; a numerically near-boundary value may change the rejection reason | W2-E numeric-boundary follow-up; measured vector tolerances do not waive exact admission/reason equality |
+| Hosted write-path execution | Both CI operating systems compile the `harness,mutants` feature combination, but the W2-E live, shutdown, full-docs slot corpus and store replay/control runs remain local evidence | W2-E harness follow-up; hosted parity needs the real-model oracle fixture and explicit handling of the reported frozen startup differences, without suppressing them |
 
 The WRITE-CMS, WRITE-CORTEX and CONTRADICTION parity rows remain deferred;
 this increment does not claim the complete write boundary or cutover readiness.

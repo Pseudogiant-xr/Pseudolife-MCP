@@ -130,6 +130,10 @@ jobs:
         run: cargo check --locked --all-targets -j 4
       - name: Clippy
         run: cargo clippy --locked --all-targets -j 4 -- -D warnings
+      - name: Check write-path harness targets
+        # 2026-10-13: cold Linux dev-profile check took 54 s; allow about 2x.
+        timeout-minutes: 2
+        run: cargo check --locked --all-targets -p pseudolife-daemon --features harness,mutants -j 4
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
       - name: Check all targets without default features
