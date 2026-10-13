@@ -1025,7 +1025,8 @@ mod tests {
     #[test]
     fn freshness_matches_python_curve() {
         let mut r = rec("e", "a", "v");
-        r.confidence = 0.8;
+        // Preserve the original binary32 fixture input after widening the field.
+        r.confidence = 0.8_f32 as f64;
         r.freshness_class = "volatile".into();
         r.last_confirmed = 0.0;
         r.asserted_at = 0.0;
