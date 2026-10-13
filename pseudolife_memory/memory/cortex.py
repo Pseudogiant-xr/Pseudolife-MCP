@@ -1347,9 +1347,12 @@ class CortexStore:
         # The value keeps every tier that backed its contender. Direct
         # support on either record wins over a dream mark at the same tier;
         # leave the contender's support/provenance intact for rollback.
-        for sup in contender.support:
+        # Assistant support never carries over, as in member corroboration:
+        # an untiered value would become assistant-owned and retractable.
+        carried = contender.support - {"assistant"}
+        for sup in carried:
             _mark_tier(new, sup, dream=f"dream:{sup}" in contender.provenance)
-        new.support |= contender.support
+        new.support |= carried
         contender.status = "superseded"
         contender.superseded_at = t
         contender.superseded_by_value = new.value

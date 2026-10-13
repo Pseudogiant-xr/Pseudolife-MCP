@@ -857,3 +857,36 @@ def test_contender_lookups_normalise_only_contested_records(monkeypatch):
     calls = 0
     assert s._active_contender(("e0", "a")).value == "w"
     assert calls == 2
+
+
+# ── settling a contender never hands the assistant ownership ─────────────
+
+def test_settled_assistant_contender_does_not_make_a_member_assistant_owned():
+    """An untiered member add that settles a parked assistant claim stays
+    untiered: carrying the contender's assistant support would let the
+    assistant retract a member the user added."""
+    s = CortexStore()
+    s.add_member(Slot("u", "langs", "python"), _unit(1), now=1.0)
+    parked = s.add_member(Slot("u", "langs", "rust"), _unit(40),
+                          support="assistant", now=2.0, dream=True)
+    assert parked.action == "contested"
+    added = s.add_member(Slot("u", "langs", "rust"), _unit(40), now=3.0)
+    assert added.action == "member_added"
+    assert added.record.origin == ""
+    removed = s.remove_member("u", "langs", "rust", support="assistant",
+                              dream=True, now=4.0)
+    assert removed.action == "member_remove_refused"
+
+
+def test_settled_assistant_contender_does_not_make_a_scalar_assistant_owned():
+    s = CortexStore()
+    s.write_fact(Slot("u", "editor", "vim"), _unit(1), now=1.0)
+    parked = s.write_fact(Slot("u", "editor", "emacs"), _unit(40),
+                          support="assistant", now=2.0)
+    assert parked.action == "contested"
+    settled = s.write_fact(Slot("u", "editor", "emacs"), _unit(40), now=3.0)
+    assert settled.action == "superseded"
+    assert "assistant" not in settled.record.support
+    nxt = s.write_fact(Slot("u", "editor", "nano"), _unit(70),
+                       support="assistant", now=4.0)
+    assert nxt.action == "contested"

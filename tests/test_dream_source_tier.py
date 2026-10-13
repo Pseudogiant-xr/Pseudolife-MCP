@@ -940,3 +940,17 @@ def test_exact_confirm_still_raises_the_tier(svc):
     svc.store("deploy target: Staging in EU region", source="user")
     svc.dream_run(StubExtractor([_deploy("staging in eu region")]))
     assert svc.cortex_lookup("deploy", "target")["origin"] == "user"
+
+
+def test_set_add_settling_an_assistant_claim_keeps_the_member_the_users(svc):
+    """memory_set_add passes no origin: settling a parked assistant claim for
+    the same value must not let the assistant retract the user's member."""
+    svc.set_add("u", "langs", "python")
+    parked = svc.set_add("u", "langs", "rust programming", origin="assistant",
+                         dream=True)
+    assert parked["action"] == "contested", parked
+    added = svc.set_add("u", "langs", "rust programming")
+    assert added["action"] == "member_added", added
+    removed = svc.set_remove("u", "langs", "rust programming",
+                             origin="assistant", dream=True)
+    assert removed["action"] == "member_remove_refused", removed
