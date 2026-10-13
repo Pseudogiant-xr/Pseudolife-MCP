@@ -18,20 +18,11 @@ impl SessionDream for DeferredSessionDream {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Episode {
-    pub id: String,
-    pub title: String,
-    pub hint: Option<String>,
-    pub started_at: f64,
-    pub ended_at: Option<f64>,
-    pub closed_by_new_start: bool,
-    pub session_key: Option<String>,
-    pub parent_id: Option<String>,
-}
+pub use crate::episodes::Episode;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Sessions {
+    pub current_id: Option<String>,
     pub episodes: Vec<Episode>,
     pub touches: HashMap<String, f64>,
     pub deferred: IndexMap<String, f64>,
@@ -52,12 +43,14 @@ pub struct Reaped {
 }
 
 impl Sessions {
+    #[cfg(test)]
     pub async fn hydrate(client: &Client) -> Result<Self, String> {
         crate::txn::with_client(client, Self::hydrate_inner)
             .await
             .map_err(|error| error.to_string())
     }
 
+    #[cfg(test)]
     async fn hydrate_inner(client: &Client) -> Result<Self, tokio_postgres::Error> {
         let mut sessions = Self::default();
         for r in client.query("SELECT id,title,hint,started_at,ended_at,closed_by_new_start,session_key,parent_id FROM episodes ORDER BY started_at", &[]).await? {
@@ -273,6 +266,7 @@ impl Sessions {
                 out.session_keys.push(key);
                 continue;
             };
+            self.current_id = None;
             let close_at = close_clock();
             let subtree = Self::subtree(&parents, &root_id);
             out.ended_sessions

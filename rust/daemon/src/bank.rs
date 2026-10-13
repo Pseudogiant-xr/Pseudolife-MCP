@@ -3,13 +3,19 @@
 use crate::config::{MemoryConfig, StartupBandSpec};
 use anyhow::Result;
 use serde_json::Value;
+use std::sync::atomic::{AtomicI64, Ordering};
 use tokio_postgres::Client;
 
 #[cfg(test)]
 pub const DIM: usize = 1024;
 
+#[derive(Default)]
 pub struct Entry {
     pub id: i64,
+    #[allow(dead_code)]
+    pub seq: u64,
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub cues: std::sync::OnceLock<(bool, bool)>,
     pub embedding: Vec<f32>,
     pub band: String,
     /// The band column as read, before seating.
@@ -19,7 +25,7 @@ pub struct Entry {
     /// psycopg's text-format REAL value, before a reader's float32 arithmetic.
     pub surprise_value: f64,
     pub ts: f64,
-    pub access_count: i32,
+    pub access_count: AtomicI64,
     pub reinforcements: i32,
     pub last_logical_turn: Option<i32>,
     pub dream_state: Option<String>,
@@ -43,6 +49,24 @@ pub struct Bank {
 }
 
 impl Bank {
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub fn push(&mut self, entry: Entry, row: &[f32]) {
+        debug_assert_eq!(row.len(), self.dim);
+        self.entries.push(entry);
+        self.matrix.extend_from_slice(row);
+    }
+
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub fn remove(&mut self, idx: usize) -> Entry {
+        self.matrix.drain(idx * self.dim..(idx + 1) * self.dim);
+        self.entries.remove(idx)
+    }
+
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub fn row(&self, idx: usize) -> &[f32] {
+        &self.matrix[idx * self.dim..(idx + 1) * self.dim]
+    }
+
     #[allow(dead_code)] // The startup harness observes the storage-row shape.
     pub fn entries_dump(&self) -> Value {
         let mut entries: Vec<&Entry> = self.entries.iter().collect();
@@ -50,7 +74,7 @@ impl Bank {
         Value::Array(entries.iter().map(|e| serde_json::json!({
             "id": e.id, "band": e.band, "text": e.text,
             "embedding": e.embedding.iter().map(|v| f64::from(*v)).collect::<Vec<_>>(),
-            "surprise": e.surprise_value, "ts": e.ts, "access_count": e.access_count,
+            "surprise": e.surprise_value, "ts": e.ts, "access_count": e.access_count.load(Ordering::Relaxed),
             "source": e.source, "superseded_at": e.superseded_at,
             "superseded_by_text": e.superseded_by_text, "last_logical_turn": e.last_logical_turn,
             "episode_id": e.episode_id, "episode_title": e.episode_title, "tags": e.tags, "slots": e.slots,
@@ -159,6 +183,8 @@ async fn hydrate_locked(
             .parse::<f64>()?;
         entries.push(Entry {
             id: r.get(0),
+            seq: crate::episodes::next_seq(),
+            cues: std::sync::OnceLock::new(),
             embedding: original_embedding,
             stored_band: r.get(1),
             // Hydration seats a row whose band left the preset in the first
@@ -184,7 +210,7 @@ async fn hydrate_locked(
                     timestamp
                 }
             },
-            access_count: r.get::<_, Option<i32>>(6).unwrap_or(0),
+            access_count: AtomicI64::new(r.get::<_, Option<i32>>(6).unwrap_or(0) as i64),
             reinforcements: r.try_get(16)?,
             last_logical_turn: r.try_get(17)?,
             dream_state: r.try_get(18)?,
@@ -323,9 +349,15 @@ impl std::error::Error for StaleDims {}
 fn retention_score(entry: &Entry, policy: &str, now: f64, boost: f64) -> f64 {
     let age = (now - entry.ts).max(1.0);
     let base = match policy {
-        "balanced" => f64::from(entry.access_count) / age + entry.surprise_value * 0.1,
-        "surprise_heavy" => f64::from(entry.access_count) / age + entry.surprise_value,
-        "recency_heavy" => f64::from(entry.access_count) * (1.0 + 2.0_f64.powf(-age / 3600.0)),
+        "balanced" => {
+            entry.access_count.load(Ordering::Relaxed) as f64 / age + entry.surprise_value * 0.1
+        }
+        "surprise_heavy" => {
+            entry.access_count.load(Ordering::Relaxed) as f64 / age + entry.surprise_value
+        }
+        "recency_heavy" => {
+            entry.access_count.load(Ordering::Relaxed) as f64 * (1.0 + 2.0_f64.powf(-age / 3600.0))
+        }
         _ => unreachable!("config validates named retention policies"),
     };
     let weight = match entry.source.as_str() {
@@ -392,6 +424,11 @@ fn seating_plan(
     (seats, moves)
 }
 
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+pub fn normalize_query(v: &mut [f32]) {
+    normalize(v);
+}
+
 #[cfg(test)]
 mod startup_tests {
     use super::*;
@@ -406,7 +443,7 @@ mod startup_tests {
             surprise,
             surprise_value: f64::from(surprise),
             ts: 0.0,
-            access_count: 0,
+            access_count: AtomicI64::new(0),
             reinforcements: 0,
             last_logical_turn: None,
             dream_state: None,
@@ -419,6 +456,7 @@ mod startup_tests {
             slots: vec![],
             authority: None,
             distortion_tolerance: None,
+            ..Default::default()
         }
     }
 
@@ -552,7 +590,7 @@ mod startup_tests {
         // Expected values evaluated with those Python functions, not this port.
         let mut row = entry(1, 0.0);
         row.ts = 100.0;
-        row.access_count = 3;
+        row.access_count = AtomicI64::new(3);
         row.surprise_value = 0.123456789;
         row.source = "tool_call".into();
         row.reinforcements = 7;
@@ -574,7 +612,7 @@ mod startup_tests {
     fn retention_source_weights_and_supersession_match_python() {
         // memory/miras/protocols.py:27-44,84-103: boost follows source weighting.
         let mut row = entry(1, 0.5);
-        row.access_count = 2;
+        row.access_count = AtomicI64::new(2);
         row.ts = 90.0;
         for (source, expected) in [
             ("user_msg", 1.875),
@@ -722,7 +760,7 @@ mod startup_tests {
         );
         assert_eq!(legacy.matrix, vec![0.6, 0.8, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
         assert_eq!(legacy.entries[2].source, "");
-        assert_eq!(legacy.entries[2].access_count, 0);
+        assert_eq!(legacy.entries[2].access_count.load(Ordering::Relaxed), 0);
         let mut expected = serde_json::json!({
             "id": 1, "band": "hot", "text": "one", "embedding": [3.0,4.0],
             "surprise": 0.25, "ts": first.ts, "access_count": 4,

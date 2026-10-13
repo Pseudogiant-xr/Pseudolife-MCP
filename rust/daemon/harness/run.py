@@ -84,6 +84,7 @@ T_COLON = "tok:with:colons-0003"
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
          timeout: float = 120.0, compare_length: bool = False, body_bytes: bool = False,
          chunked: bool = False, headers_only: bool = False) -> dict:
+    started_at = time.time()
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     c.putrequest(method, path, skip_host=any(k.lower() == "host" for k, _ in headers),
                  skip_accept_encoding=True)
@@ -132,6 +133,9 @@ def call(port: int, method: str, path: str, headers=(), body: bytes | None = Non
     else:
         payload = {"bytes": raw.decode("latin-1")}
     c.close()
+    if path == "/api/agents?view=coordination" and isinstance(payload.get("json"), dict) \
+            and "snapshot_at" in payload["json"]:
+        payload["_clock_window"] = [started_at, time.time()]
     return {"status": r.status, "headers": hdrs, **payload}
 
 
@@ -247,8 +251,20 @@ def normalize_search(body: dict) -> dict:
     return body
 
 
+def snapshot_clock_valid(resp: dict) -> bool:
+    window = resp.get("_clock_window")
+    body = resp.get("json")
+    value = body.get("snapshot_at") if isinstance(body, dict) else None
+    return (isinstance(window, list) and len(window) == 2
+            and all(type(t) in (int, float) for t in window)
+            and type(value) in (int, float) and window[0] <= value <= window[1])
+
+
 def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bool = False) -> dict:
     resp = json.loads(json.dumps(resp))
+    if path == "/api/agents?view=coordination" and snapshot_clock_valid(resp):
+        resp["json"]["snapshot_at"] = "<request clock>"
+    resp.pop("_clock_window", None)
     if urllib.parse.unquote(path.split("?")[0]) == "/health" and "json" in resp:
         resp["json"] = normalize_health(resp["json"], declared, golden=golden)
     if urllib.parse.unquote(path.split("?")[0]) == "/api/search" and isinstance(resp.get("json"), dict):
@@ -486,8 +502,7 @@ def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
         case("api POST coordination over 32K", "POST", "/api/coordination/receive", a + [js], b"{\"x\": \"" + b"a" * 40000 + b"\"}"),
         case("api maintainer unknown", "GET", "/api/maintainer/nope", a),
         case("api maintainer wrong verb", "GET", "/api/maintainer/send", a),
-        case("api agents coordination view", "GET", "/api/agents?view=coordination", a,
-             declared="W2-F: board snapshot" if auth else None),
+        case("api agents coordination view", "GET", "/api/agents?view=coordination", a),
         case("api agents coordination view POST", "POST", "/api/agents?view=coordination", a),
         case("api known GET (not ported)", "GET", "/api/stats", a, declared="W2-D: stats"),
         case("api config GET (not ported)", "GET", "/api/config", a, declared="W2-D: config read"),
@@ -571,7 +586,7 @@ class Tokens(Scenario):
                  json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "b" * 64}).encode(),
                  declared="W2-F: pairing redemption"),
             case("maintainer known GET", "GET", "/api/maintainer", [auth], declared="W2-F: maintainer"),
-            case("mcp path, auth", "GET", "/mcp", [auth], declared="W2-G: MCP transport"),
+            case("mcp path, auth", "GET", "/mcp", [auth]),
             case("search blank q", "GET", q(q=""), [auth]),
             case("search unknown band", "GET", q(q="memory", band="nope"), [auth]),
             case("search unknown band, blank q", "GET", q(band="nope"), [auth]),
@@ -584,7 +599,7 @@ class Tokens(Scenario):
             case("board check-in: revoked stored principal", "GET", "/api/hook/coordination-start",
                  [bearer("stored-dave-token-w1a")]),
             case("coordination hub (authenticated)", "POST", "/api/coordination/receive",
-                 [auth, ("Content-Type", "application/json")], b"{}", declared="W2-F: board hub"),
+                 [auth, ("Content-Type", "application/json")], b"{}"),
         ]
         return c
 
@@ -1276,8 +1291,11 @@ class StaticPaths(StaticBuild):
             import subprocess
             subprocess.run(["cmd", "/c", "mklink", "/J", str(root / "escape"), str(outside)],
                            check=True, capture_output=True)
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(root / "prefix-escape"), str(sibling)],
+                           check=True, capture_output=True)
         else:
             (root / "escape").symlink_to(outside, target_is_directory=True)
+            (root / "prefix-escape").symlink_to(sibling, target_is_directory=True)
             (root / "notice.js").symlink_to(root / "notice.txt")
             (root / "loop-a").symlink_to("loop-b")
             (root / "loop-b").symlink_to("loop-a")
@@ -1306,6 +1324,20 @@ class StaticPaths(StaticBuild):
                   "/ui/%5c%5c.%5cpipe%5cpl_http_missing_pipe"]
         paths += ["/ui/a*b", "/ui/a%7Cb", "/ui/%3C", "/ui/..%20/outside/secret.txt",
                   "/ui/..%20/static/index.html", "/ui/sub/..%20/notice.txt"]
+        paths += ["/ui/../static/index.html", "/ui/../outside/../static/index.html",
+                  "/ui/a/../../static/js/app.js", "/ui/js/../index.html",
+                  "/ui/a/./b/../c.css", "/ui/COM0.js", "/ui/lpt0.css",
+                  "/ui/prefix-escape/secret.txt"]
+        if os.name == "nt":
+            drive = daemons.scratch_root().drive.upper()
+            paths = [f"/ui/{drive}index.html" if p == "/ui/C:index.html" else p for p in paths]
+            other = "R" if drive == "Q:" else "Q"
+            paths += [f"/ui/{other}:x", f"/ui/{other}:%5capp%5cstatic%5cx",
+                      f"/ui/%5c%5c%3f%5c{other}:%5cx"]
+            paths += ["/ui/NUL", "/ui/nul.txt", "/ui/a/CON", "/ui/COM1.js",
+                      "/ui/lpt9.css", "/ui/COM%C2%B9", "/ui/AUX%20.txt", "/ui/CONOUT$",
+                      "/ui/index.html:private", "/ui/a:b/index.html",
+                      "/ui/..%5cstatic%5cindex.html", "/ui/C:..%5cstatic%5cindex.html"]
         odd_segments = (".. .", ".. ..", "... ", ".... ", ". .")
         paths += ["/ui/" + urllib.parse.quote(p) + "/notice.txt" for p in odd_segments]
         if os.name != "nt":
@@ -1316,8 +1348,6 @@ class StaticPaths(StaticBuild):
         out = [case("path " + p, "GET", p) for p in paths]
         if os.name == "nt":
             for c in out:
-                if c["path"] == "/ui/C:index.html":
-                    c["refusal_policy"] = "lexical-outside-root"
                 if "..%20/" in c["path"]:
                     c["refusal_policy"] = "parent-space-refusal"
                 if any("/" + urllib.parse.quote(p) + "/" in c["path"] for p in odd_segments):
@@ -1362,10 +1392,6 @@ class StaticRootLink(StaticPaths):
         out = [case("linked root " + p, "GET", p) for p in
                 ("/ui", "/ui/notice.txt", "/ui/missing", "/ui/escape/missing",
                  "/ui/../static/index.html", "/ui/%2e%2e/static/index.html")]
-        if os.name != "nt":
-            for c in out:
-                if "/../" in c["path"] or "%2e%2e" in c["path"]:
-                    c["refusal_policy"] = "lexical-outside-root"
         return out
 
 
@@ -1544,6 +1570,12 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
+    if c["path"] == "/api/agents?view=coordination":
+        for side, response in (("python", py), ("rust", rs)):
+            if response and isinstance(response.get("json"), dict) and "snapshot_at" in response["json"]:
+                recorded = golden and side == "python" and response["json"]["snapshot_at"] == "<request clock>"
+                if not recorded and not snapshot_clock_valid(response):
+                    row["diffs"].append(f"{side}: snapshot_at is outside its captured request window")
     if c.get("session_end_invalid_json"):
         row["declared"] = "invalid SessionEnd: Python succeeds without closing; Rust refuses"
         headers = {"content-type": "application/json; charset=utf-8",

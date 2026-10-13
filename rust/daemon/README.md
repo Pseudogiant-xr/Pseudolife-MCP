@@ -33,6 +33,9 @@ and `PSEUDOLIFE_PLUGIN_DIR` at the plugin tree for `hooks_digest`.
 
 ## The harness
 
+The W2-F coordination board's live, golden and mutant modes are documented in
+[`harness/board/README.md`](harness/board/README.md).
+
 ```bash
 python rust/daemon/harness/run.py live --rust-bin <path to pseudolife-daemon> --out results.json
 ```

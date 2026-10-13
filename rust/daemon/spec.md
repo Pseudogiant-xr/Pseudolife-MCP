@@ -58,7 +58,7 @@ listed as a divergence.
 | S6 | Ranking: query = config prefix + `q`, embedded and L2-normalized; stored rows re-normalized; cosine over eligible entries (source and tag filters apply before top-k); top `k` by cosine; drop exact-duplicate texts (first wins); keep iff relevance >= floor (0.25, or an explicit `min_score`); relevance = cosine (the recency boost is 0 on the flat preset and off by default); sort key = relevance x 0.85 for source `assistant` x 0.55 if superseded; stable sort, cut to `k`. Superseded digest entries never surface. | `cms.py:740-1100, 1426`; `band.py:157-193` |
 | S6a | Slot pool, after the dense pool: query content tokens (`[a-z']{3,}` on the lowercased text, minus the stop list) against each eligible, unseen entry's slot entity and value tokens; score `min(0.95, 0.55 + 0.35 x overlap / slot_tokens)`, x 0.55 if superseded; top `k` by score; dropped under an explicit `min_score` only. | `cms.py:168-195, 1135-1160, 1851-1951` |
 | S6b | BM25 (on unless `bm25` is false): Okapi k1 1.5, b 0.75 over every eligible entry, query tokens by `bm25.tokenize`; top 20, min-max normalized (one hit or a flat set is 1.0), kept at >= 0.1. Pool hits whose text BM25 found gain `0.3 x norm`; unseen BM25 hits enter at `0.3 x norm`, dropped under an explicit `min_score` only. Then the stable sort and the cut to `k`. | `memory/bm25.py`; `cms.py:1175-1260`; `utils/config.py:~189` |
-| S7 | Reads are from schema 55 `entries` as stored (`ORDER BY id`); no DDL, no writes. A row whose band is not in the preset is served under the first band's name. | `storage/postgres.py:104-114, 1424` |
+| S7 | Reads come from the resident state hydrated from schema 55 (`entries ORDER BY id`, facts, chronicle). A row whose band is not in the preset is served under the first band's name. The only writes are the read-path telemetry of S8-S9 (amended by W2-D: the spike was read-only). | `storage/postgres.py:104-114, 1424`; `service.py:2069-2075` |
 
 ## Query embedding
 
@@ -73,7 +73,7 @@ The spike runs the ONNX export that the prerequisite receipt verified
 `input_ids`, `attention_mask` and `position_ids = arange(T)`; its output is
 `last_hidden_state`.
 
-## Free, and therefore not compared byte for byte
+## Free, and therefore not compared byte for byte (read path)
 
 - Exact score floats, and tie order among equal scores.
 - Error text other than the listed bodies.
@@ -87,4 +87,345 @@ The spike runs the ONNX export that the prerequisite receipt verified
   byte fields and the individual event counters are conditional; their
   presence must agree between arms. A zero or null limit has null fraction
   and flag.
-- `access_count` values: Python increments them on every served hit, while the spike is read-only.
+- Dense and fused score floats beyond 4 dp in the served entry, and the raw floats inside
+  `retrieval_events.served[].components` (compared at 2e-4: torch and ONNX differ in the last bits).
+
+## W2-D: the rest of GET /api/search
+
+Added by slice W2-D (2026-10-09) at master `28c1f23c`. Everything above
+still holds; these rows complete the route. Config keys are read through
+`config.rs` with Python's dataclass defaults.
+
+| # | Exact item | Source |
+|---|---|---|
+| S8 | Retrieval event, when `memory.retrieval_log.enabled` (default true) and the query is non-blank: one `INSERT INTO retrieval_events (query_text, origin, session_id, episode_id, served, params, created_at)` with the stripped query, origin `search`, `created_at` wall clock. `served` is the response's entry list in order, skipping entries without an id: `{entry_id, score, rank, via, bank}` plus `components` when the entry has them. `rank` counts every served position, contiguity neighbours included. A zero-hit search still writes its row. A failed write never fails the search. | `service.py:2069-2075, 5892-5946`; `storage/postgres.py:2148-2170` |
+| S8a | `components` per channel: dense `{channel, dense, recency, recency_boost, source_mult, supersession_mult, surprise, band, band_depth}`; slot `{channel, slot, surprise, band}`; BM25-only `{channel, bm25, surprise: 0.0, band}`; timeline `{channel: "timeline", bm25, surprise: 0.0, band}`; contiguity `{channel: "contiguity"}`. Dense and slot hits gain `bm25` (the normalised lexical score, 0.0 when unmatched) whenever BM25 ran over a non-empty pool; every entry the reranker considered gains `ce` (a float, or null when the margin gate skipped it). | `cms.py:1090-1105, 1150-1158, 1271-1312, 1360-1366, 1557-1561`; `service.py:1998-2018` |
+| S8b | `params`: `top_k`, `min_score`, `min_score_explicit`, `band_count`, `recency_boost`, `recency_base_half_life_s`, `hide_superseded`, `bm25` (`{enabled}` plus `weight, min_score, k1, b, top_n` when on), `candidate_pool` `{multiplier, pool_size, fusion, rerank_position}`, `reranker` (the rerank log of S13), `timeline` `{enabled, fired}`, `filters` `{bands, sources, episodes, tags, min_logical_turn}`, then `contiguity_neighbors`. | `cms.py:1636-1688`; `service.py:2072-2073` |
+| S8c | Session identity of the event: the request's `X-PL-Session` header (last value), else the resident active-session pointer while younger than `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS` (21600), else null. `episode_id` is that session's open leaf episode, else null. | `service.py:970-1000, 4915-4930`; `writer_context.py:130-142, 194-211` |
+| S8d | When the cortex block (S16) serves facts and the event row exists: `UPDATE retrieval_events SET served_facts = <facts> WHERE id = <event>`. The event id never reaches the response. | `web/routes.py:362-378`; `storage/postgres.py:2310-2322` |
+| S9 | Access accrual: every entry of the final merged result (dense, slot, BM25, timeline and reference positions; not contiguity neighbours) gains 1 on its resident `access_count` before serialisation, so the response shows the incremented count. The read path does not write `entries.access_count`; the save cadence does (W2-E). The warmup probe (S17) does not count. | `cms.py:1748-1752`; `service.py:3855-3867` |
+| S10 | Chronicle events, when the query has a temporal cue (S11's regex), an aggregation cue (`how many`, `how much`, `how often`, `what percentage`, `in total`, `total` + one of `number amount distance cost sum time money`, `altogether`, `each time`, `every time`, `average`, `the most`; word-bounded, case-insensitive) or a year-first date (`\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b`): `plainto_tsquery('english', q)::text`, its ` & ` rebuilt as ` \| `, matched with `to_tsquery('simple', ...)` against `to_tsvector('english', description)` over live rows, `ORDER BY occurred_at ASC NULLS LAST, recorded_at ASC LIMIT 30` (aggregation cue) or 6. Hits give `events: [{description, actor, date, phrase}]` (`date` is `to_char(occurred_at, 'YYYY-MM-DD')`), plus `events_total` under an aggregation cue. No hits, or an empty tsquery: no key. | `service.py:2023-2066`; `cms.py:62-121`; `storage/postgres.py:3333-3361` |
+| S11 | Timeline channel, when `memory.search.timeline_channel` (default false) and the query has a temporal cue (`first last when earliest latest before after since until ago`, `how many times`, `how long`, `what order`, `in order`, `order in which`, `sequence`, `chronolog\w*`, `timeline`, and the month names except `may`; word-bounded, case-insensitive): BM25 (the configured k1, b) over the same filtered candidate pool, top 6, min-max normalised; each unseen hit with norm > 0 enters at `0.3 x norm` (dropped under an explicit `min_score` above it), marked `via: "timeline"`. After the cut, the memory part of the result is ordered by `(timestamp, seq)` (seq preserves insertion-id order before band seating), reference documents trailing. This ordering also applies when every served hit came from another channel. | `cms.py:62-82, 1185-1196, 1315-1370, 1719-1726` |
+| S12 | Contiguity, when `memory.search.contiguity_neighbors` n > 0 (default 0): around each direct hit in order, up to n stream neighbours per side (same `episode_id` when the hit has one, else the same `source` among episode-less entries; superseded digests and, under `hide_superseded`, superseded entries excluded; texts already served skipped), ordered by `(timestamp, seq)`, served with score 0.0 and `via: "contiguity"`. `low_confidence` judges only the direct hits. | `service.py:1980-2004`; `cms.py:620-664` |
+| S13 | Cross-encoder rerank, when `rerank` (route tribool) or `memory.reranker.enabled` (default false) is on: only when the combined pool (memories + reference) is non-empty and fits `reranker.top_n` (20); a margin gate (`skip_margin`, default 0 = off) on the sorted original scores may skip it. Scores are `sigmoid(logit)` of `cross-encoder/ms-marco-MiniLM-L-6-v2` per (query, text), fused `w x ce + (1 - w) x original` with `fusion_weight` 0.7, then a stable sort. Over budget: `skip_reason: "candidate_budget_exceeded"`, order unchanged. The rerank log (`enabled, fired, skip_reason, top_n, candidate_count, scored_candidates, scoring_policy`, and when the pool qualified `skip_margin, fusion_weight, model`, `margin`) is `params.reranker`. Model: an ONNX export of the same checkpoint (rows R1-R6). | `cms.py:1466-1600`; `memory/reranker.py` |
+| S14 | Reference pool (Chroma documents, `ref_top_k` 3): see the divergence list. | `cms.py:1439-1465` |
+| S15 | Query-embedding LRU cache: keyed on the prefixed query text, `embedding.cache_size` entries (default 1024), least recently used evicted. Observable only as latency (free). | `memory/embedding.py:406-484` |
+| S16 | Cortex facts block, when `memory.cortex.enabled` and `search_first` (both default true): `cortex_search(q, top_k=5, min_score=memory.cortex.guard_min_score (0.2))`; non-empty results are served as `cortex` and attached to the event (S8d). Contract rows C1-C18 below. | `web/routes.py:371-378`; `service.py:4499-4610` |
+| S17 | Warmup: once init succeeds, the daemon runs `search("warmup probe", top_k=1, count_access=False)`: one retrieval event, no access accrual, no cortex block. | `service.py:6219-6224` |
+| S18 | Pool shape: `candidate_pool_multiplier` m >= 1 widens each band's dense top-k to `k x m`; `fusion: rrf` replaces every pre-fusion score with the sum of `1/(60 + rank)` over the dense (by relevance), slot, BM25 and timeline rank lists, times the source and supersession multipliers; with m > 1 and rerank on, the cut to `k` happens after the rerank, reference positions reserved. Recency (multi-band presets with `recency_boost_enabled`, unless `disable_recency_boost`): band depth d of n gets boost `0.4 x (1 - d/(n-1))` and half-life `recency_base_half_life_s x 2^d`; relevance = `cos x (1 + boost x 2^(-age/half_life))`. | `cms.py:858-905, 940-1000, 1059-1072, 1372-1430, 2878-2881` |
+| S19 | `low_confidence`: true when the direct result is empty or, with `memory.search_confidence_floor` > 0, its best score is below the floor. | `memory/abstain.py`; `service.py:2058-2063` |
+
+### Cross-encoder (S13 detail, `read/rerank.rs`)
+
+Sources are `memory/reranker.py` and sentence-transformers 5.5.1 (`ST`).
+
+| # | Exact item | Source |
+|---|---|---|
+| R1 | A pair is `(query, candidate)` in the BERT pair template `[CLS] q [SEP] c [SEP]`, token types 0 for q and 1 for c. | `reranker.py:153`; ST `base/modules/transformer.py:1296` |
+| R2 | Truncation `longest_first` at 512 tokens, from the right. | ST `base/modules/transformer.py:667-677, 917` |
+| R3 | Pairs sorted by descending `len(q) + len(c)` (code points) into batches of 32, right-padded (`[PAD]` 0, type 0, attention 0); results restored to input order. | ST `cross_encoder/model.py:545, 677, 700` |
+| R4 | Activation Identity (the raw logit, `[B,1]` squeezed), then the stable sigmoid `x >= 0: 1/(1+e^-x)`, else `e^x/(1+e^x)`. | ST `cross_encoder/model.py:402-424, 689-696`; `reranker.py:44-51, 154-156` |
+| R5 | No candidates, or a query blank after `strip()`: no scores. | `reranker.py:146-149` |
+| R6 | Fusion `w x ce + (1 - w) x original`; no scores leaves the originals. | `reranker.py:177-185` |
+
+### Cortex facts block (S16 detail, `stores/cortex.rs`, `read/cortex_search.rs`)
+
+| # | Exact item | Source |
+|---|---|---|
+| C1 | Hydration: every `facts` row `ORDER BY id`; `freshness_class` defaults to `evergreen`, `kind` to `scalar`, a version of 0 or null to 1; the embedding read as `real[]`, a vector whose width differs from the live embedder refuses (W2-D completion correction, 2026-10-13). | `storage/sync.py:43, 273`; `storage/postgres.py:122, 1918`; `service.py:1170` |
+| C2 | Slot key: strip, casefold, runs of `[\s._\-/]+` become `-`, strip `-`; recomputed from `entity` and `attribute`, never read from the `*_norm` columns. | `memory/cortex.py:54, 311` |
+| C3 | Index: current members in record order; a duplicate current or contested scalar keeps the most recently confirmed row (the loser is demoted in memory). | `memory/cortex.py:1797` |
+| C4 | Served `origin`: the strongest tier in `support` (user > action > agent > assistant), else `""`; the `origin` column is not read. | `memory/cortex.py:229` |
+| C5 | Dense search: f32 cosine over `x/(norm + 1e-12)`; positive cosines of assistant-origin records x 0.85; `min_score` after the penalty; stable sort, cut to `top_k`. | `memory/cortex.py:1508-1541` |
+| C6 | Lexical fusion only when `memory.bm25.cortex_enabled` (default false): BM25 over `"{entity} — {attribute}: {value}"` of current records, per record; boost `+ weight x norm`, lexical-only at `weight x norm`; stable sort, cut. | `service.py:4527-4538, 4724-4760` |
+| C7 | Set slots: one entry at the first member's place: `kind: "set"`, `entity`, `attribute`, `value` (`compose_set_value`: `"a; b (N members)"`), `source_entries`, `members`, `score` (the best member, 4 dp), `contested: false`, `last_confirmed`, `asserted_at` (the newest member activity) and `age`. | `service.py:4547-4623`; `memory/cortex.py:165` |
+| C8 | Scalar entries: the record dict, then `score` (4 dp), `contested` (with `contender_value`, `contender_origin` when a contender exists) and `source_entries`. | `service.py:347, 4637-4650` |
+| C9 | Record dict: every key in order; `confidence` and `effective_confidence` at 4 dp, retaining psycopg's decimal-text REAL decoding; `stale`; `stance`, `authority`, `distortion_tolerance` only when set; `age` from `tx_time` or `asserted_at`. | `service.py:297-346` |
+| C10 | Freshness: per-class TTLs and floors, linear decay, stale past twice the TTL; an unknown class is volatile; evergreen never decays. | `memory/freshness.py` |
+| C11 | Relative ages: `_relative_time` buckets with Python's float floor division. | `memory/context_builder.py:14` |
+| C12 | Constraint pins (`pin_constraints`, default true): current scalar constraints whose entity the query names; scored by their ranked score, else their cosine, else 0; under the floor dropped; at most `max(1, k // 2)` by best score, then record order; first, with `pinned: true`; then the rest; cut to `k`. | `service.py:4652-4722` |
+| C13 | "Names the entity": a word-bounded match on normalised strings; an apostrophe inside a word belongs to it except a possessive `'s`; combining marks continue a word. | `service.py:613-680` |
+| C14 | `memory.search.stale_policy`: `annotate` (flags), `demote` (`warning`, stable stale-last order), `quarantine` (`last_known_value` and the wrapper); set members too. | `service.py:272-296` |
+| C15 | Evidence annotation: one invalidation read; an entry whose slot has a `source_superseded` invalidation after `last_confirmed or asserted_at` gains `re_verify` and `re_verify_reason`. | `service.py:4282-4330`; `storage/postgres.py:3987` |
+| C16 | `source_entries`: `traces_for_slot` (`ORDER BY entry_id`), one read per served slot. | `storage/postgres.py:3951` |
+| C17 | Slot reads (`read_tracking`, default true): the sorted unique served slots, one upsert each in one transaction, `last_read_at` wall clock; a failure is logged, never raised. | `service.py:4117-4135`; `storage/postgres.py:4253` |
+| C18 | Served facts attached to the event: `[{entity_norm, attribute_norm, rank, score, kind, contested, pinned}]` as JSONB; never fails the search. | `service.py:5968-5990`; `storage/postgres.py:2310` |
+
+
+# Write path (slice W2-E)
+
+Added 2026-10-09 by slice W2-E. This part lists what the Rust daemon must
+reproduce exactly from the Python daemon when it writes: `memory_store` first,
+then the cortex, outcomes, episodes and autosave as their pull requests land.
+References are to `pseudolife_memory/` at master `35b8f5d2`. The contract is
+the response by value plus the full database state after every write; the
+harness (`harness/w2e.py`) diffs both. Declared divergences are in
+`divergences.md` under "Write path (W2-E)".
+
+## W0. Tool bodies and their callers
+
+| # | Exact item | Source |
+|---|---|---|
+| W0.1 | Each MCP tool body returns the dict the Python `def` returns after binding, including its MCP-layer post-processing (`_store_noted`, `_noted`). Argument binding, the error envelope and the success envelope belong to the MCP surface (W2-G). A service `ValueError` is returned as `ToolError::Invalid(text)`; any other failure is internal. | `mcp_server.py:243-302, 664-695` |
+| W0.2 | Until the MCP surface lands, the harness reaches a tool body through `POST /api/_harness/tool/<name>`, compiled only under the cargo feature `harness`. A default build's route table equals Python's (unit test). | delegate ruling 2026-10-09 |
+| W0.3 | Caller identity: the session is the `X-PL-Session` header when non-empty, else the active-session pointer (`meta.active_session_pointer`, ignored when older than `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`, default 21600; `<= 0` never stale), else `mcp-session-id` only when `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` is `1/true/yes/on`, else none. Header values are not trimmed; an empty value falls through. | `service.py:970-1011`, `writer_context.py:107-211` |
+
+## W1. memory_store
+
+| # | Exact item | Source |
+|---|---|---|
+| W1.1 | Labels resolve before anything else (so an invalid explicit label wins over empty text). `"auto"` (exact, case-sensitive) runs the heuristic: text stripped, `None` when empty or over 400 code points; distortion: `None` on a first-person habit, `"constraint"` on `_STRONG`, `_FRAMING` or an imperative opener with a bare verb; authority: `"quoted"` on `_REPORTED`, else `"directive"` on `_ADDRESSED`, `_FRAMING` or the opener. An unresolved auto stores NULL. Any other value is `str(v).strip().casefold()` checked against the vocabulary, else `ValueError("<name> must be one of [...] (or None), got <repr>")`. | `memory/labels.py:60-251`, `service.py:1712-1715` |
+| W1.2 | Text is `str.strip()`ped (Unicode whitespace and U+001C..U+001F). Empty: `{"stored": false, "surprise": 0.0, "reason": "empty", "cortex_promoted": 0}` plus the `empty` note; nothing else happens (no episode, no label keys). | `service.py:1719-1722` |
+| W1.3 | Order of effects: embed the stripped text (document side, no prefix); resolve the session (W0.3); resolve the `episode` handle (W2.3); if no handle resolved, ensure the session's root episode (W2.2). These episode writes happen even when the store is later dropped. | `service.py:1723-1737` |
+| W1.4 | Meta filter (only when `memory.meta_filter.enabled`; the daemon overlay sets it false unless the YAML leaf is set): `source != "user"` and any of the 16 case-insensitive patterns searches the stripped text: `(False, 0.0)` before any other CMS effect. | `memory/cms.py:498`, `memory/meta_filter.py:17-72`, `service.py:1108` |
+| W1.5 | Surprise per band: `1.0` for an empty band, else `max(0, min(1, 1 - max_j cos))` over every resident entry of the band (superseded and digest entries included), each row and the query L2-normalized. Overall surprise is the minimum over bands. | `memory/miras/band.py:92-109`, `cms.py:502-503` |
+| W1.6 | Slots: `extract_slots(text, last_entity_context)` runs before the contradiction scan and is stamped on the stored entry as `[[entity, attribute, value, "+"], ...]`. The coreference anchor (`_last_entity_seen`) starts empty, is resident only, and after a real store becomes the entity of the first slot whose attribute is `name` or `type`. | `memory/slots.py`, `cms.py:519-525, 578, 589-594` |
+| W1.7 | Contradiction scan over every band's entries, skipping superseded ones; the first path that hits per entry wins: (0) slot identity, normalized as the cortex normalizes keys and values; (1) cosine >= 0.70 and negation asymmetry; (2) cosine >= 0.80 and `_looks_like_replacement`; (3) gain/loss asymmetry with an anchor tier (slot 0.15, content 0.35, pronoun 0.35). No NLI (never constructed). No side effect on any entry. | `memory/contradiction.py:84-601`, `service.py:1502` |
+| W1.8 | Gate: drop with `(False, surprise)` when no contradiction was found and `surprise < memory.surprise_threshold` (default 0.0, so the gate is inert and the scan unobservable at defaults). | `cms.py:540-542` |
+| W1.9 | A stored entry goes to `bands[0]` (eviction first, W1.10), stamped with: the session's open leaf episode (or, with no session, the global current episode if open); a resolved handle overrides `episode_id` and `episode_title` with its root's; tags normalized (strip, lowercase, drop empties, dedupe in order); slots; labels. Then one `INSERT INTO entries` with `band, text, embedding, surprise (float4), ts (time.time()), access_count 0, source (raw), superseded_at/superseded_by_text/last_logical_turn NULL, episode_id, episode_title, tags, slots, authority, distortion_tolerance, dream_state 'pending'`, `RETURNING id`. | `cms.py:545-601`, `memory/episodes.py:41-61, 281-299`, `storage/sync.py:57-79`, `storage/postgres.py:916-933` |
+| W1.10 | Capacity: when `bands[0]` already holds `max_entries` (flat 5250), evict before appending the entry with the lowest `((balanced + 1) * source_weight + retention_boost * log1p(reinforcements)) * (0.05 if superseded)`, `balanced = access_count / max(now - ts, 1) + 0.1 * surprise`, first index on ties; source weights `user_msg`/`user` 1.5, `system` 10.0, `tool_call` 0.5, `llm_thinking` 0.2, others 1.0; `retention_boost` 1.0 under the daemon overlay. On the last band a true drop: one transaction deleting the row and upserting `meta.capacity_true_drops` (`count` incremented, `last_at`, `last_entry_id`, `last_source`, `last_superseded`). | `memory/miras/band.py:130-151`, `protocols.py:84-103`, `retention.py:37-47`, `cms.py:2709-2772`, `storage/postgres.py:1380-1422` |
+| W1.11 | Response keys: `stored`, `surprise` (`round(x, 4)`), `reason` (`null` when stored; `"filtered_meta"` when dropped at surprise exactly 0.0; `"below_surprise_threshold"` when below the threshold; `"rejected"` otherwise), `cortex_promoted` (0 unless auto-promotion is on), then `authority` and `distortion_tolerance` when set, `episode_hint` when the landing root's title matches `^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$` (text: `session episode is untitled — call memory_session_title('<project> - <topic>'` + `, episode='<root id[:12]>'` when a handle resolved + `)`), `episode_warning: "unknown or closed episode handle"` when a handle was given and did not resolve, and `note` per `_STORE_NOTES` (a `filtered_meta` drop that is not a meta statement, with the threshold above 0, gets the exact-duplicate note). | `service.py:1749-1797`, `mcp_server.py:671-695`, `session_title.py:23` |
+
+## W2. Episodes on the store path
+
+| # | Exact item | Source |
+|---|---|---|
+| W2.1 | The episode log hydrates from `episodes ORDER BY started_at`; the current episode is the last open one. `meta.active_session_pointer` (`{session_id, ts}`), `meta.episode_tombstones` (`{id: {session_key, ended_at, title}}`, keyed rows only) and `meta.deferred_empty_roots` hydrate at init. | `storage/sync.py:146-155`, `service.py:1308-1330` |
+| W2.2 | Ensure a session episode (key non-empty): an open leaf for the key wins (no write); else the newest closed root for the key within `PSEUDOLIFE_SESSION_RESUME_SECONDS` (default 21600; `<= 0` disables) reopens (`ended_at` null, `closed_by_new_start` false, current = it, then the full upsert sweep and `UPDATE client_sessions SET ended_at = NULL, end_reason = NULL WHERE session_key = ? AND ended_at IS NOT NULL`); else a new root: id `uuid4().hex`, title `session - %Y-%m-%d %H:%M` in local time, `started_at` now, current = it, then the sweep. | `service.py:6850-6917` |
+| W2.3 | Handle (non-empty, at least 8 chars): exactly one open keyed root whose id starts with it resolves (a keyless or ambiguous match does not); else, within `PSEUDOLIFE_HANDLE_RESUME_SECONDS` (default 2592000; `<= 0` disables), exactly one closed keyed root reopens (not made current), or exactly one tombstone recreates its root under the same id (`started_at` now, its title or the generic one), deleting the tombstone (`meta` write). Each is followed by the sweep and the `client_sessions` reopen. | `service.py:6768-6848` |
+| W2.4 | The sweep upserts every episode in log order, one transaction each (`INSERT ... ON CONFLICT (id) DO UPDATE` over all eight columns); a failure is logged and stops the sweep, never the call. | `service.py:6735-6745`, `storage/postgres.py:1648-1667` |
+| W2.5 | With a resolved handle and no `X-PL-Session` header, the effective session becomes the handle root's key; with a header, the header stays the identity while the entry still attributes to the handle's root. | `service.py:1727-1737` |
+
+Free for W1 and W2: log lines; the exact float bits of `entries.embedding`
+and `entries.surprise` within the measured tolerance (but never a different
+admission decision or reason); wall-clock values (`ts`, `started_at`,
+`capacity_true_drops.last_at`) and episode ids, which the harness normalizes
+by rule.
+
+## W3. Shared episode ownership
+
+Store-driven open/resume, handle touches, idle close, deferred-empty sweeping
+and tombstones operate on one resident `EpisodeLog` under `Ready.write`.
+Startup hydrates it once from the complete validated startup candidate.
+Lock order is `Service.inner`, then `Ready.write`, then the leased storage
+writer; a later-lock holder must not acquire an earlier lock. Closing a
+session clears the global current leaf, matching `EpisodeManager.end_session`.
+The store's full episode upsert sweep must observe prior reaper closes and
+must never reopen unrelated sessions from an obsolete snapshot.
+
+The live `store-reaper` case creates an empty session through a filtered
+store, waits for idle close and compares the full episode and deferred-root
+state with Python. Native coverage also checks that handle touches postpone
+reaping and that a sweep publishes its tombstone to the same owner.
+Nonempty-session automatic titles, standalone episode APIs and tensor
+autosave/exit persistence remain named follow-ups in `divergences.md`.
+
+
+# Contract spec: coordination board (slice W2-F)
+
+What the Rust daemon reproduces exactly from the Python board: the
+`/api/coordination/<action>` surface, the store behind it, the audit chain,
+wake decisions, the async receive hub and the four board hooks. The pairing
+write below is the target contract; its HTTP integration remains the named
+W2F-PAIRING-HTTP cutover blocker in `divergences.md`. References are to `pseudolife_memory/` at master `28c1f23c`
+(`co` = `coordination.py`, `sc` = `storage/coordination.py`, `api` =
+`web/api.py`, `hub` = `web/coordination.py`). W1-A's gate
+(`spec-w1a-foundation.md`, section R) runs first; this slice owns
+everything after the parsed body. "Exact" covers response values,
+statuses and every row the board writes; the free list is at the end.
+
+## BT. Transport (after W1-A's gate)
+
+| # | Exact item | Source |
+|---|---|---|
+| BT1 | `POST /api/coordination/<action>`: `authenticated_principal` first. No env token and no map gives 401 `authentication_required`; a store that cannot vouch gives 503 `principals_unavailable`; no principal gives 401 `unauthorized`. | `api:774-779`, `co:407-426` |
+| BT2 | A refusal is `{"error": code}`, plus `"detail"` only for a public code whose detail is a string. Status: 401 for `unauthorized`, `authentication_required`, `instance_authentication_required`; 403 for `principal_not_allowed`, `invalid_credential`, `child_send_refused`; 404 `instance_not_found`; 409 `bank_identity_mismatch`; 429 for `wait_capacity_exceeded`, `rate_limited`, `queue_full`, `lease_queue_full`; 500 for `coordination_unavailable`, `invalid_bank_identity`; 503 `principals_unavailable`; else 400. A code outside `PUBLIC_ERROR_CODES` becomes `invalid_request` (a ValueError or TypeError) or `coordination_unavailable` (anything else, such as a database error). | `api:170-189`, `co:67-114, 380-404` |
+| BT3 | Success is 200 with the action's result object. | `api:787` |
+
+## BD. Dispatch (`_dispatch`)
+
+| # | Exact item | Source |
+|---|---|---|
+| BD1 | Order: the hub's `wait_seconds` check (receive only; any other action keeps the key, and it is refused as unexpected), then `coordination.enabled` false gives 200 `{"enabled": false}`, then `principal_admitted` (listed in `allowed_principals`, or a stored principal with `board` true; never `daemon` or `maintainer`), then an unknown action (`unknown_coordination_action`, detail `use one of <sorted actions>`), then the `x-pl-bank`/`x-pl-principal` binding parse (not for `context`), then unexpected parameters, missing parameters, the `context` shape rules, `generation` (an int >= 1, not a bool), the receive attachment pair, and then the instance headers `x-pl-agent` and `x-pl-agent-key` for every action but `context`, `register` and `leases`. | `co:556-612`, `hub:44-49` |
+| BD2 | Parameter whitelists and required sets as `_PARAMETERS` and `_REQUIRED`. The `unexpected_parameter` detail is `<action> does not take <sorted identifier-shaped names, or "these parameters">; it takes <accepted, comma-joined>` (or `; it takes no parameters`). The `missing_parameter` detail is `<action> needs <sorted missing>`. | `co:31-64, 536-583` |
+| BD3 | A binding (both headers; the principal percent-encoded exactly as `quote(safe="")` gives it; 1-256 characters, no C0) must equal the store's `context` `(bank_id, principal)`, else 409 `bank_identity_mismatch`. | `co:434-454, 621-626` |
+| BD4 | `register`, `send` and `heartbeat` run `prune(audit_retention_days)` first, at most once a minute per process. | `co:632-636` |
+| BD5 | `receive` with an attachment passes `check_attachment` and reads `for_delivery`. Its result gains `note` = `RECEIVE_NOTE`, plus `maintainer_note` when a message has origin `maintainer` and `verified`. `history` gains its fixed `note`. | `co:641-666, 138-148` |
+| BD6 | After `send`, `attach` and `detach`, the hub's waiters for each recipient (a send's receipts) are woken. | `co:667-673` |
+
+## BH. Async receive hub
+
+| # | Exact item | Source |
+|---|---|---|
+| BH1 | `wait_seconds` must be a finite int or float in [0, 30] (a bool is refused), else `invalid_wait_seconds`. At most 64 calls are in flight, else `wait_capacity_exceeded`. | `hub:14-15, 43-52` |
+| BH2 | A wait needs `x-pl-agent` (`instance_authentication_required`), a truthy `attachment_id` and an int `generation` (`attachment_required`). One wait per (agent, attachment, generation) (`attachment_already_waiting`), and at most 64 waiters in all. | `hub:82-90` |
+| BH3 | Loop: subscribe, read; return when there are messages or `enabled` is false; otherwise wait until notified or the deadline, then read once more. A client disconnect cancels the wait without a response. The capacity stays held until the synchronous read ends. | `hub:91-117`, `api:117-140, 782-786` |
+
+## BS. Store
+
+| # | Exact item | Source |
+|---|---|---|
+| BS1 | Validation: `_string` (type, length in characters, no C0 or surrogate, optional nonblank), `_fields` (label, project and task 120; status 240; episode 120; capabilities at most 8 names of up to 40 with bool values; children; the park fields and their exact refusal details), `_check_label`, `_check_name`, `_lease_args`, `_limit` (int 1..50, not a bool). Every hashed text runs the credential-shape guard `secret_kind` (`secret_like_body`, detail `<field> looks like a credential, which the board never keeps; remove it and retry`). | `sc:615-620, 792-946, 1379-1406, 1541-1616, 1947-1966, 3490-3492` |
+| BS2 | `reserved_name`: NFKD minus combining marks, confusables folded, casefold, alphanumerics only; `maintainer` refused anywhere in the label and within one OSA edit, `daemon` within one edit of the whole label, `passkey` and `verified` exactly. | `sc:396-422, 529-569` |
+| BS3 | `context`: insert the bank id (`str(uuid4())`) when it is absent and not `read_only`, logging `bank_identity` once; the proof is the HMAC-SHA256, keyed by the hex-decoded credential hash, of `["pseudolife-context-v1",bank,principal,agent,nonce]` (ASCII, compact). | `sc:1292-1337` |
+| BS4 | `register`, `update` (park record, expect, children, names, status history), `authenticate`/`_public` (every key; `children` without hook entries past 3 h; `adapter_available`; `name` = the name, else `label short8`, else `short8`), `attach` (the generation rule, `last_activity` only for a new attachment, `ring`, `ring_armed_until` capped at now + 60), `heartbeat` (`active`, the harness name), `detach` (drops hook children), the subagent hooks, `park_gate`, `woke`. | `sc:1355-1789, 2503-2632, 2999-3088` |
+| BS5 | Roster (`agents`): peers active within 1 h, or 3 h while attached; reachable first, then `last_activity` descending, then id; `idle_omitted`, `truncated`, `status_expires_at`, `status_overdue`, the status age (`_relative_time` buckets, `more than ...` from the log's oldest row, `unknown`), `status_stale` (2 h, non-blank status), and the settled lease page. | `sc:1791-1829, 1901-1934`, `memory/context_builder.py:14-33` |
+| BS6 | Mail: `send` (every refusal in order, prefix resolution, routed replies, bursts with `FANOUT_MAX` 50, request replay and `request_conflict`, the 60-per-minute rate, the 256 pending cap, the writer-epoch check, the HLC high-water upsert), `receive` (the cursor, the `for_delivery` filter, continuity, first-read events), `ack` (batches and prefixes), `attempt`, `history`, `prune`. | `sc:3090-3925` |
+| BS7 | Wake: `_wake_decision` and its maintainer branch (every decision, reason, cap, stagger and receipt field), `_serve_wake`, `_listener_path`, `_live_park`, `_authority`, `_lease_clearer`, `_need_matches`. | `sc:500-513, 2551-2579, 2662-2997` |
+| BS8 | Leases: `acquire_lease`, `release_lease`, `list_leases`, settle and grant (one fence sequence, the 300 s grant window, departed and reserved waiters), `reserved_lease`, `already_delegate`, `lease_queue_full`. | `sc:1947-2268, 2285-2298` |
+| BS9 | Every mutation takes its row locks in Python's order, ending with the audit-chain advisory lock. Every board row equals Python's after the same operation sequence, apart from the free fields. | `sc:1-21, 441-447` |
+
+## BA. Audit chain (byte-exact)
+
+| # | Exact item | Source |
+|---|---|---|
+| BA1 | `payload` is `json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))`, stored as TEXT: keys in code-point order, non-ASCII raw, `\uXXXX` in lowercase for C0, Python `repr` for floats (`1e+16`, `1e-05`, `60.0`). | `sc:953-954` |
+| BA2 | `hash = sha256(prev_hash + json.dumps(["pseudolife-coordination-audit-v1", seq, event, actor, principal, agent_id, recipient_agent_id, project, task, message_id, float(created_at), hlc, payload], ensure_ascii=False, separators=(",", ":")))`; genesis `"0"*64`; `seq` dense under `pg_advisory_xact_lock(hashtextextended('coordination-audit-chain', 0))`, taken last in the mutation's own transaction. | `sc:439-447, 957-971, 1235-1272` |
+| BA3 | A send event keeps `body` and a 16-byte hex `body_salt` outside the hash; its payload holds `text_commitment = sha256(bytes.fromhex(salt) + utf8(body))`. | `sc:448-472, 516-525, 3461-3475` |
+| BA4 | Which events each mutation logs, with which actor, columns and payload. Heartbeats and plain renewals log nothing, apart from a heartbeat's name change. `audit_prune` cuts on UTC day boundaries. | `sc:1-21, 978-985, 3816-3925` |
+| BA5 | Python's `verify_audit_chain` accepts a chain written by any mix of Python and Rust appends. | `sc:1035-1150` |
+
+## BK. Hooks and pairing
+
+| # | Exact item | Source |
+|---|---|---|
+| BK1 | `GET /api/hook/coordination-start`: 200 `text/plain; charset=utf-8`, `cache-control: no-store`, body `CHECKIN_TEXT + "\n"` or empty, and `x-pl-board: on` or `off; reason=<unavailable_reason>` (`disabled`, `authentication_required`, `unauthorized`, `principals_unavailable`, `principal_not_allowed`). | `api:598-621`, `co:192-212, 360-377` |
+| BK2 | `GET /api/hook/park-gate?agent&since`: `allow\n`, or `block\n<PARK_GATE_MESSAGE>\n`; `allow` on any failure or a malformed agent; `since` counts only as a float in [0, 1e12). | `co:259-303`, `sc:2999-3042` |
+| BK3 | `POST /api/hook/woke?agent` and `POST /api/hook/subagent?agent&event&child&type`: `ok\n` when recorded, else empty; every failure is empty. | `co:306-357`, `sc:1741-1789, 3044-3064` |
+| BK4 | Pairing write: one conditional UPDATE on the database clock (`token_hash`, `paired_at`, `paired_code_hash`; the code cleared), a same-token retry inside the window answering the same row, the spent-code cleanup, and `store.add` of the result. | `principal_store.py:407-454`, `api:394-408` |
+
+## Free, and therefore not compared byte for byte (board)
+
+- Random values: agent and message ids, credentials, bank ids, body salts.
+  The harness maps each one to an ordinal by first appearance and checks
+  its shape (32 hex, a 43-character URL-safe token, a canonical UUID, 32
+  hex), and that each credential hashes to its stored `credential_hash`.
+- Wall-clock times and HLC physical parts: compared as (step, offset), the
+  offset being a declared constant (0, 25, 60, 300, a ttl, a TTL), inside
+  each arm's own captured window.
+- Audit `hash` and `prev_hash`, which depend on the above: checked by
+  recomputing them with Python's `audit_hash` and by `verify_audit_chain`
+  (BA2, BA5), not by cross-arm equality.
+- JSON key order and whitespace in responses.
+- Log lines.
+
+## Declared divergences (W2-F)
+
+| Item | Python | Rust | Why |
+|---|---|---|---|
+| Unicode tables for names, labels, lease names and excerpts (NFKD, combining marks, casefold, category C, alphanumerics) | the production oracle is python:3.12-slim (Unicode 15.0); the local oracle is CPython 3.11 (Unicode 14.0) | the crates' Unicode tables | the canonical shapes are ASCII plus the listed confusables; only code points whose properties differ between versions behave differently (ruling d, 2026-10-09) |
+| `send` readiness | waits for the full service (embedder and hydration), so an embedder failure refuses sends | needs the storage tier and the board's HLC reseed only | the full init exists to reseed the HLC, which the board reseeds from SQL itself (ruling a) |
+| Lone surrogates in a JSON body | `json.loads` accepts `"\ud800"`, then a field check refuses it with that field's code | `400 invalid_json` | Rust strings cannot hold one; no producer sends one |
+| #639: a `no_path` receipt can still ring a Codex doorbell | rings | rings (ported as is) | deferred until after cutover by decision; ported, not fixed |
+| `lease` with an explicit `"ttl": null` | depends on state: `reserved_lease`, an auth refusal, 200 for a caller already queued, a 500 from the NOT NULL column, or `invalid_request` from `now + None` | `400 invalid_request` before any check | no producer sends a null ttl; the shim and the MCP tool always send an int (Opus review, finding 2) |
+| A cursor or Console `limit` integer beyond i64, and non-ASCII digits in a cursor | Python's unbounded `int()` (a receive cursor answers `cursor_ahead`; a history cursor with no retained sends answers 200) | a receive or history cursor is `invalid_cursor` without detail; a Console limit beyond i64 is `invalid_limit` as in Python | cursors are produced by the daemon itself (Opus review, finding 6) |
+| A 400-digit integer `park_expires` | `math.isfinite` overflows: 500 | `400 invalid_park` | no producer sends one (Opus review, finding 11) |
+| `NaN`, `Infinity` and nesting deeper than 128 in a JSON body | `json.loads` accepts them, so the board's own type checks refuse them | `400 invalid_json` from the gate's parser | body parsing is W1-A's gate; no producer sends them (Opus review, finding 10) |
+| Receive-wait key for `attachment_id` `true` vs `1` | equal in Python's tuple key (`attachment_already_waiting`) | distinct | no producer sends a non-string attachment id (Opus review, finding 5) |
+
+
+## MCP surface (W2-G)
+
+Added 2026-10-09 for slice W2-G. Python references are to
+`pseudolife_memory/` at master `28c1f23c`; SDK references are to the pinned
+`mcp` 2.1.1 (`mcp/server/streamable_http.py`, `streamable_http_manager.py`,
+`transport_security.py`). The canonical producers are the Python and Rust
+shims and `doctor`, which all speak the legacy handshake: POST `initialize`
+(protocol `2025-11-25`), POST `notifications/initialized`, POST requests with
+`Mcp-Session-Id` and `MCP-Protocol-Version`, then DELETE (recorded from the
+SDK client the Python shim uses). Code: `src/mcp/`. Unlike the spike's
+routes, the JSON-RPC bodies below are compared byte for byte, key order
+included; the "Free" list at the end of this section replaces the one above
+for the MCP surface.
+
+### Mount and transport
+
+| # | Exact item | Source |
+|---|---|---|
+| M1 | `/mcp` and `/mcp/*` are served only on bearer-configured installs after the bearer gate (503/401 as for the catch-all). `/mcp/` answers 307 with `Location: http://<Host>/mcp[?query]`, no body; any other `/mcp/...` path answers 404 `text/plain; charset=utf-8` `Not Found`. | `web/api.py:858-886`; Starlette `redirect_slashes` |
+| M2 | An `MCP-Protocol-Version` header outside `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25` routes to the 2026-07-28 era (declared divergence: only its no-envelope refusal is served). | `streamable_http_manager.py:_handle_request` |
+| M3 | Session lookup first: a known id goes to its transport; an id the process terminated answers 404 `Not Found: Session has been terminated` (with the id header) after the security check; an unknown id answers 404 `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Session not found"}}`, no id header. No id: a new transport with a fresh `uuid4().hex` id, reported in `mcp-session-id` even on refusals. | `streamable_http_manager.py:_handle_stateful_request` |
+| M4 | Security, per request: POST needs a Content-Type whose lowercase starts with `application/json`, else 400 plain `Invalid Content-Type header` (no content type). Tokenless MCP remains unserved (501) under the forward-port ruling; the deferred transport policy requires Host to start with `127.0.0.1:`, `localhost:` or `[::1]:` (421 `Invalid Host header`), and a non-empty Origin must start with `http://127.0.0.1:`, `http://localhost:` or `http://[::1]:` (403 `Invalid Origin header`). With a token, no Host or Origin check. | `mcp_server.py:125-160`; `transport_security.py` |
+| M5 | POST order: Accept must cover both `application/json` and `text/event-stream` (`*/*`, `application/*`, `text/*` count; 406), then a Content-Type part equal to `application/json` (415), then JSON (400, -32700 `Parse error: ...`), then a JSON-RPC message (400, -32602 `Validation error: ...`), then, for anything but `initialize`, a session id (400 `Bad Request: Missing session ID`). Errors are `{"jsonrpc":"2.0","id":null,"error":{"code":C,"message":M}}`, `application/json`, with the id header. | `streamable_http.py:_handle_post_request`, `_create_error_response` |
+| M6 | Notifications and client responses answer 202, empty body, `application/json`, with the id header. Requests answer 200 SSE with `cache-control: no-cache, no-transform`, `connection: keep-alive`, `content-type: text/event-stream`, `mcp-session-id`, `x-accel-buffering: no`, and one `event: message\r\ndata: <json>\r\n\r\n` event; then the stream ends. | same; sse-starlette |
+| M7 | GET needs Accept covering `text/event-stream` (406 `Not Acceptable: Client must accept text/event-stream`), a session id (400), and no open standalone stream on the session (409 `Conflict: Only one SSE stream is allowed per session`); then an open SSE stream carrying server notifications. DELETE needs a session id (400), terminates the session, and answers 200, empty, `application/json`, with the id header. Other methods: 405 `Method Not Allowed` with `allow: GET, POST, DELETE`. | `streamable_http.py:_handle_get_request`, `_handle_delete_request`, `_handle_unsupported_request` |
+| M8 | `initialize` needs `protocolVersion` (string), `capabilities` (object) and `clientInfo` with string `name` and `version`, else -32602 `Invalid request parameters` with `data: ""`. It echoes a handshake version and answers `2025-11-25` for any other; re-initializing a live session is allowed. The result is exactly `{"capabilities":{"experimental":{},"prompts":{"listChanged":false},"resources":{"listChanged":false,"subscribe":false},"tools":{"listChanged":true}},"instructions":I,"protocolVersion":V,"serverInfo":{"name":"Pseudolife Memory","version":""}}`, `I` being `_MCP_INSTRUCTIONS`. `ping` gives `{}`; `prompts/list`, `resources/list`, `resources/templates/list` give empty lists; unknown methods (including `subscriptions/listen` in this era) give -32601 `Method not found` with `data` set to the method. Requests need no prior `notifications/initialized`. | `mcp_server.py:122, 163-166, 3147-3159`; SDK lowlevel server |
+
+### Tools, tiers and identity
+
+| # | Exact item | Source |
+|---|---|---|
+| M9 | The catalogue is 38 tools in registration order; each tool object (`annotations`, `description`, `inputSchema`, `name`, `outputSchema`) is byte-equal to Python's serialization. `src/mcp/tools.jsonl` holds them as recorded by `harness/mcp_catalogue.py`, one object per line. | `mcp_server.py:_tool`, `_bind_arguments`, `_annotations` |
+| M10 | Tiers are cumulative: minimal 10, core 24, full 38 (`src/mcp/tiers.json`). `tools/list`, with any params, returns `{"tools":[...]}` for the caller's tier, with no `nextCursor`. | `mcp_server.py:208-213, 3133-3137` |
+| M11 | The default tier is `PSEUDOLIFE_MCP_TOOLSET`, stripped and lowercased; unset or unknown means `full`. `PSEUDOLIFE_MCP_TIER_MAP` is `writer:tier,...`: each part stripped, split at the first `:`, both sides stripped and lowercased; malformed parts are skipped and a later part wins. | `toolset_tiers.py:36-65` |
+| M12 | The tier key is the bearer's principal when it is not `default`; for `default`, the `X-PL-Writer` header (first value, latin-1, empty means unset), else `PSEUDOLIFE_WRITER_ID`, else none (the shared bucket). Resolution: the key's override (stripped, lowercased) → the tier map → the stored principal's tier (only when the key is the request's own named principal) → the default. | `mcp_server.py:3001-3037`; `toolset_tiers.py:115-130` |
+| M13 | `memory_toolset(action)`: `status` gives `{"current","default","ladder","adds"}` (`adds` text exact). `expand` steps up one rung (floor minimal); `collapse` steps down to the key's floor (tier map → stored tier → default). No move gives `{"changed":false,"current":C,"reason":R}` with `R` `already at full` or `already at your floor (F)`. A move stores the override for 12 h, answers `{"changed":true,"current","previous","visible_tools_added","visible_tools_removed","list_changed_sent":true}` (names sorted), and pushes `{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}` to the session's open GET stream. | `mcp_server.py:1419-1497`; `toolset_tiers.py:67-112` |
+| M14 | `tools/call` with non-object params, no string `name`, or non-object `arguments` gives -32602 `Invalid request parameters`, `data: ""`; missing or null `arguments` is `{}`. A name not in the catalogue gives `{"content":[{"text":"Unknown tool: N","type":"text"}],"isError":true}`. Hidden tools stay callable. | SDK `call_tool`; `toolset_tiers.py` docstring |
+| M15 | A dict result is `{"content":[{"text":T,"type":"text"}],"isError":false,"structuredContent":D}`, `T` being the dict indented by 2. A refusal has the same shape with `isError: true` and the `_error_payload` object: the code from a `code` attribute or a `code` / `code: detail` message, prose as `invalid_argument`, a missing file as `file_not_found`, anything else as `internal_error` (plus `mutation: "unknown"` off the read-only tools); `coordination_unavailable` adds `mutation: "unknown"` off the read-only tools. | `mcp_server.py:240-302, 309-314` |
+| M16 | memory_toolset's argument binding: an unknown name gives `unknown_parameter`, one sentence per name (`unknown parameter 'K' for memory_toolset; did you mean 'G'?` from difflib at cutoff 0.6, else ending `.`), the last closed by ` Accepted: action`, with `param` the first name and `accepted: ["action"]`. A missing `action` gives `action: Field required`; any other value gives `action: Input should be 'expand', 'collapse' or 'status'` (both `invalid_argument`, `param: "action"`). | `mcp_server.py:358-432` |
+| M17 | The writer is the named principal, else `X-PL-Writer` (non-empty), else `PSEUDOLIFE_WRITER_ID`, else `unknown`; the session is `X-PL-Session` as sent. Tool bodies receive both through `CallIdentity` (`src/mcp/dispatch.rs`). | `writer_context.py:130-205`; `service.py:893` |
+
+### SDK parameter validation
+
+`src/mcp/validation-schema.json` records the MCP and MCP-types 2.1.1
+parameter schemas, including the Pydantic versions used to generate them.
+Regenerate it with `python rust/daemon/harness/mcp_validation_schema.py`.
+The table contains all 13 handshake request methods, four client notification
+methods and the nine registered request handlers. It includes nested metadata,
+task, client implementation, capability and input-response fields. Unknown
+extension keys follow each model's extra-field policy.
+
+Non-null round-trip `requestState` is refused before dispatch until sealed-state
+issuance and verification are implemented (MCP-SEALED-REQUEST-STATE).
+Spec parameter validation precedes handler lookup; registered handler validation
+precedes readiness or tier mutation. Unknown methods reach lookup without spec
+validation. Notifications validate before changing readiness. The Rust evaluator
+implements the table's scalar coercions, unions, required fields, nested objects,
+arrays, literals, URL fields and numeric constraints; it does not dispatch Python
+or load schemas from the network.
+
+`mcp_run.py <binary> <output> --validation-sweep` generates field variants from
+both validation layers and compares HTTP/JSON-RPC codes, readiness and tier on
+both live daemons, before and after initialization. The pinned corpus has 18,515
+cases and requires all 37,030 paired observations with zero differences. It
+retains the separate strict transport corpus and its declared differences. The
+CI driver also runs `--validation-coercions`: 2,137 cases and 4,274 observations
+covering integer, float and URL spellings, including raw overflowing JSON number
+literals. CI installs Pydantic 2.14.0/core 2.50.0; generation and live sweeps
+refuse an unreviewed core version. Completed sweep differences are parity
+failures; incomplete runs and cleanup failures remain infrastructure failures.
+The sweep retains one-shot HTTP exchanges and a fresh MCP session and writer
+key per observation. Its sockets use SO_LINGER(1,0) on close so completed
+exchanges do not hold client ephemeral ports in TIME_WAIT on Windows. This
+setting applies only to the generated validation sweep, not the strict transport
+corpus. Responses are read completely before normal closure; failures still
+abort the run and release clients. No request is retried or removed.
+Oracle recording and golden distillation reject case exceptions, missing cases,
+incomplete tool coverage and incorrect per-case or corpus totals before writing outputs.
+
+### Free (MCP surface)
+
+- The text after `Parse error: ` and `Validation error: `.
+- SSE keep-alive comments (`: ping - <time>` every 15 s) and their timestamps.
+- The value of `mcp-session-id` (a fresh uuid4 hex); only its presence is compared.
+- Header order, `date`, `server`, `content-length` and `transfer-encoding`.
+- Key order and float text inside a result's `content[0].text`, which repeats `structuredContent`.
+
+### MCP refusal cleanup (2026-10-13)
+
+MCP admission and cleanup share the SDK's 4 MiB body limit. A complete,
+in-budget refusal drain keeps the connection reusable; incomplete cleanup,
+read failure, an exhausted budget or an unread Expect body closes it. The
+shared 250 ms deadline bounds cleanup, including headers-only peers. This
+resolves the accidental use of the REST 256 KiB budget without weakening
+body admission or changing REST cleanup. `MCP-REFUSAL-CLEANUP` in
+`divergences.md` records the remaining Python connection-lifetime difference.
+The strict live comparator and committed goldens are unchanged.
+
+Initialization validates known client-capability object fields and the SDK's
+boolean spellings for `roots.listChanged`; unknown capability fields remain
+open. Standalone SSE notifications have a 16-item delivery queue and the
+existing 8-item HTTP output queue. A slow consumer backpressures delivery;
+DELETE and disconnect cancel blocked delivery without holding the sessions
+lock. Mutant runs require `--baseline <compare.json>` and must add or change
+strict differences beyond that ordinary run.

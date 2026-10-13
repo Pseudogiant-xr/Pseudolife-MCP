@@ -1725,6 +1725,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "fancy-regex",
  "form_urlencoded",
  "futures",
  "getrandom 0.3.4",
@@ -1744,6 +1745,10 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-postgres",
+ "tokio-util",
+ "unicode-casefold",
+ "unicode-normalization",
+ "uuid",
  "windows-sys 0.61.2",
  "yaml-rust2",
 ]

@@ -78,13 +78,19 @@ jobs:
         run: |
           python -m pip install pytest pyyaml "psycopg[binary]" psutil
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py -k 'not committed_census_matches_current_tree'
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py -k 'not committed_census_matches_current_tree'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
       - name: ported-row-and-mutant-ci-inventory
         working-directory: .
         run: python rust/ci/inventory.py
+      - name: Board harness lifecycle and normalization
+        working-directory: .
+        # Linux 2026-10-13: 21 tests in 0.21s. Allow a three-minute cold
+        # Windows startup/import floor pending its first hosted measurement.
+        timeout-minutes: 3
+        run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py
       - name: Bind the event-selected Python oracle
         shell: pwsh
         working-directory: .
@@ -130,6 +136,10 @@ jobs:
         run: cargo check --locked --all-targets -j 4
       - name: Clippy
         run: cargo clippy --locked --all-targets -j 4 -- -D warnings
+      - name: Check write-path harness targets
+        # 2026-10-13: cold Linux dev-profile check took 54 s; allow about 2x.
+        timeout-minutes: 2
+        run: cargo check --locked --all-targets -p pseudolife-daemon --features harness,mutants -j 4
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
       - name: Check all targets without default features
@@ -347,6 +357,15 @@ jobs:
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
           python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
           exit $LASTEXITCODE
+      # Linux 2026-10-13: offline W2-D checks measured below one second;
+      # one minute is the smallest whole-minute timeout above twice that.
+      - name: Offline W2-D search harness regressions
+        if: matrix.suite == 'eval'
+        timeout-minutes: 1
+        shell: pwsh
+        run: |
+          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py
+          exit $LASTEXITCODE
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
         if: matrix.suite == 'eval'
@@ -537,6 +556,36 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')
           exit $LASTEXITCODE
+      # Linux 2026-10-13: coercion baseline + four controls + disabled control 204.2s,
+      # targeted tests 14.68s; seven minutes is about twice that gate.
+      - name: Daemon MCP live parity and controls
+        if: matrix.suite == 'cli'
+        timeout-minutes: 7
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: w2g
+        run: |
+          $defaultName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $mutantName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $defaultName)).Path
+          $mutants = (Resolve-Path (Join-Path 'rust/target/release' $mutantName)).Path
+          $env:PL_HARNESS_SCRATCH = Join-Path $env:RUNNER_TEMP 'daemon-mcp-homes'
+          # Scalar coercions are not fully described by the SDK JSON schemas.
+          python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/mcp_ci.py --default-bin $candidate --mutant-bin $mutants --out (Join-Path $env:RUNNER_TEMP 'daemon-mcp')
+          exit $LASTEXITCODE
+      - name: Retain daemon MCP parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-mcp-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/daemon-mcp/**/*.json
+            ${{ runner.temp }}/daemon-mcp/*.log
+          if-no-files-found: error
       - name: Retain daemon security parity outcomes
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
