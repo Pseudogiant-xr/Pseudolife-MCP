@@ -25470,13 +25470,13 @@
   },
   {
    "origin": "crafted",
-   "text": "foo path: C:\\Users\\x",
+   "text": "foo path: C:\\Users\\<user>",
    "ctx": null,
    "slots": [
     [
      "foo",
      "path",
-     "C:\\Users\\x",
+     "C:\\Users\\<user>",
      "+"
     ]
    ],
@@ -25484,20 +25484,20 @@
     [
      "foo",
      "path",
-     "C:\\Users\\x",
+     "C:\\Users\\<user>",
      "+"
     ]
    ]
   },
   {
    "origin": "crafted",
-   "text": "foo path: C:\\Users\\x",
+   "text": "foo path: C:\\Users\\<user>",
    "ctx": "Jacque",
    "slots": [
     [
      "foo",
      "path",
-     "C:\\Users\\x",
+     "C:\\Users\\<user>",
      "+"
     ]
    ],
@@ -25505,20 +25505,20 @@
     [
      "foo",
      "path",
-     "C:\\Users\\x",
+     "C:\\Users\\<user>",
      "+"
     ]
    ]
   },
   {
    "origin": "crafted",
-   "text": "foo path: C:\\Users\\x",
+   "text": "foo path: C:\\Users\\<user>",
    "ctx": "",
    "slots": [
     [
      "foo",
      "path",
-     "C:\\Users\\x",
+     "C:\\Users\\<user>",
      "+"
     ]
    ],
@@ -25526,7 +25526,7 @@
     [
      "foo",
      "path",
-     "C:\\Users\\x",
+     "C:\\Users\\<user>",
      "+"
     ]
    ]

@@ -177,7 +177,7 @@ CRAFTED = [
     "foo port: Because", "foo port: WHAT", "foo port: 1 port", "foo PORT: 1",
     "Foo Port Host: x", "my port: 8080", "the foo port: 1", "an a the foo port: 1",
     "our this that its port: 1", "foo port: 'quoted'", "foo url: http://x/y?z=1",
-    "foo path: C:\\Users\\x", "foo bar baz qux port: 1",
+    "foo path: C:\\Users\\<user>", "foo bar baz qux port: 1",
     "foo bar baz qux quux port: 1", "Foo's port: 1", "FOO'S port: 1",
     "foo port host: 1", "foo port = 1 = 2", "foo port: 1: 2",
     # copula
