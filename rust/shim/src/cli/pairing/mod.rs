@@ -12,7 +12,7 @@ mod invite;
 mod invite_db;
 mod net;
 mod pair;
-mod pyjson;
+use super::pyjson;
 mod sqlstate;
 mod token_file;
 mod url;
@@ -75,7 +75,7 @@ fn eprint(text: &str) {
 
 /// Python's `str.isprintable()` for one character (Unicode 14, as the
 /// dispatcher's pinned repr table).
-fn printable(c: char) -> bool {
+pub(super) fn printable(c: char) -> bool {
     !(crate::board::claims::forbidden(c)
         || matches!(
             c,

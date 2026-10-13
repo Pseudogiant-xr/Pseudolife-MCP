@@ -171,7 +171,7 @@ fn negative_number(text: &str) -> bool {
     })
 }
 
-fn decimal_digit(c: char) -> Option<u32> {
+pub(in crate::cli) fn decimal_digit(c: char) -> Option<u32> {
     // Decimal blocks at the pinned CPython 3.11 / Unicode 14 producer.
     const ZEROS: &[u32] = &[
         0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66,

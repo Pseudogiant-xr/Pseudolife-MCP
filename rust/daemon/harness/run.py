@@ -391,6 +391,8 @@ class Scenario:
     files: dict[str, str] = {}  # extra files in each data dir
     golden_replay = False
     golden_db_state = False
+    ci_fixture = False
+    settle_with_search = False
 
     def timeline(self, procs: dict, holders: list) -> list[dict]:
         """Scenarios whose answers depend on time (lease, backoff, reaper):
@@ -402,7 +404,26 @@ class Scenario:
 
     def prepare_home(self, home: Path) -> dict[str, str]:
         """Optional per-arm files/environment, confined to the disposable home."""
-        return {}
+        if not self.ci_fixture:
+            return {}
+        # Gate/auth/recovery CI needs an embedder, not a downloaded model;
+        # both arms use the existing 1,024-dimensional offline fixture.
+        import onnxruntime
+        import yaml
+        from embedding_fixture import create
+        model = home / "model"
+        create(model, dimension=1024)
+        path = home / "data/config.yaml"
+        config = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
+        config = config or {}
+        config["embedding"] = {"model_name": str(model), "backend": "onnx", "device": "cpu",
+                               "cpu_dtype": "fp32", "query_prefix": "", "max_seq_length": 32}
+        path.write_text(yaml.safe_dump(config), encoding="utf-8")
+        runtime = Path(onnxruntime.__file__).parent / "capi"
+        library = runtime / "onnxruntime.dll" if os.name == "nt" else next(runtime.glob("libonnxruntime.so.*"))
+        return {"ORT_DYLIB_PATH": str(library), "PSEUDOLIFE_DAEMON_ONNX_DIR": str(model),
+                "PSEUDOLIFE_DAEMON_ORT_THREADS": "1", "OMP_NUM_THREADS": "1",
+                "TOKENIZERS_PARALLELISM": "false"}
 
     def cleanup_home(self, home: Path) -> None:
         """Restore fixture permissions before a later pass removes the home."""
@@ -1487,13 +1508,14 @@ def common_env(scn: Scenario, dsn: str) -> dict[str, str]:
     return env
 
 
-def settled(port: int, token: str | None) -> bool:
+def settled(port: int, token: str | None, *, check_db: bool = True) -> bool:
     """Init finished: health is ok with a db and an embedder, and a blank
     search (which runs ``ensure_init`` under the service lock, then answers
     without touching the bank) succeeds."""
     try:
         body = call(port, "GET", "/health", timeout=30).get("json") or {}
-        if not (body.get("status") == "ok" and body.get("db") == "ok" and "embedder" in body):
+        if not (body.get("status") == "ok" and (not check_db or body.get("db") == "ok")
+                and "embedder" in body):
             return False
         r = call(port, "GET", "/api/search?q=", [bearer(token)] if token else [], timeout=300)
         return r["status"] == 200
@@ -1501,11 +1523,12 @@ def settled(port: int, token: str | None) -> bool:
         return False
 
 
-def wait_settled(ports: list[int], timeout: float = 600.0, token: str | None = None) -> None:
+def wait_settled(ports: list[int], timeout: float = 600.0, token: str | None = None,
+                 *, check_db: bool = True) -> None:
     deadline = time.monotonic() + timeout
     pending = set(ports)
     while pending and time.monotonic() < deadline:
-        pending = {p for p in pending if not settled(p, token)}
+        pending = {p for p in pending if not settled(p, token, check_db=check_db)}
         if pending:
             time.sleep(2)
     if pending:
@@ -1516,6 +1539,17 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
+    if c.get("session_end_invalid_json"):
+        row["declared"] = "invalid SessionEnd: Python succeeds without closing; Rust refuses"
+        headers = {"content-type": "application/json; charset=utf-8",
+                   "cache-control": "no-store", "x-content-type-options": "nosniff"}
+        oracle = {"status": 200, "headers": headers, "json": {"ok": True}, "raw": '{"ok": true}'}
+        want = {"status": 400, "headers": headers, "json": {"error": "invalid_json"},
+                "raw": '{"error": "invalid_json"}'}
+        if golden:
+            oracle, want = golden_scrub(oracle), golden_scrub(want)
+        row["diffs"] = diff_values(oracle, py) + diff_values(want, rs)
+        return row
     if c.get("refusal_policy") in {"lexical-outside-root", "parent-space-refusal"}:
         sys.path.insert(0, str(REPO))
         from pseudolife_memory.web.api import CONSOLE_SECURITY_HEADERS
@@ -1636,7 +1670,8 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         for d in procs.values():
             d.start(240)
         if scn.settle:
-            wait_settled([d.port for d in procs.values()], token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"))
+            wait_settled([d.port for d in procs.values()], token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"),
+                         check_db=not scn.settle_with_search)
         rows = []
         golden_name = scn.name
         if scn.name in {"static-build", "static-paths", "static-root-link"}:
@@ -1871,6 +1906,7 @@ def summarize(results: list[dict], refusals: list[dict]) -> tuple[int, int, int]
 
 
 def main() -> int:
+    global GOLDENS
     if sys.argv[1:2] == ["schema"]:
         import schema_cases
         return schema_cases.main(sys.argv[2:])
@@ -1883,9 +1919,16 @@ def main() -> int:
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--record", action="store_true")
+    ap.add_argument("--golden-dir", type=Path, help="record/replay goldens in this directory")
     ap.add_argument("--no-refusals", action="store_true")
     ap.add_argument("--mutants", nargs="*", help="run only these mutants (default: all)")
+    ap.add_argument("--fixture", action="store_true", help="use the offline embedding fixture in both arms")
+    ap.add_argument("--settle-with-search", action="store_true",
+                    help="use successful blank search readiness when testing health's db field")
     args = ap.parse_args()
+    if args.golden_dir:
+        GOLDENS = args.golden_dir.resolve()
+        GOLDENS.mkdir(parents=True, exist_ok=True)
     args.rust_bin = args.rust_bin.resolve()  # the daemon's cwd is its disposable home
     root = daemons.scratch_root()
     names = args.only or list(SCENARIOS) + ["refusals"]
@@ -1899,11 +1942,14 @@ def main() -> int:
             if n not in SCENARIOS:
                 continue
             scn = SCENARIOS[n]()
+            scn.ci_fixture = args.fixture
+            scn.settle_with_search = args.settle_with_search
             if mode == "golden" and (scn.live_only or
                                     (type(scn).timeline is not Scenario.timeline and not scn.golden_replay)):
                 # Remote-policy and timing fixtures without replay require both live arms.
                 print(f"[{n}] live-only: skipped in golden mode", flush=True)
                 continue
+            started = time.monotonic()
             try:
                 r = run_scenario(scn, args.rust_bin, root, mode, args.record)
             except Exception as exc:  # a scenario that cannot complete is a failure, never a pass
@@ -1915,6 +1961,7 @@ def main() -> int:
                 for name in pg.existing():
                     if name.startswith(f"{pg.PREFIX}{n.replace('-', '_')}_"):
                         pg.drop(name)
+            r["seconds"] = time.monotonic() - started
             results.append(r)
             bad = [c["case"] for c in r["cases"] if c["diffs"]]
             print(f"[{n}] cases {len(r['cases'])} diffs {len(bad)} db_diffs {len(r['db_diffs'])} {bad[:6]}",

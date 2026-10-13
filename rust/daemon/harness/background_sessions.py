@@ -52,6 +52,7 @@ run_daemon()
         def prepare_template(self, dsn):
             root = daemons.scratch_root()
             home = daemons.make_home(root, self.name + "-seed", self.config_yaml)
+            fixture_env = self.prepare_home(home) if self.ci_fixture else {}
             code = '''
 import os
 from unittest.mock import patch
@@ -74,6 +75,7 @@ svc.flush()
 svc._storage.close()
 '''
             env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
+            env.update(fixture_env)
             log = home / "seed.log"
             with log.open("wb") as out:
                 result = subprocess.run([sys.executable, "-c", code], cwd=daemons.REPO,
