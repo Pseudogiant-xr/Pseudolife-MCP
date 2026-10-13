@@ -40,6 +40,7 @@ pub struct App {
     pub static_dir: Option<PathBuf>,
     pub board: Arc<crate::board::Board>,
     pair_failures: Mutex<VecDeque<Instant>>,
+    pub mcp: crate::mcp::McpState,
 }
 
 impl App {
@@ -50,6 +51,7 @@ impl App {
         static_dir: Option<PathBuf>,
         board: Arc<crate::board::Board>,
     ) -> App {
+        let mcp = crate::mcp::McpState::from_env(env_tokens.configured());
         App {
             service,
             env_tokens,
@@ -57,6 +59,7 @@ impl App {
             static_dir,
             board,
             pair_failures: Mutex::new(VecDeque::new()),
+            mcp,
         }
     }
 
@@ -766,9 +769,11 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
         .get_all("expect")
         .iter()
         .any(|value| value.as_bytes().eq_ignore_ascii_case(b"100-continue"));
+    let mcp_path = path == "/mcp" || path.starts_with("/mcp/");
     let cap = match path.as_str() {
         "/api/pair" => PAIR_BODY_LIMIT,
         "/api/hook/session-end" => SESSION_END_BODY_LIMIT,
+        _ if mcp_path => crate::mcp::BODY_LIMIT,
         _ => body_limit(&path),
     };
     let mut body = RequestBody::new(body);
@@ -784,6 +789,7 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 | "/api/hook/coordination-start"
         );
     if (response.status().as_u16() >= 400 || bodyless_hook) && !body.inner.is_end_stream() {
+        let mut complete = false;
         // Polling an Expect body would send 100 Continue after admission refused it.
         if !expect_continue {
             let outcome = finish_unread_body(
@@ -792,6 +798,7 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE,
             )
             .await;
+            complete = outcome == DrainOutcome::Complete && body.received <= cap;
             if outcome != DrainOutcome::Complete || body.received > cap {
                 eprintln!(
                     "http refusal cleanup: outcome={outcome:?} received={} cap={cap} overshoot={} frames={} max_frame={}",
@@ -802,9 +809,14 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 );
             }
         }
-        response
-            .headers_mut()
-            .insert(header::CONNECTION, HeaderValue::from_static("close"));
+        // A fully drained MCP refusal can reuse the connection, matching
+        // the SDK mount. An unfinished/oversized body must still close;
+        // REST and hook cleanup retain their existing connection policy.
+        if !mcp_path || !complete {
+            response
+                .headers_mut()
+                .insert(header::CONNECTION, HeaderValue::from_static("close"));
+        }
     }
     response
 }
@@ -894,13 +906,17 @@ async fn dispatch(
     if path.starts_with("/api/") || path == "/api" {
         return api(app, path, method, h, raw_query, body).await;
     }
-    match resolve(app, h) {
+    let principal = match resolve(app, h) {
         Resolved::Unavailable => return principals_unavailable(),
         Resolved::None => return unauthorized(),
-        Resolved::Principal(..) => {}
-    }
+        Resolved::Principal(p) => p,
+    };
     if path == "/mcp" || path.starts_with("/mcp/") {
-        return not_implemented(path);
+        // Tokenless MCP awaits the accepted Host/Origin and identity policy.
+        if !app.auth_configured() {
+            return not_implemented(path);
+        }
+        return crate::mcp::handle(app, &principal, path, method, h.clone(), raw_query, body).await;
     }
     // The MCP app's own router: `/mcp` is its only route.
     text_response(
@@ -921,6 +937,151 @@ pub fn py_strip(s: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mcp_refusal_app() -> Arc<App> {
+        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Arc::new(Service::new(
+            crate::config::Config::default(),
+            env,
+            PathBuf::from("unused"),
+            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+            true,
+        ));
+        let store = Arc::new(auth::PrincipalStore::new());
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+            service.clone(),
+            store.clone(),
+        ));
+        Arc::new(App::new(
+            service,
+            auth::EnvTokens {
+                single: Some("fixture-token".into()),
+                map: vec![],
+            },
+            store,
+            None,
+            board,
+        ))
+    }
+
+    #[tokio::test]
+    async fn mcp_refusal_complete_drain_preserves_connection() {
+        for path in ["/mcp", "/mcp/"] {
+            let chunks = [
+                Ok::<_, std::io::Error>(vec![b' '; CONTROL_BODY_LIMIT]),
+                Ok(vec![b' '; 1]),
+            ];
+            let request = Request::builder()
+                .method("POST")
+                .uri(path)
+                .body(Body::from_stream(futures::stream::iter(chunks)))
+                .unwrap();
+            let response = handle(State(mcp_refusal_app()), request).await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert!(
+                response.headers().get(header::CONNECTION).is_none(),
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_refusal_incomplete_drain_closes_connection() {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .body(Body::from_stream(futures::stream::pending::<
+                Result<Vec<u8>, std::io::Error>,
+            >()))
+            .unwrap();
+        let response = tokio::time::timeout(
+            Duration::from_secs(2),
+            handle(State(mcp_refusal_app()), request),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.headers()[header::CONNECTION], "close");
+    }
+
+    #[tokio::test]
+    async fn mcp_refusal_expect_does_not_poll_and_cap_stops_cleanup() {
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for expect in [false, true] {
+            let polls = Arc::new(AtomicUsize::new(0));
+            let count = polls.clone();
+            let chunks = futures::stream::iter([vec![b' '; crate::mcp::BODY_LIMIT], vec![b' '; 1]])
+                .map(move |chunk| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Ok::<_, std::io::Error>(chunk)
+                });
+            let mut request = Request::builder().method("POST").uri("/mcp");
+            if expect {
+                request = request.header("expect", "100-continue");
+            }
+            let response = handle(
+                State(mcp_refusal_app()),
+                request.body(Body::from_stream(chunks)).unwrap(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(response.headers()[header::CONNECTION], "close");
+            assert_eq!(polls.load(Ordering::SeqCst), usize::from(!expect));
+        }
+    }
+
+    #[tokio::test]
+    async fn tokenless_mcp_remains_unserved() {
+        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Arc::new(Service::new(
+            crate::config::Config::default(),
+            env,
+            PathBuf::from("unused"),
+            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+            false,
+        ));
+        let store = Arc::new(auth::PrincipalStore::new());
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+            service.clone(),
+            store.clone(),
+        ));
+        let app = Arc::new(App::new(
+            service,
+            auth::EnvTokens {
+                single: None,
+                map: vec![],
+            },
+            store,
+            None,
+            board,
+        ));
+        for path in ["/mcp", "/mcp/", "/mcp/x"] {
+            for method in ["GET", "POST", "DELETE"] {
+                let request = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("host", "127.0.0.1:8765")
+                    .body(Body::empty())
+                    .unwrap();
+                let response = handle(State(app.clone()), request).await;
+                assert_eq!(
+                    response.status(),
+                    StatusCode::NOT_IMPLEMENTED,
+                    "{method} {path}"
+                );
+                let body = axum::body::to_bytes(response.into_body(), 1024)
+                    .await
+                    .unwrap();
+                let payload: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(payload, json!({"error": "not_implemented", "path": path}));
+            }
+        }
+    }
 
     #[test]
     fn body_json_preserves_object_keys_and_numeric_values() {

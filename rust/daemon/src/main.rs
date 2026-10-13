@@ -23,6 +23,7 @@ mod heap_trim;
 mod http;
 mod labels;
 mod maintenance;
+mod mcp;
 mod meta_filter;
 mod mutants;
 mod onnx_artifacts;

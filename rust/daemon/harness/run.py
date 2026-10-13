@@ -586,7 +586,7 @@ class Tokens(Scenario):
                  json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "b" * 64}).encode(),
                  declared="W2-F: pairing redemption"),
             case("maintainer known GET", "GET", "/api/maintainer", [auth], declared="W2-F: maintainer"),
-            case("mcp path, auth", "GET", "/mcp", [auth], declared="W2-G: MCP transport"),
+            case("mcp path, auth", "GET", "/mcp", [auth]),
             case("search blank q", "GET", q(q=""), [auth]),
             case("search unknown band", "GET", q(q="memory", band="nope"), [auth]),
             case("search unknown band, blank q", "GET", q(band="nope"), [auth]),

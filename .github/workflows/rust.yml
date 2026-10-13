@@ -556,6 +556,36 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')
           exit $LASTEXITCODE
+      # Linux 2026-10-13: coercion baseline + four controls + disabled control 204.2s,
+      # targeted tests 14.68s; seven minutes is about twice that gate.
+      - name: Daemon MCP live parity and controls
+        if: matrix.suite == 'cli'
+        timeout-minutes: 7
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: w2g
+        run: |
+          $defaultName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $mutantName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $defaultName)).Path
+          $mutants = (Resolve-Path (Join-Path 'rust/target/release' $mutantName)).Path
+          $env:PL_HARNESS_SCRATCH = Join-Path $env:RUNNER_TEMP 'daemon-mcp-homes'
+          # Scalar coercions are not fully described by the SDK JSON schemas.
+          python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/mcp_ci.py --default-bin $candidate --mutant-bin $mutants --out (Join-Path $env:RUNNER_TEMP 'daemon-mcp')
+          exit $LASTEXITCODE
+      - name: Retain daemon MCP parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-mcp-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/daemon-mcp/**/*.json
+            ${{ runner.temp }}/daemon-mcp/*.log
+          if-no-files-found: error
       - name: Retain daemon security parity outcomes
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4

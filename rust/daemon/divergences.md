@@ -11,13 +11,110 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Surface | Python behaviour | Owner |
 |---|---|---|
 | Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents` and `POST /api/daemon-notice`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
-| `/mcp`, `/mcp/*` after the bearer gate | the MCP transport | W2-G |
-| Tokenless MCP Host/Origin rebinding policy and bound-identity validation | SDK transport policy and durable board binding checks before tool dispatch | **CUTOVER BLOCKER — W2-G**; MCP stays unmounted (501) until these gates are ported |
+| Tokenless MCP Host/Origin rebinding policy and bound-identity validation | SDK transport policy and durable board binding checks before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until these gates are accepted; authenticated bound-identity checks remain deferred as listed below |
 | Credential-bearing extractor/recall redirect refusal | `utils/no_redirect.py`, extractor and recall transports | W3-H / W2-D; outbound transports are not implemented in this slice |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes` and `session-end` after its gates | change note and episode close | W2-E |
 | `POST /api/pair` after a valid body on an authenticated install | the 2-slot redemption gate (`RedemptionGate`, 429 `rate_limited`), invocation of the implemented `principals::redeem` store transaction plus immediate `PrincipalStore::add`, the failure-budget refund on success, and 503 `pairing_unavailable` on a store error | HTTP-SECURITY / CLI-PAIRING (the gate wraps only `principal_store.redeem`, `web/api.py:378-393`) |
 | Stored callers' POST `/api/config` and `/api/daemon-notice` gate | HTTP already returns 403 `operator_principal_required` by stored-name inference; method-aware source policy is implemented for HTTP-SECURITY to consume with `resolve_detailed` | HTTP-SECURITY |
+
+## MCP surface (W2-G)
+
+
+Bearer-authenticated `/mcp` is served (spec.md, "MCP surface (W2-G)"); `tools/list` is byte-equal
+at every tier. A `tools/call` of a tool whose body has not landed answers the
+declared stub (delegate ruling 2026-10-09): the normal refusal envelope,
+`isError: true`, structured content equal to the JSON text,
+`{"error": "not_implemented", "message": "not_implemented: <tool> is not yet served by the Rust daemon"}`,
+with no `mutation` key because nothing ran. Nothing installs the Rust daemon
+before cutover, so no client sees it. The harness (`harness/mcp_compare.py`,
+`UNSERVED`) checks the stub for every row here; the PR that wires a body
+deletes its row in both places, and from then on the harness compares that
+tool's answers by value.
+
+| Tool | Body owner | Missing service prerequisite |
+|---|---|---|
+| `memory_agents` | W2-F | W2-F supplies the REST board context and roster; MCP adapter dispatch and binding remain unwired. |
+| `memory_message` | W2-F | W2-F supplies REST mailbox, audit and wake services; MCP dispatch remains unwired. |
+| `memory_search` | W2-D | W2-D supplies REST search, cortex and read telemetry; MCP filters, compact results and dispatch remain unwired. |
+| `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion remains deferred. |
+| `memory_world_search` | W2-D | No resident world-cortex search service. |
+| `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
+| `memory_get` | W2-D | No entry lookup service with its access-count and trace effects. |
+| `memory_recent` | W2-D | No recent-entry service or MCP compaction. |
+| `memory_history` | W2-D | No canonical history service. |
+| `memory_stats` | W2-D | No complete statistics service or MCP projection. |
+| `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
+| `memory_fact_get` | W2-D | Startup holds canonical inputs, but no resident cortex lookup service. |
+| `document_search` | W2-D | No reference-pool search service. |
+| `memory_episode_summary` | W2-D | No episode summary service. |
+| `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
+| `memory_store` | W2-E | W2-E supplies the resident write store, surprise gate and contradiction service behind its harness route; MCP argument binding and dispatch remain unwired. |
+| `memory_fact_set` | W2-E | No canonical fact mutation service or resident-store synchronization. |
+| `memory_set_add` | W2-E | No set-valued slot mutation service. |
+| `memory_set_remove` | W2-E | No set-valued slot removal service. |
+| `memory_fact_resolve` | W2-E | No contender promotion service. |
+| `memory_world_set` | W2-E | No world-fact mutation service. |
+| `memory_outcome` | W2-E | No outcome/lesson mutation service. |
+| `memory_episode_start` | W2-E | Store-driven episode start/resume and attribution exist; the standalone episode API and MCP dispatch remain unwired. |
+| `memory_episode_end` | W2-E | Background close helpers exist, but the public episode close/outcome service does not. |
+| `memory_session_title` | W2-E | No session title service or public session identity resolution. |
+| `memory_supersede` | W2-E | No supersession service, audit lineage or resident publication. |
+| `memory_reinstate` | W2-E | No reinstatement decision service. |
+| `memory_reinforce` | W2-E | No reinforcement service. |
+| `memory_forget` | W2-E | No forget/cascade service. |
+| `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
+| `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
+| `memory_graph_review` | W3-H | No graph review/proposal service. |
+| `memory_consolidate` | W3-H | No consolidation service. |
+| `memory_graph_relate` | W3-H | Edge storage exists, but service-level validation, provenance and fact projection do not. |
+| `memory_graph_unrelate` | W3-H | Edge storage exists, but the public unrelate service does not. |
+| `memory_alias` | W3-H | Alias storage exists, but the public alias service and resident graph synchronization do not. |
+| `memory_relation_define` | W3-H | Relation storage exists, but the public relation-definition service does not. |
+
+The integration batch retains W2-G's refusal stubs for every tool except
+`memory_toolset`. W2-D supplies expanded REST search, W2-E supplies the
+harness-gated store body, and W2-F supplies the REST board. Their presence
+does not register MCP tool bodies: MCP argument binding, projections and
+bound-identity enforcement remain the prerequisites listed above.
+
+**MCP-REFUSAL-CLEANUP:** MCP refusals use the shared counted reader with the
+MCP 4 MiB budget, not the REST 256 KiB budget. Fully drained in-budget bodies
+preserve the connection. An exhausted budget, failed read, 250 ms cleanup
+deadline, or unread `Expect: 100-continue` body closes the connection. The
+selected response may be delayed by that deadline, unlike Python's immediate
+response and subsequent discard. Over-budget frame overshoot retains the
+shared HTTP bound. The strict MCP comparator retains any resulting connection
+header or transport differences; they are not normalized away. The live
+corpus at `73c4220c5` retains five `body_limit` differences (indices 0, 2,
+3, 4 and 5), all the added `Connection: close` header on a 413; response
+statuses and bodies match, and all six body-limit probes complete.
+
+**MCP-TOKENLESS-GUARD:** the Host/Origin helper exists inside the transport,
+but the production tokenless mount still returns 501 before reaching it.
+This slice does not enable tokenless MCP or claim live rebinding parity.
+**MCP-BOUND-IDENTITY:** authenticated binding remains deferred: W2-F's
+board context service is present in this batch but is not wired into the MCP
+mount's durable bank/principal authorization. Python refuses mismatched `X-PL-Bank`/`X-PL-Principal`
+before MCP handling; Rust still serves `initialize`, `tools/list` and
+`memory_toolset` for those requests. Toolset changes use the resolved
+bearer/writer tier key; no bank tool body is enabled by this deferral. W2-F's
+context must be wired before its or other bank tool bodies are registered.
+
+| Item | Python | Rust | Owner |
+|---|---|---|---|
+| MCP-LIVE-SESSIONS | Python 2.1.1 retains a live transport for every session-less request until DELETE | the live session map is likewise unbounded; terminated history alone is capped at 10,000 | resource-lifetime parity; future bounded admission needs an explicit policy |
+| MCP-HTTP1-ONLY | the current daemon listener serves HTTP/1 | the Rust listener enables Axum's `http1` feature only; SSE uses `Connection: keep-alive`, which must be removed before any HTTP/2 listener is enabled | HTTP/2 transport deferred |
+| MCP-SEALED-REQUEST-STATE | `tools/call`, `prompts/get` and `resources/read` unseal a non-null `requestState` before validation/dispatch; a valid server-minted token may resume a multi-round exchange | this slice never mints round-trip state and refuses every non-null token with -32602 `Invalid or expired requestState`, before readiness or tier changes; null remains absent | multi-round state issuance and authenticated unsealing are deferred with the unserved tool bodies; untrusted tokens cannot invoke a body |
+| MCP-REQUEST-CANCELLATION | `notifications/cancelled` cancels the matching in-flight response; a legacy response stream settles with -32800 | cancellation notifications receive 202 but are discarded; any matching request still in flight later emits its ordinary response. Currently `memory_toolset` blocked by a backpressured GET notification stream exposes this window | W2-G follow-up: add per-session request tracking and response cancellation separately from disconnect-surviving write bodies; no bank tool body is enabled here |
+| Argument binding for tools other than `memory_toolset` (`unknown_parameter`, pydantic type, enum, length and range refusals, the string-to-list pre-parse, `_non_blank`, `_check_as_of`) | refused before the body runs | not yet: every unserved tool answers the stub whatever its arguments | W2-G (next PR) |
+| The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`) | served | only the no-envelope refusal (400, -32602) | W2-G (follow-up); the shims and doctor use the handshake era, but README documents direct `--transport http` clients |
+| `X-PL-Bank` / `X-PL-Principal` binding on `/mcp` (`bound_identity`, `enforce_bound_identity` against the board context) | checked before forwarding; a mismatch is a coordination error | forwarded unchecked; `initialize`, `tools/list` and `memory_toolset` still answer | W2-F supplies the check, W2-G calls it |
+| A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) |
+| Terminated session ids | kept for the process lifetime (404 "has been terminated") | the latest 10,000; older ones answer 404 "Session not found" | bounded memory |
+| `Last-Event-ID` on GET (replay) | the SDK's replay path with no event store | ignored | non-canonical |
+| JSON-RPC message validation: batches, non-object messages, ids that are not integers or strings | pydantic union validation | 400 -32602 with a fixed message (the text after `Validation error: ` is free) | non-canonical |
+| Duplicate `X-PL-Writer` / `X-PL-Session` headers | the SDK request context's header mapping | the first value | non-canonical |
 
 ## Startup and configuration
 
@@ -72,7 +169,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 |---|---|---|
 | Noncanonical static drive-relative requests and lexical escapes through linked roots | captured oracle observations | `lexical-outside-root`: 403 before filesystem access, exact refusal headers/body; shipped Console asset paths are unchanged |
 | Windows nonempty dot/space-only segments except `.` and `..`, including `. ` and all-space segments | captured path-dependent refusal/fallback observations | `parent-space-refusal`: exact 403 before filesystem access; outside the shipped asset URLs |
-| HTTP-BODY-LIMITS: cap enforced at frame granularity | uvicorn sends the selected early response immediately, keeps the connection alive when permitted and discards unread body data after the response | Rust waits for bounded cleanup before replying (up to 250 ms; early Expect refusals skip polling), then sends Connection: close whenever cleanup was needed, including complete drains; polling stops at the route budget or failure, with one in-flight frame and Hyper's final drop poll able to overshoot; a slow in-cap body can exceed the deliberate deadline |
+| HTTP-BODY-LIMITS: cap enforced at frame granularity | uvicorn sends the selected early response immediately, keeps the connection alive when permitted and discards unread body data after the response | Rust waits for bounded cleanup before replying (up to 250 ms; early Expect refusals skip polling), then sends Connection: close whenever REST/hook cleanup was needed, including complete drains; MCP preserves fully drained in-budget connections as described above; polling stops at the route budget or failure, with one in-flight frame and Hyper's final drop poll able to overshoot; a slow in-cap body can exceed the deliberate deadline |
 | Malformed or non-object SessionEnd bodies | becomes an empty object and returns 200 `{ok:true}` with no writes | deliberately returns 400 `invalid_json`: never acknowledge a close that did not happen; non-object SessionEnd bodies also use `invalid_json`, while other REST routes use `body_must_be_object`; empty bodies and valid objects retain their handling. The four HTTP-BODY-LIMITS scenarios now contain 132 live/golden cases, including 16 invalid SessionEnd probes. |
 | Noncanonical JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels); a truthy SessionEnd ID may enter its mutation handler | REST and SessionEnd return 400 `invalid_json`, preserving the native strict JSON domain; the HTTP-BODY-LIMITS corpus includes fixed/chunked `{"session_id": NaN}` probes whose Python replies are 200 `{ok:true}` with unchanged disposable bank state; outside shipped canonical SessionEnd producers |
 | Static types for extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` for unknown extensions; the shipped vendor Markdown notice uses its platform type |
