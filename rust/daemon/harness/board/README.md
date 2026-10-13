@@ -10,7 +10,8 @@ cd rust/daemon/harness
 python -m board.run live    --rust-bin PATH [--only NAME ...] [--out FILE] [--record]
 python -m board.run golden  --rust-bin PATH [--only NAME ...]
 python -m board.run mutants --rust-bin PATH_BUILT_WITH_--features_mutants
-python -m pytest board/test_norm.py
+python -m pytest board/test_norm.py board/test_run.py
+python -m board.boundary
 ```
 
 Per step it compares the status, the headers clients read (`content-type`,
@@ -62,3 +63,9 @@ They are not admitted as portable checked-in expectations: the capture lacks
 the elapsed input schedule needed to reproduce its activity decisions. A
 local `--record` run writes fresh recordings to `board/goldens/`; recording
 is separate from proving replay parity.
+
+`board.boundary` creates and removes one owned disposable bank on loopback
+port 5434, then explicitly runs the otherwise ignored Cargo regression: a
+registered, attached agent must heartbeat while full initialization holds the
+service mutex after publishing storage. The normal Cargo suite also covers a
+PostgreSQL server that accepts TCP but never completes authentication.

@@ -8,7 +8,7 @@
 use super::canon::float_value;
 use super::error::{BoardError, Result};
 use serde_json::{Map, Value, json};
-use tokio_postgres::{Client, NoTls, Row};
+use tokio_postgres::{Client, Row};
 
 /// Finish a transaction on the dedicated board client, independently of the
 /// writer's global recovery marker. The driver rolls back on drop (including
@@ -40,12 +40,12 @@ impl Conn {
             .dsn
             .parse()
             .map_err(|e: tokio_postgres::Error| BoardError::Internal(e.to_string()))?;
-        let mut config = config;
-        config.connect_timeout(std::time::Duration::from_secs(10));
-        let (client, connection) = config.connect(NoTls).await?;
-        tokio::spawn(async move {
-            let _ = connection.await;
-        });
+        // Bound authentication/startup as well as the TCP connection. The
+        // shared connector creates a fresh session; no board write is retried.
+        let (client, _connection) =
+            crate::storage::connect(&config, std::time::Duration::from_secs(10))
+                .await
+                .map_err(BoardError::Internal)?;
         client
             .batch_execute("SET lock_timeout = '5s'; SET search_path TO public")
             .await?;

@@ -1,6 +1,7 @@
 use super::*;
 use crate::txn::tests::{completion, query, startup, terminal_error};
 use tokio::net::TcpListener;
+use tokio_postgres::NoTls;
 
 #[tokio::test]
 async fn aborted_board_transaction_cannot_report_success() {
@@ -176,4 +177,30 @@ async fn board_commit_is_independent_of_the_writer_adapter() {
     driver.abort();
     writer_driver.abort();
     writer_server.abort();
+}
+
+#[tokio::test]
+async fn board_startup_handshake_has_a_deadline() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (_stream, _) = listener.accept().await.unwrap();
+        // Accept TCP but never finish PostgreSQL authentication.
+        std::future::pending::<()>().await;
+    });
+    let dsn = format!(
+        "host=127.0.0.1 port={} user=fixture sslmode=disable",
+        address.port()
+    );
+    let mut conn = Conn::new(dsn);
+    let result = tokio::time::timeout(std::time::Duration::from_secs(12), conn.client()).await;
+    server.abort();
+    assert!(
+        result.is_ok(),
+        "board startup exceeded its ten-second connection deadline"
+    );
+    assert!(
+        result.unwrap().is_err(),
+        "unfinished authentication cannot return a usable client"
+    );
 }

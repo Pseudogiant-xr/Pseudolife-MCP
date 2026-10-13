@@ -167,6 +167,11 @@ impl Service {
 
     /// `_ensure_tier(full=False)` for the board, without embedding or hydration.
     pub async fn storage_tier(&self) -> Result<Arc<Storage>, String> {
+        // Embedding and hydration keep inner locked after storage is usable.
+        // Heartbeats and mailbox calls must not wait for that unrelated tier.
+        if let Some(storage) = self.snapshot().storage {
+            return Ok(storage);
+        }
         let mut inner = self.inner.lock().await;
         self.ensure_storage(&mut inner).await
     }
@@ -489,6 +494,94 @@ mod tests {
         let inner = service.inner.lock().await;
         assert_eq!(inner.failures, 1);
         assert!(inner.storage.is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a disposable board database through board.boundary"]
+    async fn board_heartbeat_during_paused_initialization() {
+        let dsn =
+            std::env::var("PL_W2F_BOARD_DSN").expect("board.boundary supplies the disposable DSN");
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|n| n.starts_with("pl_cf_w2f_"))
+        );
+        assert_eq!(parsed.get_ports(), &[5434]);
+        assert!(
+            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(h)] if h == "127.0.0.1")
+        );
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::new(),
+            dsn.clone(),
+            true,
+        ));
+        let board = crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn,
+            service.clone(),
+            Arc::new(crate::auth::PrincipalStore::new()),
+        );
+        let params = |v: Value| v.as_object().unwrap().clone();
+        let mut headers = std::collections::HashMap::new();
+        let registered = board
+            .dispatch(
+                "register",
+                params(json!({"label": "codex"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        headers.insert(
+            "x-pl-agent".into(),
+            registered["agent_id"].as_str().unwrap().into(),
+        );
+        headers.insert(
+            "x-pl-agent-key".into(),
+            registered["credential"].as_str().unwrap().into(),
+        );
+        let attached = board
+            .dispatch(
+                "attach",
+                params(json!({"attachment_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        // Initialization owns this same mutex throughout embedding and hydration,
+        // after ensure_storage has published the usable storage snapshot.
+        let initializing = service.inner.lock().await;
+        let heartbeat = tokio::time::timeout(
+            Duration::from_secs(2),
+            board.dispatch(
+                "heartbeat",
+                params(json!({"attachment_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "generation": attached["generation"], "active": true})),
+                &headers,
+                "default",
+            ),
+        )
+        .await;
+        drop(initializing);
+        let result = heartbeat
+            .expect("heartbeat waited behind full service initialization")
+            .unwrap();
+        assert_eq!(result["agent_id"], registered["agent_id"]);
+        assert!(
+            result["lease_until"].as_f64().unwrap() >= attached["lease_until"].as_f64().unwrap()
+        );
+        drop(board);
+        let storage = service.inner.lock().await.storage.take().unwrap();
+        service.update(|s| s.storage = None);
+        Arc::try_unwrap(storage)
+            .ok()
+            .expect("storage released")
+            .close()
+            .await;
     }
 
     #[test]
