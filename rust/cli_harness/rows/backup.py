@@ -1,9 +1,8 @@
 """CLI-BACKUP-DSN: ``pseudolife-mcp backup`` (explicit DSN and file mode).
 
-Canonical argv: ``backup [--data-dir P] [--out P] [--keep-days N]`` with
-space-separated values, each option at most once, P a canonical path
-(``str(Path(P)) == P``, no ``..``) and N a plain decimal of at least a
-minute; plus ``--help`` at COLUMNS=80. The bank is the explicit
+Argparse argv: ``backup [--data-dir P] [--out P] [--keep-days N]`` with
+inline or separate values, repeated and abbreviated options, pathlib path
+spellings and Python floats; help follows COLUMNS. The bank is the explicit
 ``PSEUDOLIFE_MCP_DATABASE_URL``; without one, a data dir holding no embedded
 bank is archived in file mode. Every case that would need the lite tier's
 embedded instance defers (Rust tests cover the deferrals; this row compares
@@ -13,7 +12,7 @@ Contract per arm: exit code, both streams byte-exact (the timestamp in the
 two new file names is normalized against the arm's own clock window), every
 file under the home, the state archive read back member by member (name,
 type, mode, uid, gid, mtime, size, link target, content hash; uname and gname
-on Windows), the dump decompressed (pg_dump's per-run ``\\restrict`` key
+validated against NSS on Linux, empty on Windows), the dump decompressed (pg_dump's per-run ``\\restrict`` key
 normalized only when the ``\\restrict`` and ``\\unrestrict`` keys agree),
 and the source bank unchanged. Container bytes (tar header layout, gzip
 headers, compression) are free.
@@ -128,6 +127,14 @@ def tree(root_rel: str = "bank", old_backups: bool = True, bdir_rel: str | None 
     return setup
 
 
+def working_directory(setup, relative):
+    def prepare(arm):
+        setup(arm)
+        arm.cwd = arm.home / relative
+        arm.cwd.mkdir(parents=True, exist_ok=True)
+    return prepare
+
+
 def with_pg0(inner=None):
     """Hard-link the real bundled pg_dump into the arm home's ~/.pg0."""
     def setup(arm):
@@ -150,6 +157,20 @@ def with_symlink(arm):
     link = arm.home / "bank" / "link"
     os.symlink("config.yaml", link)
     os.utime(link, (FIXED, FIXED), follow_symlinks=False)
+
+
+def discovery_denied(*, metadata_error: bool):
+    def setup(arm):
+        tree(old_backups=False)(arm)
+        installation = arm.home / ".pg0" / "installation"
+        installation.mkdir(parents=True)
+        os.chmod(installation.parent if metadata_error else installation, 0)
+    return setup
+
+
+def restore_pg0_permissions(arm, _obs):
+    for path in [arm.home / ".pg0", arm.home / ".pg0" / "installation"]:
+        os.chmod(path, 0o700)
 
 
 def drop_pg0(arm, _obs):
@@ -239,6 +260,20 @@ def _stamp(data: bytes, window: list[float]) -> bytes:
                    if _in_window(m.group(2), window) else m.group(0), data)
 
 
+def _owner_name(identifier: int, actual: str, *, group: bool) -> str:
+    # Names depend on the host's NSS database; validate them before replacing
+    # them with a portable token in observations and recorded goldens.
+    import grp
+    import pwd
+    try:
+        expected = grp.getgrgid(identifier).gr_name if group else pwd.getpwuid(identifier).pw_name
+    except KeyError:
+        expected = ""
+    if actual != expected:
+        raise ValueError(f"tar owner name does not match NSS for numeric id {identifier}")
+    return "<gid-name>" if group and expected else "<uid-name>" if expected else ""
+
+
 def _tar_view(data: bytes) -> bytes:
     members = []
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
@@ -247,8 +282,8 @@ def _tar_view(data: bytes) -> bytes:
             members.append({
                 "name": member.name, "type": member.type.decode(), "mode": oct(member.mode),
                 "uid": member.uid, "gid": member.gid,
-                "uname": member.uname if WINDOWS else "<free>",
-                "gname": member.gname if WINDOWS else "<free>",
+                "uname": member.uname if WINDOWS else _owner_name(member.uid, member.uname, group=False),
+                "gname": member.gname if WINDOWS else _owner_name(member.gid, member.gname, group=True),
                 "mtime": repr(member.mtime), "size": member.size,
                 "linkname": member.linkname, "devmajor": member.devmajor, "devminor": member.devminor, "sha256": hashlib.sha256(content).hexdigest(),
             })
@@ -313,6 +348,27 @@ def backup_stdout_closed(obs: dict) -> None:
         obs["stderr"] = base64.b64encode(_SHUTDOWN_FLUSH.sub(b"", stderr)).decode()
 
 
+# Python's unhandled discovery OSError includes interpreter frames. Keep the
+# final exception line exact; discard only a complete preceding frame block.
+_DISCOVERY_TRACEBACK = re.compile(
+    rb'\ATraceback \(most recent call last\):\r?\n'
+    rb'(?:  File "[^\r\n]+", line [0-9]+, in [^\r\n]+\r?\n'
+    rb'(?:    [^\r\n]*\r?\n)*)+'
+    rb'(?P<error>(?:BlockingIOError|ChildProcessError|BrokenPipeError|ConnectionAbortedError|'
+    rb'ConnectionRefusedError|ConnectionResetError|FileExistsError|FileNotFoundError|InterruptedError|'
+    rb'IsADirectoryError|NotADirectoryError|PermissionError|ProcessLookupError|TimeoutError|OSError): '
+    rb'\[(?:Errno|WinError) [0-9]+\] [^\r\n]+\r?\n)\Z')
+
+
+@normalize.rule("backup-discovery-traceback")
+def discovery_traceback(obs: dict) -> None:
+    if obs["exit"] == 1:
+        stderr = base64.b64decode(obs["stderr"])
+        match = _DISCOVERY_TRACEBACK.fullmatch(stderr)
+        if match:
+            obs["stderr"] = base64.b64encode(match["error"]).decode()
+
+
 # ---------------------------------------------------------------- cases
 
 RULES = ("backup-files",)
@@ -341,6 +397,50 @@ def cases() -> list[Case]:
     no_pg_dump = {"PATH": f"{{HOME}}{sep}no-bin"}
     return [
         Case("help", ["backup", "--help"]),
+        *[Case(f"help-stdout-closed-{flag.lstrip('-')}", ["backup", flag],
+               stdout_closed=True, rules=("python-stdout-closed-trailer",))
+          for flag in ["--help", "-h"]],
+        *[Case(f"help-columns-{width}", ["backup", "-h"], env={"COLUMNS": str(width)})
+          for width in (20, 40, 60, 100, 120, "1_00", "１００", "999999999999999999999999999999")],
+        Case("help-columns-malformed-multiple-signs", ["backup", "--help"],
+             env={"COLUMNS": "++" + "9" * 4301}),
+        Case("file-mode-argparse-equals-repeat-abbrev",
+             ["backup", "--data-dir=absent", f"--data={{HOME}}{sep}bank", "--keep=+1e1", "--keep-days=.5"],
+             setup=tree(), rules=RULES),
+        Case("file-mode-parent-paths",
+             ["backup", "--data-dir", f"{{HOME}}{sep}bank{sep}notes-ü{sep}..",
+              "--out", f"{{HOME}}{sep}bank{sep}empty{sep}..{sep}backups"],
+             setup=tree(), rules=RULES),
+        Case("file-mode-pathlib-spelling",
+             ["backup", "--data-dir", f"{{HOME}}{sep}bank{sep}.{sep}", "--keep-days", "1_0"],
+             setup=tree(), rules=RULES),
+        *[Case(f"argparse-{label}", ["backup", *argv]) for label, argv in [
+            ("missing-value", ["--out"]), ("unknown", ["--unknown"]),
+            ("option-space-value", ["--keep-days", "--out=two words"]),
+            ("invalid-float", ["--keep=oops"]), ("help-inline-error", ["--help=value"]),
+            ("help-after-unknown", ["--unknown", "-h"]),
+            ("help-short-tail", ["-hx"]), ("help-short-cluster", ["-hh"]),
+            ("help-short-cluster-tail", ["-hhx"]), ("help-short-equals", ["-h=hh"]),
+            ("help-short-unknown-equals", ["-hx=foo"]),
+            ("help-short-cluster-equals", ["-hh=foo"]),
+            ("help-short-option-tail", ["-h-h"]),
+            ("negative-exponent-value", ["--keep-days", "-1e3"]),
+        ]],
+        *[Case(f"file-mode-keep-{label}", ["backup", *data, f"--keep-days={value}"],
+               setup=tree(), rules=RULES) for label, value in [
+            ("negative", "-1"), ("nan", "nan"),
+            ("infinity", "Infinity"), ("unicode", "١_٠.٥"),
+        ]],
+        Case("argparse-keep-zero", ["backup", "--keep-days=0", "--help"]),
+        # Windows clock ticks make independently created archives at zero
+        # retention nondeterministic. The named CI exception records the
+        # reference measurement; native boundary/API proofs cover retention.
+        Case("file-mode-keep-zero", ["backup", *data, "--keep-days=0"],
+             setup=tree(), platforms=("linux",), rules=RULES),
+        *[Case(f"argparse-negative-{label}",
+               ["backup", "--data-dir", "absent-fixture", "--keep-days", value])
+          for label, value in [("newline", "-1\n"), ("unicode-newline", "-١\n"),
+                               ("newer-unicode", "-\U0001e4f0")]],
         Case("member-kinds-roundtrip", ["backup", *data], setup=member_kinds,
              after=restore_members, rules=RULES + ("backup-restoration",)),
         Case("raw-rotation-names", ["backup", *data], setup=raw_rotation,
@@ -352,6 +452,10 @@ def cases() -> list[Case]:
              env={"PSEUDOLIFE_MCP_DATA_DIR": f"{{HOME}}{sep}bank"},
              setup=tree(), rules=RULES),
         Case("file-mode-cwd-data", ["backup"], setup=tree("cwd/data"), rules=RULES),
+        Case("file-mode-data-dir-dot", ["backup", "--data-dir", "."],
+             setup=working_directory(tree(), "bank"), rules=RULES),
+        Case("file-mode-out-dot", ["backup", *data, "--out", "."],
+             setup=working_directory(tree(bdir_rel="elsewhere"), "elsewhere"), rules=RULES),
         Case("file-mode-out-absolute-keep-half-day",
              ["backup", *data, "--out", f"{{HOME}}{sep}elsewhere", "--keep-days", "0.5"],
              setup=tree(bdir_rel="elsewhere"), rules=RULES),
@@ -366,6 +470,12 @@ def cases() -> list[Case]:
              setup=lambda arm: (arm.home / "bank").mkdir(), rules=RULES),
         Case("file-mode-stdout-closed", ["backup", *data], setup=tree(), stdout_closed=True,
              rules=RULES + ("backup-stdout-closed",)),
+        *[Case(f"discovery-permission-{kind}", ["backup", *data],
+               env={"PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://unused", **no_pg_dump},
+               setup=discovery_denied(metadata_error=kind == "metadata"),
+               after=restore_pg0_permissions, platforms=("linux",), programs=("pg_dump",),
+               rules=("backup-discovery-traceback",))
+          for kind in ("metadata", "read-dir")],
         # DSN cases look pg_dump up (the home's ~/.pg0 bundle, then PATH):
         # core's preflight proves PATH finds none outside the home, except
         # in dsn-path, which runs this host's bundled pg_dump from its PATH.
@@ -427,6 +537,30 @@ MUTANTS = [
            "    } else {\n        120\n    })",
            "    } else {\n        0\n    })",
            ("file-mode-stdout-closed",)),
+    Mutant("backup-argparse-repeat-first-wins", "backup", B + "args.rs",
+           '"--data-dir" => args.data_dir = Some(pathlib(Path::new(value))),',
+           '"--data-dir" => { if args.data_dir.is_none() { args.data_dir = Some(pathlib(Path::new(value))); } },',
+           ("file-mode-argparse-equals-repeat-abbrev",)),
+    Mutant("backup-help-ignores-columns", "backup", B + "args.rs",
+           'pub(super) fn width() -> usize {\n    std::env::var("COLUMNS")',
+           'pub(super) fn width() -> usize {\n    std::env::var("IGNORED_COLUMNS")',
+           ("help-columns-40",)),
+    Mutant("backup-help-closed-exit-1", "backup", B + "mod.rs",
+           'return Some(if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                120',
+           'return Some(if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                1',
+           ("help-stdout-closed-help", "help-stdout-closed-h")),
+    Mutant("backup-dot-join-keeps-prefix", "backup", B + "args.rs",
+           '    pathlib(&base.join(name))', '    base.join(name)',
+           ("file-mode-data-dir-dot", "file-mode-out-dot")),
+    Mutant("backup-discovery-generic-errno-class", "backup", B + "dump.rs",
+           '        if number == code {\n            return class;',
+           '        if number == code {\n            let _ = class;\n            return "OSError";',
+           ("discovery-permission-metadata", "discovery-permission-read-dir"),
+           platforms=("linux",)),
+    Mutant("backup-owner-name-windows", "backup", B + "archive.rs",
+           '        let _ = (uid, gid);\n        Ok((Vec::new(), Vec::new()))',
+           '        let _ = (uid, gid);\n        Ok((b"unexpected-owner".to_vec(), Vec::new()))',
+           ("file-mode",), platforms=("windows",)),
 ]
 if WINDOWS:
     MUTANTS += [
