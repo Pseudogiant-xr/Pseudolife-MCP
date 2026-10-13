@@ -9,8 +9,13 @@ use tokio_postgres::Client;
 #[cfg(test)]
 pub const DIM: usize = 1024;
 
+#[derive(Default)]
 pub struct Entry {
     pub id: i64,
+    #[allow(dead_code)]
+    pub seq: u64,
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub cues: std::sync::OnceLock<(bool, bool)>,
     pub embedding: Vec<f32>,
     pub band: String,
     /// The band column as read, before seating.
@@ -44,6 +49,24 @@ pub struct Bank {
 }
 
 impl Bank {
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub fn push(&mut self, entry: Entry, row: &[f32]) {
+        debug_assert_eq!(row.len(), self.dim);
+        self.entries.push(entry);
+        self.matrix.extend_from_slice(row);
+    }
+
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub fn remove(&mut self, idx: usize) -> Entry {
+        self.matrix.drain(idx * self.dim..(idx + 1) * self.dim);
+        self.entries.remove(idx)
+    }
+
+    #[cfg_attr(not(feature = "harness"), allow(dead_code))]
+    pub fn row(&self, idx: usize) -> &[f32] {
+        &self.matrix[idx * self.dim..(idx + 1) * self.dim]
+    }
+
     #[allow(dead_code)] // The startup harness observes the storage-row shape.
     pub fn entries_dump(&self) -> Value {
         let mut entries: Vec<&Entry> = self.entries.iter().collect();
@@ -160,6 +183,8 @@ async fn hydrate_locked(
             .parse::<f64>()?;
         entries.push(Entry {
             id: r.get(0),
+            seq: crate::episodes::next_seq(),
+            cues: std::sync::OnceLock::new(),
             embedding: original_embedding,
             stored_band: r.get(1),
             // Hydration seats a row whose band left the preset in the first
@@ -399,6 +424,11 @@ fn seating_plan(
     (seats, moves)
 }
 
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+pub fn normalize_query(v: &mut [f32]) {
+    normalize(v);
+}
+
 #[cfg(test)]
 mod startup_tests {
     use super::*;
@@ -426,6 +456,7 @@ mod startup_tests {
             slots: vec![],
             authority: None,
             distortion_tolerance: None,
+            ..Default::default()
         }
     }
 

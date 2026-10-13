@@ -24,6 +24,7 @@ RUST_CHECKS = (
     "Prepare selected package metadata for the Rust identity contract",
     "Install pinned nextest in the runner temporary directory",
     "Check formatting", "Check all targets", "Clippy", "Nextest",
+    "Check write-path harness targets",
     "Check all targets without default features", "Clippy without default features",
     "Nextest without default features",
     "Daemon override build configurations",
@@ -197,6 +198,9 @@ def check_w1c_shards(jobs):
 
 def check_executable_coverage(jobs):
     rust = {step.get("name"): step for step in jobs["rust"]["steps"]}
+    require_command(commands(rust["Check write-path harness targets"]["run"]),
+                    ("cargo", "check"), ("--locked", "--all-targets", "-p",
+                                         "pseudolife-daemon", "--features", "harness,mutants"))
     require_command(commands(rust["Check generated daemon schema"]["run"]),
                     ("python", "rust/daemon/harness/gen_schema_sql.py"), ("--check",))
     assert rust["Check generated daemon schema"]["working-directory"] == "."
@@ -653,6 +657,8 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Run unchanged candidates and differential judges", "& $oraclePython -c $judgeBootstrap", "# & $oraclePython -c $judgeBootstrap"),
     ("Run every eval harness test", "evals/rust_baseline", ""),
     ("Clippy", "--all-targets", ""),
+    ("Check write-path harness targets", "harness,mutants", "mutants"),
+    ("Check write-path harness targets", "--all-targets", ""),
     ("Nextest without default features", "--no-default-features", ""),
     ("Nextest without default features", "--no-default-features", "--no-default-features --features codex-delivery"),
     ("Nextest", "cargo nextest run", "cargo --version #"),

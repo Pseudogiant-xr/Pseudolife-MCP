@@ -23,6 +23,8 @@ contract-harness = []
 # Store differential driver; never enabled in the serving release binary.
 principal-harness = []
 graph-harness = []
+# Harness-only access to write tool bodies.
+harness = []
 
 [[bin]]
 name = "dream-contract"
@@ -31,6 +33,7 @@ required-features = ["contract-harness"]
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio-util.workspace = true
 tokio-postgres = { workspace = true, features = ["with-serde_json-1", "with-chrono-0_4"] }
 serde_json.workspace = true
 serde.workspace = true
@@ -43,6 +46,9 @@ getrandom = "=0.3.4"
 percent-encoding.workspace = true
 regex.workspace = true
 yaml-rust2.workspace = true
+uuid.workspace = true
+unicode-casefold.workspace = true
+fancy-regex = "=0.14.0"
 # Crate-local pins: the versions the 2026-10-09 contract-first spike was proven with.
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
 anyhow = "=1.0.104"

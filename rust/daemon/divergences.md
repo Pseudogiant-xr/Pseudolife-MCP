@@ -61,8 +61,8 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Non-canonical startup metadata | Python coercions can accept arbitrary numeric spellings or non-string identities | supports shipped producer shapes; malformed durable HLC pairs refuse, and unbounded integers or Python-only identity/timestamp coercions remain deferred | W2-D/E for producer evolution |
 | Reconnect after a lost session | heals on next use, rechecks the lease epoch | none: a lost writer session is not replaced | W2-E (write path) |
 | Writer-session probe per call (`verify_writer_session`) | probes at most once a second | none | W2-E |
-| Session reaper integration | closes idle sessions, derives generic titles and preserves resumable roots | reaping, cascade close, deferred-empty sweep and tombstone hydration implemented; generic auto-title and write/resume integration pending | W2-E (episodes) / W3-I |
-| Autosave and exit persistence | changed-state save through resident writer stores | owned scheduling and exit callback implemented; callback has no mutable state to save in the current reader | W2-E (durability) |
+| Session reaper integration | closes idle sessions, derives generic titles and preserves resumable roots | reaping, cascade close, deferred-empty sweep, tombstone hydration and store/resume integration implemented; generic auto-title pending | W2-E (episodes) / W3-I |
+| Autosave and exit persistence | changed-state save through resident writer stores | owned scheduling and exit callback implemented; admitted stores drain before exit, but counters and tensor weights are not saved | W2-E (durability) |
 | Canonical-store compaction | removes selected resident records, marks slots dirty and rewrites their rows | selection policy implemented and checked against Python goldens; resident-store mutation and slot sync await the writer | W2-E / W3-I |
 | Automatic dream and graph sweep stages | backlog/quiescence gate, extraction, analyzer and graph review ticks | session-end trigger interface is a declared no-op; sweep currently runs maintenance only | W3-H |
 | `application_name` fallback | derived from argv | `pseudolife-mcp pid=<pid> pseudolife-daemon serve` | free (not persisted) |
@@ -136,3 +136,53 @@ and the CLI cleans up the template at exit. `w2d-portable-goldens` remains a
 named W2-D follow-up for committed CI fixtures; recording a candidate response,
 replacing an expected value or widening normalization is not a remedy. Local
 same-template oracle recording/replay is separate evidence, not CI coverage.
+
+## Write path (W2-E)
+
+`memory_store` (spec W1, W2). Each row names the pull request expected to
+close it, or why it stays.
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `memory.cortex.auto_promote: true` | slot-shaped facts promoted into the cortex on every store | the client receives successful store admission with `cortex_promoted: 0`, but no cortex rows are written; the configuration is not refused | W2-E cortex PR (needs the cortex write path) |
+| Presets with more than one band (`continuum` and aliases, multi-band `custom`) | store lands in `bands[0]`, the promotion walk moves entries down the chain, and eviction relocates to the next band | store lands in `bands[0]`; no promotion walk; every eviction is a true drop | the opt-in presets; flat is the default since 2026-08-15 |
+| `custom` band `retention_policy` other than `balanced` | its own eviction score | scored as `balanced` | same |
+| Entry insert fails after eviction | the entry stays resident (served until restart) and the error propagates | the entry is not kept; the error propagates | failure path only; keeps bank and table aligned |
+| `surprise_history`, `interaction_count` | written to `weights.pt` by autosave | resident only | W2-E autosave PR |
+| Per-call `_ensure_init` passes: writer-session probe, rehydrate after a changed lease, correction / reinstatement / curation / lesson-synthesis recovery | run before every store | not run | writer-session probe and reconnect: W2-E; recovery passes belong to the curation and dream slices |
+| Unicode newer than 14.0 in the label, meta-filter and slot regexes | Python 3.11 tables (Unicode 14.0) | the `regex` crate's tables (Unicode 16.0) | identical for every code point assigned by Unicode 14.0 (full scan) |
+| Non-ASCII decimal digits in a generic session title | `\d` matches them | ASCII digits only | titles are `strftime` output or caller text |
+| MCP argument binding and the error envelope | FastMCP / pydantic | not in this slice; the harness reaches the body through a feature-gated route | W2-G |
+| `entries.embedding`, `entries.surprise` | torch fp32 | ONNX Runtime fp32 | compared within measured tolerances (`harness/goldens/w2e-tolerance.json`); an admission decision or reason must never differ |
+
+### W2-E first increment boundaries
+
+Stores and background reaping now use one episode log, touch map, deferred-root
+map and tombstone map under `Ready.write`. Startup constructs that owner from
+the validated startup candidate; no second episode cache is published. This
+closes the preparation's cache-ownership gap without adding another database
+connection or changing the leased writer boundary.
+
+Admitted store tasks are tracked independently of disconnected callers and
+drained before the background exit callback. This completes their write-through
+database operations; it does not implement tensor-state persistence.
+
+The remaining write work is deliberately split into subsequent increments:
+
+| Item | Remaining behavior | Owner / reason |
+|---|---|---|
+| Canonical writes | Fact set, HLC ticking, contenders, supersession, set-valued slots and world facts remain unimplemented; slot extraction here is a pure text operation, not a canonical write | W2-E cortex increment; scalar and set history require their own response and post-state proof |
+| Outcomes and lessons | Outcome attribution, lesson updates and their persistence remain unimplemented | W2-E outcomes increment |
+| Episode APIs and titles | Standalone episode operations, session-title tools and automatic content titles on idle close remain unimplemented; store-driven open/resume and empty-root reaping share state | W2-E episode increment; content titles also rewrite entry stamps |
+| Autosave and clean-exit flush | Background scheduling exists, but changed-state saving and exit flush remain no-ops; store rows write through, while counters, surprise history and band weights do not survive restart via `weights.pt` | W2-E persistence increment; the Python tensor format and recovery contract need a separate proof |
+| Resident cortex refresh | No canonical write path updates resident canonical stores; auto-promotion stays disabled in this increment | W2-E cortex increment, coordinated with W2-D read-store ownership |
+| Frozen store catalog snapshots | Original store recordings predate the catalog instrument's `column_types`, owner/comment and sequence-bound representations; replay retains and reports initialization differences | Historical recordings are retained unchanged; live Python comparison is the current-source proof, not a waiver of frozen replay differences |
+| New reaper recording's startup state | The live fixture inherits Python-seeded relation timestamps, curation metadata and dream acknowledgement state; a fresh Rust-only replay does not reproduce that seed state | W3-H startup/dream integration; the new recording is retained unchanged and its replay differences are reported separately from the matching live reaper behavior |
+| Unicode runtime | Label, meta-filter and slot regexes retain the existing Unicode-14 assigned-character contract; newer assigned characters may follow Rust's newer tables | Explicitly retained runtime substitution; no comparator or frozen expectation is weakened |
+| Malformed hydrated slot rows | Python may raise while unpacking a malformed persisted slot; Rust ignores the entire entry's structured-slot comparison if any row is not four strings, then retains the text/negation paths | W2-E retained substitution for corrupt or noncanonical persisted data; `malformed_rows_and_superseded_entries` pins it, and canonical producers emit four-string rows |
+| Shutdown deadline | Admitted stores drain without a timeout; a store stuck on an unresponsive PostgreSQL connection can block graceful exit indefinitely | W2-E lifecycle follow-up; a deadline and cancellation recovery need proof that eviction and subsequent insert cannot be torn apart |
+| Exact-duplicate boundary | The fixed-order Rust dot product and Python BLAS reduction are not proven identical at the exact `1.0` duplicate threshold; a numerically near-boundary value may change the rejection reason | W2-E numeric-boundary follow-up; measured vector tolerances do not waive exact admission/reason equality |
+| Hosted write-path execution | Both CI operating systems compile the `harness,mutants` feature combination, but the W2-E live, shutdown, full-docs slot corpus and store replay/control runs remain local evidence | W2-E harness follow-up; hosted parity needs the real-model oracle fixture and explicit handling of the reported frozen startup differences, without suppressing them |
+
+The WRITE-CMS, WRITE-CORTEX and CONTRADICTION parity rows remain deferred;
+this increment does not claim the complete write boundary or cutover readiness.

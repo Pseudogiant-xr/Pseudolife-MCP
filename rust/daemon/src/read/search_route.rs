@@ -252,7 +252,8 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
     let (entries_out, served_comps, params_json, direct_scores) =
         tokio::task::spawn_blocking(move || {
             let qv = embed_cache::encode_query(&r2.embedder, &params.query, cache_size)?;
-            let bank = r2.bank.as_ref();
+            let bank_guard = r2.bank.read().expect("bank lock");
+            let bank = &*bank_guard;
             let ranked = search::rank(bank, &qv, &params, Some(LazyReranker::get()));
             let direct_scores: Vec<f64> = ranked.hits.iter().map(|h| h.score).collect();
             // (index, score, via, components) with contiguity neighbours placed

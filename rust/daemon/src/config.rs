@@ -43,6 +43,9 @@ pub struct MemoryConfig {
     pub preset: String,
     pub bands: Vec<String>,
     pub band_specs: Vec<StartupBandSpec>,
+    pub surprise_threshold: f64,
+    pub meta_filter_enabled: bool,
+    pub cortex_auto_promote: bool,
     pub retention_boost: f64,
     pub search: SearchConfig,
     pub bm25: Bm25Config,
@@ -389,6 +392,9 @@ impl Default for MemoryConfig {
                 retention_policy: "balanced".into(),
             }],
             retention_boost: 1.0,
+            surprise_threshold: 0.0,
+            meta_filter_enabled: false,
+            cortex_auto_promote: false,
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
@@ -1243,6 +1249,18 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         if let Some(traces) = section(m, "traces", "memory.")? {
             memory.traces_enabled = want_bool(traces, "enabled", "memory.traces", true)?;
             memory.retention_boost = want_float(traces, "retention_boost", "memory.traces", 1.0)?;
+        }
+        // Write-path overlay: these leaves change only when explicitly set.
+        if user_set("memory.surprise_threshold") {
+            memory.surprise_threshold = want_float(m, "surprise_threshold", p, 0.0)?;
+        }
+        if user_set("memory.meta_filter.enabled")
+            && let Some(Node::Map(mf)) = lookup(m, "meta_filter")
+        {
+            memory.meta_filter_enabled = want_bool(mf, "enabled", "memory.meta_filter", true)?;
+        }
+        if let Some(c) = section(m, "cortex", "memory.")? {
+            memory.cortex_auto_promote = want_bool(c, "auto_promote", "memory.cortex", false)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
         section(m, "reference", "memory.")?;

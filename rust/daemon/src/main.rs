@@ -8,14 +8,21 @@ mod background;
 mod background_sessions;
 mod bank;
 mod config;
+mod contradiction;
 mod dream;
 mod embed;
 mod embedding_math;
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+mod episodes;
 mod graph_read;
+#[cfg(feature = "harness")]
+mod harness_route;
 mod health;
 mod heap_trim;
 mod http;
+mod labels;
 mod maintenance;
+mod meta_filter;
 mod mutants;
 mod onnx_artifacts;
 mod onnx_runtime;
@@ -28,9 +35,12 @@ mod release_check;
 mod routes;
 mod search;
 mod service;
+mod slots;
 mod startup;
 mod static_files;
 mod storage;
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+mod store;
 mod stores;
 mod txn;
 
@@ -252,6 +262,9 @@ fn main() {
                 1
             }
         };
+        // HTTP admission has stopped. Detached stores must finish before
+        // background shutdown performs the final persistence callback.
+        service.writes.drain().await;
         background.shutdown(service.as_ref()).await;
         code
     });

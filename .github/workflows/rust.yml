@@ -78,7 +78,7 @@ jobs:
         run: |
           python -m pip install pytest pyyaml "psycopg[binary]" psutil
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py -k 'not committed_census_matches_current_tree'
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py -k 'not committed_census_matches_current_tree'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
@@ -130,6 +130,10 @@ jobs:
         run: cargo check --locked --all-targets -j 4
       - name: Clippy
         run: cargo clippy --locked --all-targets -j 4 -- -D warnings
+      - name: Check write-path harness targets
+        # 2026-10-13: cold Linux dev-profile check took 54 s; allow about 2x.
+        timeout-minutes: 2
+        run: cargo check --locked --all-targets -p pseudolife-daemon --features harness,mutants -j 4
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
       - name: Check all targets without default features

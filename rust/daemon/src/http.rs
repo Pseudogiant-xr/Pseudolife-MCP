@@ -291,7 +291,7 @@ fn method_not_allowed() -> Response {
     json_response(405, &json!({"error": "method_not_allowed"}))
 }
 
-struct RequestBody {
+pub(crate) struct RequestBody {
     inner: Body,
     received: usize,
     frames: usize,
@@ -363,7 +363,7 @@ async fn finish_unread_body(
 }
 
 /// `_read_body(receive, max_bytes)`: None when over the limit.
-async fn read_body(body: &mut RequestBody, limit: usize) -> Option<Vec<u8>> {
+pub(crate) async fn read_body(body: &mut RequestBody, limit: usize) -> Option<Vec<u8>> {
     let limit = if crate::mutants::active("body-limit-inclusive") {
         limit.saturating_sub(1)
     } else {
@@ -703,6 +703,10 @@ async fn api(
     }
     if method == "POST" && OPERATOR_POST_PATHS.contains(&path) && stored {
         return json_response(403, &json!({"error": "operator_principal_required"}));
+    }
+    #[cfg(feature = "harness")]
+    if method == "POST" && path.starts_with("/api/_harness/tool/") {
+        return crate::harness_route::call(app, path, h, body).await;
     }
     let params = parse_query(raw_query);
     let coordination_path = path.starts_with("/api/coordination/");

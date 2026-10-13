@@ -22,10 +22,11 @@ pub struct Ready {
     #[allow(dead_code)]
     pub storage: Arc<Storage>,
     pub embedder: Arc<Embedder>,
-    pub bank: Arc<Bank>,
-    /// Lock order: Service.inner, then sessions, then the storage writer.
-    /// A holder of a later lock must never acquire an earlier one.
-    pub sessions: tokio::sync::Mutex<crate::background_sessions::Sessions>,
+    pub bank: Arc<std::sync::RwLock<Bank>>,
+    /// Lock order: Service.inner, then write, then the storage writer.
+    /// Stores and background reaping share this episode state and lock.
+    pub write: tokio::sync::Mutex<crate::episodes::WriteState>,
+    pub writes: crate::store::WriteTasks,
     /// Complete durable startup inputs for the read/write slices.
     #[allow(dead_code)] // W2-D/E adopt these inputs when their stores land.
     pub startup: Arc<StartupState>,
@@ -52,6 +53,7 @@ struct Inner {
 }
 
 pub struct Service {
+    pub writes: crate::store::WriteTasks,
     pub session_dream: Arc<dyn crate::background_sessions::SessionDream>,
     pub release_check: Arc<crate::release_check::ReleaseCheck>,
     pub config: Config,
@@ -80,6 +82,7 @@ impl Service {
             .and_then(|v| v.parse().ok())
             .unwrap_or(4);
         Service {
+            writes: crate::store::WriteTasks::default(),
             session_dream: Arc::new(crate::background_sessions::DeferredSessionDream),
             release_check: Arc::new(crate::release_check::ReleaseCheck::default()),
             config,
@@ -226,16 +229,14 @@ impl Service {
                 embedder.embedding_dim(),
             )
             .await?;
-            let sessions = crate::background_sessions::Sessions::hydrate(storage.client())
-                .await
-                .map_err(anyhow::Error::msg)?;
+            let write = crate::episodes::from_startup(&startup)?;
             let cortex =
                 crate::stores::cortex::hydrate(storage.client(), embedder.embedding_dim()).await?;
-            Ok::<_, anyhow::Error>((bank, startup, sessions, cortex))
+            Ok::<_, anyhow::Error>((bank, startup, write, cortex))
         }
         .await;
         match candidate {
-            Ok((bank, startup, sessions, cortex)) => {
+            Ok((bank, startup, write, cortex)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -246,8 +247,9 @@ impl Service {
                 let ready = Arc::new(Ready {
                     storage,
                     embedder,
-                    bank: Arc::new(bank),
-                    sessions: tokio::sync::Mutex::new(sessions),
+                    bank: Arc::new(std::sync::RwLock::new(bank)),
+                    write: tokio::sync::Mutex::new(write),
+                    writes: self.writes.clone(),
                     startup: Arc::new(startup),
                     cortex: Arc::new(cortex),
                 });
@@ -402,9 +404,12 @@ impl crate::background::Duties for Service {
             let ready = self.ensure_init_inner().await?;
             // All session mutation is serialized with service operations.
             let _service_lock = self.inner.lock().await;
-            let mut sessions = ready.sessions.lock().await;
+            let mut write = ready.write.lock().await;
+            let sessions = &mut write.log;
             let entries: Vec<_> = ready
                 .bank
+                .read()
+                .unwrap()
                 .entries
                 .iter()
                 .filter_map(|e| {
@@ -443,7 +448,7 @@ impl crate::background::Duties for Service {
                 },
             );
             sessions.persist_reap(ready.storage.client(), &result).await;
-            drop(sessions);
+            drop(write);
             drop(_service_lock);
             if let Some(error) = result.failure {
                 return Err(error);
@@ -542,7 +547,7 @@ mod tests {
             );
         }
         fn retained(ready: &Ready) -> Value {
-            json!({"startup": ready.startup.dump(), "entries": ready.bank.entries_dump()})
+            json!({"startup": ready.startup.dump(), "entries": ready.bank.read().expect("bank lock").entries_dump()})
         }
         let first = service.ensure_init().await;
         let first_ready = service.inner.lock().await.ready.clone();
@@ -602,7 +607,7 @@ mod tests {
                         })
                     });
                     json!({"ok": true, "startup": ready.startup.dump(),
-                           "entries": ready.bank.entries_dump(), "same_as_first": same})
+                           "entries": ready.bank.read().expect("bank lock").entries_dump(), "same_as_first": same})
                 }
                 Err(error) => json!({"ok": false, "error": error,
                     "retained": service.inner.lock().await.ready.as_deref().map(retained),

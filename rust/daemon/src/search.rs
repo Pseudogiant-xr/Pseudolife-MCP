@@ -930,6 +930,7 @@ mod tests {
             slots: vec![],
             authority: None,
             distortion_tolerance: None,
+            ..Default::default()
         }
     }
 
