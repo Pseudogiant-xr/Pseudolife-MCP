@@ -551,14 +551,15 @@ def run_op(op: dict, port: int, mcp: Mcp | None, dsn: str, rust: bool) -> dict |
     return mcp.call(op["name"], args, headers)
 
 
-def prepare_template(scn: dict, tag: str, root: Path) -> str:
+def prepare_template(scn: dict, tag: str, root: Path, owned: list[str]) -> str:
     template = pg.name(f"pl_cf_w2e_{tag}_t")
+    owned.append(template)
     dsn = pg.create(template)
     home = daemons.make_home(root, f"{tag}-seed", scn.get("config"))
     d = daemons.python_daemon(home, daemons.free_port(),
                               daemons.base_env(home, side_env(scn, dsn, scn.get("seed_env"))))
-    d.start(300)
     try:
+        d.start(300)
         w1a.wait_settled([d.port], token=TOKEN)
         mcp = Mcp(d.port)
         mcp.init()
@@ -573,13 +574,24 @@ def prepare_template(scn: dict, tag: str, root: Path) -> str:
 
 def run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
                  tol: dict, mutant: str | None = None) -> dict:
+    owned = []
+    try:
+        return _run_scenario(name, binary, root, mode, record, tol, mutant, owned)
+    finally:
+        for database in reversed(owned):
+            pg.drop(database)
+
+
+def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
+                  tol: dict, mutant: str | None, owned: list[str]) -> dict:
     scn = SCENARIOS[name]
     tag = name.replace("-", "_")
     if mode == "golden":
-        return run_golden(name, binary, root, tol)
-    template = prepare_template(scn, tag, root)
+        return run_golden(name, binary, root, tol, owned)
+    template = prepare_template(scn, tag, root, owned)
     dbs = {side: pg.name(f"pl_cf_w2e_{tag}_{suffix}")
            for side, suffix in (("python", "py"), ("rust", "rs"))}
+    owned.extend(dbs.values())
     dsns = {k: pg.create(v, template=template) for k, v in dbs.items()}
     before = {k: dbstate.dump(dsn) for k, dsn in dsns.items()}
     procs = {}
@@ -618,8 +630,6 @@ def run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
     finally:
         for d in procs.values():
             d.stop()
-    for n in [template, *dbs.values()]:
-        pg.drop(n)
     result = {"scenario": name, "mutant": mutant, "steps": steps, "stats": stats}
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
@@ -673,7 +683,7 @@ def unpack_numeric(packed: dict, into: dict) -> dict:
     return into
 
 
-def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
+def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str]) -> dict:
     """Replay a recorded scenario against the Rust daemon alone, from a bank
     its own constructor builds. Seeded scenarios need the Python daemon to
     seed and are skipped (declared)."""
@@ -684,6 +694,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
     golden = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
     tag = name.replace("-", "_")
     db = pg.name(f"pl_cf_w2e_{tag}_rs")
+    owned.append(db)
     dsn = pg.create(db)
     before = dbstate.dump(dsn)
     home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
@@ -712,7 +723,6 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict) -> dict:
             steps.append(row)
     finally:
         d.stop()
-        pg.drop(db)
     return {"scenario": name, "steps": steps, "stats": stats}
 
 
@@ -724,6 +734,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path)
     ap.add_argument("--record", action="store_true")
     args = ap.parse_args()
+    args.rust_bin = args.rust_bin.resolve()
     root = daemons.scratch_root() / "w2e"
     root.mkdir(parents=True, exist_ok=True)
     names = args.only or list(SCENARIOS)

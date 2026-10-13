@@ -24,17 +24,20 @@ def main() -> int:
     parser.add_argument("--rust-bin", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
+    args.rust_bin = args.rust_bin.resolve()
     root = h.daemons.scratch_root() / "w2e-shutdown"
     root.mkdir(parents=True, exist_ok=True)
     scenario = {"config": "memory:\n  dream:\n    enabled: false\n  retrieval_log:\n    enabled: false\n", "seed": []}
     procs = {}
+    owned = []
     results = {}
     text = ("A disconnected store must finish before daemon shutdown. " * 160).strip()
     call_args = {"text": text, "source": "fixture"}
     try:
-        template = h.prepare_template(scenario, "shutdown", root)
+        template = h.prepare_template(scenario, "shutdown", root, owned)
         for side in ("python", "rust"):
             name = h.pg.name(f"pl_cf_w2e_shutdown_{side}")
+            owned.append(name)
             dsn = h.pg.create(name, template=template)
             before = h.dbstate.dump(dsn)
             home = h.daemons.make_home(root, side, scenario["config"])
@@ -106,7 +109,7 @@ run_daemon()
     finally:
         for daemon in procs.values():
             daemon.stop()
-        for name in list(h.pg.NAMES.labels):
+        for name in reversed(owned):
             h.pg.drop(name)
 
 

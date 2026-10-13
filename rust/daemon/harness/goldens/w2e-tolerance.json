@@ -1,5 +1,5 @@
 {
- "measured": "2026-10-09, harness/w2e.py calibrate on playground-1 (Linux, Ryzen 7 5800X3D): torch 2.14.1 fp32 CPU (Python oracle, master 28c1f23c) vs ONNX Runtime 1.24.3 fp32 (Rust); 4 scenarios, 64 steps, 47 stored entries compared by id",
+ "measured": "2026-10-09, harness/w2e.py calibrate on a Linux dev box (Ryzen 7 5800X3D): torch 2.14.1 fp32 CPU (Python oracle, master 28c1f23c) vs ONNX Runtime 1.24.3 fp32 (Rust); 4 scenarios, 64 steps, 47 stored entries compared by id",
  "observed": {"embedding_max_abs_diff": 7.0e-07, "embedding_min_cosine": 0.9999999999927013, "surprise_abs": 1.43e-06},
  "rule": "each threshold is about ten times the observed gap; an admission decision or reason that differs is a diff regardless",
  "embedding_max_abs_diff": 1e-05,
