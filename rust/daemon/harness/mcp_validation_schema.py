@@ -11,13 +11,25 @@ import json
 from pathlib import Path
 
 from mcp.types import methods
+from pydantic.json_schema import GenerateJsonSchema
 
 VERSIONS = ('2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25')
 SERVED = ('initialize', 'ping', 'tools/list', 'tools/call', 'prompts/list',
           'prompts/get', 'resources/list', 'resources/templates/list', 'resources/read')
 DOCUMENTATION = {'title', 'description', 'default', 'examples', 'deprecated'}
 KEYWORDS = {'type', '$ref', 'anyOf', 'properties', 'required', 'additionalProperties',
-            'items', 'enum', 'const', 'minimum', 'maximum', 'minLength', 'maxLength', 'format'}
+            'items', 'enum', 'const', 'minimum', 'maximum', 'minLength', 'maxLength', 'format',
+            'x-allowed-schemes'}
+
+
+class ValidationSchema(GenerateJsonSchema):
+    """Preserve URL constraints omitted from the standard JSON Schema projection."""
+
+    def url_schema(self, schema):
+        result = super().url_schema(schema)
+        if "allowed_schemes" in schema:
+            result["x-allowed-schemes"] = schema["allowed_schemes"]
+        return result
 
 
 def compact(schema):
@@ -41,7 +53,7 @@ def compact(schema):
 def collect(models):
     definitions, params = {}, {}
     for method, model in sorted(models.items()):
-        schema = model.model_json_schema(by_alias=True)
+        schema = model.model_json_schema(by_alias=True, schema_generator=ValidationSchema)
         for name, definition in schema.get('$defs', {}).items():
             value = compact(definition)
             assert name not in definitions or definitions[name] == value, name

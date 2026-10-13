@@ -72,3 +72,15 @@ def test_untrusted_state_does_not_mask_other_generated_fields():
         if (case['method'] in table['sealed_state_methods']
                 and '.requestState' not in case['field']):
             assert case['params'].get('requestState') is None, case['field']
+
+
+def test_generated_table_preserves_core_url_constraints():
+    from mcp.types import Root
+    from pydantic import ValidationError
+    table = schema.generate()
+    uri = table['handlers']['definitions']['Root']['properties']['uri']
+    assert uri['x-allowed-schemes'] == ['file']
+    assert corpus.sample(uri, {}) == 'file:///fixture'
+    Root(uri=corpus.sample(uri, {}))
+    with pytest.raises(ValidationError):
+        Root(uri='https://example.test/resource')

@@ -151,7 +151,16 @@ fn valid(schema: &Value, value: &Value, defs: &Value) -> bool {
                     .and_then(Value::as_u64)
                     .is_none_or(|max| len <= max)
                 && (schema.get("format").and_then(Value::as_str) != Some("uri")
-                    || reqwest::Url::parse(s).is_ok())
+                    || reqwest::Url::parse(s).is_ok_and(|url| {
+                        schema
+                            .get("x-allowed-schemes")
+                            .and_then(Value::as_array)
+                            .is_none_or(|schemes| {
+                                schemes
+                                    .iter()
+                                    .any(|scheme| scheme.as_str() == Some(url.scheme()))
+                            })
+                    }))
         }),
         Some("array") => value.as_array().is_some_and(|items| {
             schema
@@ -189,4 +198,24 @@ fn valid(schema: &Value, value: &Value, defs: &Value) -> bool {
             .get("maximum")
             .and_then(Value::as_f64)
             .is_none_or(|max| number(value).is_some_and(|n| n <= max))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn sdk_file_urls_refuse_other_schemes() {
+        for method in ["prompts/get", "tools/call"] {
+            for (uri, expected) in [
+                ("file:///fixture", true),
+                ("https://example.test/resource", false),
+            ] {
+                let params = json!({"name":"memory_toolset", "arguments":{},
+                    "inputResponses":{"fixture":{"roots":[{"uri":uri}]}}});
+                assert_eq!(request(method, &params, true), expected, "{method}: {uri}");
+            }
+        }
+    }
 }

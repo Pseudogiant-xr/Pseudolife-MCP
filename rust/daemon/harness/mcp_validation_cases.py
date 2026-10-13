@@ -34,7 +34,10 @@ def sample(schema, defs):
     if kind == 'array':
         return [sample(schema.get('items', {}), defs)]
     if kind == 'string':
-        return 'https://example.test/resource' if schema.get('format') == 'uri' else 'fixture'
+        if schema.get('format') == 'uri':
+            scheme = schema.get('x-allowed-schemes', ['https'])[0]
+            return 'file:///fixture' if scheme == 'file' else scheme + '://example.test/resource'
+        return 'fixture'
     if kind in ('integer', 'number'):
         return schema.get('minimum', 1)
     if kind == 'boolean':
@@ -50,6 +53,9 @@ def variants(schema, defs, base=None, path=()):
     yield path, base
     for value in VALUES:
         yield path, value
+    if schema.get('format') == 'uri':
+        for value in ('file:///fixture', 'https://example.test/resource', 'fixture:opaque'):
+            yield path, value
     if 'enum' in schema:
         for value in schema['enum']:
             yield path, value
