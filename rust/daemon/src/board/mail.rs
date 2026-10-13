@@ -946,7 +946,7 @@ impl Store {
             .await?;
         }
         append(&tx, events, now, None).await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         let agents = recipients
             .into_iter()
             .map(|r| (r.agent_id.clone(), r))
@@ -1108,7 +1108,7 @@ impl Store {
                 })
                 .collect();
             append(&tx, events, now, None).await?;
-            tx.commit().await?;
+            super::db::commit(tx).await?;
         }
         let messages: Vec<Value> = rows
             .iter()
@@ -1256,7 +1256,7 @@ impl Store {
             })
             .collect();
         append(&tx, events, now, None).await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         let receipts: Vec<Value> = ids
             .iter()
             .filter_map(|id| found.get(id).map(|m| Value::Object(receipt(m))))
@@ -1337,7 +1337,7 @@ impl Store {
             )
             .await?;
         }
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(Value::Object(receipt(&row)))
     }
 
@@ -1500,7 +1500,7 @@ impl Store {
         let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
             params.iter().map(|b| b.as_ref() as _).collect();
         let rows = tx.query(&sql, &refs).await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         let has_more = rows.len() as i64 > limit;
         let rows: Vec<&tokio_postgres::Row> = rows.iter().take(limit as usize).collect();
         let mut messages = Vec::new();
@@ -1737,7 +1737,7 @@ impl Store {
             }
         }
         append(&tx, events, now, head).await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(
             json!({"bodies_expired": expired.len(), "removed": removed.len(),
                   "agents_removed": agents.len(), "audit_removed": audit_removed}),

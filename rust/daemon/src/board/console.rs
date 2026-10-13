@@ -108,7 +108,7 @@ impl Store {
                 &[&principal],
             )
             .await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         let events: Vec<Value> = rows
             .iter()
             .take(100)

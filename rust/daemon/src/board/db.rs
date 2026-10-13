@@ -10,6 +10,21 @@ use super::error::{BoardError, Result};
 use serde_json::{Map, Value, json};
 use tokio_postgres::{Client, NoTls, Row};
 
+/// Finish a transaction on the dedicated board client, independently of the
+/// writer's global recovery marker. The driver rolls back on drop (including
+/// cancellation), so the next operation cannot commit an abandoned body.
+/// PostgreSQL silently turns COMMIT of an aborted block into ROLLBACK; probe
+/// first so a swallowed statement failure cannot be reported as success.
+pub async fn commit(tx: tokio_postgres::Transaction<'_>) -> Result<()> {
+    tx.batch_execute("SELECT 1").await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "db_tests.rs"]
+mod tests;
+
 pub struct Conn {
     dsn: String,
     client: Option<Client>,

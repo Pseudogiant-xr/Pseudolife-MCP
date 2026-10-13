@@ -93,8 +93,9 @@ The spike runs the ONNX export that the prerequisite receipt verified
 
 What the Rust daemon reproduces exactly from the Python board: the
 `/api/coordination/<action>` surface, the store behind it, the audit chain,
-wake decisions, the async receive hub, the four board hooks and the pairing
-write. References are to `pseudolife_memory/` at master `28c1f23c`
+wake decisions, the async receive hub and the four board hooks. The pairing
+write below is the target contract; its HTTP integration remains the named
+W2F-PAIRING-HTTP cutover blocker in `divergences.md`. References are to `pseudolife_memory/` at master `28c1f23c`
 (`co` = `coordination.py`, `sc` = `storage/coordination.py`, `api` =
 `web/api.py`, `hub` = `web/coordination.py`). W1-A's gate
 (`spec-w1a-foundation.md`, section R) runs first; this slice owns

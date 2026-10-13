@@ -86,3 +86,18 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
 | Colliding inverse provenance | base-set iteration can select different source relation names for the same inverse triple depending on hash seed | choose the lexicographically smallest asserted source relation; exact triple and valid provenance membership are checked, with smallest-source choice pinned | W3-H; declared deterministic choice; all other provenance exact |
 | Whole graph caps, communities, graph service/MCP wiring, fact projection, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | store and GraphStore read-model helpers; these services are not wired | W3-H, subsequent increments |
+
+## Coordination board completion (W2-F)
+
+| Name | Disposition and evidence | Remaining gate |
+|---|---|---|
+| W2F-MAIL-PACING | The original mail golden is retained unchanged in the completion evidence; the supplied recordings are not committed as portable expectations because they omit the elapsed input schedule. It was captured with two interleaved daemon arms and `active_seconds: 1`; standalone replay sends sooner. Both `wake.rs` and Python `CoordinationStore._wake_decision` compare `last_activity > now - active_seconds`. The initial completion baseline reproduces four response differences and 180 downstream state differences: project mail and replies remain `hinted/active` in Rust where the recording says `not_needed/no_park`, affecting delivery reads and audited payloads. This is an unsynchronized input-clock limitation, not permission to change wake semantics or ignore diffs. | Strict golden replay remains nonzero when the boundary differs. A future clock-controlled oracle capture must prove both sides of the activity boundary; no comparator, tolerance or recorded expectation is changed here. |
+| W2F-CONSOLE-STARTUP | Both implementations return `available: false, reason: not_initialized` before storage exists. Golden replay previously started after the first HTTP health response while only the live Python arm waited for warmup. The runner now waits for `db: ok` on both arms, and for Python's embedding warmup before the scenario; Console remains read-only and does not initialize the bank. | Runner regression covers both modes; the original Console recording is retained in the completion evidence. Cold-start Console behavior remains unchanged. |
+| W2F-PAIRING-HTTP | The authenticated valid-body `/api/pair` route remains a deliberate 501 refusal. The SQL redemption primitive exists, but the HTTP two-slot non-queueing gate, attempt refunds, disconnect ownership and immediate principal-cache publication are not integrated. Wiring only the SQL call would expose an incomplete credential-enrolment path. This slice retains the refusal rather than treating store-level coverage as endpoint coverage. | **Cutover blocker:** HTTP-SECURITY / CLI-PAIRING must cover success, same-token retry, conflicts, expiry/revocation, environment-name exclusion, saturation, failure budgets and cancellation before enabling BK4 at HTTP. |
+
+The board transaction boundary is independent of the shared writer adapter:
+`Board::conn` serializes the dedicated client, driver transactions roll back
+when dropped, and `board::db::commit` probes for an aborted block before
+reporting success. A failed connection is replaced only on the next call;
+no uncertain write is retried. This does not use the writer's global recovery
+marker, which belongs to a different PostgreSQL session.

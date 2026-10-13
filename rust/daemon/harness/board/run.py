@@ -261,17 +261,17 @@ def start(kind: str, scn: S.Scenario, binary: Path, root: Path, dsn: str, tag: s
     return d.start(240)
 
 
-def wait_ready(port: int, timeout: float = 600.0) -> None:
+def wait_ready(port: int, timeout: float = 600.0, *, require_embedder: bool = True) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             body = call(port, "GET", "/health", [], None, timeout=30).get("json") or {}
-            if "embedder" in body and "db" in body:
+            if body.get("db") == "ok" and (not require_embedder or "embedder" in body):
                 return
         except OSError:
             pass
         time.sleep(2)
-    raise RuntimeError("the Python oracle did not finish its warmup")
+    raise RuntimeError("the daemon did not reach the required readiness tier")
 
 
 def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
@@ -287,10 +287,11 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
             dsn = pg.create(names[side])
             procs[side] = start(side, scn, binary, root, dsn, tag)
             arms[side] = Arm(side, procs[side], dsn)
-        if "python" in procs:
-            # The oracle's warmup loads its embedder; a board call made
-            # during it waits on the service lock and skews every window.
-            wait_ready(procs["python"].port)
+        for side, proc in procs.items():
+            # Both arms need storage before read-only Console snapshots.
+            # Python also finishes embedding warmup, which holds its service
+            # lock; the Rust board intentionally needs only the storage tier.
+            wait_ready(proc.port, require_embedder=side == "python")
         recorded = {"responses": {}, "states": {}}
         for i, step in enumerate(scn.steps()):
             out = {side: arms[side].run(step) for side in sides}

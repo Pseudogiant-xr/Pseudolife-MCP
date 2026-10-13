@@ -536,7 +536,7 @@ impl Store {
         .await?;
         append(&tx, events, now, None).await?;
         let view = lease_view(&tx, &name, agent_id).await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(view)
     }
 
@@ -597,7 +597,7 @@ impl Store {
         )
         .await?;
         append(&tx, events, now, None).await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(result)
     }
 }
@@ -616,7 +616,7 @@ pub async fn list_leases(
         let mut events = Vec::new();
         settle_due(&tx, now, &mut events, name).await?;
         append(&tx, events, now, None).await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
     }
     lease_page(&*client, name, limit, now).await
 }

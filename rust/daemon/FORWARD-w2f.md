@@ -1,5 +1,9 @@
 # W2-F forward review checklist
 
+Historical forwarding evidence follows. Wave 2 completion decisions superseding
+the open handoff items are recorded under "Coordination board completion" in
+`divergences.md`; the board client now has its own checked commit boundary.
+
 The paused coordination-board port now contains master `4b34c81e` through a
 merge, preserving the original `decf25dc` history. The source branch remains
 unchanged; this work is local on `rust-cf/w2f-core-fwd` and is not published.

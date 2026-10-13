@@ -480,7 +480,7 @@ impl Store {
             mac.update(message.as_bytes());
             result["proof"] = json!(hex::encode(mac.finalize().into_bytes()));
         }
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(result)
     }
 
@@ -926,7 +926,7 @@ impl Store {
         let mut out = self
             .authenticate(&tx, principal, &agent_id, &credential)
             .await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         out["credential"] = json!(credential);
         Ok(out)
     }
@@ -1164,7 +1164,7 @@ impl Store {
         let out = self
             .authenticate(&tx, principal, agent_id, credential)
             .await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(out)
     }
 
@@ -1285,7 +1285,7 @@ impl Store {
         children.push(json!({"label": label, "since": float_value(now), "agent_id": child}));
         self.set_hook_children(&tx, &row, children, principal, now)
             .await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(json!({"recorded": true, "changed": true}))
     }
 
@@ -1316,7 +1316,7 @@ impl Store {
         }
         self.set_hook_children(&tx, &row, children, principal, now)
             .await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(json!({"recorded": true, "changed": true}))
     }
 
@@ -1361,7 +1361,7 @@ impl Store {
             let mut events = Vec::new();
             lease::settle_due(&tx, now, &mut events, None).await?;
             append(&tx, events, now, None).await?;
-            tx.commit().await?;
+            super::db::commit(tx).await?;
         }
         self.roster_read(&*client, agent_id, project, task, page)
             .await
@@ -1627,7 +1627,7 @@ impl Store {
             None,
         )
         .await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         let mut out = json!({"agent_id": agent_id, "generation": generation,
                              "lease_until": float_value(lease_until),
                              "ring_armed_until": Self::deadline_or_zero(&armed_until)});
@@ -1727,7 +1727,7 @@ impl Store {
         self.record_listener(&tx, &row, &armed_until).await?;
         let mailbox = mail::mailbox_state(&tx, agent_id).await?;
         let offer = wake::serve_wake(&tx, agent_id, now).await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         let mut out = json!({"agent_id": agent_id, "generation": generation,
                              "lease_until": float_value(until),
                              "ring_armed_until": Self::deadline_or_zero(&armed_until)});
@@ -1784,7 +1784,7 @@ impl Store {
             );
         }
         append(&tx, events, now(), None).await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(json!({"detached": true}))
     }
 
@@ -1892,7 +1892,7 @@ impl Store {
             None,
         )
         .await?;
-        tx.commit().await?;
+        super::db::commit(tx).await?;
         Ok(json!({"recorded": true, "rings": rings}))
     }
 }

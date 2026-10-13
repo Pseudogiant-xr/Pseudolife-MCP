@@ -46,5 +46,19 @@ on both arms identically (the audit log is hashed and stays as written).
 
 Linux runs go to the slice's lane box with its own test PostgreSQL on
 127.0.0.1:5434 (`PSEUDOLIFE_TEST_PG_HOST_PORT`, `PSEUDOLIFE_TEST_PG_LOGIN_FILE`);
-the Rust daemon needs no ONNX model for the board. The oracle must finish its
-warmup before the first step (the runner waits for it).
+the Rust daemon needs no ONNX model for the board. Both daemons must expose `db: ok` before the first step; the Python oracle
+also finishes embedding warmup (the runner waits for these tiers).
+
+
+The completion run uses the original supplied oracle recordings, preserved
+byte for byte outside version control (archive SHA-256
+`6cd2bf2fa9c44986289514379f7269d6f234211033e24eecc1db5a1e695f9c92`). The mail scenario's one-second activity window makes its standalone
+replay sensitive to elapsed time between calls; see `W2F-MAIL-PACING` in
+`../../divergences.md`. Replay reports those differences and exits nonzero;
+they are not normalized away. The live comparison and mutant controls remain
+separate evidence from this timing-limited recording.
+
+They are not admitted as portable checked-in expectations: the capture lacks
+the elapsed input schedule needed to reproduce its activity decisions. A
+local `--record` run writes fresh recordings to `board/goldens/`; recording
+is separate from proving replay parity.
