@@ -777,9 +777,9 @@ superseded-row compaction. Design doc:
 poisoning-amplifier path with a defense keyed on *who wrote*, never on
 what the text says (the MAFIA result in `SECURITY.md` closes the argument
 that content inspection can defend this path). When on, a **scalar** claim
-whose backing entry is agent-tier — its `source` maps to origin `agent` —
-and outside `memory.dream.trusted_sources` never takes `current`
-directly:
+whose backing entry is agent-tier — its `source` maps to origin `agent`,
+or it cites a user-stated note that fails the citation check — and outside
+`memory.dream.trusted_sources` never takes `current` directly:
 
 - it **parks** via the ordinary contender machinery (visible as
   `contested` in `memory_fact_get`, `quarantine:low_trust` in its

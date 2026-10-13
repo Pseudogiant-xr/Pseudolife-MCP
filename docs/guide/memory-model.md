@@ -44,7 +44,9 @@ slots](#set-valued-slots)), retrievable out of the context window.
   [Benchmarks](benchmarks.md)).
 - **Deliberate write / correction.** `memory_fact_set(entity, attribute,
   value, origin="user")` asserts a fact at higher confidence; setting a new
-  value at an existing slot supersedes the old (kept as audit history).
+  value at an existing slot supersedes the old (kept as audit history) when
+  the write's tier is equal to or stronger than the standing value's. A
+  weaker write parks as a contender instead (see "Provenance contenders").
 
 ### How current is this fact?
 
