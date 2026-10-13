@@ -1099,3 +1099,145 @@ def test_rollback_confirmation_via_member_op_restores_scalar_tier(rollback_svc):
     assert _confirmed_record(service, False)["origin"] == "user"
     assert service.dream_rollback()["reverted"] == 1
     assert _confirmed_record(service, False)["support"] == ["agent"]
+
+
+@pytest.mark.parametrize("member", [False, True])
+@pytest.mark.parametrize("same_run", [False, True])
+def test_rollback_restores_previous_tiers_and_dream_marks(
+        rollback_svc, pg_url, tmp_path, member, same_run):  # noqa: F811
+    service = rollback_svc
+    _dream_confirm(service, member=member, source="agent")
+    if not same_run:
+        _dream_confirm(service, member=member)
+    before = _confirmed_record(service, member)
+    claims = []
+    if same_run:
+        service.store("my preferred editor is vim", source="user")
+        claims.append(_claim("vim", op="add" if member else None))
+    service.store("my preferred editor is no longer vim" if member else
+                  "my preferred editor is nano", source="user")
+    claims.append(dict(_claim("vim" if member else "nano",
+                              op="remove" if member else None),
+                       source=int(same_run)))
+    run = service.dream_run(StubExtractor(claims))
+    assert run["member_removed" if member else "superseded"] == 1
+    if same_run:
+        assert run["member_confirmed" if member else "confirmed"] == 1
+    out = service.dream_rollback()
+    after = _confirmed_record(service, member)
+    assert after["value"] == before["value"]
+    assert after["support"] == before["support"]
+    assert {p for p in after["provenance"] if p.startswith("dream:")} == {
+        p for p in before["provenance"] if p.startswith("dream:")}
+    assert out["reverted"] == 1 + int(same_run) and out["partial"] == 0
+    assert [d["seq"] for d in out["details"]] == sorted(
+        (d["seq"] for d in out["details"]), reverse=True)
+    # Rollback must persist the restored marks without a separate flush.
+    service._storage.close()
+    fresh = MemoryService(data_dir=tmp_path / "reload", database_url=pg_url)
+    try:
+        restored = _confirmed_record(fresh, member)
+        assert restored["support"] == before["support"]
+        assert {p for p in restored["provenance"] if p.startswith("dream:")} == {
+            p for p in before["provenance"] if p.startswith("dream:")}
+        if member:
+            result = fresh.set_remove("editor-pref", "editor", "vim",
+                                      origin="user", dream=True)
+            assert result["action"] == "member_removed"
+        else:
+            result = fresh.cortex_write("editor-pref", "editor", "helix",
+                                        support="user", dream=True,
+                                        confidence=1.0)
+            assert result["action"] == "superseded"
+    finally:
+        fresh.flush()
+        fresh._storage.close()
+
+
+@pytest.mark.parametrize("member", [False, True])
+@pytest.mark.parametrize("direct_tier", ["user", "action"])
+@pytest.mark.parametrize("contender", [False, True])
+def test_rollback_restored_value_keeps_later_direct_support(
+        rollback_svc, member, direct_tier, contender):
+    service = rollback_svc
+    _dream_confirm(service, member=member, source="agent")
+    service.store("my preferred editor is vim", source="user")
+    service.store("my preferred editor is no longer vim" if member else
+                  "my preferred editor is nano", source="user")
+    service.dream_run(StubExtractor([
+        _claim("vim", op="add" if member else None),
+        dict(_claim("vim" if member else "nano",
+                    op="remove" if member else None), source=1)]))
+    if contender:
+        service.cortex_write("editor-pref", "editor", "vim",
+                             support=direct_tier, force_contend=True)
+    elif member:
+        service.set_add("editor-pref", "editor", "vim", origin=direct_tier)
+    else:
+        service.cortex_write("editor-pref", "editor", "vim",
+                             support=direct_tier, confidence=1.0)
+        if _confirmed_record(service, False)["value"] != "vim":
+            service.cortex_resolve("editor-pref", "editor", accept=True)
+    service.dream_rollback()
+    after = _confirmed_record(service, member)
+    assert "agent" in after["support"]
+    assert direct_tier in after["support"]
+    assert f"dream:{direct_tier}" not in after["provenance"]
+
+
+@pytest.mark.parametrize("source", ["agent", "user"])
+def test_rollback_reports_retained_conversion_on_member_confirmation(
+        rollback_svc, source):
+    service = rollback_svc
+    _dream_confirm(service, source="agent")
+    run = _dream_confirm(service, member=True, source=source)
+    assert run["member_confirmed"] == 1
+    journal = service._storage.dream_run_journal(run["run_id"])
+    assert journal[0]["prev_kind"] == "scalar"
+    out = service.dream_rollback()
+    assert out["partial"] == 1 and out["reverted"] == 0
+    assert out["details"][0]["outcome"] == "partial:set_retained"
+    assert _confirmed_record(service, True)["support"] == ["agent"]
+    assert service.cortex_lookup("editor-pref", "editor")["kind"] == "set"
+
+
+@pytest.mark.parametrize("member", [False, True])
+@pytest.mark.parametrize("compacted", [False, True])
+def test_rollback_previous_tiers_uses_newest_history_or_journal_fallback(
+        rollback_svc, member, compacted):
+    service = rollback_svc
+    _dream_confirm(service, member=member, source="agent")
+    # Archive an older vim with different support from the next vim.
+    if member:
+        service.set_remove("editor-pref", "editor", "vim")
+        service.set_add("editor-pref", "editor", "vim", origin="user",
+                        dream=True)
+        service.set_add("editor-pref", "editor", "vim", origin="action",
+                        dream=True)
+    else:
+        service.cortex_write("editor-pref", "editor", "nano", support="user",
+                             dream=True, confidence=1.0)
+        service.cortex_write("editor-pref", "editor", "vim", support="user",
+                             dream=True, confidence=1.0)
+        service.cortex_write("editor-pref", "editor", "vim", support="action",
+                             dream=True)
+    before = _confirmed_record(service, member)
+    assert before["support"] == ["action", "user"]
+    assert {"dream:action", "dream:user"} <= set(before["provenance"])
+    service.store("my preferred editor is no longer vim" if member else
+                  "my preferred editor is nano", source="user")
+    run = service.dream_run(StubExtractor([
+        _claim("vim" if member else "nano", op="remove" if member else None)]))
+    assert run["member_removed" if member else "superseded"] == 1
+    if compacted:
+        service.config.memory.compaction.keep_per_slot = 0
+        service.config.memory.compaction.min_age_days = 0.0
+        assert service.compact_superseded()["facts"] > 0
+        assert not [r for r in service._cortex.records_for("editor-pref", "editor")
+                    if r.status in ("superseded", "removed")]
+    out = service.dream_rollback()
+    after = _confirmed_record(service, member)
+    assert after["support"] == (["user"] if compacted else before["support"])
+    assert {p for p in after["provenance"] if p.startswith("dream:")} == (
+        set() if compacted else {"dream:action", "dream:user"})
+    assert out["reverted"] == 1 and out["partial"] == 0

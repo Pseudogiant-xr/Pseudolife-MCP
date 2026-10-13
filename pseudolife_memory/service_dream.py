@@ -2634,7 +2634,47 @@ class DreamOps:
                 return None
             return getattr(max(recs, key=lambda r: r.superseded_at or 0), attr)
 
+        def _prev_tiers(row: dict):
+            # Called under the lock, BEFORE the rewrite adds direct support.
+            # The journal has only the strongest tier; audit history retains
+            # the full set and the marks (removed rows for set members).
+            want = _norm_value(row["prev_value"] or "")
+            kind = "member" if row["prev_kind"] == "set" else "scalar"
+            recs = [r for r in self._cortex.records_for(
+                        row["entity"], row["attribute"])
+                    if (r.kind == kind or r.status == "contested")
+                    and _norm_value(r.value) == want]
+            prev = max((r for r in recs
+                        if r.status in ("superseded", "removed")),
+                       key=lambda r: r.superseded_at or 0, default=None)
+            if prev is None:
+                return None  # Compacted history: keep the journal fallback.
+            support = set(prev.support)
+            marks = {p for p in prev.provenance if p.startswith("dream:")}
+            # A direct reassertion since the run must not become dream-only
+            # or lose a tier when this reversal confirms that same value or
+            # settles its contender. Settlement does not carry assistant tier.
+            for rec in (r for r in recs if r.status in ("current", "contested")):
+                carried = (rec.support - {"assistant"}
+                           if rec.status == "contested" else rec.support)
+                direct = {t for t in support if f"dream:{t}" not in marks}
+                direct |= {t for t in carried
+                           if f"dream:{t}" not in rec.provenance}
+                support.update(carried)
+                marks.update(p for p in rec.provenance if p.startswith("dream:"))
+                marks.difference_update(f"dream:{t}" for t in direct)
+            return support, marks
+
+        def _restore_tiers(rec, tiers) -> None:
+            if tiers is not None:
+                rec.support = set(tiers[0])
+                rec.provenance = {p for p in rec.provenance
+                                  if not p.startswith("dream:")} | tiers[1]
+                self._cortex.dirty_slots.add(rec.key)
+
         def _rewrite_prev(row: dict) -> str:
+            with self._lock:
+                tiers = _prev_tiers(row)
             res = self.cortex_write(
                 row["entity"], row["attribute"], row["prev_value"],
                 confidence=float(row["prev_confidence"] or 0.55),
@@ -2644,18 +2684,16 @@ class DreamOps:
                 distortion_tolerance=_prev_label(row, "distortion_tolerance"))
             if res["action"] == "contested":
                 # Rollback is explicit authority: a low-confidence prev
-                # must still win the slot back (the same path resolve
-                # exists for).
+                # must still win the slot back (the resolve path).
                 self.cortex_resolve(row["entity"], row["attribute"],
                                     accept=True)
-            # track=False: this lookup verifies the rollback took — it is
-            # not a serve, and counting it would pollute the read signal.
-            cur = self.cortex_lookup(row["entity"], row["attribute"],
-                                     track=False)
-            if cur and _norm_value(cur.get("value", "")) == _norm_value(
-                    row["prev_value"]):
-                return "reverted"
-            return "partial:value_not_restored"
+            with self._lock:
+                # Store lookup does not count this verification as a serve.
+                cur = self._cortex.lookup(row["entity"], row["attribute"])
+                if cur and _norm_value(cur.value) == _norm_value(row["prev_value"]):
+                    _restore_tiers(cur, tiers)
+                    return "reverted"
+                return "partial:value_not_restored"
 
         def _restore_contender(row: dict) -> str | None:
             # A write that made a parked contender's value current settled
@@ -2694,15 +2732,18 @@ class DreamOps:
                 if rec is None or _norm_value(rec.value) != _norm_value(
                         row["prev_value"] or ""):
                     return "skipped:superseded_by_later"
+                retained_set = (row["action"] == "member_confirmed"
+                                and row["prev_kind"] == "scalar")
                 raised = {t for t in rec.support
                           if _TIER_RANK.get(t, 0) > _TIER_RANK[prior]
                           and f"dream:{t}" in rec.provenance}
                 if not raised:
-                    return "skipped:confirmed"
+                    return ("partial:set_retained" if retained_set
+                            else "skipped:confirmed")
                 rec.support.difference_update(raised)
                 rec.provenance.difference_update(f"dream:{t}" for t in raised)
                 self._cortex.dirty_slots.add(rec.key)
-                return "reverted"
+                return "partial:set_retained" if retained_set else "reverted"
 
         for row in reversed(journal):
             action = row["action"]
@@ -2781,11 +2822,20 @@ class DreamOps:
                                 outcome = "partial:set_retained"
                         restored = _restore_contender(row)
                     elif action == "member_removed":
+                        with self._lock:
+                            tiers = _prev_tiers(row)
                         res = self.set_add(
                             row["entity"], row["attribute"],
                             row["prev_value"],
                             confidence=float(row["prev_confidence"] or 0.55),
                             origin=row["prev_support"] or "agent")
+                        with self._lock:
+                            rec = next((m for m in self._cortex.members(
+                                row["entity"], row["attribute"])
+                                if _norm_value(m.value) == _norm_value(
+                                    row["prev_value"] or "")), None)
+                            if rec is not None:
+                                _restore_tiers(rec, tiers)
                         # Re-adding an assistant-origin member into a set
                         # that has since gained a stronger-tier member parks
                         # it as a contender instead (add_member's guard).

@@ -78,12 +78,15 @@
   human stated the change, or settle it with `memory_fact_resolve`.
 - The shipped extractor's parser drops a claim whose value is JSON `null`
   instead of storing the text `None`.
+- A dream rollback restores the previous value's full support set and dream
+  marks from its newest matching audit record, including removed members.
+  It preserves later direct support for the same value and removes a tier
+  the rolled-back run's confirmations raised only while it remains dream-only.
 - Known limits: a retraction skips the negation rule, so a note that affirms a
-  dream-consolidated member can still back a misread removal of it; and a
-  dream rollback restores the previous value as a direct write, so a
-  restored dream value is protected from later dream claims until it is
-  changed directly. Rollback also removes a tier the rolled-back run's
-  confirmations raised, unless a later direct write backed that tier;
-  confirmations without a journaled prior tier remain unchanged.
+  dream-consolidated member can still back a misread removal of it. If the
+  previous audit record is no longer available, rollback falls back to the
+  journal's strongest prior tier as a direct write. Confirmations without a
+  journaled prior tier remain unchanged. A member confirmation that converted
+  a scalar into a set leaves the set in place and reports a partial rollback.
 - Facts consolidated before this release keep their stored tier until
   restated; nothing is backfilled.
