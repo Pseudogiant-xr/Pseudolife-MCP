@@ -1,7 +1,7 @@
 """Run the MCP-surface harness end to end on disposable banks.
 
 usage: python mcp_run.py <rust-binary> <out-dir> [--mutant NAME --baseline <compare.json>]
-                         [--tokenless | --config2] [--record <golden.json>]
+                         [--tokenless | --config2] [--record <golden.json>] [--mount-probe]
 
 Creates pl_cf_w2g_py and pl_cf_w2g_rs through the test login, starts the
 Python oracle (from this checkout) and the Rust daemon on them with the
@@ -112,6 +112,17 @@ def main():
             seed_stored(py_dsn)
             seed_stored(rs_dsn)
             time.sleep(13)
+        if "--mount-probe" in args:
+            from run import Tokens, bearer, call, compare_case
+            case = next(c for c in Tokens().cases() if c["name"] == "mcp path, auth")
+            case["headers"] = [bearer(ENV["PSEUDOLIFE_MCP_TOKEN"])]
+            case["expected_status"] = 406
+            replies = [call(port, case["method"], case["path"], case["headers"], case["body"])
+                       for port in (py_port, rs_port)]
+            mount = compare_case(case, *replies)
+            (out / "foundation-mount.json").write_text(json.dumps(mount, indent=2) + "\n", encoding="utf-8")
+            if mount["diffs"]:
+                raise RuntimeError("authenticated foundation MCP mount differs")
         if record:
             cmd = [sys.executable, str(HERE / "mcp_compare.py"), "record", str(py_port), record]
         else:

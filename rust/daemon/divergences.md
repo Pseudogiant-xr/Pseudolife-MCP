@@ -98,15 +98,19 @@ but the production tokenless mount still returns 501 before reaching it.
 This slice does not enable tokenless MCP or claim live rebinding parity.
 **MCP-BOUND-IDENTITY:** authenticated binding remains deferred because the
 board context service and its durable bank/principal authorization are absent
-from this branch. Only `memory_toolset` executes, scoped to the resolved
+from this branch. Python refuses mismatched `X-PL-Bank`/`X-PL-Principal`
+before MCP handling; Rust still serves `initialize`, `tools/list` and
+`memory_toolset` for those requests. Toolset changes use the resolved
 bearer/writer tier key; no bank tool body is enabled by this deferral. W2-F's
 context must be wired before its or other bank tool bodies are registered.
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
+| MCP-LIVE-SESSIONS | Python 2.1.1 retains a live transport for every session-less request until DELETE | the live session map is likewise unbounded; terminated history alone is capped at 10,000 | resource-lifetime parity; future bounded admission needs an explicit policy |
+| MCP-HTTP1-ONLY | the current daemon listener serves HTTP/1 | the Rust listener enables Axum's `http1` feature only; SSE uses `Connection: keep-alive`, which must be removed before any HTTP/2 listener is enabled | HTTP/2 transport deferred |
 | Argument binding for tools other than `memory_toolset` (`unknown_parameter`, pydantic type, enum, length and range refusals, the string-to-list pre-parse, `_non_blank`, `_check_as_of`) | refused before the body runs | not yet: every unserved tool answers the stub whatever its arguments | W2-G (next PR) |
 | The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`) | served | only the no-envelope refusal (400, -32602) | W2-G (follow-up); the shims and doctor use the handshake era, but README documents direct `--transport http` clients |
-| `X-PL-Bank` / `X-PL-Principal` binding on `/mcp` (`bound_identity`, `enforce_bound_identity` against the board context) | checked before forwarding; a mismatch is a coordination error | forwarded unchecked; no served tool reads the binding yet | W2-F supplies the check, W2-G calls it |
+| `X-PL-Bank` / `X-PL-Principal` binding on `/mcp` (`bound_identity`, `enforce_bound_identity` against the board context) | checked before forwarding; a mismatch is a coordination error | forwarded unchecked; `initialize`, `tools/list` and `memory_toolset` still answer | W2-F supplies the check, W2-G calls it |
 | A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) |
 | Terminated session ids | kept for the process lifetime (404 "has been terminated") | the latest 10,000; older ones answer 404 "Session not found" | bounded memory |
 | `logging/setLevel`, `completion/complete` | -32602 for these params (capabilities do not advertise them) | -32601 `Method not found` | non-canonical |
