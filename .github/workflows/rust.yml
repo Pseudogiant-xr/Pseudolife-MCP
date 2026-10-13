@@ -87,7 +87,7 @@ jobs:
         run: python rust/ci/inventory.py
       - name: Board harness lifecycle and normalization
         working-directory: .
-        # Linux 2026-10-13: 13 tests in under one second; a one-minute
+        # Linux 2026-10-13: 21 tests in under one second; a one-minute
         # startup floor also covers the first hosted Windows measurement.
         timeout-minutes: 1
         run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py

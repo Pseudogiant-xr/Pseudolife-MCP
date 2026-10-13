@@ -22,6 +22,7 @@ Exit status: 0 only when no step, no state and no chain check differs.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import hashlib
 import http.client
 import json
@@ -282,10 +283,12 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
     golden = load_golden(scn.name) if mode == "golden" else None
     arms: dict[str, Arm] = {}
     rows, state_diffs, procs = [], [], {}
-    try:
+    with ExitStack() as cleanup:
         for side in sides:
+            cleanup.callback(pg.drop, names[side])
             dsn = pg.create(names[side])
             procs[side] = start(side, scn, binary, root, dsn, tag)
+            cleanup.callback(procs[side].stop)
             arms[side] = Arm(side, procs[side], dsn)
         for side, proc in procs.items():
             # Both arms need storage before read-only Console snapshots.
@@ -314,11 +317,6 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
                     state_diffs.append(f"after step {i} ({step.name}): {d}")
         chain = {side: chain_check(arms[side].dsn) for side in sides}
         creds = {side: credential_check(arms[side].responses, dump(arms[side].dsn)) for side in sides}
-    finally:
-        for d in procs.values():
-            d.stop()
-    for side in sides:
-        pg.drop(names[side])
     if record:
         save_golden(scn.name, recorded)
     problems = [f"{side} chain: {p}" for side, ps in chain.items() for p in ps]
@@ -381,12 +379,14 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=["live", "golden", "mutants"])
     ap.add_argument("--rust-bin", required=True, type=Path)
-    ap.add_argument("--only", nargs="*")
+    ap.add_argument("--only", nargs="+", choices=[*S.SCENARIOS, "mixed"])
     ap.add_argument("--out", type=Path)
     ap.add_argument("--record", action="store_true")
     args = ap.parse_args()
-    root = daemons.scratch_root()
     names = args.only or list(S.SCENARIOS) + ["mixed"]
+    if args.mode == "golden" and not any(n in S.SCENARIOS for n in names):
+        ap.error("golden mode requires at least one recorded scenario")
+    root = daemons.scratch_root()
 
     def one_pass(mode: str):
         results = [run_scenario(S.SCENARIOS[n](), args.rust_bin, root, mode, args.record)

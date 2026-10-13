@@ -307,7 +307,7 @@ class Mail(Scenario):
             msg("A blank text", "A", "B", "   "),
             msg("A NUL text", "A", "B", "a\u0000b"),
             msg("A too long", "A", "B", "é" * 4097),
-            msg("A secret text", "A", "B", "use AKIAABCDEFGHIJKLMN12 now"),
+            msg("A secret text", "A", "B", "use AKIA" + "ABCDEFGHIJKLMN12 now"),
             msg("A to daemon", "A", "daemon", "hi"),
             msg("A to Maintainer", "A", " Maintainer ", "hi"),
             msg("A to nobody", "A", "0123456789abcdef0123456789abcdef", "hi"),

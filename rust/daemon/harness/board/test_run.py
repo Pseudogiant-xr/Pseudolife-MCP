@@ -46,3 +46,49 @@ def test_readiness_requires_healthy_storage_and_the_requested_tier(
     monkeypatch.setattr(run.time, "sleep", lambda _: None)
     run.wait_ready(1, require_embedder=require_embedder)
     assert len(calls) == expected_calls
+
+
+@pytest.mark.parametrize("failure", ["readiness", "second_start", "stop"])
+def test_failed_scenarios_clean_up_every_owned_bank(monkeypatch, tmp_path, failure):
+    created, dropped, stopped = [], [], []
+    monkeypatch.setattr(run.pg, "create", lambda name: created.append(name) or name)
+    monkeypatch.setattr(run.pg, "drop", dropped.append)
+    monkeypatch.setattr(run, "dump", lambda _: {})
+    monkeypatch.setattr(run, "credential_check", lambda *args: [])
+    monkeypatch.setattr(run, "chain_check", lambda _: [])
+
+    def stop(side):
+        stopped.append(side)
+        if failure == "stop" and side == "rust":
+            raise RuntimeError("fixture stop")
+
+    def start(side, *args):
+        if failure == "second_start" and side == "rust":
+            raise RuntimeError("fixture startup")
+        return SimpleNamespace(port=side, stop=lambda: stop(side))
+
+    def ready(*args, **kwargs):
+        if failure == "readiness":
+            raise RuntimeError("fixture readiness")
+
+    monkeypatch.setattr(run, "start", start)
+    monkeypatch.setattr(run, "wait_ready", ready)
+    scenario = SimpleNamespace(name="cleanup", steps=lambda: [])
+    with pytest.raises(RuntimeError, match="fixture"):
+        run.run_scenario(scenario, Path("unused"), tmp_path, "live", False)
+    assert set(dropped) == set(created)
+    assert len(dropped) == len(created) == 2
+    assert set(stopped) == ({"python"} if failure == "second_start" else {"python", "rust"})
+
+
+@pytest.mark.parametrize("mode,selection", [
+    ("live", ["identitiy"]), ("golden", ["identitiy"]),
+    ("mutants", ["identitiy"]), ("golden", ["mixed"]), ("live", []),
+])
+def test_invalid_selection_fails_before_any_scenario(monkeypatch, mode, selection):
+    monkeypatch.setattr(sys, "argv", ["board.run", mode, "--rust-bin", "unused", "--only", *selection])
+    monkeypatch.setattr(run.daemons, "scratch_root", lambda: Path("unused"))
+    monkeypatch.setattr(run, "run_scenario", lambda *args: pytest.fail("invalid selection ran a scenario"))
+    with pytest.raises(SystemExit) as raised:
+        run.main()
+    assert raised.value.code == 2
