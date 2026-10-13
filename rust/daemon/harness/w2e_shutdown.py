@@ -25,8 +25,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     args.rust_bin = args.rust_bin.resolve()
-    root = h.daemons.scratch_root() / "w2e-shutdown"
-    root.mkdir(parents=True, exist_ok=True)
+    root = h.run_root("w2e-shutdown")
     scenario = {"config": "memory:\n  dream:\n    enabled: false\n  retrieval_log:\n    enabled: false\n", "seed": []}
     procs = {}
     owned = []

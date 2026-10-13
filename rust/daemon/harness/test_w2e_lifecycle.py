@@ -1,4 +1,4 @@
-"""CLI path resolution and run-owned cleanup before any real daemon starts."""
+"""Numeric comparison and run ownership without starting real daemons."""
 import argparse
 import importlib
 import json
@@ -26,6 +26,64 @@ def harness(monkeypatch):
 
 class FixtureFailure(RuntimeError):
     pass
+
+
+@pytest.mark.parametrize("python_embedding,rust_embedding", [
+    ([1.0, 0.0], [1.0]), ([1.0], [1.0, 0.0]),
+    ([], [1.0]), ([1.0], []), (None, [1.0]), ([1.0], None),
+])
+@pytest.mark.parametrize("calibrate", [False, True])
+def test_embedding_shape_mismatch_is_a_difference(harness, python_embedding, rust_embedding,
+                                                 calibrate):
+    tolerance = {} if calibrate else json.loads(
+        harness.TOLERANCE_FILE.read_text(encoding="utf-8"))
+    stats = {}
+    differences = harness.compare_numeric(
+        {1: {"embedding": python_embedding, "surprise": None}},
+        {1: {"embedding": rust_embedding, "surprise": None}}, tolerance, stats)
+    assert len(differences) == 1 and "entries[1].embedding" in differences[0]
+    assert not stats  # No tolerance statistics from incompatible shapes.
+
+
+def test_tokenized_embeddings_still_report_dimension_mismatch(harness):
+    def state(embedding):
+        return {"rows": {"public.entries": {
+            "columns": ["id", "embedding", "surprise"],
+            "rows": [[1, embedding, None]],
+        }}}
+
+    python, rust = state("[1.0,0.0]"), state("[1.0]")
+    a, b = harness.extract_numeric(python), harness.extract_numeric(rust)
+    assert python == rust  # The separate numeric comparison owns this check.
+    assert "length" in harness.compare_numeric(a, b, {}, {})[0]
+
+
+@pytest.mark.parametrize("driver", ["w2e", "w2e_shutdown"])
+def test_overlapping_invocations_preserve_each_others_homes(harness, monkeypatch, tmp_path, driver):
+    module = importlib.import_module(driver)
+    arguments = [driver, *(["live", "--only", "store-defaults"] if driver == "w2e" else []),
+                 "--rust-bin", "candidate", "--out", str(tmp_path / "result.json")]
+    monkeypatch.setattr(sys, "argv", arguments)
+    monkeypatch.setattr(harness.daemons, "scratch_root", lambda: tmp_path)
+    roots = []
+
+    def overlap(*args, **kwargs):
+        root = args[2]
+        roots.append(root)
+        marker = harness.daemons.make_home(root, "same-scenario", None) / f"run-{len(roots)}"
+        marker.write_text("owned evidence", encoding="utf-8")
+        if len(roots) == 1:
+            with pytest.raises(FixtureFailure, match="after home creation"):
+                module.main()
+            assert marker.read_text(encoding="utf-8") == "owned evidence"
+        raise FixtureFailure("after home creation")
+
+    monkeypatch.setattr(harness, "run_scenario" if driver == "w2e" else "prepare_template", overlap)
+    with pytest.raises(FixtureFailure, match="after home creation"):
+        module.main()
+    assert len(set(roots)) == 2
+    assert all(root.parent == tmp_path for root in roots)
+    assert (roots[1] / "same-scenario" / "run-2").read_text(encoding="utf-8") == "owned evidence"
 
 
 @pytest.mark.parametrize("driver", ["w2e", "w2e_shutdown"])

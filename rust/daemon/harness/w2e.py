@@ -43,6 +43,7 @@ import math
 import os
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -481,7 +482,11 @@ def compare_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
         if a is None or b is None:
             continue  # the row diff reports the missing entry
         ea, eb = a["embedding"], b["embedding"]
-        if ea and eb:
+        if (ea is None) != (eb is None):
+            diffs.append(f"entries[{eid}].embedding: python/rust presence mismatch")
+        elif ea is not None and len(ea) != len(eb):
+            diffs.append(f"entries[{eid}].embedding: length python {len(ea)} vs rust {len(eb)}")
+        elif ea:
             mad = max(abs(x - y) for x, y in zip(ea, eb))
             cos = sum(x * y for x, y in zip(ea, eb)) / (
                 math.sqrt(sum(x * x for x in ea)) * math.sqrt(sum(y * y for y in eb)))
@@ -517,6 +522,11 @@ def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
 
 
 # ── running ───────────────────────────────────────────────────────────────
+
+def run_root(prefix: str = "w2e") -> Path:
+    """Keep each invocation's homes and evidence separate, including on failure."""
+    return Path(tempfile.mkdtemp(prefix=f"{prefix}-{os.getpid()}-", dir=daemons.scratch_root()))
+
 
 def side_env(scn: dict, dsn: str, extra: dict | None = None) -> dict:
     env = {"PSEUDOLIFE_RELEASE_CHECK": "0", "PSEUDOLIFE_PLUGIN_DIR": str(w1a.REPO / "plugin"),
@@ -735,8 +745,7 @@ def main() -> int:
     ap.add_argument("--record", action="store_true")
     args = ap.parse_args()
     args.rust_bin = args.rust_bin.resolve()
-    root = daemons.scratch_root() / "w2e"
-    root.mkdir(parents=True, exist_ok=True)
+    root = run_root()
     names = args.only or list(SCENARIOS)
     tol = {} if args.mode == "calibrate" else json.loads(TOLERANCE_FILE.read_text(encoding="utf-8"))
     results = []
