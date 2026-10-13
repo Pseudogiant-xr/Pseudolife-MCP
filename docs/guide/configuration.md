@@ -2946,7 +2946,8 @@ every variant.
   (`evals/digest_sidecar_probe.py`).
 - **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
   false`) — when on, a scalar dream claim whose backing entry is
-  agent-tier (its `source` maps to origin `agent`) and outside
+  agent-tier (its `source` maps to origin `agent`, or it cites a
+  user-stated note that fails the citation check) and outside
   `memory.dream.trusted_sources` never takes `current` directly: it
   parks via the existing contender machinery (visible in
   `memory_fact_get` as contested), promotable only by an explicit
