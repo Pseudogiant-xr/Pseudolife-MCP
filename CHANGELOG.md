@@ -6,6 +6,153 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-13 — Facts the dream consolidates keep the tier of the note they came from, and a dream can no longer replace a value a person set directly
+
+### Changed (2026-10-13 — native shim reports the 0.18.0 package version)
+
+- The native Rust shim candidate's crate version and `PACKAGE_VERSION` move
+  to 0.18.0, so its `version` output and startup version check match the
+  released Python package again. The parity oracle compares the two; this
+  follows the release, as `rust/PORTING.md` orders Python changes first.
+- The Rust port's fixed Phase 1 oracle pin moves from the 0.17.0 commit
+  `686b3f95` to the v0.18.0 release commit `1d444aa1`. The regenerated
+  inventory counts 426 test files (the new `tests/test_changelog_fragments.py`
+  is internal), and the startup contract's version-mismatch template carries
+  0.18.0. Receipts captured at earlier oracles keep their identities.
+
+### Changed (2026-10-13 — agents are told to mark human-stated corrections as user)
+
+- The standing memory instructions now say to pass `origin="user"` to
+  `memory_fact_set` when the human stated the value: the compact
+  session-start core every session gets, the full memory-loop block
+  (`full_separate_hook`) and `examples/CLAUDE.memory.md`. Since the dream
+  keeps user-stated facts at user tier, a default (agent) write is parked as
+  a contender, not applied, when the slot's value is user- or action-backed.
+- The memory-model, dreaming and configuration guides now say that a write
+  supersedes only at an equal or stronger tier, and that the consolidation
+  quarantine also parks a claim whose user-stated note fails the citation
+  check.
+
+### Fixed (2026-10-11 — Backup CLI inputs and archive ownership)
+
+- The native backup command accepts argparse option spellings and pathlib
+  paths, including repeated options and parent components, and formats help
+  for the terminal width. Output containment checks still prevent archives
+  from including their own partial files.
+  Windows containment also checks directory identity across local UNC aliases;
+  help on a closed stdout uses Python's exit status.
+- State archives retain Unix owner and group names, including non-UTF-8 NSS
+  names through binary PAX records, alongside numeric IDs.
+  PostgreSQL client discovery failures preserve Python's final OS diagnostic
+  and output-directory creation; native output omits interpreter frames.
+  Discovery paths with non-UTF-8 bytes and terminal widths beyond Python's
+  integer conversion limit defer before effects.
+- Windows backup rotation uses Python 3.11's system-clock precision, so
+  zero-day retention does not treat a newly written archive as older merely
+  because the native clock reports a finer timestamp.
+
+### Security (2026-10-08 — dream facts keep their note's provenance tier)
+
+- A fact the dream consolidated from a user-stated note (`source="user"` or
+  `"conversation"`) was stored at `agent` tier, because the tier came from the
+  claim's `origin` field, which the shipped extractors always set to `agent`.
+  The dream now stores each fact at the tier of its backing note's `source`
+  tag, the same rule the quarantine's witness check uses; the claim's `origin`
+  field, being model output, is no longer read.
+- The backing note is the extractor's citation, so a tier above `agent` is
+  kept only when the cited note passes deterministic checks, in every batch,
+  one note or many: the claim's whole value appears in the note as one phrase
+  (case-insensitive, on Unicode word boundaries, every word kept) at least
+  once without a negator (`not`, `no`, `never`, `without`, `neither`, `nor`,
+  `cannot` or an `n't` form) among the three words before it in the same
+  clause, and the note contains at least one word of the claim's entity or
+  attribute name. A retraction (`op: "remove"`) skips the negation rule. A
+  claim that fails is treated as unbacked: `agent` tier, the tier every dream
+  fact had before this change, and low-trust to the quarantine. A paraphrase
+  therefore stays at `agent` tier, as does a claim whose value is not a
+  string (a number, a boolean, a list or a dict), including one the shipped
+  extractor's parser turned into text; the value is still stored. A `source`
+  index
+  that is a boolean is not read as a note number. The check confirms that
+  the note mentions the value and names the slot, not that it asserts the
+  value; the next rule covers that gap for values the user set directly.
+- A dream claim never replaces a value that a direct user or action write set
+  (`memory_fact_set`, a resolve, a store's auto-promote): with
+  `protect_provenance` on, a dream claim for a different value parks as a
+  contender, with or without the quarantine, and a quarantine promotion
+  cannot replace it either. On set-valued slots a dream add parks rather
+  than convert such a scalar into a set (`member_add_blocked_direct`), and a
+  dream retraction of a member a direct user- or action-tier write added is
+  dropped (`member_remove_refused`). Members added by `memory_set_add`, which
+  passes no origin, carry no tier and are not guarded against a dream
+  retraction (an assistant-origin retraction of one is still refused). A
+  scalar converted into a set keeps every support tier and its marks. A value
+  the dream itself consolidated from a user note still updates from a later
+  backed user note. The dream marks the tiers it adds (`dream:<tier>` in the fact's
+  provenance) and a direct write at that tier, a member confirmation by
+  exact or near-duplicate value included, clears the mark; only the dream
+  writes a mark (a `dream:` token in a caller's provenance or source tag is
+  dropped). Facts written before this release count as direct, except that a
+  literal `dream:` token already stored in a fact's provenance (possible
+  before this release from a store with such a source tag and auto-promote
+  on) is indistinguishable from a mark and is honoured as one.
+- A dream restatement that is a shorter form of the current value (a
+  compression echo) still confirms it, but no longer raises its tier: only a
+  restatement equal to the stored value after normalisation can.
+- With the quarantine on, a value promoted by a second witness gains that
+  witness's tier (it was stamped `agent`), and the promotion check compares
+  that same tier, after the assistant-speaker demotion, against the current
+  value, so a promotion is never weaker than a direct write of the same
+  claim. The store checks again at promotion time, so a direct write that
+  lands after the quarantine chose to promote is not replaced, and a
+  different value parked in place of the one the quarantine validated is not
+  promoted; the claim parks its own value instead. That holds for a trusted
+  claim too: once the quarantine has chosen to promote, a refused promotion
+  parks the claim as a contender and never falls back to a direct write.
+- A dream write at a user note's tier records no correction signal: those
+  remain the record of a human changing a value directly.
+- When a dream makes a parked contender current, the value keeps its direct
+  user or action support, including after a restart.
+- Set-valued slots get the scalar path's tier guard (with `protect_provenance`
+  on): a weaker-tier dream op can no longer convert a stronger tier's scalar
+  into a set (it parks as a contender, `member_add_blocked_tier`) or retract a
+  stronger tier's member (`member_remove_refused`). The MCP set tools pass no
+  tier and stay unguarded.
+- Behaviour changes to expect. With the quarantine on, a user claim that
+  fails the citation check (a paraphrase, a negated mention, or a note that
+  never names the slot) parks as a contender instead of being written. A
+  dream claim that conflicts with a value set by `memory_fact_set` (or another
+  direct write) at user or action tier parks instead of superseding it, so
+  such a change waits for `memory_fact_resolve`; likewise a dream note can no
+  longer convert such a value into a set or retract a member a direct user-
+  or action-tier write added. And `memory_fact_set`, whose
+  default origin is `agent`, now parks against a fact the dream consolidated
+  at `user` tier instead of superseding it; pass `origin="user"` when the
+  human stated the change, or settle it with `memory_fact_resolve`.
+- The shipped extractor's parser drops a claim whose value is JSON `null`
+  instead of storing the text `None`.
+- A dream rollback restores the previous value's full support set and dream
+  marks from its newest matching audit record, including removed members.
+  It preserves later direct support for the same value and removes a tier
+  the rolled-back run's confirmations raised only while it remains dream-only.
+- Known limits: a retraction skips the negation rule, so a note that affirms a
+  dream-consolidated member can still back a misread removal of it. If the
+  previous audit record is no longer available, rollback falls back to the
+  journal's strongest prior tier as a direct write. Confirmations without a
+  journaled prior tier remain unchanged. A member confirmation that converted
+  a scalar into a set leaves the set in place and reports a partial rollback.
+  A rollback keeps every direct tier that backs the restored value, a
+  surviving set member's included. A direct write of the same value that
+  lands while the rollback restores it is kept too, except at the tier the
+  rollback's own write stamps (the previous tier, and the user tier when it
+  has to resolve a contest), which cannot be told apart. If the daemon
+  stops partway through a rollback, a value it already restored can keep
+  direct backing instead of its dream mark; that only protects it more.
+- Facts consolidated before this release keep their stored tier until
+  restated; nothing is backfilled.
+- Advisory: [GHSA-xvw8-qq56-8r2f](https://github.com/Pseudogiant-xr/Pseudolife-MCP/security/advisories/GHSA-xvw8-qq56-8r2f).
+  Reported by [@Adam13y](https://github.com/Adam13y).
+
 ## [0.18.0] - 2026-10-13 — Console static files refuse escaping paths before touching the filesystem, the daemon log stops carrying the database password, and transient Codex coordination failures retry
 
 ### Fixed (2026-10-11 — Console index containment)
