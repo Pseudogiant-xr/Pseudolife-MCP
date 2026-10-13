@@ -339,3 +339,37 @@ fn a_binary_at_the_runtime_root_does_not_claim_installed_identity() {
         &first_line(),
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn multiple_runtime_aliases_match_live_python_selection() {
+    let home = DisposableHome::new();
+    let runtime = home.path("installed");
+    let executable = installed_executable(&runtime);
+    fs::write(runtime.join("runtime.json"), r#"{"source":"fixture"}"#).unwrap();
+    let root = home.path("runtimes");
+    fs::create_dir(&root).unwrap();
+    for name in ["000009", "０００００２", "000002", "manual"] {
+        std::os::unix::fs::symlink(&runtime, root.join(name)).unwrap();
+    }
+    let python = std::env::var_os("PSEUDOLIFE_MCP_PYTHON").unwrap_or_else(|| "python3".into());
+    let oracle = Command::new(python)
+        .env("PYTHONPATH", Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .args(["-c", "import sys; from pathlib import Path; from pseudolife_memory.runtimes import Layout, running_runtime; r = running_runtime(Layout(Path(sys.argv[1]), Path('launcher')), sys.argv[2]); print('runtime ' + str(r.path) + ' (source fixture)')"])
+        .arg(&root)
+        .arg(&runtime)
+        .output()
+        .unwrap();
+    assert_eq!(oracle.status.code(), Some(0));
+    assert!(oracle.stderr.is_empty());
+    let expected = first_line() + std::str::from_utf8(&oracle.stdout).unwrap();
+    assert_output(
+        command(&executable, &home.0)
+            .env("PSEUDOLIFE_SHIM_RUNTIMES", &root)
+            .env("PSEUDOLIFE_SHIM_LAUNCHER", home.path("launcher"))
+            .arg("version")
+            .output()
+            .unwrap(),
+        &expected,
+    );
+}

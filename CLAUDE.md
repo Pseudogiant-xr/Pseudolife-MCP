@@ -331,13 +331,18 @@ took 143 CUDA OOMs.
   commit, exit code, pytest's summary line) land in
   `~/.pseudolife-mcp/suite-results`; cite the machine and commit in the PR.
   The box's address and settings live only in the private
-  `~/.pseudolife-mcp/locks/full-suite.remote`, never in the tree.
+  `~/.pseudolife-mcp/locks/full-suite.remote`, never in the tree. The
+  Windows dev VM (see "Dev machines" below) is a further full-suite
+  machine with its own lock and lease; `remote-suite.ps1` does not
+  dispatch to it.
   - **Each machine mirrors under its own lease**: `full-suite` on the
     Windows host, `full-suite@box` on the box (its `full-suite.lease`
     file; `PSEUDOLIFE_SUITE_LEASE` overrides). Gate CPU- or
     memory-saturating work on the lease of the machine it runs on: `lease
     check full-suite` on the Windows host, `lease check full-suite@box` on
-    the box. A suite on the other machine does not load yours.
+    the box. A suite on another machine does not load yours, with one
+    exception: the box and the Windows dev VM share the hypervisor's RAM
+    (see "Dev machines" below).
   - **On the box, suites never touch the live bank's Postgres** (5433):
     the suite user's shells source `~/.config/pseudolife-suite/env`, which
     sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:5434` (the separate test
@@ -524,6 +529,94 @@ took 143 CUDA OOMs.
   local selection and “local full suite: not required under the
   ordinary-code rule”. An old-head full pass is not evidence for a changed
   head, except under the review-fix rule above.
+
+## Dev machines (where work runs)
+
+Besides the maintainer's Windows host and hosted CI, the maintainer's
+homelab hypervisor carries dev machines for sessions to use: Linux dev
+boxes (the box above and its sibling) and a Windows dev VM. They are
+development tools, not merge gates: hosted CI stays the gate, and a PR
+cites the machine and commit of any run it relies on. Their names,
+addresses, SSH aliases, lease names and test-database settings live only
+in private config (the maintainer's `~/.ssh/config`,
+`~/.pseudolife-mcp/locks/full-suite.remote`, each machine's
+`~/.config/pseudolife-suite/env` and `full-suite.lease`) and the memory
+bank (search "dev machines homelab"), never in the tree.
+
+- **Where work goes.**
+  - Linux dev boxes: Linux full suites, Rust builds and tests on Linux,
+    and long or CPU-heavy Linux work that would otherwise load the
+    Windows host. `ops/remote-suite.ps1` dispatches to the one box its
+    `full-suite.remote` names. `PSEUDOLIFE_SUITE_REMOTE` can point one
+    run at the sibling instead, once the sibling has its own suite env
+    and lease file; a dispatched run refuses a machine without its own
+    lease name.
+  - Windows dev VM: Windows-only flake repro loops (run the one failing
+    test many times there, instead of CI round-trips), Windows Rust
+    builds under MSVC, and native-Windows behaviour (process ownership
+    and shutdown, named pipes, junctions, UNC and device paths). It is
+    also the place for an occasional native Windows full suite, which the
+    maintainer's Windows host refuses. Its disk is slow: on 2026-10-10 a
+    cold `cargo test --no-run` of one shim integration-test binary took
+    15 minutes there, so keep its build tree warm rather than cleaning it.
+  - Local WSL: the Windows host's own full suites (`ops/wsl-suite.ps1`),
+    as above.
+  - Hosted CI: the merge gate. Its Windows job runs a curated lite list
+    of test files, not the full suite (`.github/workflows/ci.yml`,
+    `test-lite-windows`).
+- **One full suite per machine**, under that machine's own lock. Each dev
+  machine mirrors its suite on the board under its own `full-suite@<name>`
+  lease, set in its private `full-suite.lease`; without that file a run
+  falls back to `full-suite`, the Windows host's lease, and the board
+  mislabels it. **The hypervisor's RAM cannot carry a Windows VM full
+  suite beside a Linux dev box full suite**: before starting a full suite
+  on either, check that no full suite is running on the other (`lease
+  check` on its lease, or a running pytest process there), and say on the
+  board which one you hold.
+- **Never the live bank.** Every dev machine tests against its own test
+  PostgreSQL: the boxes use their separate loopback test server, and the
+  Windows VM uses the `[lite]` extra's embedded PostgreSQL on loopback
+  inside the VM, started for each test run by a wrapper kept in the VM's
+  private config. A Windows SSH session's child processes end with the
+  session, so a server started by hand dies when you disconnect. None of
+  them may point a test at the live bank's server or the Windows host's
+  bench server.
+- **No automatic restarts.** The Windows VM's updates are notify-only and
+  paused, with automatic restart disabled; patch it only when the
+  maintainer asks. Restart only the machine you are using, and only a dev
+  machine, never the hypervisor or any other guest.
+- The Windows VM's default SSH shell is PowerShell 7. Use the redirect
+  form for test runs there too (`... > log 2>&1; "exit $LASTEXITCODE"`),
+  never a pipe.
+
+## Disk space (builds and long runs)
+
+A full disk kills a run mid-step and can leave half-written files behind.
+It happened twice in two days:
+- 2026-10-11: a Linux dev box filled to 100% and a session's Rust build
+  died with os error 28.
+- 2026-10-12: the sibling box hit 0 bytes free. One worktree's Rust
+  `target/` grew from 17 GB to 28 GB while rebuilding after a merge from
+  master, and the session crashed mid-task.
+
+- **Check free space before** every Rust build, full suite, eval run or bulk
+  download: `df -h /` on Linux, `Get-PSDrive` on Windows (the drive that
+  holds your worktree and build tree). Don't start below 8 GB free; one Rust
+  workspace build can add 10 GB or more.
+- **A Rust `target/` directory is a cache.** It measured 8–28 GB per
+  worktree on 2026-10-12. Prefer one shared `CARGO_TARGET_DIR` per machine to
+  one per worktree. Before a big rebuild, such as after merging master into a
+  long-lived branch, `cargo clean` your own stale profiles (for example
+  `--profile dev` when you are working in release).
+- **Below the floor, stop starting heavy work.** Free only your own caches,
+  and tell the maintainer, or the session that launched you, instead of
+  deleting anything else. Another session's worktree, evidence or cache is
+  not yours to delete. A merged branch's build cache may be removed by the
+  session that owns it, or with the maintainer's go, and the deletion is
+  recorded (path, size, why).
+- **Watchers include disk.** A heartbeat or watcher that tracks a long run
+  reports free disk on each check, so a filling disk shows up before the run
+  dies.
 
 ## Stopping processes (shared host)
 

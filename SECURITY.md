@@ -101,7 +101,9 @@ How this maps onto Pseudolife:
   `memory_store` on its behalf. That instruction-following boundary is the
   model's, not this server's; assume it will occasionally fail.
 - **The surprise gate is an admission filter, not a trust filter.** It
-  drops near-duplicates. Novel malicious content passes it *preferentially*.
+  can drop near-duplicates when `memory.surprise_threshold` is above `0`;
+  the shipped default (`0.0`) is permissive and stores everything. Novel
+  malicious content passes it *preferentially*.
   Do not mistake novelty gating for a defense.
 - **No content screen is a defense either.** The 2026 attack literature
   (MAFIA, arXiv 2608.03844) defeats *audited* memory stores from the

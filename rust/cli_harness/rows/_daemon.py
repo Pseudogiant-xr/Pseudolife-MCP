@@ -24,6 +24,7 @@ from pathlib import Path
 from . import _bank
 
 ORACLE: dict = {"python": None, "source": None}
+CI_FIXTURE = False
 _POOL: dict[str, "RealDaemon"] = {}
 
 
@@ -57,6 +58,15 @@ class RealDaemon:
         self._log = open(self.data / "daemon.log", "wb")
         self.proc = None
         try:
+            if CI_FIXTURE:
+                from rust.daemon.harness.embedding_fixture import create
+                model = self.data / 'model'
+                create(model, dimension=1024)
+                config = {'embedding': {'model_name': str(model), 'backend': 'onnx',
+                                        'device': 'cpu', 'cpu_dtype': 'fp32',
+                                        'query_prefix': '', 'max_seq_length': 32}}
+                (self.data / 'config.yaml').write_text(json.dumps(config), encoding='utf-8')
+                env['TOKENIZERS_PARALLELISM'] = 'false'
             creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             self.proc = subprocess.Popen(
                 [ORACLE["python"], "-P", "-m", "pseudolife_memory.cli", "serve"],

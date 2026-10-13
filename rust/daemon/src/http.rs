@@ -574,13 +574,17 @@ async fn hook(
             let Ok(text) = std::str::from_utf8(&raw) else {
                 return uvicorn_500();
             };
-            // Malformed JSON and non-object bodies become an empty object.
-            // With no session ID, hook_session_end returns without writes.
-            let parsed = parse_body_json(text).ok();
-            let id = parsed
-                .as_ref()
-                .and_then(Value::as_object)
-                .and_then(|o| o.get("session_id"));
+            // Python accepts malformed closes as success without writes. Refuse
+            // them explicitly; an absent body still means no session ID.
+            let parsed = if raw.is_empty() {
+                json!({})
+            } else {
+                match parse_body_json(text) {
+                    Ok(value) if value.is_object() => value,
+                    _ => return json_response(400, &json!({"error": "invalid_json"})),
+                }
+            };
+            let id = parsed.as_object().and_then(|o| o.get("session_id"));
             let present = match id {
                 None | Some(Value::Null) => false,
                 Some(Value::Bool(b)) => *b,
