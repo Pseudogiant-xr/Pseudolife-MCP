@@ -8,6 +8,11 @@ from pathlib import Path
 TABLE = Path(__file__).resolve().parents[1] / 'src/mcp/validation-schema.json'
 VALUES = (None, False, True, 0, 1, -1, 1.5, 1e20, 100000000000000000000,
           '', 'fixture', 'bad', '1.0', [], {}, [None])
+INTEGER_STRINGS = ('0-1', '00-1', '-0-1', '+0-1', '0_0-1', '0_-1', '0__1',
+                   '0__0', '0_', '00_.0', '0_.0', '1_.0', '1_0.0', '1_0.0_0',
+                   '0-1.0', '0-0', '-00', '0-_1', '0-_1_2', '1e0', '+-1', '--1',
+                   ' 1 ', '1_2', '01', '0.00', '-1', '9' * 4299, '9' * 4300,
+                   '9' * 4301, '-' + '9' * 4299, '-' + '9' * 4300)
 
 
 def resolve(schema, defs):
@@ -53,6 +58,9 @@ def variants(schema, defs, base=None, path=()):
     yield path, base
     for value in VALUES:
         yield path, value
+    if schema.get('type') == 'integer':
+        for value in INTEGER_STRINGS:
+            yield path, value
     if schema.get('format') == 'uri':
         for value in ('file:///fixture', 'https://example.test/resource', 'fixture:opaque'):
             yield path, value

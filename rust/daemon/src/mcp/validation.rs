@@ -50,25 +50,65 @@ fn integer(value: &Value) -> bool {
                 n.is_finite() && n.fract() == 0.0 && n.abs() < 9223372036854775808.0
             })
         }
-        Value::String(s) => {
-            static PATTERN: OnceLock<regex::Regex> = OnceLock::new();
-            // Pydantic's integer string grammar permits underscores and a
-            // zero fractional part, but not exponent notation or Unicode digits.
-            let s = s.trim();
-            PATTERN
-                .get_or_init(|| regex::Regex::new(r"^[+-]?[0-9](?:_?[0-9])*(?:\.0+)?$").unwrap())
-                .is_match(s)
-                && s.trim_start_matches(['+', '-'])
-                    .split('.')
-                    .next()
-                    .unwrap()
-                    .replace('_', "")
-                    .trim_start_matches('0')
-                    .len()
-                    <= 4300
-        }
+        Value::String(s) => integer_string(s),
         _ => false,
     }
+}
+
+// Match the pinned SDK's clean_int_str order, including its permissive
+// leading-zero cleanup, then validate the resulting JSON integer spelling.
+fn integer_string(raw: &str) -> bool {
+    let mut s = raw.trim();
+    if let Some(rest) = s.strip_prefix('+') {
+        if rest.starts_with('-') {
+            return false;
+        }
+        s = rest;
+    }
+    let negative = s.starts_with('-');
+    if negative {
+        s = &s[1..];
+        if s.starts_with(['-', '+']) {
+            return false;
+        }
+    }
+    match s.as_bytes().first() {
+        Some(b'0') => {
+            let mut start = s.len() - 1;
+            for (index, byte) in s.bytes().enumerate().skip(1) {
+                match byte {
+                    b'0' | b'_' => continue,
+                    b'1'..=b'9' | b'-' => start = index,
+                    b'.' => start = index - 1,
+                    _ => return false,
+                }
+                break;
+            }
+            s = &s[start..];
+        }
+        Some(b'1'..=b'9' | b'-') => (),
+        _ => return false,
+    }
+    if let Some((whole, fraction)) = s.split_once('.') {
+        if !fraction.is_empty() && fraction.bytes().all(|b| b == b'0') {
+            s = whole;
+        }
+    }
+    let mut cleaned =
+        if s.contains('_') && !s.starts_with('_') && !s.ends_with('_') && !s.contains("__") {
+            s.replace('_', "")
+        } else {
+            s.to_owned()
+        };
+    if negative {
+        cleaned.insert(0, '-');
+    }
+    // The pinned integer parser's 4,300-byte limit includes a minus sign.
+    let digits = cleaned.strip_prefix('-').unwrap_or(&cleaned);
+    cleaned.len() <= 4300
+        && !digits.is_empty()
+        && (digits.len() == 1 || !digits.starts_with('0'))
+        && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
 fn number(value: &Value) -> Option<f64> {

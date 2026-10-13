@@ -1105,6 +1105,47 @@ mod sessions {
         assert!(!app.mcp.is_ready("s"));
     }
 
+    async fn assert_sdk_ttl_rule(ttl: String, accepted: bool) {
+        let app = app();
+        app.mcp.register("s");
+        app.mcp.mark_ready("s");
+        let params = json!({"name":"memory_toolset", "arguments":{"action":"expand"},
+                "task":{"ttl":ttl}});
+        let value: Value = serde_json::from_str(
+            &respond(
+                app.clone(),
+                "caller".into(),
+                "s".into(),
+                HeaderMap::new(),
+                json!(1),
+                "tools/call".into(),
+                params.as_object().unwrap().clone(),
+            )
+            .await,
+        )
+        .unwrap();
+        assert_eq!(
+            value.get("error").is_none(),
+            accepted,
+            "ttl length {}",
+            ttl.len()
+        );
+        assert_eq!(
+            app.mcp.resolve_tier(&app.store, "caller", Some("caller")),
+            if accepted { Tier::Full } else { Tier::Core }
+        );
+    }
+
+    #[tokio::test]
+    async fn sdk_integer_ttl_signed_limit_preserves_tier() {
+        assert_sdk_ttl_rule(format!("-{}", "1".repeat(4300)), false).await;
+    }
+
+    #[tokio::test]
+    async fn sdk_integer_ttl_zero_minus_coercion_expands_tier() {
+        assert_sdk_ttl_rule("0-1".into(), true).await;
+    }
+
     #[tokio::test]
     async fn malformed_task_refuses_before_tier_change() {
         let app = app();
