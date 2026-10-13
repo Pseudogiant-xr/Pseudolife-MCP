@@ -407,18 +407,21 @@ def main() -> int:
             results, rs_before, rs_after = run_rust(mode, rs_dsn, work, frozen, cases,
                                                     args.mutant)
             diffs = []
+            if len(cases) != len(results):
+                diffs.append(f"result count: python {len(cases)} vs rust {len(results)}")
             served = 0
             for c, r in zip(cases, results):
                 served += len(c["entries"])
                 for d in value_diff(c["entries"], r["entries"], f"[{c['query']}]"):
                     diffs.append(d)
             sdiffs, delta = state_diffs(py_before, py_after, rs_before, rs_after)
-            total_cases += len(cases)
+            compared = min(len(cases), len(results))
+            total_cases += compared
             total_diffs += len(diffs)
             total_state += len(sdiffs)
             written = {t: len(v["added"]) + len(v["removed"]) for t, v in delta.items()}
             print(f"mode {mode}: coverage {json.dumps(coverage(cases))}")
-            print(f"mode {mode}: {len(cases)} cases, {served} served facts, "
+            print(f"mode {mode}: {compared}/{len(cases)} cases compared, {served} served facts, "
                   f"{len(diffs)} entry diffs, {len(sdiffs)} state diffs; "
                   f"python wrote {written}")
             for d in (diffs + sdiffs)[:40]:

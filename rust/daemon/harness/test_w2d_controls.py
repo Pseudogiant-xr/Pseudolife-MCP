@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import w2d_search as search
+import w2d_cortex_check as cortex
 
 
 class Scenario:
@@ -16,6 +17,22 @@ class Scenario:
 
 
 class MutantQualification(unittest.TestCase):
+    def test_cortex_requires_one_result_per_oracle_case(self):
+        cases = [{"query": "first", "entries": []}, {"query": "second", "entries": []}]
+        state = {"rows": {}}
+        for count in (1, 2, 3):
+            with (self.subTest(results=count),
+                  patch.object(sys, "argv", ["w2d_cortex_check.py", "--mode", "default"]),
+                  patch.dict(cortex.os.environ, {"CARGO_TARGET_DIR": "unused"}),
+                  patch.object(cortex.tempfile, "mkdtemp", return_value="unused"),
+                  patch.object(cortex, "seed", return_value=(0, [])),
+                  patch.object(cortex, "create", return_value="fixture"),
+                  patch.object(cortex, "drop"),
+                  patch.object(cortex, "run_python", return_value=(cases, state, state)),
+                  patch.object(cortex, "run_rust", return_value=([{"entries": []}] * count, state, state)),
+                  contextlib.redirect_stdout(io.StringIO())):
+                self.assertEqual(cortex.main(), 0 if count == len(cases) else 1)
+
     def test_timeline_response_cannot_normalize_reversed_dense_hits(self):
         entries = [{"id": 1, "score": 0.8}, {"id": 2, "score": 0.8001}]
         response = {"status": 200, "headers": {"content-type": "application/json"},
