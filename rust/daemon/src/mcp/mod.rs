@@ -726,13 +726,12 @@ fn params_valid(method: &str, p: &Map<String, Value>) -> bool {
     if !opt("_meta", Value::is_object) {
         return false;
     }
-    // The pinned handshake schema validates only progressToken inside
-    // request metadata; unknown extension keys remain unrestricted.
+    // The pinned handshake schema and typed handler validate progressToken;
+    // the handler also rejects null. Unknown extension keys stay unrestricted.
     if p.get("_meta")
         .and_then(|meta| meta.get("progressToken"))
         .is_some_and(|v| {
-            !(v.is_null()
-                || v.is_boolean()
+            !(v.is_boolean()
                 || request_id(v).is_some()
                 // Pydantic's float-to-int path excludes both signed 64-bit
                 // endpoints; integer spellings above use arbitrary width.
@@ -1118,6 +1117,7 @@ mod sessions {
     #[tokio::test]
     async fn invalid_metadata_refuses_before_toolset_mutation() {
         for token in [
+            Value::Null,
             json!([]),
             json!({}),
             json!(1.5),
@@ -1151,7 +1151,6 @@ mod sessions {
             json!({"progressToken":9223372036854774784.0}),
             json!({"progressToken":-9223372036854774784.0}),
             crate::http::parse_body_json(r#"{"progressToken":100000000000000000000}"#).unwrap(),
-            json!({"progressToken":null}),
             json!({"progressToken":true}),
             json!({"progressToken":1}),
             json!({"progressToken":1.0}),
