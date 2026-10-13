@@ -27,8 +27,9 @@ At startup, resume and before shared-file work:
 
 Evidence stays in the authoritative Evidence Hub workflow: capture its raw
 JSON report, ingest that daemon-visible file with `re_evidence(action="ingest")`,
-then explicitly record a claim with `action="claim"` and the returned
-`evidence_ids`. Preserve the original report and its hash. Keep competing
+then take the returned `id` (the artifact ID) and explicitly record a claim
+with `re_evidence(action="claim", evidence_ids=[<returned-artifact-id>], ...)`.
+Preserve the original report and its hash. Keep competing
 interpretations as separate `hypothesis` claims; observed, verified or rejected
 claims require linked artifacts. A summary or a message is never proof.
 Loading these instructions does not authorize daemon setup, configuration
