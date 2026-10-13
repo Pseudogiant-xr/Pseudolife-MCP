@@ -96,6 +96,8 @@ def run(py_port, rs_port, output):
                 if py != rs:
                     failures.append({'index': index, 'case': case, 'before_ready': ready,
                                      'python': py, 'rust': rs})
+                    if len(failures) <= 3:
+                        print(json.dumps(failures[-1]), flush=True)
                 if completed % 100 == 0:
                     print(f'validation sweep: {completed}/{len(workload)}, {len(failures)} differences', flush=True)
     report = {'generated_cases': len(all_cases), 'expected_observations': len(workload),
