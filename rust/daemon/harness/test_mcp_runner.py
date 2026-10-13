@@ -91,6 +91,7 @@ def test_failed_comparison_cannot_reuse_an_old_report(runner, monkeypatch):
 @pytest.mark.parametrize('failure', ['exception', 'missing', 'truncated', 'stub'])
 def test_failed_or_incomplete_oracle_record_is_not_written(tmp_path, monkeypatch, capsys, failure):
     import mcp_compare
+    monkeypatch.setattr(mcp_compare, 'CASES', mcp_compare.BASE_CASES)
 
     data = {case.__name__: [{'status': 200, 'headers': {}, 'body': {}}]
             * mcp_compare.CASE_RESPONSE_COUNTS[case.__name__] for case in mcp_compare.CASES}
@@ -137,7 +138,7 @@ def test_completed_sweep_difference_is_parity_failure(runner, monkeypatch, capsy
     monkeypatch.setattr(sweep, 'EXPECTED_CASES', 1)
     monkeypatch.setattr(sweep, 'cases', lambda: iter([{'method': 'ping', 'params': {},
         'notification': False, 'field': 'fixture'}]))
-    monkeypatch.setattr(sweep, 'observe', lambda port, *args: {'code': port})
+    monkeypatch.setattr(sweep, 'observe', lambda port, *args, **kwargs: {'code': port})
     assert mcp_run.main() == 1
     assert 'parity failed' in capsys.readouterr().err
     assert set(runner.stopped) == {'py', 'rs'} and len(runner.dropped) == 2
@@ -162,6 +163,7 @@ def test_golden_distillation_rejects_failed_transport_case(tmp_path):
 def test_compensated_case_truncation_is_rejected(tmp_path, monkeypatch, consumer):
     import mcp_compare
     import mcp_goldens
+    monkeypatch.setattr(mcp_compare, 'CASES', mcp_compare.BASE_CASES)
 
     counts = {'handshake': 4, 'lists': 18, 'protocol_versions': 10, 'methods': 24,
               'calls': 4, 'toolset': 53, 'stored': 30, 'list_changed_stream': 2,

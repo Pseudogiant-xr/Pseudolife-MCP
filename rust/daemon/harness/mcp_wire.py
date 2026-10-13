@@ -12,22 +12,24 @@ PROTOCOL = "2025-11-25"
 ACCEPT = "application/json, text/event-stream"
 
 
-def request(port, method, body, headers, timeout=120):
-    """One HTTP exchange; ``body`` is bytes, a JSON-able value, or None."""
-    c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+def request(port, method, body, headers, timeout=120, *, connection=None):
+    """One exchange, closing the supplied or newly created connection afterward."""
+    c = connection if connection is not None else http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     data = body if isinstance(body, (bytes, type(None))) else json.dumps(body).encode()
     pairs = list(headers.items() if isinstance(headers, dict) else headers)
-    c.putrequest(method, "/mcp", skip_accept_encoding=True,
-                 skip_host=any(k.lower() == "host" for k, _ in pairs))
-    for k, v in pairs:
-        c.putheader(k, v)
-    if data is not None:
-        c.putheader("Content-Length", str(len(data)))
-    c.endheaders(data)
-    r = c.getresponse()
-    raw = r.read()
-    hdrs = [(k.lower(), v) for k, v in r.getheaders()]
-    c.close()
+    try:
+        c.putrequest(method, "/mcp", skip_accept_encoding=True,
+                     skip_host=any(k.lower() == "host" for k, _ in pairs))
+        for k, v in pairs:
+            c.putheader(k, v)
+        if data is not None:
+            c.putheader("Content-Length", str(len(data)))
+        c.endheaders(data)
+        r = c.getresponse()
+        raw = r.read()
+        hdrs = [(k.lower(), v) for k, v in r.getheaders()]
+    finally:
+        c.close()
     req_sid = next((v for k, v in pairs if k.lower() == "mcp-session-id"), None)
     return {"status": r.status, "headers": hdrs, "body": raw, "req_sid": req_sid}
 

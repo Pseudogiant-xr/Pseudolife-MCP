@@ -159,6 +159,12 @@ covering integer, float and URL spellings, including raw overflowing JSON number
 literals. CI installs Pydantic 2.14.0/core 2.50.0; generation and live sweeps
 refuse an unreviewed core version. Completed sweep differences are parity
 failures; incomplete runs and cleanup failures remain infrastructure failures.
+The sweep retains one-shot HTTP exchanges and a fresh MCP session and writer
+key per observation. Its sockets use SO_LINGER(1,0) on close so completed
+exchanges do not hold client ephemeral ports in TIME_WAIT on Windows. This
+setting applies only to the generated validation sweep, not the strict transport
+corpus. Responses are read completely before normal closure; failures still
+abort the run and release clients. No request is retried or removed.
 Oracle recording and golden distillation reject case exceptions, missing cases,
 incomplete tool coverage and incorrect per-case or corpus totals before writing outputs.
 
