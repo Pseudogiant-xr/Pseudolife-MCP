@@ -699,7 +699,7 @@ def _inherited_labels(parents, new_text: str) -> tuple[str | None, str | None]:
 # same _origin_from_source mapping the auto-promote write path uses, and
 # witness identity is ep:<episode_id> when the entry has one (the daemon's
 # session identity), else src:<source>. A claim with no resolvable backing
-# entry has no witness at all — it follows its own origin field.
+# entry is agent tier and low-trust, under one shared "unbacked" token.
 
 def _quarantine_low_trust(claim: dict, src_entry: dict | None,
                           trusted: set[str]) -> bool:
@@ -714,7 +714,9 @@ def _quarantine_low_trust(claim: dict, src_entry: dict | None,
             return True
         src = src_entry.get("source") or ""
         return _origin_from_source(src) == "agent" and src not in trusted
-    return (claim.get("origin") or "agent") == "agent"
+    # Unbacked: the dream writes it at agent tier, so it is low-trust. Its
+    # origin field is model output and never read.
+    return True
 
 
 def _quarantine_witness(claim: dict, src_entry: dict | None) -> str:
@@ -725,7 +727,9 @@ def _quarantine_witness(claim: dict, src_entry: dict | None) -> str:
         if ep:
             return f"ep:{ep}"
         return f"src:{src_entry.get('source') or ''}"
-    return f"origin:{claim.get('origin') or 'agent'}"
+    # One token for every unbacked claim: varying the model-written origin
+    # label must not mint "independent" witnesses.
+    return "unbacked"
 
 
 def _onnx_embedding_available() -> bool:
@@ -3925,6 +3929,7 @@ class MemoryService(DreamOps, MaintainerOps):
         stance: str | None = None,
         authority="auto",
         distortion_tolerance="auto",
+        dream: bool = False,
     ) -> dict[str, Any]:
         """Write / confirm / supersede a canonical fact at the
         ``(entity, attribute)`` slot. The claim is embedded through the same
@@ -3933,6 +3938,10 @@ class MemoryService(DreamOps, MaintainerOps):
         ``force_contend`` (internal; consolidation quarantine): park the
         value as a contender regardless of tier — including at an empty
         slot. Not exposed on the MCP surface.
+        ``dream`` (internal; the dream's claim writes): see
+        :meth:`CortexStore.write_fact` — a dream claim never supersedes a
+        value a direct user or action write backs, and emits no correction
+        signal. Not exposed on the MCP surface.
 
         ``support`` records who asserted the fact — ``"user"`` (the human stated
         it), ``"action"`` (a tool/agent action confirmed it), or ``"agent"`` (the
@@ -3994,6 +4003,7 @@ class MemoryService(DreamOps, MaintainerOps):
                     stance=stance,
                     authority=auth,
                     distortion_tolerance=dt,
+                    dream=dream,
                 )
             except ValueError as exc:
                 if "holds a set" in str(exc):
@@ -4008,9 +4018,10 @@ class MemoryService(DreamOps, MaintainerOps):
             self._save_cortex()
             # Auto-tag a user correction: a user-tier write that REPLACED an older
             # value is a genuine "Y -> Z" correction signal for procedural memory.
-            # Gated to support=="user" so dream/agent consolidation (support=agent)
-            # never feeds itself a correction (no synthesis feedback loop).
-            if (res.action == "superseded"
+            # Gated to a direct support=="user" write so dream consolidation,
+            # which can write at a user note's tier, never feeds itself a
+            # correction (no synthesis feedback loop).
+            if (res.action == "superseded" and not dream
                     and (support or "").strip().lower() == "user"):
                 self._emit_correction_signal(
                     entity, attribute, res.record.supersedes_value, value,
@@ -4036,6 +4047,7 @@ class MemoryService(DreamOps, MaintainerOps):
         provenance: list[str] | None = None,
         origin: str | None = None,
         confidence: float = 0.7,
+        dream: bool = False,
     ) -> dict[str, Any]:
         """Add (or confirm) a member of the set-valued ``(entity, attribute)``
         slot. A scalar already occupying the slot converts to a set one-way
@@ -4053,7 +4065,8 @@ class MemoryService(DreamOps, MaintainerOps):
         Returns ``{"action", "entity", "attribute", "member", "members_count"}``
         — ``action`` is one of ``"member_added"``, ``"member_confirmed"``,
         ``"member_capped"``, ``"member_invalid"``, ``"contested"`` (the
-        aggregate-conversion guard parked the add as a contender), or
+        aggregate, assistant-origin or tier guard parked the add as a
+        contender rather than convert a scalar), or
         ``"confirmed"`` (the member equalled the protected scalar) — see
         ``add_member``.
         """
@@ -4072,6 +4085,7 @@ class MemoryService(DreamOps, MaintainerOps):
                 hlc=self._hlc.tick(),
                 writer_id=writer_id,
                 session_id=session_id,
+                dream=dream,
             )
             self._ensure_subject_entity(entity)
             self._save_cortex()
@@ -4084,17 +4098,21 @@ class MemoryService(DreamOps, MaintainerOps):
             }
 
     def set_remove(self, entity: str, attribute: str, member: str,
-                   origin: str | None = None) -> dict[str, Any]:
+                   origin: str | None = None,
+                   dream: bool = False) -> dict[str, Any]:
         """Retract one current member of a set-valued slot (audit row kept,
         ``status`` -> ``"removed"``). Persists via the same per-slot
         write-through path ``cortex_write`` uses.
 
-        ``origin`` is the retracting write's provenance tier. Only the
-        ``assistant`` floor is consulted: an assistant-stated retraction of a
-        member some other tier put there is refused
-        (``"member_remove_refused"``), so an assistant-origin claim can never
-        take a member out of the user's set. Callers that pass nothing (the
-        MCP tool, the dream rollback replay) are unguarded exactly as before.
+        ``origin`` is the retracting write's provenance tier. An
+        assistant-stated retraction of a member some other tier put there is
+        refused (``"member_remove_refused"``), and with ``protect_provenance``
+        on so is any retraction by a tier below the member's own, so an
+        agent-tier dream op can never take a member out of the user's set,
+        and so is a dream retraction (``dream=True``, internal) of a member a
+        direct user or action write backs. Callers that pass nothing (the
+        MCP tool, the dream rollback replay's removes) are unguarded exactly
+        as before.
 
         Returns ``{"action", "entity", "attribute", "member", "members_count"}``
         — ``action`` is ``"member_removed"``, ``"member_not_found"`` or
@@ -4104,7 +4122,7 @@ class MemoryService(DreamOps, MaintainerOps):
             self._ensure_init()
             assert self._cortex is not None
             res = self._cortex.remove_member(entity, attribute, member,
-                                             support=origin)
+                                             support=origin, dream=dream)
             self._save_cortex()
             return {
                 "action": res.action,
@@ -4445,7 +4463,9 @@ class MemoryService(DreamOps, MaintainerOps):
             return out[:top_k]
 
     def cortex_resolve(self, entity: str, attribute: str, accept: bool,
-                       support: str = "user") -> dict[str, Any]:
+                       support: str = "user",
+                       dream: bool = False,
+                       expect_value: str | None = None) -> dict[str, Any]:
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
         there is nothing parked to resolve, and ``{"resolved": False,
@@ -4466,7 +4486,9 @@ class MemoryService(DreamOps, MaintainerOps):
 
         ``support`` (internal): the tier stamped on an accepted contender —
         "user" for the MCP tool path; the consolidation quarantine passes
-        "agent" so an automated promotion never reads as a human act."""
+        the promoting claim's write tier with ``dream=True``, which marks
+        that tier as dream-written so the promotion never reads as a direct
+        human act."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
@@ -4476,12 +4498,21 @@ class MemoryService(DreamOps, MaintainerOps):
             # retires without competing, so it needs no tick.
             res = self._cortex.resolve(entity, attribute, accept,
                                        support=support,
-                                       hlc=self._hlc.tick() if accept else None)
+                                       hlc=self._hlc.tick() if accept else None,
+                                       dream=dream, expect_value=expect_value)
             if res is None:
                 return {"resolved": False, "reason": "no_contender",
                         "entity": entity, "attribute": attribute}
             if res.action == "refused":
                 return {"resolved": False, "reason": "slot_holds_set",
+                        "entity": entity, "attribute": attribute}
+            if res.action == "refused_direct":
+                # dream=True only: the current value is a direct write.
+                return {"resolved": False, "reason": "direct_write",
+                        "entity": entity, "attribute": attribute}
+            if res.action == "refused_changed":
+                # expect_value only: another value is parked now.
+                return {"resolved": False, "reason": "contender_changed",
                         "entity": entity, "attribute": attribute}
             self._save_cortex()
             cur = self._cortex.lookup(entity, attribute)

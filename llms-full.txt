@@ -1950,8 +1950,86 @@ it came from a live `memory_set_add` call or a dream claim.
 
 Every cortex fact carries a provenance tier: **`user` > `action` >
 `agent` > `assistant`** (set via `origin=`, or defaulted from `source`). A
-write may only *supersede* a slot whose current value is backed by an
-equal-or-weaker tier. A **weaker-tier** write (e.g. an `agent` value
+dream-consolidated fact takes the tier of its backing note's `source` tag
+(`user` / `conversation` → `user`; an unmapped tag or no backing note →
+`agent`); the claim's own `origin` field is model output and is never read.
+The extractor chooses which note a claim cites, in a one-note batch as in a
+larger one, so a tier above `agent` also needs the cited note to pass a
+citation check: the claim's whole value appears in it as one phrase
+(case-insensitive, on Unicode word boundaries, every word kept, so
+"retired" does not back `not retired`, nor "UK" back `US`), at least once
+without a negator (`not`, `no`, `never`, `without`, `neither`, `nor`,
+`cannot` or an `n't` form) among the three words before it in the same
+clause, so "editor: never emacs" does not back `emacs`; and the note
+contains at least one word of the claim's entity or attribute name (split
+on `-`, `_`, `.` and spaces; stop words and single letters skipped; a
+plural or paraphrase does not match). A retraction (`op: "remove"`) skips
+the negation rule, since "no longer serves X" is what backs removing X.
+Otherwise the claim counts as unbacked: `agent` tier, and low-trust to the
+consolidation quarantine (which then parks it rather than writing it). A
+`source` index that is a boolean is not read as a note number.
+
+The check bounds the tier a claim may borrow; it is not a fact check, and
+its limits are deliberate trade-offs, not guarantees:
+
+- It proves a *mention*, not an *assertion*: "I tried vim but hated it; my
+  editor is emacs" mentions `vim` and names the editor slot, so a claim of
+  `vim` passes. The rule below keeps such a claim from replacing a value
+  the user set directly.
+- Hyphens and apostrophes are word edges: "editor-vim" backs `vim`, and
+  "O'Brien" backs `O`.
+- A value that contains its own slot word (`home city` at `user.home_city`)
+  passes the slot-word check by itself.
+- Negation is read only from the three words before a mention in its
+  clause: a negation further back, after the value, or in other words
+  ("hated", "gave up on") is not seen.
+- A retraction skips the negation rule, so a note that mentions a
+  dream-consolidated member and names the slot can back an extractor's
+  misread removal of it even when the note affirms it. A member added by a
+  direct write is not affected (see below).
+- Only a string value is checked: a `None`, number, boolean, list or dict
+  value stays at `agent` tier, and so does a number or other non-string
+  value the shipped extractor's parser turned into text. The shipped extractor's parser drops a claim
+  whose value is JSON `null` rather than storing the text `None`.
+- `memory_dream(rollback)` restores the previous value as a direct write,
+  so a restored value the dream had consolidated is protected from later
+  dream claims until it is changed directly.
+
+**A dream claim never replaces a value a direct write set.** When the
+current value's `user` or `action` tier comes from a direct write
+(`memory_fact_set`, a resolve, a store's auto-promote, anything but the
+dream), a dream claim for a different value parks as a contender, whatever
+its own tier and whether or not the quarantine is on. The same holds on the
+set paths: a dream add parks rather than convert such a scalar into a set
+(`member_add_blocked_direct`), and a dream retraction of a member a direct
+user- or action-tier write added is dropped (`member_remove_refused`); a
+retraction aimed at a scalar slot finds no member and changes nothing.
+Members added by `memory_set_add`, which passes no origin, carry no tier
+(empty support, empty origin) and are not guarded against a dream
+retraction; an assistant-origin retraction of one is still refused. A
+quarantine promotion checks again when it promotes,
+so a direct write that lands in between is not replaced. A value the dream
+itself consolidated from a user note still updates from a later backed
+user note, so changed preferences keep flowing. The record tells the two
+apart by a `dream:<tier>` provenance mark the dream adds when it is the
+write that first gives a fact that tier; a direct write at the tier clears
+it, so a direct confirmation (of a member too, by exact or near-duplicate
+value) protects the value from then on. A scalar converted into a set keeps
+every support tier and its marks. Only the dream writes a mark: a `dream:`
+token in a caller's provenance or `source` tag is dropped. Facts written
+before this release carry no mark and count as direct, with one exception:
+before this release a store with `source="dream:user"` and auto-promote on
+could leave a literal `dream:user` token in a fact's provenance, and such a
+stored token is indistinguishable from a mark, so it is honoured as one
+after a reload. A dream restatement
+that is a shorter form of the current value (a compression echo) confirms
+it without raising its tier; only an exact restatement can. With
+`protect_provenance` off, these rules are off as well.
+
+A write may only *supersede* a slot whose current value is backed by an
+equal-or-weaker tier, so a `memory_fact_set` with no `origin` (recorded as
+`agent`) parks against a fact the dream consolidated at `user` tier. A
+**weaker-tier** write (e.g. an `agent` value
 conflicting with a `user`-stated fact), or one below the confidence margin,
 is **not applied** — it's parked as a *contender*:
 
@@ -1986,6 +2064,12 @@ member another tier added (the retraction is dropped, `action:
 "member_remove_refused"`). It may fill an empty slot, extend a set it
 alone built, and retract its own members. Nothing supersedes *it*
 in return: an assistant-origin value is replaced by any later write.
+With `protect_provenance` on, every other tier gets the same two set-slot
+guards against a stronger tier: a weaker-tier add cannot convert a
+stronger tier's scalar into a set (it parks, `member_add_blocked_tier`),
+and a weaker-tier retraction of a stronger tier's member is dropped
+(`member_remove_refused`). Joining a set is not tier-guarded, and the MCP
+set tools, which pass no tier, are unguarded by design.
 Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
 for assistant-stated facts lifts the fact-only arm on
 `single-session-assistant` from 0.054 to 0.536 while the knowledge-update
@@ -3680,9 +3764,15 @@ directly:
   **and only when the witness's tier is not below the standing current's
   origin**: the two-man rule is never weaker than the provenance guard
   it reinforces, so two agent witnesses cannot supersede a user-stated
-  fact. The same witness restating merely re-confirms the parked value;
-  an automated promotion is stamped agent-supported (a literal, never
-  the claim's own origin field), and never as a user act.
+  fact, and no promotion replaces a value a direct (non-dream) user or
+  action write set. The witness's tier here is the tier a direct write of
+  the same claim would get: its note's `source` tag, kept only when the
+  note passes the citation check ("Provenance contenders" in
+  [memory-model.md](memory-model.md)), and lowered to `assistant` for an
+  assistant-stated claim. The same witness restating merely re-confirms
+  the parked value; an automated promotion adds that same tier to the
+  value's support (never the claim's own origin field), so a value a
+  user-sourced note confirms is as protected as one it wrote directly.
 
 Run results carry `quarantine_parked` / `quarantine_held` /
 `quarantine_promoted`; parks and promotions are journaled (a promotion

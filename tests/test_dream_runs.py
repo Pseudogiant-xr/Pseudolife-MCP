@@ -407,10 +407,18 @@ def test_rollback_re_parks_a_contender_the_runs_insert_settled(svc):
     assert _contenders(svc, "team", "mascot") == ["owl"]
 
 
+def _dream_seed_fox(svc):
+    """A user-tier fox the dream consolidated: a later user note's add may
+    convert it (a direct user write could not be converted by the dream)."""
+    svc.store("the team mascot is a fox", source="user")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))
+
+
 def test_rollback_re_parks_a_contender_the_runs_member_add_settled(svc):
-    svc.cortex_write("team", "mascot", "fox", support="user")
+    _dream_seed_fox(svc)
     svc.cortex_write("team", "mascot", "owl", support="agent")
-    svc.store("adding an owl to the mascots", source="notes")
+    # User-sourced: a weaker-tier add may not convert the user scalar.
+    svc.store("adding an owl to the team mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
     assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
     assert _contenders(svc, "team", "mascot") == []
@@ -443,8 +451,9 @@ def test_rollback_readds_removed_member(svc):
 
 
 def test_rollback_unwinds_scalar_to_set_conversion(svc):
-    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
-    svc.store("adding an owl to the mascots", source="notes")
+    _dream_seed_fox(svc)
+    # User-sourced: a weaker-tier add may not convert the user scalar.
+    svc.store("adding an owl to the team mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
     # Conversion happened: the scalar became a member alongside owl.
     assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
@@ -455,9 +464,85 @@ def test_rollback_unwinds_scalar_to_set_conversion(svc):
     assert cur["value"] == "fox"
 
 
+def test_rollback_unwinds_an_agent_tier_conversion_at_agent_tier(svc):
+    """The agent-tier path: an agent note's add converts an agent scalar,
+    and the rollback restores the scalar at its journaled agent tier."""
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="agent")
+    svc.store("adding an owl to the team mascots", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
+    assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    cur = svc.cortex_lookup("team", "mascot")
+    assert cur is not None and cur.get("kind") != "set", cur
+    assert cur["value"] == "fox" and cur["origin"] == "agent"
+
+
+def _corrections(svc):
+    return [s for s in svc._storage.pending_signals()
+            if s["outcome"] == "correction"]
+
+
+def test_a_user_tier_dream_supersede_emits_no_correction_signal(svc):
+    """A correction signal is a human's "Y -> Z": the dream writing at a
+    user note's tier must not feed lesson synthesis its own output."""
+    svc.store("my preferred editor is vim", source="user")
+    svc.dream_run(_Stub([_scalar("editor-pref", "editor", "vim")]))
+    svc.store("I switched my preferred editor to helix", source="user")
+    svc.dream_run(_Stub([_scalar("editor-pref", "editor", "helix")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "helix"
+    assert _corrections(svc) == []
+    # Control: the same supersede by a direct user write does emit one.
+    svc.cortex_write("editor-pref", "editor", "nano", support="user")
+    assert len(_corrections(svc)) == 1
+
+
+def test_dream_tier_mark_survives_a_reload(pg_conn, pg_url,  # noqa: F811
+                                           tmp_path):
+    """The dream:<tier> provenance mark round-trips through Postgres: after
+    a reload a dream-consolidated user value still updates from a user note,
+    and a direct user value still holds."""
+    from pseudolife_memory.service import MemoryService
+
+    first = MemoryService(data_dir=tmp_path / "first", database_url=pg_url)
+    first.store("my preferred editor is vim", source="user")
+    first.dream_run(_Stub([_scalar("editor-pref", "editor", "vim")]))
+    first.cortex_write("deploy", "target", "prod", support="user")
+    first.flush()
+    first._storage.close()          # one writer per bank: hand it over
+    fresh = MemoryService(data_dir=tmp_path / "reload", database_url=pg_url)
+    try:
+        assert "dream:user" in fresh.cortex_lookup(
+            "editor-pref", "editor")["provenance"]
+        fresh.store("I switched my preferred editor to helix", source="user")
+        fresh.store("set the deploy target to staging", source="user")
+        fresh.dream_run(_CiteStub([
+            ("helix", _scalar("editor-pref", "editor", "helix")),
+            ("staging", _scalar("deploy", "target", "staging"))]))
+        assert fresh.cortex_lookup("editor-pref", "editor")["value"] == "helix"
+        assert fresh.cortex_lookup("deploy", "target")["value"] == "prod"
+    finally:
+        if fresh._storage is not None:
+            fresh._storage.close()
+
+
+class _CiteStub(_Stub):
+    """Cites each claim's note by a word in it (batch order is not
+    insertion order within one clock tick)."""
+
+    def __init__(self, pairs):
+        super().__init__([c for _, c in pairs])
+        self._pairs = pairs
+
+    def extract(self, texts, vocab, known_facts=None):
+        return [dict(c, source=next(i for i, t in enumerate(texts) if w in t))
+                for w, c in self._pairs]
+
+
 def test_rollback_keeps_set_when_other_members_arrived(svc):
-    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
-    svc.store("adding an owl to the mascots", source="notes")
+    _dream_seed_fox(svc)
+    # User-sourced: a weaker-tier add may not convert the user scalar.
+    svc.store("adding an owl to the team mascots", source="user")
     svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
     # A member the run did NOT add arrives afterwards.
     svc.set_add("team", "mascot", "crow")
