@@ -134,7 +134,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
     let floor = p.min_score.unwrap_or(p.default_floor);
     let k = p.k;
     let pool_mult = p.pool_multiplier.max(1) as usize;
-    let pool_k = k * pool_mult;
+    let pool_k = k.saturating_mul(pool_mult);
     let rerank_before_cut = pool_mult > 1 && p.rerank_enabled;
     let n = p.band_order.len();
 
@@ -940,6 +940,25 @@ mod tests {
 
     fn ids(bank: &Bank, r: &Ranked) -> Vec<i64> {
         r.hits.iter().map(|h| bank.entries[h.idx].id).collect()
+    }
+
+    #[test]
+    fn gate_large_candidate_pool_keeps_all_available_entries() {
+        let bank = Bank {
+            dim: DIM,
+            entries: vec![
+                entry(1, "a", "x", false),
+                entry(2, "b", "x", false),
+                entry(3, "c", "x", false),
+            ],
+            matrix: [unit(0.9), unit(0.8), unit(0.7)].concat(),
+        };
+        let mut p = params("", usize::MAX / 3 + 1);
+        p.pool_multiplier = 3;
+        assert_eq!(
+            ids(&bank, &rank(&bank, &unit(1.0), &p, None)),
+            vec![1, 2, 3]
+        );
     }
 
     #[test]

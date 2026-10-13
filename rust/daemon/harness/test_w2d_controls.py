@@ -15,6 +15,20 @@ class Scenario:
 
 
 class MutantQualification(unittest.TestCase):
+    def test_slot_read_control_is_exercised(self):
+        self.assertEqual(search.MUTANTS.get("w2d-cortex-skip-slot-reads"), "default")
+
+    def test_new_seed_ages_past_the_initial_relative_time_bucket(self):
+        with (patch.object(search.pg, "create", return_value="fixture"),
+              patch.object(search.daemons, "make_home"),
+              patch.object(search.daemons, "base_env", return_value={}),
+              patch.object(search.subprocess, "run") as run,
+              patch.object(search.time, "sleep") as sleep):
+            run.return_value.returncode = 0
+            run.return_value.stdout = "stored fixture"
+            search.seed_template("fixture", 0)
+        sleep.assert_called_once_with(70)
+
     def run_control(self, results):
         with (patch.object(sys, "argv", ["w2d_search.py", "mutants", "--rust-bin", "unused"]),
               patch.object(search, "SCENARIOS", {"control": Scenario}),

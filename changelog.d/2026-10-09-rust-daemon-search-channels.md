@@ -21,3 +21,6 @@
 - Cortex confidence preserves PostgreSQL's decimal decoding before rounding.
   Search fixture entry points enforce disposable database admission, and
   mutant controls require covered, clean baselines before crediting a kill.
+- Search pool sizing saturates on large requests, and failed or panicking
+  reranker initialization stays disabled. Offline search harness regressions
+  run in CI; live model/database proofs remain named coverage exceptions.

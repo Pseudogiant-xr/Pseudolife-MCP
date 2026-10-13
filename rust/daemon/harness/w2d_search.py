@@ -73,7 +73,7 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "search-no-contiguity": "contiguity", "search-rrf-off": "rrf-pool",
            "search-no-cortex": "default", "search-rerank-unfused": "margin-gate",
            "search-neighbours-reversed": "contiguity", "search-recency-off": "continuum",
-           "search-cortex-stripped-q": "default"}
+           "search-cortex-stripped-q": "default", "w2d-cortex-skip-slot-reads": "default"}
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
 
 
@@ -464,6 +464,11 @@ def seed_template(name: str, paragraphs: int) -> None:
     if r.returncode != 0:
         raise RuntimeError(f"seeding failed: {r.stderr[-3000:]}")
     print(r.stdout.strip(), flush=True)
+    # Linux 2026-10-13: a fresh default scenario crossed "just now" ->
+    # "1 minute ago" between oracle and candidate. Keep timestamps and the
+    # comparator unchanged; start after that first, nonnumeric age bucket.
+    print("waiting 70 seconds for the initial relative-age bucket", flush=True)
+    time.sleep(70)
 
 
 def coverage(responses: list[dict], state: dict) -> dict:

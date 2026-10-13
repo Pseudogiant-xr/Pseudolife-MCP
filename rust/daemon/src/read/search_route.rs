@@ -89,24 +89,45 @@ impl LazyReranker {
     }
 
     fn model(&self) -> Option<Arc<rerank::Reranker>> {
-        let mut st = self.state.lock().expect("reranker slot");
-        if st.is_none() {
-            let loaded = std::env::var_os("PSEUDOLIFE_DAEMON_RERANK_DIR").and_then(|dir| {
-                match rerank::Reranker::load(std::path::Path::new(&dir), 1) {
-                    Ok(r) => Some(Arc::new(r)),
-                    Err(e) => {
-                        eprintln!("Cross-encoder reranker failed to load ({e}) — disabling.");
-                        None
-                    }
+        self.model_with(|| {
+            let Some(dir) = std::env::var_os("PSEUDOLIFE_DAEMON_RERANK_DIR") else {
+                eprintln!(
+                    "PSEUDOLIFE_DAEMON_RERANK_DIR is unset; disabling cross-encoder reranker."
+                );
+                return None;
+            };
+            match rerank::Reranker::load(std::path::Path::new(&dir), 1) {
+                Ok(r) => Some(Arc::new(r)),
+                Err(e) => {
+                    eprintln!("Cross-encoder reranker failed to load ({e}) — disabling.");
+                    None
                 }
-            });
-            *st = Some(loaded);
+            }
+        })
+    }
+
+    fn model_with(
+        &self,
+        load: impl FnOnce() -> Option<Arc<rerank::Reranker>>,
+    ) -> Option<Arc<rerank::Reranker>> {
+        let Ok(mut st) = self.state.lock() else {
+            return None;
+        };
+        if st.is_none() {
+            *st = Some(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(load)).unwrap_or_else(|_| {
+                    eprintln!("Cross-encoder reranker initialization panicked — disabling.");
+                    None
+                }),
+            );
         }
         st.clone().flatten()
     }
 
     fn disabled(&self) -> bool {
-        matches!(*self.state.lock().expect("reranker slot"), Some(None))
+        self.state
+            .lock()
+            .map_or(true, |st| matches!(*st, Some(None)))
     }
 }
 
@@ -525,6 +546,34 @@ pub async fn warmup_probe(svc: &Service, ready: &Arc<Ready>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gate_poisoned_reranker_stays_disabled() {
+        let reranker = LazyReranker {
+            state: Mutex::new(None),
+        };
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = reranker.state.lock().unwrap();
+            panic!("injected model initialization panic");
+        }));
+        assert!(!reranker.available());
+        assert!(reranker.scores("query", &["candidate"]).is_empty());
+    }
+
+    #[test]
+    fn gate_reranker_load_panic_disables_without_poisoning() {
+        let reranker = LazyReranker {
+            state: Mutex::new(None),
+        };
+        assert!(
+            reranker
+                .model_with(|| panic!("injected load failure"))
+                .is_none()
+        );
+        assert!(!reranker.state.is_poisoned());
+        assert!(!reranker.available());
+        assert!(reranker.model_with(|| panic!("must not retry")).is_none());
+    }
 
     #[test]
     fn coercions_follow_python() {
