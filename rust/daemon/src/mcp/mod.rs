@@ -734,8 +734,11 @@ fn params_valid(method: &str, p: &Map<String, Value>) -> bool {
             !(v.is_null()
                 || v.is_boolean()
                 || request_id(v).is_some()
-                || v.as_f64()
-                    .is_some_and(|n| n.is_finite() && n.fract() == 0.0))
+                // Pydantic's float-to-int path excludes both signed 64-bit
+                // endpoints; integer spellings above use arbitrary width.
+                || v.as_f64().is_some_and(|n| {
+                    n.is_finite() && n.fract() == 0.0 && n.abs() < 9223372036854775808.0
+                }))
         })
     {
         return false;
@@ -1114,7 +1117,14 @@ mod sessions {
 
     #[tokio::test]
     async fn invalid_metadata_refuses_before_toolset_mutation() {
-        for token in [json!([]), json!({}), json!(1.5)] {
+        for token in [
+            json!([]),
+            json!({}),
+            json!(1.5),
+            json!(1e20),
+            json!(9223372036854775808.0),
+            json!(-9223372036854775808.0),
+        ] {
             let app = app();
             app.mcp.register("s");
             app.mcp.mark_ready("s");
@@ -1138,6 +1148,9 @@ mod sessions {
             );
         }
         for meta in [
+            json!({"progressToken":9223372036854774784.0}),
+            json!({"progressToken":-9223372036854774784.0}),
+            crate::http::parse_body_json(r#"{"progressToken":100000000000000000000}"#).unwrap(),
             json!({"progressToken":null}),
             json!({"progressToken":true}),
             json!({"progressToken":1}),
