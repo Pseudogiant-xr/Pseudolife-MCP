@@ -256,7 +256,7 @@ pub fn message_ids(value: &Value) -> Result<(Vec<String>, bool)> {
     let s = text::py_strip(raw);
     let (items, batch): (Vec<String>, bool) = if s.starts_with('[') {
         let parsed: Value =
-            serde_json::from_str(s).map_err(|_| BoardError::code("invalid_message_id"))?;
+            crate::http::parse_body_json(s).map_err(|_| BoardError::code("invalid_message_id"))?;
         let Some(list) = parsed.as_array().filter(|l| !l.is_empty()) else {
             return Err(BoardError::code("invalid_message_id"));
         };
@@ -736,7 +736,7 @@ impl Store {
                 )
                 .await?;
             let epoch = row
-                .map(|r| r.get::<_, Value>(0))
+                .map(|r| r.get::<_, super::db::JsonValue>(0).0)
                 .and_then(|v| canon::py_int_i64(&v))
                 .filter(|e| *e >= 1)
                 .ok_or_else(|| BoardError::Internal("invalid writer lease epoch".into()))?;
@@ -1506,7 +1506,7 @@ impl Store {
         let mut messages = Vec::new();
         for sent in &rows {
             let payload_text: String = sent.get("payload");
-            let payload: Value = serde_json::from_str(&payload_text).unwrap_or(Value::Null);
+            let payload: Value = crate::http::parse_body_json(&payload_text).unwrap_or(Value::Null);
             let redacted_at: Option<f64> = sent.get("redacted_at");
             let redacted = redacted_at.is_some();
             let body: Option<String> = sent.get("body");

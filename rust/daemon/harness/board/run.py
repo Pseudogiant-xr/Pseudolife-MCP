@@ -397,17 +397,33 @@ def main() -> int:
 
     if args.mode == "mutants":
         outcome = {}
-        for m in MUTANTS:
-            os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = m
-            steps, diff_steps, state, chain = summarize(one_pass("live"))
-            outcome[m] = {"diff_steps": diff_steps, "state_diffs": state, "chain": chain}
-            print(f"mutant {m}: {diff_steps} step diffs, {state} state diffs, {chain} chain problems",
-                  flush=True)
-        os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+        original = os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+        try:
+            baseline_results = one_pass("live")
+            steps, diff_steps, state, chain = summarize(baseline_results)
+            baseline = {"steps": steps, "diff_steps": diff_steps, "state_diffs": state, "chain": chain}
+            print("unmutated baseline:", baseline, flush=True)
+            if diff_steps or state or chain:
+                if args.out:
+                    args.out.write_text(json.dumps({"baseline": baseline,
+                        "baseline_results": baseline_results, "mutants": {}, "survivors": [],
+                        "error": "unmutated_baseline_differs"}, indent=1, default=str), encoding="utf-8")
+                return 1
+            for m in MUTANTS:
+                os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = m
+                steps, diff_steps, state, chain = summarize(one_pass("live"))
+                outcome[m] = {"diff_steps": diff_steps, "state_diffs": state, "chain": chain}
+                print(f"mutant {m}: {diff_steps} step diffs, {state} state diffs, {chain} chain problems",
+                      flush=True)
+        finally:
+            if original is None:
+                os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+            else:
+                os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = original
         survivors = [m for m, o in outcome.items() if not any(o.values())]
         if args.out:
-            args.out.write_text(json.dumps({"mutants": outcome, "survivors": survivors}, indent=1),
-                                encoding="utf-8")
+            args.out.write_text(json.dumps({"baseline": baseline, "mutants": outcome,
+                                           "survivors": survivors}, indent=1), encoding="utf-8")
         print("survivors:", survivors or "none")
         return 1 if survivors else 0
 

@@ -92,3 +92,38 @@ def test_invalid_selection_fails_before_any_scenario(monkeypatch, mode, selectio
     with pytest.raises(SystemExit) as raised:
         run.main()
     assert raised.value.code == 2
+
+
+@pytest.mark.parametrize("difference", ["response", "state", "chain"])
+def test_mutants_refuse_a_broken_unmutated_baseline(monkeypatch, tmp_path, difference):
+    calls = []
+    monkeypatch.setenv("PSEUDOLIFE_DAEMON_MUTANT", "inherited-control")
+    monkeypatch.setattr(sys, "argv", ["board.run", "mutants", "--rust-bin", "unused", "--only", "identity"])
+    monkeypatch.setattr(run.daemons, "scratch_root", lambda: tmp_path)
+
+    def scenario(*args):
+        calls.append(run.os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"))
+        return {"steps": [{"diffs": ["baseline"] if difference == "response" else []}],
+                "state_diffs": ["baseline"] if difference == "state" else [],
+                "chain": ["baseline"] if difference == "chain" else []}
+
+    monkeypatch.setattr(run, "run_scenario", scenario)
+    assert run.main() == 1, "a broken baseline was credited as a mutant kill"
+    assert calls == [None], "mutants ran before a clean unmutated baseline"
+    assert run.os.environ["PSEUDOLIFE_DAEMON_MUTANT"] == "inherited-control"
+
+
+def test_mutants_require_the_control_to_differ_after_a_clean_baseline(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setenv("PSEUDOLIFE_DAEMON_MUTANT", "inherited-control")
+    monkeypatch.setattr(sys, "argv", ["board.run", "mutants", "--rust-bin", "unused", "--only", "identity"])
+    monkeypatch.setattr(run.daemons, "scratch_root", lambda: tmp_path)
+
+    def scenario(*args):
+        calls.append(run.os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"))
+        return {"steps": [{"diffs": []}], "state_diffs": [], "chain": []}
+
+    monkeypatch.setattr(run, "run_scenario", scenario)
+    assert run.main() == 1, "disabled controls must survive"
+    assert calls == [None, *run.MUTANTS]
+    assert run.os.environ["PSEUDOLIFE_DAEMON_MUTANT"] == "inherited-control"

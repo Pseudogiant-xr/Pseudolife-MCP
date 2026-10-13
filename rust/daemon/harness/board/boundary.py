@@ -14,10 +14,16 @@ from board.run import REPO, pg
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--clock", action="store_true", help="exercise failed clock seeding before send")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--clock", action="store_true", help="exercise failed clock seeding before send")
+    group.add_argument("--json-keys", action="store_true", help="exercise reserved JSON keys in capabilities")
     args = parser.parse_args()
-    test = ("board_send_refuses_an_incomplete_clock_seed" if args.clock
-            else "board_heartbeat_during_paused_initialization")
+    if args.json_keys:
+        test = "board_json_capabilities_roundtrip"
+    elif args.clock:
+        test = "board_send_refuses_an_incomplete_clock_seed"
+    else:
+        test = "board_heartbeat_during_paused_initialization"
     if pg.HOST_PORT != "127.0.0.1:5434":
         raise SystemExit("board boundary fixture requires test PostgreSQL at 127.0.0.1:5434")
     name = pg.name("pl_cf_w2f_init_boundary")

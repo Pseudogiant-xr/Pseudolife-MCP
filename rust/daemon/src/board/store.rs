@@ -445,7 +445,7 @@ impl Store {
         let Some(bank) = bank else {
             return Err(BoardError::code("invalid_bank_identity"));
         };
-        let value: Value = bank.get(0);
+        let value: Value = bank.get::<_, super::db::JsonValue>(0).0;
         let bank_id = match value.as_str() {
             Some(s) if uuid::Uuid::parse_str(s).is_ok_and(|u| u.hyphenated().to_string() == s) => {
                 s.to_string()

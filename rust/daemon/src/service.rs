@@ -715,6 +715,121 @@ mod tests {
             .await;
     }
 
+    #[tokio::test]
+    #[ignore = "requires a disposable board database through board.boundary"]
+    async fn board_json_capabilities_roundtrip() {
+        let dsn = std::env::var("PL_W2F_BOARD_DSN").expect("owned board fixture DSN");
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|n| n.starts_with("pl_cf_w2f_"))
+        );
+        assert_eq!(parsed.get_ports(), &[5434]);
+        assert!(
+            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(h)] if h == "127.0.0.1")
+        );
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::new(),
+            dsn.clone(),
+            true,
+        ));
+        let board = crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn,
+            service.clone(),
+            Arc::new(crate::auth::PrincipalStore::new()),
+        );
+        let params = |v: Value| v.as_object().unwrap().clone();
+        let mut headers = std::collections::HashMap::new();
+        let capabilities = json!({"$serde_json::private::Number": true});
+        let registered = board
+            .dispatch(
+                "register",
+                params(json!({"label":"json fixture", "capabilities": capabilities})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_vec(&registered["capabilities"]).unwrap(),
+            serde_json::to_vec(&capabilities).unwrap()
+        );
+        headers.insert(
+            "x-pl-agent".into(),
+            registered["agent_id"].as_str().unwrap().into(),
+        );
+        headers.insert(
+            "x-pl-agent-key".into(),
+            registered["credential"].as_str().unwrap().into(),
+        );
+        let changed = capabilities.clone();
+        let updated = board
+            .dispatch(
+                "update",
+                params(json!({"status": "updated"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_vec(&updated["capabilities"]).unwrap(),
+            serde_json::to_vec(&changed).unwrap()
+        );
+        // The roster excludes its caller, so read from a separate observer.
+        let observer = board
+            .dispatch(
+                "register",
+                params(json!({"label": "observer"})),
+                &std::collections::HashMap::new(),
+                "default",
+            )
+            .await
+            .unwrap();
+        let observer_headers = std::collections::HashMap::from([
+            (
+                "x-pl-agent".into(),
+                observer["agent_id"].as_str().unwrap().into(),
+            ),
+            (
+                "x-pl-agent-key".into(),
+                observer["credential"].as_str().unwrap().into(),
+            ),
+        ]);
+        let roster = board
+            .dispatch("agents", params(json!({})), &observer_headers, "default")
+            .await
+            .unwrap();
+        let console = board
+            .console("default", &std::collections::HashMap::new())
+            .await
+            .unwrap();
+        for result in [roster, console] {
+            let row = result["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["agent_id"] == registered["agent_id"])
+                .unwrap();
+            assert_eq!(
+                serde_json::to_vec(&row["capabilities"]).unwrap(),
+                serde_json::to_vec(&changed).unwrap()
+            );
+        }
+        drop(board);
+        let storage = service.inner.lock().await.storage.take().unwrap();
+        service.update(|s| s.storage = None);
+        Arc::try_unwrap(storage)
+            .ok()
+            .expect("storage released")
+            .close()
+            .await;
+    }
+
     #[test]
     fn backoff_ladder_matches_python() {
         let mut inner = Inner::default();

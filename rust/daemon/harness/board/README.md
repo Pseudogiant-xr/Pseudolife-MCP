@@ -13,6 +13,7 @@ python -m board.run mutants --rust-bin PATH_BUILT_WITH_--features_mutants
 python -m pytest board/test_norm.py board/test_run.py
 python -m board.boundary
 python -m board.boundary --clock
+python -m board.boundary --json-keys
 ```
 
 Per step it compares the status, the headers clients read (`content-type`,
@@ -81,3 +82,12 @@ Hosted live coverage remains a follow-up: the proven runner warms the Python
 arm with a cached model, while a portable offline fixture has not yet been
 integrated and validated for this board runner. The original timing-sensitive
 goldens remain strict failing evidence, not CI expectations.
+
+`--json-keys` registers the serde-reserved capability key, updates the agent,
+and checks byte-identical capabilities through roster and Console reads. Board
+JSON/JSONB decoding uses the protected HTTP JSON parser for every JSON column.
+
+Mutant mode first clears any inherited mutation and requires a live baseline
+with zero response, state and chain differences. A broken baseline returns
+failure before any control runs; the caller’s original mutation environment
+is restored on every exit.

@@ -10,6 +10,35 @@ use super::error::{BoardError, Result};
 use serde_json::{Map, Value, json};
 use tokio_postgres::{Client, Row};
 
+/// PostgreSQL JSON with ordinary object keys, including serde's reserved key.
+/// The driver's Value decoder uses serde's arbitrary-precision transport;
+/// reuse the HTTP parser so user keys cannot be mistaken for that transport.
+#[derive(Debug)]
+pub struct JsonValue(pub Value);
+
+impl<'a> tokio_postgres::types::FromSql<'a> for JsonValue {
+    fn from_sql(
+        ty: &tokio_postgres::types::Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let text = if *ty == tokio_postgres::types::Type::JSONB {
+            match raw.split_first() {
+                Some((&1, text)) => text,
+                _ => return Err("unsupported PostgreSQL JSONB version".into()),
+            }
+        } else {
+            raw
+        };
+        Ok(Self(crate::http::parse_body_json(std::str::from_utf8(
+            text,
+        )?)?))
+    }
+
+    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+        *ty == tokio_postgres::types::Type::JSON || *ty == tokio_postgres::types::Type::JSONB
+    }
+}
+
 /// Finish a transaction on the dedicated board client, independently of the
 /// writer's global recovery marker. The driver rolls back on drop (including
 /// cancellation), so the next operation cannot commit an abandoned body.
@@ -116,7 +145,7 @@ impl AgentRow {
             task: r.get("task"),
             status: r.get("status"),
             episode: r.get("episode"),
-            capabilities: r.get("capabilities"),
+            capabilities: r.get::<_, JsonValue>("capabilities").0,
             wake_enabled: r.get("wake_enabled"),
             created_at: r.get("created_at"),
             last_activity: r.get("last_activity"),
@@ -126,7 +155,7 @@ impl AgentRow {
             generation: r.get("generation"),
             lease_until: r.get("lease_until"),
             status_expires_at: r.get("status_expires_at"),
-            children: r.get("children"),
+            children: r.get::<_, JsonValue>("children").0,
             park_reason: r.get("park_reason"),
             park_needs: r.get("park_needs"),
             park_clear_by: r.get("park_clear_by"),
@@ -235,9 +264,11 @@ impl MessageRow {
             attempts: r.get("attempts"),
             acknowledged_at: r.get("acknowledged_at"),
             first_read_at: r.get("first_read_at"),
-            wake: r.get("wake"),
+            wake: r.get::<_, Option<JsonValue>>("wake").map(|v| v.0),
             origin: r.get("origin"),
-            maintainer_proof: r.get("maintainer_proof"),
+            maintainer_proof: r
+                .get::<_, Option<JsonValue>>("maintainer_proof")
+                .map(|v| v.0),
             repudiated_at: r.get("repudiated_at"),
         }
     }

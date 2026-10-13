@@ -484,7 +484,7 @@ pub async fn serve_wake(c: &impl GenericClient, agent_id: &str, now: f64) -> Res
             )
             .await?;
         if let Some(event) = event {
-            let stamp: Option<Value> = event.get(1);
+            let stamp = event.get::<_, Option<super::db::JsonValue>>(1).map(|v| v.0);
             let stamp = stamp.as_ref().and_then(canon::as_f64);
             if stamp == park_since {
                 park_seq = Some(event.get(0));

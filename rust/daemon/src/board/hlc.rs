@@ -67,7 +67,7 @@ async fn stored_high_water_inner(c: &tokio_postgres::Client) -> Result<(i64, i64
         .query_opt("SELECT value FROM meta WHERE key=$1", &[&HLC_META_KEY])
         .await?;
     if let Some(row) = stamp {
-        let v: Value = row.get(0);
+        let v: Value = row.get::<_, super::db::JsonValue>(0).0;
         let parts = v.as_array().filter(|a| a.len() == 2).and_then(|a| {
             let p = super::canon::py_int_i64(&a[0])?;
             let l = super::canon::py_int_i64(&a[1])?;

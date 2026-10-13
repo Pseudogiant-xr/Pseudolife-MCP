@@ -204,3 +204,26 @@ async fn board_startup_handshake_has_a_deadline() {
         "unfinished authentication cannot return a usable client"
     );
 }
+
+#[test]
+fn json_columns_preserve_nested_keys_and_arbitrary_precision_numbers() {
+    use tokio_postgres::types::{FromSql, Type};
+    let text = r#"{"$serde_json::private::Number":true,"_":false,"nested":[{"$serde_json::private::Number":"value"}],"integer":123456789012345678901234567890}"#;
+    for ty in [Type::JSON, Type::JSONB] {
+        let mut bytes = Vec::new();
+        if ty == Type::JSONB {
+            bytes.push(1);
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        let value = JsonValue::from_sql(&ty, &bytes).unwrap().0;
+        assert_eq!(value["$serde_json::private::Number"], true);
+        assert_eq!(value["_"], false);
+        assert_eq!(value["nested"][0]["$serde_json::private::Number"], "value");
+        assert_eq!(
+            value["integer"].to_string(),
+            "123456789012345678901234567890"
+        );
+    }
+    assert!(JsonValue::from_sql(&Type::JSONB, &[]).is_err());
+    assert!(JsonValue::from_sql(&Type::JSONB, b"\x02{}").is_err());
+}
