@@ -82,6 +82,8 @@
   dream-consolidated member can still back a misread removal of it; and a
   dream rollback restores the previous value as a direct write, so a
   restored dream value is protected from later dream claims until it is
-  changed directly.
+  changed directly. Rollback also removes a tier the rolled-back run's
+  confirmations raised, unless a later direct write backed that tier;
+  confirmations without a journaled prior tier remain unchanged.
 - Facts consolidated before this release keep their stored tier until
   restated; nothing is backfilled.

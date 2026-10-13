@@ -954,3 +954,148 @@ def test_set_add_settling_an_assistant_claim_keeps_the_member_the_users(svc):
     removed = svc.set_remove("u", "langs", "rust programming",
                              origin="assistant", dream=True)
     assert removed["action"] == "member_remove_refused", removed
+
+
+# ── rollback removes tiers introduced by confirmations
+
+@pytest.fixture()
+def rollback_svc(pg_conn, pg_url, tmp_path):  # noqa: F811
+    service = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    try:
+        yield service
+    finally:
+        if not service._storage._conn.closed:
+            service.flush()
+            service._storage.close()
+
+
+def _confirmed_record(service, member):
+    slot = service.cortex_lookup("editor-pref", "editor", track=False)
+    return slot["members"][0] if member else slot
+
+
+def _dream_confirm(service, *, member=False, source="user", value="vim"):
+    service.store(f"my preferred editor is {value}", source=source)
+    out = service.dream_run(StubExtractor([
+        _claim(value, op="add" if member else None)]))
+    out["run_id"] = service._storage.latest_committed_dream_run()["id"]
+    return out
+
+
+@pytest.mark.parametrize("member", [False, True])
+def test_rollback_restores_confirmation_tier_and_persists(
+        rollback_svc, pg_url, tmp_path, member):  # noqa: F811
+    service = rollback_svc
+    _dream_confirm(service, member=member, source="agent")
+    before = _confirmed_record(service, member)
+    run = _dream_confirm(service, member=member)
+    assert _confirmed_record(service, member)["support"] == ["agent", "user"]
+    assert "dream:user" in _confirmed_record(service, member)["provenance"]
+    out = service.dream_rollback(run["run_id"])
+    after = _confirmed_record(service, member)
+    assert after["support"] == before["support"]
+    assert after["provenance"] == before["provenance"]
+    assert out["reverted"] == 1 and out["partial"] == 0
+    # No full flush: rollback itself must persist the dirty slot.
+    service._storage.close()
+    fresh = MemoryService(data_dir=tmp_path / "reload", database_url=pg_url)
+    try:
+        restored = _confirmed_record(fresh, member)
+        assert restored["support"] == before["support"]
+        assert restored["provenance"] == before["provenance"]
+        if member:
+            result = fresh.set_remove("editor-pref", "editor", "vim",
+                                      origin="agent", dream=True)
+            assert result["action"] == "member_removed"
+        else:
+            result = fresh.cortex_write("editor-pref", "editor", "nano",
+                                        support="agent", confidence=1.0)
+            assert result["action"] == "superseded"
+    finally:
+        fresh.flush()
+        fresh._storage.close()
+
+
+@pytest.mark.parametrize("member", [False, True])
+@pytest.mark.parametrize("direct_tier", ["user", "action"])
+def test_rollback_confirmation_preserves_later_direct_support(
+        rollback_svc, member, direct_tier):
+    service = rollback_svc
+    _dream_confirm(service, member=member, source="agent")
+    _dream_confirm(service, member=member)
+    if member:
+        service.set_add("editor-pref", "editor", "vim", origin=direct_tier)
+    else:
+        service.cortex_write("editor-pref", "editor", "vim",
+                             support=direct_tier)
+    out = service.dream_rollback()
+    after = _confirmed_record(service, member)
+    expected = ["agent", direct_tier]
+    assert set(after["support"]) == set(expected)
+    assert f"dream:{direct_tier}" not in after["provenance"]
+    assert out["reverted"] == (direct_tier == "action")
+
+
+@pytest.mark.parametrize("member", [False, True])
+def test_rollback_confirmation_without_a_tier_raise_is_untouched(
+        rollback_svc, member):
+    service = rollback_svc
+    _dream_confirm(service, member=member)
+    _dream_confirm(service, member=member)
+    before = _confirmed_record(service, member)
+    out = service.dream_rollback()
+    assert _confirmed_record(service, member) == before
+    assert out["reverted"] == 0 and out["skipped"] == 1
+
+
+@pytest.mark.parametrize("member", [False, True])
+def test_rollback_confirmation_requires_newest_run_first(rollback_svc, member):
+    service = rollback_svc
+    _dream_confirm(service, member=member, source="agent")
+    raised = _dream_confirm(service, member=member)
+    newer = _dream_confirm(service, member=member)
+    refused = service.dream_rollback(raised["run_id"])
+    assert refused == {"error": "stale_run_id", "latest": newer["run_id"]}
+    assert _confirmed_record(service, member)["origin"] == "user"
+    assert service.dream_rollback(newer["run_id"])["skipped"] == 1
+    assert _confirmed_record(service, member)["origin"] == "user"
+    assert service.dream_rollback(raised["run_id"])["reverted"] == 1
+    assert _confirmed_record(service, member)["origin"] == "agent"
+
+
+@pytest.mark.parametrize("member", [False, True])
+def test_rollback_confirmation_without_prior_tier_is_conservative(
+        rollback_svc, pg_conn, member):  # noqa: F811
+    service = rollback_svc
+    _dream_confirm(service, member=member, source="agent")
+    run = _dream_confirm(service, member=member)
+    pg_conn.execute("UPDATE dream_run_slots SET prev_support = NULL "
+                    "WHERE run_id = %s", (run["run_id"],))
+    pg_conn.commit()
+    before = _confirmed_record(service, member)
+    out = service.dream_rollback()
+    assert _confirmed_record(service, member) == before
+    assert out["reverted"] == 0 and out["skipped"] == 1
+
+
+def test_rollback_confirmation_does_not_change_a_replacement(rollback_svc):
+    service = rollback_svc
+    _dream_confirm(service, source="agent")
+    _dream_confirm(service)
+    service.cortex_write("editor-pref", "editor", "nano", support="user",
+                         dream=True, confidence=1.0)
+    before = _confirmed_record(service, False)
+    assert before["value"] == "nano" and "dream:user" in before["provenance"]
+    out = service.dream_rollback()
+    assert _confirmed_record(service, False) == before
+    assert out["reverted"] == 0
+
+
+def test_rollback_confirmation_via_member_op_restores_scalar_tier(rollback_svc):
+    service = rollback_svc
+    service.cortex_write("editor-pref", "editor", "32 editors", support="agent")
+    run = _dream_confirm(service, member=True, value="32 editors")
+    assert run["confirmed"] == 1
+    assert _confirmed_record(service, False)["origin"] == "user"
+    assert service.dream_rollback()["reverted"] == 1
+    assert _confirmed_record(service, False)["support"] == ["agent"]

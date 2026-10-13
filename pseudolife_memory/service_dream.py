@@ -2577,7 +2577,7 @@ class DreamOps:
         (design doc 2026-08-01: has_trace gates scalars but never member
         ops, so a rewind would re-add reverted members while suppressing
         reverted scalars)."""
-        from pseudolife_memory.memory.cortex import _norm_value
+        from pseudolife_memory.memory.cortex import _TIER_RANK, _norm_value
         import time as _time
 
         if self._storage is None:
@@ -2675,6 +2675,35 @@ class DreamOps:
                            *args, since=rollback_started))
             return rec.value if rec is not None else None
 
+        def _restore_confirmed_tiers(row: dict) -> str:
+            # Only the strongest prior tier is journaled. A marked tier
+            # above it was absent before this confirmation; a direct write
+            # since then clears its mark and must retain its support. An
+            # unknown pre-image cannot prove that a tier was introduced.
+            prior = row.get("prev_support")
+            if prior not in _TIER_RANK:
+                return "skipped:confirmed"
+            with self._lock:
+                if row["action"] == "confirmed":
+                    rec = self._cortex.lookup(row["entity"], row["attribute"])
+                else:
+                    rec = next((m for m in self._cortex.members(
+                        row["entity"], row["attribute"])
+                        if _norm_value(m.value) == _norm_value(
+                            row["prev_value"] or "")), None)
+                if rec is None or _norm_value(rec.value) != _norm_value(
+                        row["prev_value"] or ""):
+                    return "skipped:superseded_by_later"
+                raised = {t for t in rec.support
+                          if _TIER_RANK.get(t, 0) > _TIER_RANK[prior]
+                          and f"dream:{t}" in rec.provenance}
+                if not raised:
+                    return "skipped:confirmed"
+                rec.support.difference_update(raised)
+                rec.provenance.difference_update(f"dream:{t}" for t in raised)
+                self._cortex.dirty_slots.add(rec.key)
+                return "reverted"
+
         for row in reversed(journal):
             action = row["action"]
             outcome = "skipped:no_reversal"
@@ -2701,6 +2730,10 @@ class DreamOps:
                             deleted = self._storage.delete_chronicle_event(
                                 ev_id)
                     outcome = "reverted" if deleted else "skipped:already_gone"
+                elif action in ("confirmed", "member_confirmed"):
+                    # A member operation may confirm an aggregate scalar;
+                    # the returned action identifies the record to restore.
+                    outcome = _restore_confirmed_tiers(row)
                 elif row["kind"] == "scalar":
                     if action == "inserted" and row["prev_status"] is None:
                         with self._lock:
@@ -2726,10 +2759,6 @@ class DreamOps:
                                        else "skipped:already_gone")
                         else:
                             outcome = _rewrite_prev(row)
-                    elif action == "confirmed":
-                        # Only confidence/last_confirmed moved; unwinding
-                        # that is not expressible through the write path.
-                        outcome = "skipped:confirmed"
                 else:  # member
                     if action == "member_added":
                         self.set_remove(row["entity"], row["attribute"],
@@ -2765,8 +2794,6 @@ class DreamOps:
                         outcome = ("partial:member_not_restored"
                                    if res["action"] == "contested"
                                    else "reverted")
-                    elif action == "member_confirmed":
-                        outcome = "skipped:confirmed"
             except Exception as exc:  # noqa: BLE001 — keep unwinding
                 logger.warning("rollback: reversal failed at seq %s (%s)",
                                row["seq"], exc)
