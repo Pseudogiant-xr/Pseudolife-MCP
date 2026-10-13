@@ -1,7 +1,7 @@
 {
   "schema": 2,
-  "oracle_head": "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1",
-  "package_version": "0.17.0",
+  "oracle_head": "1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4",
+  "package_version": "0.18.0",
   "template_rule": "Only exact owned fixture URL and credential-file parameters replaced; expected newline generated for capture platform. Actual streams remain raw.",
   "oracle_schema": 55,
   "historical_contract": {
@@ -34,7 +34,7 @@
       "case": "version-mismatch",
       "exit_code": 0,
       "stdout_frame_count": 1,
-      "stderr_lf_template": "[shim] this shim is pseudolife-mcp 0.17.0 but the daemon at {fixture_url} is 99.0.0 \u2014 run pseudolife-mcp update --clients-only --tag 99.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon (pseudolife-mcp update); then start a new session.\n"
+      "stderr_lf_template": "[shim] this shim is pseudolife-mcp 0.18.0 but the daemon at {fixture_url} is 99.0.0 \u2014 run pseudolife-mcp update --clients-only --tag 99.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon (pseudolife-mcp update); then start a new session.\n"
     },
     {
       "case": "preframe-refusal",
@@ -58,9 +58,9 @@
   "source_binding": {
     "windows": {
       "pyproject.toml": {
-        "git_blob": "a4add026b5398c958df774516e71c3a816068bb9",
-        "git_blob_sha256": "025d0a199c1d46226f84396400d7e704c85711017011fb5c9d8bc82eab90d699",
-        "selected_bytes_sha256": "0218a1d741fef4621f735fe6ef8f85dbc79753b7ed89409c0ebaa9fb803840f0",
+        "git_blob": "101cddf56d0596e402d2e8728170958ef0062534",
+        "git_blob_sha256": "34ccc51c1268f8d563b0421afed907870db68f819df49e2f4cc5d4d12999c009",
+        "selected_bytes_sha256": "1b102dc01f47a7bc38261101908fd2f144250b777915ebd9152091f7ca21f024",
         "selected_source_lf_matches_pin": true
       },
       "pseudolife_memory/__init__.py": {
@@ -96,9 +96,9 @@
     },
     "linux": {
       "pyproject.toml": {
-        "git_blob": "a4add026b5398c958df774516e71c3a816068bb9",
-        "git_blob_sha256": "025d0a199c1d46226f84396400d7e704c85711017011fb5c9d8bc82eab90d699",
-        "selected_bytes_sha256": "025d0a199c1d46226f84396400d7e704c85711017011fb5c9d8bc82eab90d699",
+        "git_blob": "101cddf56d0596e402d2e8728170958ef0062534",
+        "git_blob_sha256": "34ccc51c1268f8d563b0421afed907870db68f819df49e2f4cc5d4d12999c009",
+        "selected_bytes_sha256": "34ccc51c1268f8d563b0421afed907870db68f819df49e2f4cc5d4d12999c009",
         "selected_source_lf_matches_pin": true
       },
       "pseudolife_memory/__init__.py": {
@@ -158,5 +158,5 @@
     }
   },
   "proof_oracle_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
-  "proof_status": "Historical startup captures at the recorded proof oracle; selected startup source blobs equal current master. Current candidate-head runtime acceptance remains pending."
+  "proof_status": "Historical startup captures at the recorded proof oracle (package 0.17.0); selected startup source blobs equal current master, and the version-mismatch template carries the selected package version. Current candidate-head runtime acceptance remains pending."
 }

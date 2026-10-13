@@ -34,6 +34,49 @@ def test_equal_observations_have_no_diff():
     assert compare.diff(obs(stdout=b"x"), obs(stdout=b"x"), ()) == []
 
 
+@pytest.mark.parametrize("fault", [
+    {"mismatches": ["fifo:missing"]},
+    {"hardlink_same_inode": False},
+    {"socket_omitted": False},
+])
+@pytest.mark.parametrize("both_arms", [False, True])
+def test_backup_restore_fault_controls_are_rejected(fault, both_arms):
+    good = {"mismatches": [], "hardlink_same_inode": True, "socket_omitted": True}
+    bad = dict(good, **fault)
+    assert compare.diff(obs(restore=bad if both_arms else good), obs(restore=bad), ())
+
+
+@pytest.mark.parametrize("restore", [None, {}, {"archive_missing": True},
+                                    {"mismatches": [], "hardlink_same_inode": 1,
+                                     "socket_omitted": True}])
+def test_backup_restore_requires_complete_typed_success(restore):
+    good = {"mismatches": [], "hardlink_same_inode": True, "socket_omitted": True}
+    assert compare.diff(obs(restore=good), obs(restore=restore), ())
+
+
+def test_backup_restore_case_requires_observations_from_both_arms(monkeypatch):
+    from cli_harness.rows import backup
+    monkeypatch.setattr(backup, "_have_pg0", lambda: False)
+    case = next(case for case in backup.cases() if case.id == "member-kinds-roundtrip")
+    good = {"mismatches": [], "hardlink_same_inode": True, "socket_omitted": True}
+    assert compare.diff(obs(restore=good), obs(restore=good), case.rules) == []
+    assert compare.diff(obs(), obs(), case.rules)
+
+
+def test_snapshot_keeps_read_error_for_an_unfollowable_directory(tmp_path, monkeypatch):
+    directory = tmp_path / "profile"
+    directory.mkdir()
+    try:
+        directory.read_bytes()
+    except OSError as error:
+        expected = f"unreadable:{error.__class__.__name__}"
+    else:
+        pytest.fail("directory fixture must refuse a file read")
+    original = Path.is_dir
+    monkeypatch.setattr(Path, "is_dir", lambda path: False if path == directory else original(path))
+    assert core.snapshot(tmp_path)["profile"] == expected
+
+
 @pytest.mark.parametrize("directory", ["bank/backups", "bank/mybk"])
 @pytest.mark.parametrize("kind,extension", [("state", "tar.gz"), ("memory", "sql.gz")])
 def test_backup_mode_paths_use_each_arms_validated_timestamp(directory, kind, extension):
@@ -1532,3 +1575,53 @@ def test_fixture_replies_records_and_closes_with_bounded_polling(row, monkeypatc
         assert probe.connect_ex(("127.0.0.1", port)) != 0
     # Bound the actual idle wait without depending on thread scheduling.
     assert intervals and all(0 < timeout <= 0.05 for timeout in intervals)
+
+
+@pytest.mark.skipif(core.WINDOWS, reason="POSIX special-file snapshot")
+def test_snapshot_observes_fifo_and_socket_without_opening_them(tmp_path, monkeypatch):
+    import socket
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo, 0o640)
+    sock = socket.socket(socket.AF_UNIX)
+    sock.bind(str(tmp_path / "socket"))
+    original = Path.read_bytes
+
+    def guarded(path):
+        assert path not in (fifo, tmp_path / "socket"), "special-file snapshot attempted content read"
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+    try:
+        assert core.snapshot(tmp_path) == {"fifo": "fifo", "socket": "socket"}
+    finally:
+        sock.close()
+
+
+def test_home_tokens_preserve_surrogateescape_link_targets():
+    home = "/fixture"
+    want = obs()
+    want["files"] = {"raw-link": "link:" + home + "/raw-\udcff"}
+    normalize.home_tokens(want, home)
+    assert want["files"]["raw-link"] == "link:{HOME}/raw-\udcff"
+    wrong = obs()
+    wrong["files"] = {"raw-link": "link:{HOME}/raw-\udcfe"}
+    assert compare.diff(want, wrong, ())
+
+
+def test_golden_secret_guards_scan_surrogateescape_strings(tmp_path, monkeypatch):
+    import json
+    from cli_harness import runner
+    clean = {"raw-link": "link:raw-\udcff"}
+    assert normalize.scram_marks(clean) == []
+    assert normalize.drawn_login_secrets(clean) == []
+    runner.write_golden(tmp_path / "raw.json", clean)
+    assert json.loads((tmp_path / "raw.json").read_text(encoding="utf-8")) == clean
+    def unexpected_write(*args, **kwargs):
+        raise AssertionError("rejected fixture must not reach the file writer")
+
+    monkeypatch.setattr(Path, "write_text", unexpected_write)
+    for marker in ["SCRAM-SHA-256$marker", _drawn_login_line().decode("ascii")]:
+        rejected = {"raw-link": "link:raw-\udcff/" + marker}
+        with pytest.raises(SystemExit, match="refusing to write"):
+            runner.write_golden(tmp_path / "unsafe.json", rejected)
+        assert not (tmp_path / "unsafe.json").exists()
