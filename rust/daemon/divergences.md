@@ -88,7 +88,10 @@ deadline, or unread `Expect: 100-continue` body closes the connection. The
 selected response may be delayed by that deadline, unlike Python's immediate
 response and subsequent discard. Over-budget frame overshoot retains the
 shared HTTP bound. The strict MCP comparator retains any resulting connection
-header or transport differences; they are not normalized away.
+header or transport differences; they are not normalized away. The live
+corpus at `73c4220c5` retains five `body_limit` differences (indices 0, 2,
+3, 4 and 5), all the added `Connection: close` header on a 413; response
+statuses and bodies match, and all six body-limit probes complete.
 
 **MCP-TOKENLESS-GUARD:** the Host/Origin helper exists inside the transport,
 but the production tokenless mount still returns 501 before reaching it.
