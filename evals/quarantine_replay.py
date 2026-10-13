@@ -60,8 +60,8 @@ def replay(rows: list[dict], trusted: set[str]) -> dict:
             out["excluded_contested"] += 1
             continue
         if r.get("src_entry_id") is None:
-            # Unbacked claim: the shipped fallback quarantines on the
-            # claim's own origin, which defaults to agent.
+            # Unbacked claim: always low-trust (agent tier; its own
+            # origin field is model output and never read).
             out["no_backing"] += 1
             out["would_park"] += 1
             continue
