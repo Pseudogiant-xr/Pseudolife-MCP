@@ -60,7 +60,9 @@ pub const PARK_FIELDS: [&str; 5] = [
 ];
 /// `DONE_STATUS`: `^\W*(done|complete|completed|finished|merged)\b`, case-insensitive.
 static DONE_PREFIX: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-    regex::Regex::new(r"(?i)^(done|completed|complete|finished|merged)").expect("done status")
+    // Python re.IGNORECASE also folds dotted and dotless I to ASCII i.
+    regex::Regex::new(r"(?i)^(done|completed|complete|f[iİı]n[iİı]shed|merged)")
+        .expect("done status")
 });
 
 fn done_status(status: &str) -> bool {
@@ -2042,6 +2044,8 @@ mod tests {
             "\u{301}Done",
             "Done\u{301}",
             "Completed!",
+            "fınished",
+            "fİnished",
         ] {
             assert!(done_status(status), "Python accepts {status:?}");
         }

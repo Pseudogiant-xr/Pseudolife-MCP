@@ -87,9 +87,9 @@ jobs:
         run: python rust/ci/inventory.py
       - name: Board harness lifecycle and normalization
         working-directory: .
-        # Linux 2026-10-13: 21 tests in under one second; a one-minute
-        # startup floor also covers the first hosted Windows measurement.
-        timeout-minutes: 1
+        # Linux 2026-10-13: 21 tests in 0.21s. Allow a three-minute cold
+        # Windows startup/import floor pending its first hosted measurement.
+        timeout-minutes: 3
         run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py
       - name: Bind the event-selected Python oracle
         shell: pwsh
