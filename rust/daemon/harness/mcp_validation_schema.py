@@ -54,7 +54,8 @@ def generate():
     versions = {name: importlib.metadata.version(name)
                 for name in ('mcp', 'mcp-types', 'pydantic', 'pydantic-core')}
     assert versions['mcp'] == versions['mcp-types'] == '2.1.1', versions
-    out = {'source': versions, 'handshake_versions': VERSIONS}
+    out = {'source': versions, 'handshake_versions': VERSIONS,
+           'sealed_state_methods': sorted(methods.INPUT_REQUIRED_METHODS)}
     for name, mapping in [('requests', methods.CLIENT_REQUESTS),
                           ('notifications', methods.CLIENT_NOTIFICATIONS)]:
         arms = [collect({method: model for (method, version), model in mapping.items()

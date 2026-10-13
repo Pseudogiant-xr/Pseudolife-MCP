@@ -20,6 +20,17 @@ pub fn notification(method: &str, params: &Value) -> bool {
     layer("notifications", method, params)
 }
 
+/// This slice never mints sealed round-trip state. Refuse an inbound token
+/// before dispatch, as the SDK middleware does for an untrusted token.
+pub fn has_untrusted_state(method: &str, params: &serde_json::Map<String, Value>) -> bool {
+    table()["sealed_state_methods"]
+        .as_array()
+        .expect("state method table")
+        .iter()
+        .any(|name| name.as_str() == Some(method))
+        && params.get("requestState").is_some_and(|v| !v.is_null())
+}
+
 fn layer(name: &str, method: &str, params: &Value) -> bool {
     let layer = &table()[name];
     layer["params"]

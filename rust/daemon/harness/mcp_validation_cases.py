@@ -95,6 +95,10 @@ def cases(table=None):
                 base.update(name='memory_toolset', arguments={'action': 'expand'})
             if method == 'initialize':
                 base['protocolVersion'] = '2025-11-25'
+            if 'requestState' in base:
+                # Opaque state is minted by the server; a fabricated value
+                # would mask every other field behind the middleware refusal.
+                base['requestState'] = None
             for path, params in variants(schema, layer['definitions'], base):
                 # Non-object top-level params belong to JSON-RPC transport
                 # validation; this sweep isolates SDK parameter validation.

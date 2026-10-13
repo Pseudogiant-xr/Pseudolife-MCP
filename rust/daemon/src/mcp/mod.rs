@@ -759,6 +759,14 @@ async fn respond(
     params: Map<String, Value>,
 ) -> String {
     let state = &app.mcp;
+    if validation::has_untrusted_state(&method, &params) {
+        return rpc_error(
+            &id,
+            INVALID_PARAMS,
+            "Invalid or expired requestState",
+            json!({"reason":"invalid_request_state"}),
+        );
+    }
     if !params_valid(&method, &params) {
         return invalid_params(&id);
     }
@@ -1042,6 +1050,34 @@ mod sessions {
             let value = crate::http::parse_body_json(std::str::from_utf8(&bytes).unwrap()).unwrap();
             assert_eq!(value["id"].to_string(), expected_id);
         }
+    }
+
+    #[tokio::test]
+    async fn untrusted_request_state_refuses_before_tier_change() {
+        let app = app();
+        app.mcp.register("s");
+        app.mcp.mark_ready("s");
+        let params = json!({"name":"memory_toolset", "arguments":{"action":"expand"},
+            "requestState":"not-a-sealed-token"});
+        let value: Value = serde_json::from_str(
+            &respond(
+                app.clone(),
+                "caller".into(),
+                "s".into(),
+                HeaderMap::new(),
+                json!(1),
+                "tools/call".into(),
+                params.as_object().unwrap().clone(),
+            )
+            .await,
+        )
+        .unwrap();
+        assert_eq!(value["error"]["code"], INVALID_PARAMS);
+        assert_eq!(value["error"]["data"]["reason"], "invalid_request_state");
+        assert_eq!(
+            app.mcp.resolve_tier(&app.store, "caller", Some("caller")),
+            Tier::Core
+        );
     }
 
     #[tokio::test]

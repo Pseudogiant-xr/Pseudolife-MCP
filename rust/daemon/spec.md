@@ -140,6 +140,8 @@ methods and the nine registered request handlers. It includes nested metadata,
 task, client implementation, capability and input-response fields. Unknown
 extension keys follow each model's extra-field policy.
 
+Non-null round-trip `requestState` is refused before dispatch until sealed-state
+issuance and verification are implemented (MCP-SEALED-REQUEST-STATE).
 Spec parameter validation precedes handler lookup; registered handler validation
 precedes readiness or tier mutation. Unknown methods reach lookup without spec
 validation. Notifications validate before changing readiness. The Rust evaluator

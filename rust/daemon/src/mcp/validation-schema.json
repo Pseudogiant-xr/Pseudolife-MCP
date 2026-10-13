@@ -2449,6 +2449,11 @@
       }
     }
   },
+  "sealed_state_methods": [
+    "prompts/get",
+    "resources/read",
+    "tools/call"
+  ],
   "source": {
     "mcp": "2.1.1",
     "mcp-types": "2.1.1",

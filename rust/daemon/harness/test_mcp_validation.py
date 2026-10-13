@@ -11,7 +11,7 @@ import mcp_validation_sweep as sweep
 def test_recorded_shapes_match_the_pinned_sdk():
     recorded = json.loads(corpus.TABLE.read_text(encoding='utf-8'))
     generated = schema.generate()
-    for key in ('requests', 'handlers', 'notifications'):
+    for key in ('requests', 'handlers', 'notifications', 'sealed_state_methods'):
         assert recorded[key] == generated[key]
 
 
@@ -64,3 +64,11 @@ def test_sweep_rejects_an_incomplete_generated_corpus(tmp_path, monkeypatch):
     monkeypatch.setattr(sweep, 'cases', lambda: iter([]))
     with pytest.raises(AssertionError, match='generated corpus count'):
         sweep.run(1, 2, tmp_path / 'report.json')
+
+
+def test_untrusted_state_does_not_mask_other_generated_fields():
+    table = schema.generate()
+    for case in corpus.cases(table):
+        if (case['method'] in table['sealed_state_methods']
+                and '.requestState' not in case['field']):
+            assert case['params'].get('requestState') is None, case['field']
