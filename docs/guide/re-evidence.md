@@ -82,13 +82,18 @@ Graph views, and the Console cannot create or mutate RE evidence.
 
 ## Upgrading the fork
 
-This fork includes upstream **v0.17.0**, with the upstream **v55** schema and
+This fork includes upstream **v0.18.1**, with the upstream **v55** schema and
 the independent **`v34-rehub`** extension. Follow the ordinary upgrade and
 backup instructions for the chosen durable or lite installation; use this
 fork's checkout when rebuilding so the RE extension remains installed.
 Startup applies upstream's additive migrations to an existing v37 RE bank
 and keeps its proof rows, original-byte hashes and claim links. It still
-refuses incompatible unpublished pilot table shapes.
+refuses incompatible unpublished pilot table shapes. Canonical and RE extension
+initialization share one transaction in the Python service, so a refused
+extension does not commit a partial canonical upgrade.
+
+This fork's RE tools use the Python daemon and shim. The upstream native
+Rust candidate remains an explicit opt-in and does not implement the RE tools.
 
 The `re_evidence` tool is in the **core** tier. If the client does not list
 it, expand with `memory_toolset` and rediscover tools. The Svelte Console

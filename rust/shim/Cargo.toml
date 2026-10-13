@@ -1,0 +1,66 @@
+[package]
+name = "pseudolife-stdio"
+version = "0.18.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+default-run = "pseudolife-stdio"
+
+[features]
+default = ["codex-delivery"]
+codex-delivery = ["dep:tokio-tungstenite"]
+
+[dependencies]
+rmcp.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+http.workspace = true
+sse-stream.workspace = true
+tokio-util.workspace = true
+
+serde.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+dirs.workspace = true
+uuid.workspace = true
+
+unicode-normalization.workspace = true
+chrono.workspace = true
+unicode-casefold.workspace = true
+tokio-tungstenite = { workspace = true, optional = true }
+process-wrap.workspace = true
+tokio-postgres.workspace = true
+tokio-postgres-rustls.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+percent-encoding.workspace = true
+regex.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+tokio-rustls.workspace = true
+rustls-native-certs = "=0.8.4"
+http-body-util.workspace = true
+bytes.workspace = true
+yaml-rust2.workspace = true
+regex-lite.workspace = true
+serde_stacker.workspace = true
+zip.workspace = true
+flate2.workspace = true
+tar.workspace = true
+stacker.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+rustix = { workspace = true, features = ["event"] }
+
+[target.'cfg(windows)'.dependencies]
+libc.workspace = true
+windows-sys = { workspace = true, features = ["Win32_System_SystemInformation"] }

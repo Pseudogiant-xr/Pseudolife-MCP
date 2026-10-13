@@ -189,6 +189,14 @@ bash 3.2 and BSD tools. If you add
 behavior, add a test; if you fix a bug, add the test that would have
 caught it.
 
+A pull request that touches `rust/` and changes nothing else except
+`.github/workflows/rust.yml`, `CHANGELOG.md` or `changelog.d/` fragments
+changes no Python, so CI skips the four Python suite lanes for it and runs
+a `guards` job instead (the tracked-tree and release-doc guards); the Rust
+workflow is that PR's gate. Every master push, and a nightly run, still
+runs the full suite. The Rust port under `rust/` is experimental and
+nothing installs it; see [rust/README.md](rust/README.md).
+
 A docs-only change can skip the full run locally. That means Markdown
 anywhere, `llms.txt` / `llms-full.txt`, and non-code files under `docs/`
 (such as `docs/atlas/atlas.json`), with nothing under `tests/`, `ops/`,
@@ -217,7 +225,10 @@ from hard experience:
 - Branch off `master`; keep each PR to one logical change.
 - Commit style is conventional (`feat:`, `fix:`, `docs:`, `test:`,
   `chore:`, scope in parens — see `git log`).
-- User-visible changes get a line in `CHANGELOG.md` under `[Unreleased]`.
+- User-visible changes add a changelog fragment,
+  `changelog.d/<YYYY-MM-DD>-<slug>.md`, rather than editing `CHANGELOG.md`
+  (see [changelog.d/README.md](changelog.d/README.md)); the release folds
+  the fragments into `[Unreleased]`.
 - Match the surrounding code's style and comment density. Comments explain
   *why*, not *what*.
 - Schema changes bump the schema version — see [Schema bumps](#schema-bumps)
@@ -257,7 +268,7 @@ guard tests go red:
   behaviour the bump adds gets a test **beside its consumer**, or a row in
   `tests/test_schema_ddl_shape.py` if it is pure DDL shape — never a new
   `tests/test_schema_vNN.py`;
-- a `CHANGELOG.md` entry that names `vNN`;
+- a changelog fragment (`changelog.d/`) that names `vNN`;
 - `docs/atlas/atlas.json` `meta.schema` (pinned by
   `tests/test_atlas_currency.py`) — re-verify the affected storage cards,
   don't just renumber;

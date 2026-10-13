@@ -1,0 +1,91 @@
+{
+  "schema": "users-comparison-receipt-v1",
+  "executed_head": "245baf71e697a5b236dbf89928bdd942dafde983",
+  "executed_tree": "57a97ffc0d89b2d20ea2a44ddf0738917612bcd9",
+  "platform": "Linux",
+  "toolchain": "Rust 1.94.0",
+  "recorded_utc": "2026-10-06T17:34:55.904549+00:00",
+  "comparison_crate": {
+    "name": "users",
+    "version": "0.11.0",
+    "default_features": false,
+    "scope": "Isolated comparison project, absent from runtime dependency graph"
+  },
+  "inputs": [
+    {
+      "path": "rust/shim/src/credentials/unix_accounts.rs",
+      "git_blob": "cc02b6a490a2db29317852874364fa1c6ee70c5f",
+      "git_sha256": "dc540ee91ca72756c43c20bf939789ac48e66b79e213394517a31981b457ba0c",
+      "executed_bytes_sha256": "dc540ee91ca72756c43c20bf939789ac48e66b79e213394517a31981b457ba0c",
+      "line_endings": "LF",
+      "git_content_equal_after_line_ending_normalization": true
+    },
+    {
+      "path": "rust/shim/tests/unix_accounts_lookup/mod.rs",
+      "git_blob": "210fd137f32e1a9884cfd0e5915900e42e0e5928",
+      "git_sha256": "deaf6284799502079813783efeb0873794880d0aa040aaddc99a3901bf78e0f2",
+      "executed_bytes_sha256": "deaf6284799502079813783efeb0873794880d0aa040aaddc99a3901bf78e0f2",
+      "line_endings": "LF",
+      "git_content_equal_after_line_ending_normalization": true
+    },
+    {
+      "path": "evals/rust_port/users_comparison/src/main.rs",
+      "git_blob": "493212cb0d9fd91aa0942d25c87934540a2e3734",
+      "git_sha256": "e04177d518ecd5ab3c0f76c17c0f60d58105648a7cb361986fff9db67a0eca9b",
+      "executed_bytes_sha256": "e04177d518ecd5ab3c0f76c17c0f60d58105648a7cb361986fff9db67a0eca9b",
+      "line_endings": "LF",
+      "git_content_equal_after_line_ending_normalization": true
+    },
+    {
+      "path": "evals/rust_port/users_comparison/Cargo.toml",
+      "git_blob": "b0034789eefa6a80a5a73be1ae79242acde08989",
+      "git_sha256": "9833d5f429be34abe04f3562ef2253b208b395c39b929608cb54f9aa7022d3ec",
+      "executed_bytes_sha256": "d809ee01b293f9282c459aa7bf51f2e3430c95dafa767ed3044d125c6a6e4fc8",
+      "line_endings": "CRLF",
+      "git_content_equal_after_line_ending_normalization": true
+    },
+    {
+      "path": "evals/rust_port/users_comparison/Cargo.lock",
+      "git_blob": "293a7450a021fbc287d1d3dabb138ed1beeb8ce1",
+      "git_sha256": "808b6a3dcb241dc479e6e933207c26c5a72a2027713d5682213de7af869fd83a",
+      "executed_bytes_sha256": "808b6a3dcb241dc479e6e933207c26c5a72a2027713d5682213de7af869fd83a",
+      "line_endings": "LF",
+      "git_content_equal_after_line_ending_normalization": true
+    }
+  ],
+  "receipts": [
+    {
+      "command": "cargo +1.94.0 run --locked --offline --jobs 2 --manifest-path evals/rust_port/users_comparison/Cargo.toml",
+      "exit_code": 0,
+      "log_sha256": "5a209574efb48e39e50081775acdda43329ba060faaa97cf8fcb91628f9c1401"
+    },
+    {
+      "command": "cargo +1.94.0 test --locked --offline --jobs 2 --manifest-path evals/rust_port/users_comparison/Cargo.toml",
+      "exit_code": 0,
+      "log_sha256": "9a13e26cc997a5f1acba4abc46c7b779795252bf680e9f270b74770be12e1f3c"
+    }
+  ],
+  "observed_output": "nss_equivalent=true real_uid_equivalent=true cases=4 parallel_threads=4 positive_cases=2",
+  "synthetic_tests": {
+    "passed": 6,
+    "failed": 0,
+    "ignored": 0,
+    "original_tests_byte_identical": true,
+    "additive_admission_tests": 2
+  },
+  "build_controls": {
+    "offline": true,
+    "locked": true,
+    "jobs": 2,
+    "incremental": false,
+    "existing_target_reused": true
+  },
+  "limits": [
+    "Local NSS backend and real UID only; real/effective UID divergence not exercised",
+    "Android and other Unix targets not executed",
+    "Unusual NSS backends and malformed libc storage not established",
+    "Populated-error and null-home tests are deliberate defensive rejection, not former-crate equivalence",
+    "Twelve historical workspace logs at43e precede this repair and are not current validation",
+    "Full suites, hosted CI and independent review not included"
+  ]
+}

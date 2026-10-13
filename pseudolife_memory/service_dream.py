@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import unicodedata
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
@@ -30,7 +31,8 @@ from pseudolife_memory.dream_token import (
 from pseudolife_memory.memory.cortex import _norm_key
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 
-from pseudolife_memory.memory.labels import (INHERIT, contains_verbatim,
+from pseudolife_memory.memory.labels import (_TOKEN_STOP, INHERIT,
+                                             contains_verbatim,
                                              content_tokens)
 
 logger = logging.getLogger(__name__)
@@ -214,6 +216,90 @@ class DreamStallTracker:
             elif self.stall is not None:
                 self.notice_at = self.last_notice_at = self.clock()
                 self.announced_hard = self._hard(self.stall)
+
+
+def _citation_text(s: str | None) -> str:
+    """NFC, casefolded, whitespace-collapsed: the form the citation check
+    compares in."""
+    return " ".join(unicodedata.normalize("NFC", s or "").casefold().split())
+
+
+def _word_char(ch: str) -> bool:
+    # Letters, digits and combining marks of any script, and "_".
+    return (ch.isalnum() or ch == "_"
+            or unicodedata.category(ch).startswith("M"))
+
+
+def _phrase_starts(phrase: str, text: str):
+    """Start offsets where ``phrase`` occurs in ``text`` with no word
+    character on either side (both already in :func:`_citation_text`
+    form)."""
+    at = text.find(phrase)
+    while at != -1:
+        end = at + len(phrase)
+        if ((at == 0 or not _word_char(text[at - 1]))
+                and (end == len(text) or not _word_char(text[end]))):
+            yield at
+        at = text.find(phrase, at + 1)
+
+
+def _has_phrase(phrase: str, text: str) -> bool:
+    return next(_phrase_starts(phrase, text), None) is not None
+
+
+_NEGATORS = frozenset({"not", "no", "never", "without", "neither", "nor",
+                       "cannot"})
+_CLAUSE_BREAK_RE = re.compile(r"[.;:,!?()\[\]{}\u2013\u2014]")
+_NEG_WORD_RE = re.compile(r"[\w'\u2019]+")
+
+
+def _negated_at(text: str, at: int) -> bool:
+    """A negator among the three words before offset ``at`` in its clause
+    (clause breaks: ``. ; : , ! ?``, brackets and dashes)."""
+    clause = _CLAUSE_BREAK_RE.split(text[:at])[-1]
+    return any(w in _NEGATORS or w.endswith(("n't", "n\u2019t"))
+               for w in _NEG_WORD_RE.findall(clause)[-3:])
+
+
+def _citation_backs(value: str, note: str, entity: str = "",
+                    attribute: str = "", *, affirmative: bool = True) -> bool:
+    """Whether a cited note MENTIONS a claim's value and NAMES its slot: the
+    whole ``value`` as one phrase (case-insensitive, whitespace-collapsed,
+    on Unicode word boundaries, every token kept, short ones and negators
+    included) at least once without a negator among the three words before
+    it in the same clause, AND at least one token of the claim's ``entity``
+    or ``attribute`` (split on ``- _ .`` and whitespace; stop words and
+    single characters skipped) as a whole word. Deterministic, no model.
+
+    A mention is not proof that the note ASSERTS the value ("I tried vim
+    but hated it; my editor is emacs" mentions vim and names the editor
+    slot), so this only bounds the tier a claim may borrow from the note
+    it cites; it is not a fact check. Guards the write tier of every dream
+    claim, whatever the batch size: anything it cannot confirm fails closed
+    to agent, the tier every dream claim had before the tier was taken from
+    the note.
+
+    ``affirmative=False`` (a retraction, ``op: "remove"``) skips the
+    negation rule: "no longer serves X" is the note that backs removing X.
+    The value and slot checks still apply."""
+    v = _citation_text(value)
+    n = _citation_text(note)
+    if not v or not n or all(affirmative and _negated_at(n, at)
+                             for at in _phrase_starts(v, n)):
+        return False
+    slot = re.split(r"[-_.\s]+", _citation_text(f"{entity} {attribute}"))
+    return any(_has_phrase(t, n) for t in slot
+               if len(t) >= 2 and t not in _TOKEN_STOP)
+
+
+def _claim_note_index(c: dict, n: int) -> int | None:
+    """The claim's ``source`` as an index into a batch of ``n`` notes, or
+    None. A bool is not an index, though ``isinstance(True, int)`` holds."""
+    idx = c.get("source")
+    if isinstance(idx, bool) or not isinstance(idx, int) \
+            or not 0 <= idx < n:
+        return None
+    return idx
 
 
 def _stall_tracker(service) -> DreamStallTracker:
@@ -1462,6 +1548,8 @@ class DreamOps:
         from pseudolife_memory.memory.dream import (_DATE_LIKE_RE,
                                                     literal_violations,
                                                     span_unbacked)
+        # Late import: service.py imports this module at load time.
+        from pseudolife_memory.service import _origin_from_source
         import time as _time
         traces_cfg = self.config.memory.traces
         dream_cfg = self.config.memory.dream
@@ -1586,8 +1674,8 @@ class DreamOps:
             # name before anything mints an entity from them (2026-07-26).
             extracted = unflatten_slot_key_claims(extracted, vocab)
             for c in extracted:
-                idx = c.get("source")
-                if isinstance(idx, int) and 0 <= idx < len(entries):
+                idx = _claim_note_index(c, len(entries))
+                if idx is not None:
                     src_entry = entries[idx]
                 elif len(entries) == 1:
                     # Unambiguous: extractors that don't cite sources (stubs,
@@ -1764,10 +1852,9 @@ class DreamOps:
                         literal_dropped += 1
                         return
             actor = str(c.get("actor") or "user")
-            idx = c.get("source")
+            idx = _claim_note_index(c, len(entries))
             episode = (entries[idx].get("episode_id")
-                       if isinstance(idx, int)
-                       and 0 <= idx < len(entries) else None)
+                       if idx is not None else None)
             ev_row = {
                 "occurred_at": (c.get("date") if batch_has_date
                                 else None),
@@ -1808,13 +1895,43 @@ class DreamOps:
                     if chronicle_on:
                         _write_event(c, src_id)
                     continue
-                # Speaker provenance -> write origin. "user" is a label about
-                # the TURN, never a tier promotion: support is never taken
-                # from claim text (2026-08-09 review), so only the DEMOTING
-                # direction is honoured here. Absent speaker (every shipped
-                # extraction) leaves the origin exactly as the claim carries
-                # it, so nothing about the shipped dream moves.
-                claim_origin = c.get("origin", "agent")
+                # Write tier = the backing entry's source tier, the same trust
+                # base the quarantine's witness check stands on
+                # (_quarantine_route). The claim's own ``origin`` field is
+                # model output and never read: support is never taken from
+                # claim text (2026-08-09 review), and the shipped extractors
+                # stamp every claim "agent", which stored user-sourced notes
+                # at agent tier where any agent note could supersede them.
+                # An unbacked claim, or an unmapped source tag, is agent.
+                # The backing note is the extractor's citation (model
+                # output), in a one-note batch too: the extractor can restate
+                # a value the note never states. So a tier above agent also
+                # needs the cited note to state the value and name the slot
+                # (_citation_backs); a citation that fails counts as no
+                # backing note, for the tier and the quarantine alike.
+                # Only a string value can be checked against its note: a
+                # None, number, bool, list or dict value is unbacked here,
+                # and so is one the extractor's parser coerced to text
+                # (value_coerced). Either is still stored exactly as before,
+                # at agent tier.
+                tier_entry = src_entry
+                if (src_entry is not None
+                        and _origin_from_source(src_entry.get("source"))
+                        not in (None, "agent")
+                        and (not isinstance(c.get("value"), str)
+                             or c.get("value_coerced")
+                             or not _citation_backs(
+                                 c["value"],
+                                 src_entry.get("text", ""),
+                                 str(c.get("entity", "")),
+                                 str(c.get("attribute", "")),
+                                 affirmative=c.get("op") != "remove"))):
+                    tier_entry = None
+                claim_origin = ((_origin_from_source(tier_entry.get("source"))
+                                 if tier_entry is not None else None)
+                                or "agent")
+                # Speaker provenance only ever DEMOTES: "user" is a label
+                # about the turn, never a tier promotion.
                 if c.get("speaker") == "assistant":
                     if assistant_policy == "drop":
                         logger.info(
@@ -1939,7 +2056,7 @@ class DreamOps:
                     res = self.set_add(
                         ent, attr, c["value"],
                         confidence=float(c.get("confidence", 0.55)),
-                        origin=claim_origin)
+                        origin=claim_origin, dream=True)
                     if res["action"] == "member_invalid":
                         logger.info(
                             "dream: member add rejected (invalid value) "
@@ -1950,18 +2067,19 @@ class DreamOps:
                             "for %s.%s", ent, attr)
                     elif res["action"] == "contested":
                         logger.info(
-                            "dream: member add parked by %s guard for %s.%s",
-                            "assistant-origin"
-                            if claim_origin == "assistant" else "aggregate",
-                            ent, attr)
+                            "dream: member add parked (assistant-origin, "
+                            "tier, direct-write or aggregate guard; %s-tier "
+                            "claim) for "
+                            "%s.%s", claim_origin, ent, attr)
                 elif op == "remove":
                     res = self.set_remove(ent, attr, c["value"],
-                                          origin=claim_origin)
+                                          origin=claim_origin, dream=True)
                     if res["action"] == "member_remove_refused":
                         logger.info(
-                            "dream: dropping assistant-stated retraction of "
-                            "a member backed by a stronger tier for %s.%s "
-                            "= %r", ent, attr, c["value"])
+                            "dream: dropping %s-tier retraction of a member "
+                            "backed by a stronger tier or a direct write for "
+                            "%s.%s = %r",
+                            claim_origin, ent, attr, c["value"])
                 else:
                     # Consolidation quarantine (two-man rule): route the
                     # scalar claim BEFORE the write. Scope v1 is scalars
@@ -1971,7 +2089,8 @@ class DreamOps:
                     q_route, q_low = None, False
                     if quarantine_on:
                         q_route, q_witness, q_low = self._quarantine_route(
-                            ent, attr, c, src_entry, qt_trusted)
+                            ent, attr, c, tier_entry, qt_trusted,
+                            claim_tier=claim_origin)
                     # Claim-derived kwargs shared by every scalar write
                     # below — one definition, so the next claim field
                     # cannot silently miss one of the routing paths (this
@@ -1992,32 +2111,51 @@ class DreamOps:
                         "authority": ((src_entry or {}).get("authority")
                                       or INHERIT),
                         "distortion_tolerance": _source_class(c, src_entry),
+                        # A dream claim: never supersedes a direct user or
+                        # action value, never raises a tier on an echo.
+                        "dream": True,
                     }
                     try:
                         if q_route == "promote":
                             # Independent second witness: promote the parked
                             # value via the contender machinery. Support is
-                            # the LITERAL "agent" — never the claim's own
-                            # origin field, which is model output and
-                            # steerable by note text (2026-08-09 review).
+                            # the promoting claim's write tier (its backing
+                            # note's source, speaker-demoted), exactly what a
+                            # direct write would store, and the same tier the
+                            # route's promote check compared against the
+                            # current value — never the claim's
+                            # own origin field, which is model output and
+                            # steerable by note text (2026-08-09 review). A
+                            # fixed "agent" here left a user-confirmed value
+                            # supersedable by the next agent note.
+                            # expect_value binds the promotion to the
+                            # contender the route validated: a value parked
+                            # in its place since is refused, not promoted.
                             rr = self.cortex_resolve(
-                                ent, attr, accept=True, support="agent")
+                                ent, attr, accept=True, support=claim_origin,
+                                dream=True, expect_value=c["value"])
                             if rr.get("resolved"):
                                 qt_promoted += 1
                                 res = {"action": "quarantine_promoted"}
                             else:
                                 # Raced away (e.g. the user rejected the
                                 # contender from another connection between
-                                # the route read and this resolve): fail
-                                # CLOSED — a low-trust claim still parks.
+                                # the route read and this resolve, or a
+                                # direct write landed, or another value was
+                                # parked in place of the validated one, and
+                                # the store refused the promotion): fail
+                                # CLOSED — the claim parks its own value,
+                                # carrying its witness token like any other
+                                # park, and is counted. Never a plain write:
+                                # the route chose promotion, not a write.
                                 res = self.cortex_write(
                                     ent, attr, c["value"],
                                     provenance=(
                                         ["quarantine:low_trust", q_witness]
-                                        if q_low else None),
-                                    force_contend=q_low,
+                                        if q_low else [q_witness]),
+                                    force_contend=True,
                                     **claim_kwargs)
-                                if q_low and res["action"] == "contested":
+                                if res["action"] == "contested":
                                     qt_parked += 1
                         elif q_route in ("park", "hold", "hold_ordinary"):
                             # "hold_ordinary" parks WITHOUT the marker: an
@@ -2148,8 +2286,8 @@ class DreamOps:
                     events_pass_failed = True
                     ev_items = []
                 for c in ev_items:
-                    idx = c.get("source")
-                    if isinstance(idx, int) and 0 <= idx < len(entries):
+                    idx = _claim_note_index(c, len(entries))
+                    if idx is not None:
                         ev_src = entries[idx].get("db_id")
                     elif len(entries) == 1:
                         ev_src = entries[0].get("db_id")
@@ -2355,14 +2493,17 @@ class DreamOps:
 
     def _quarantine_route(self, ent: str, attr: str, c: dict,
                           src_entry: dict | None,
-                          trusted: set[str]) -> tuple[str | None, str, bool]:
+                          trusted: set[str], *,
+                          claim_tier: str) -> tuple[str | None, str, bool]:
         """Route one scalar dream claim under the two-man rule.
 
         Returns ``(route, witness, low)``:
 
         * ``"promote"`` — a MARKED parked value gains an independent
-          second witness AND the witness's tier (entry-metadata-derived,
-          never claim text) is not below the current record's origin —
+          second witness AND ``claim_tier`` (the claim's write tier: the
+          backing entry's source tier after the citation check and the
+          assistant-speaker demotion, never claim text) is not below the
+          current record's origin —
           the two-man rule must never be weaker than the provenance
           guard it reinforces (2026-08-09 review: two agent witnesses
           must not supersede a user fact);
@@ -2380,26 +2521,28 @@ class DreamOps:
         """
         from pseudolife_memory.memory.cortex import (_TIER_RANK,
                                                      _is_compression_echo,
-                                                     _norm_value)
+                                                     _norm_value,
+                                                     direct_backed)
         # Late import: service.py imports this module at load time, so the
         # shared quarantine helpers cannot be imported at module level.
-        from pseudolife_memory.service import (_origin_from_source,
-                                               _quarantine_low_trust,
+        from pseudolife_memory.service import (_quarantine_low_trust,
                                                _quarantine_witness)
 
         low = _quarantine_low_trust(c, src_entry, trusted)
         witness = _quarantine_witness(c, src_entry)
-        # The witness's tier comes from the backing entry's source (the
-        # only trust base the rule stands on); an unbacked claim ranks as
-        # agent regardless of what its text asserts.
-        claim_tier = ((_origin_from_source(src_entry.get("source"))
-                       if src_entry is not None else None) or "agent")
+        # The promote check compares the tier the claim would be written
+        # at (passed in by the caller, demotion applied), so promotion is
+        # never weaker than a direct write of the same claim.
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
             cur = self._cortex.lookup(ent, attr)
             cur_value = cur.value if cur is not None else None
             cur_origin = cur.origin if cur is not None else None
+            # A dream promotion never replaces a direct user/action value,
+            # the same rule a direct dream write meets in write_fact.
+            cur_direct = (self._cortex.protect_provenance
+                          and direct_backed(cur))
             match = next(
                 (r for r in self._cortex.contenders_for(ent, attr)
                  if _norm_value(r.value) == _norm_value(c["value"])), None)
@@ -2414,7 +2557,7 @@ class DreamOps:
             independent = (not low) or witness not in witnesses
             tier_ok = (cur_origin is None
                        or _TIER_RANK.get(claim_tier, 0)
-                       >= _TIER_RANK.get(cur_origin, 0))
+                       >= _TIER_RANK.get(cur_origin, 0)) and not cur_direct
             if independent and tier_ok:
                 return "promote", witness, low
             return "hold", witness, low
@@ -2434,7 +2577,8 @@ class DreamOps:
         (design doc 2026-08-01: has_trace gates scalars but never member
         ops, so a rewind would re-add reverted members while suppressing
         reverted scalars)."""
-        from pseudolife_memory.memory.cortex import _norm_value
+        from pseudolife_memory.memory.cortex import (_DIRECT_TIERS, _TIER_RANK,
+                                                     _norm_value)
         import time as _time
 
         if self._storage is None:
@@ -2491,7 +2635,100 @@ class DreamOps:
                 return None
             return getattr(max(recs, key=lambda r: r.superseded_at or 0), attr)
 
+        def _prev_tiers(row: dict):
+            # Called under the lock, BEFORE the rewrite adds direct support.
+            # The journal has only the strongest tier; audit history retains
+            # the full set and the marks (removed rows for set members).
+            want = _norm_value(row["prev_value"] or "")
+            kind = "member" if row["prev_kind"] == "set" else "scalar"
+            recs = [r for r in self._cortex.records_for(
+                        row["entity"], row["attribute"])
+                    if (r.kind == kind or r.status == "contested")
+                    and _norm_value(r.value) == want]
+            # Only the record THIS run displaced: inside the run's window,
+            # and for a scalar write superseded by the run's own value (a
+            # member op's conversion supersedes it differently). A same-value
+            # contender parked and pushed out (or settled) later is also
+            # "superseded", with tiers the previous value never had.
+            lo = float(target.get("started_at") or 0)
+            hi = float(target.get("finished_at") or rollback_started)
+
+            # This row's own record: one run may displace the same value
+            # more than once, and the journal stamps each row just after its
+            # write, so the newest candidate at or before the row is its own.
+            row_at = float(row.get("at") or hi)
+
+            def _displaced_by_run(r) -> bool:
+                if not lo <= (r.superseded_at or 0) <= min(hi, row_at):
+                    return False
+                return (r.status != "superseded" or r.kind != "scalar"
+                        or row["kind"] != "scalar"
+                        or _norm_value(r.superseded_by_value or "")
+                        == _norm_value(row["new_value"] or ""))
+
+            prev = max((r for r in recs
+                        if r.status in ("superseded", "removed")
+                        and _displaced_by_run(r)),
+                       key=lambda r: r.superseded_at or 0, default=None)
+            if prev is None:
+                return None  # Compacted history: keep the journal fallback.
+            support = set(prev.support)
+            marks = {p for p in prev.provenance if p.startswith("dream:")}
+            # A direct reassertion since the run must not become dream-only
+            # or lose a tier when this reversal confirms that same value or
+            # settles its contender. Settlement does not carry assistant tier.
+            for rec in (r for r in recs if r.status in ("current", "contested")):
+                carried = (rec.support - {"assistant"}
+                           if rec.status == "contested" else rec.support)
+                direct = {t for t in support if f"dream:{t}" not in marks}
+                direct |= {t for t in carried
+                           if f"dream:{t}" not in rec.provenance}
+                support.update(carried)
+                marks.update(p for p in rec.provenance if p.startswith("dream:"))
+                marks.difference_update(f"dream:{t}" for t in direct)
+            return support, marks
+
+        def _direct_backing(row: dict, rec, own: set) -> set:
+            # Under the lock, after the rewrite: every direct tier now backing
+            # the restored value survives the restore. Sources: same-value
+            # current or contested records of any kind (a surviving member
+            # included), records this rollback archived (a converted set's
+            # survivor), and the restored record itself minus the tiers the
+            # rollback's own write stamped (``own``), so a direct
+            # confirmation racing the rollback is kept.
+            want = _norm_value(row["prev_value"] or "")
+            keep: set = set()
+            for r in self._cortex.records_for(row["entity"], row["attribute"]):
+                if _norm_value(r.value) != want:
+                    continue
+                direct = {t for t in r.support
+                          if t in _DIRECT_TIERS and f"dream:{t}" not in r.provenance}
+                if r is rec:
+                    keep |= direct - own
+                elif r.status in ("current", "contested") or (
+                        r.status in ("superseded", "removed")
+                        and (r.superseded_at or 0) >= rollback_started):
+                    keep |= direct
+            return keep
+
+        def _restore_tiers(rec, tiers, keep: set = frozenset()) -> None:
+            if tiers is not None:
+                rec.support = set(tiers[0]) | keep
+                rec.provenance = ({p for p in rec.provenance
+                                   if not p.startswith("dream:")}
+                                  | (tiers[1] - {f"dream:{t}" for t in keep}))
+            elif keep:
+                # Compacted history: the journal-tier write stands, and the
+                # direct backing found now still survives on top of it.
+                rec.support |= keep
+                rec.provenance -= {f"dream:{t}" for t in keep}
+            else:
+                return
+            self._cortex.dirty_slots.add(rec.key)
+
         def _rewrite_prev(row: dict) -> str:
+            with self._lock:
+                tiers = _prev_tiers(row)
             res = self.cortex_write(
                 row["entity"], row["attribute"], row["prev_value"],
                 confidence=float(row["prev_confidence"] or 0.55),
@@ -2499,20 +2736,20 @@ class DreamOps:
                 stance=_prev_stance(row),
                 authority=_prev_label(row, "authority"),
                 distortion_tolerance=_prev_label(row, "distortion_tolerance"))
+            own = {row["prev_support"] or "agent"}
             if res["action"] == "contested":
                 # Rollback is explicit authority: a low-confidence prev
-                # must still win the slot back (the same path resolve
-                # exists for).
+                # must still win the slot back (the resolve path).
                 self.cortex_resolve(row["entity"], row["attribute"],
                                     accept=True)
-            # track=False: this lookup verifies the rollback took — it is
-            # not a serve, and counting it would pollute the read signal.
-            cur = self.cortex_lookup(row["entity"], row["attribute"],
-                                     track=False)
-            if cur and _norm_value(cur.get("value", "")) == _norm_value(
-                    row["prev_value"]):
-                return "reverted"
-            return "partial:value_not_restored"
+                own.add("user")  # resolve stamps the user tier
+            with self._lock:
+                # Store lookup does not count this verification as a serve.
+                cur = self._cortex.lookup(row["entity"], row["attribute"])
+                if cur and _norm_value(cur.value) == _norm_value(row["prev_value"]):
+                    _restore_tiers(cur, tiers, _direct_backing(row, cur, own))
+                    return "reverted"
+                return "partial:value_not_restored"
 
         def _restore_contender(row: dict) -> str | None:
             # A write that made a parked contender's value current settled
@@ -2531,6 +2768,38 @@ class DreamOps:
                        or self._cortex.restore_settled_contender(
                            *args, since=rollback_started))
             return rec.value if rec is not None else None
+
+        def _restore_confirmed_tiers(row: dict) -> str:
+            # Only the strongest prior tier is journaled. A marked tier
+            # above it was absent before this confirmation; a direct write
+            # since then clears its mark and must retain its support. An
+            # unknown pre-image cannot prove that a tier was introduced.
+            prior = row.get("prev_support")
+            if prior not in _TIER_RANK:
+                return "skipped:confirmed"
+            with self._lock:
+                if row["action"] == "confirmed":
+                    rec = self._cortex.lookup(row["entity"], row["attribute"])
+                else:
+                    rec = next((m for m in self._cortex.members(
+                        row["entity"], row["attribute"])
+                        if _norm_value(m.value) == _norm_value(
+                            row["prev_value"] or "")), None)
+                if rec is None or _norm_value(rec.value) != _norm_value(
+                        row["prev_value"] or ""):
+                    return "skipped:superseded_by_later"
+                retained_set = (row["action"] == "member_confirmed"
+                                and row["prev_kind"] == "scalar")
+                raised = {t for t in rec.support
+                          if _TIER_RANK.get(t, 0) > _TIER_RANK[prior]
+                          and f"dream:{t}" in rec.provenance}
+                if not raised:
+                    return ("partial:set_retained" if retained_set
+                            else "skipped:confirmed")
+                rec.support.difference_update(raised)
+                rec.provenance.difference_update(f"dream:{t}" for t in raised)
+                self._cortex.dirty_slots.add(rec.key)
+                return "partial:set_retained" if retained_set else "reverted"
 
         for row in reversed(journal):
             action = row["action"]
@@ -2558,6 +2827,10 @@ class DreamOps:
                             deleted = self._storage.delete_chronicle_event(
                                 ev_id)
                     outcome = "reverted" if deleted else "skipped:already_gone"
+                elif action in ("confirmed", "member_confirmed"):
+                    # A member operation may confirm an aggregate scalar;
+                    # the returned action identifies the record to restore.
+                    outcome = _restore_confirmed_tiers(row)
                 elif row["kind"] == "scalar":
                     if action == "inserted" and row["prev_status"] is None:
                         with self._lock:
@@ -2583,10 +2856,6 @@ class DreamOps:
                                        else "skipped:already_gone")
                         else:
                             outcome = _rewrite_prev(row)
-                    elif action == "confirmed":
-                        # Only confidence/last_confirmed moved; unwinding
-                        # that is not expressible through the write path.
-                        outcome = "skipped:confirmed"
                 else:  # member
                     if action == "member_added":
                         self.set_remove(row["entity"], row["attribute"],
@@ -2609,11 +2878,21 @@ class DreamOps:
                                 outcome = "partial:set_retained"
                         restored = _restore_contender(row)
                     elif action == "member_removed":
+                        with self._lock:
+                            tiers = _prev_tiers(row)
                         res = self.set_add(
                             row["entity"], row["attribute"],
                             row["prev_value"],
                             confidence=float(row["prev_confidence"] or 0.55),
                             origin=row["prev_support"] or "agent")
+                        with self._lock:
+                            rec = next((m for m in self._cortex.members(
+                                row["entity"], row["attribute"])
+                                if _norm_value(m.value) == _norm_value(
+                                    row["prev_value"] or "")), None)
+                            if rec is not None:
+                                _restore_tiers(rec, tiers, _direct_backing(
+                                    row, rec, {row["prev_support"] or "agent"}))
                         # Re-adding an assistant-origin member into a set
                         # that has since gained a stronger-tier member parks
                         # it as a contender instead (add_member's guard).
@@ -2622,8 +2901,6 @@ class DreamOps:
                         outcome = ("partial:member_not_restored"
                                    if res["action"] == "contested"
                                    else "reverted")
-                    elif action == "member_confirmed":
-                        outcome = "skipped:confirmed"
             except Exception as exc:  # noqa: BLE001 — keep unwinding
                 logger.warning("rollback: reversal failed at seq %s (%s)",
                                row["seq"], exc)

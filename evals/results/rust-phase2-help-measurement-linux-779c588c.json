@@ -1,0 +1,1014 @@
+{
+  "schema": 1,
+  "status": "quiet-cli-pair-final",
+  "capture_platform": {
+    "os": "Linux",
+    "architecture": "x86_64"
+  },
+  "provenance": {
+    "measured_at_utc": "2026-10-05T00:17:54Z",
+    "source_head": "779c588c8c96fe5265b3877bdb15f9d2942b0111",
+    "source_schema": 54,
+    "source_dirty": false,
+    "parent_runtime": {
+      "python": "3.11.15",
+      "dependencies": {
+        "psutil": "7.2.2",
+        "mcp": "2.1.1",
+        "httpx": "0.28.1",
+        "torch": "2.14.1+cpu",
+        "sentence-transformers": "6.1.0",
+        "psycopg": "3.3.6"
+      }
+    },
+    "host": {
+      "label": "local-cpu-01",
+      "os": "Linux",
+      "os_release": "6.6.114.1-microsoft-standard-WSL2",
+      "architecture": "x86_64",
+      "logical_cpus": 8,
+      "physical_cpus": 4,
+      "ram_bytes": 42060558336
+    },
+    "instrument_sha256": {
+      "evals/rust_baseline/__init__.py": "c1722478e4cc576b1f5623673c4730bbbe128bdb1bd5f1ac172cdea7ac65e674",
+      "evals/rust_baseline/ci.py": "e9ce796dff12d128903f9c0678facef60ff70d15f6fe7abe06dc53a5e2a4de03",
+      "evals/rust_baseline/cli_measurement.py": "f5b9bd4a3ac0763e3543060aabee3471488dc39e4549d8c4fda05ea04b0991b8",
+      "evals/rust_baseline/common.py": "0c2a74901cc935bbf03eec5d84b5de5b52d97d92696e388cf017c4ccf074a02c",
+      "evals/rust_baseline/daemon.py": "6968c2315da3bcd9fbcd4780c82faf11aef9b993ec5b0961a596727c53071e4d",
+      "evals/rust_baseline/daemon_child.py": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+      "evals/rust_baseline/scaling.py": "4df2f32c0e17b07a9ef2477d9037571cc7fffa204e64bfe3f60e30b830390bd7",
+      "evals/rust_baseline/scaling_child.py": "481c77113ef0b6f02d6c5681baa9acb85236d52ee552a296676f2dfc3ddb1517",
+      "evals/rust_baseline/shim.py": "bdd028df521705cfbfdab32dfbcc28962680351bc449c8a89f6036e281725407",
+      "evals/rust_baseline/shim_measurement.py": "bcf25f3ac45177605a1d7d519b670f28f3f65dd02aedc9ad1a6b9ad1168c824e",
+      "evals/rust_baseline/test_baseline.py": "865c10f02599a28123c9fbc88ed60cf20a9b3fe5597889e9f373b40af16871fa",
+      "evals/rust_baseline/test_review_fixes.py": "2990a91b17906e241f2366e5604fcf175be43567acdcd2bcc3a72c3281445cb5",
+      "evals/rust_baseline/test_scaling.py": "36124408bc76d8d101031c633d5264166ca84241c43926db8e02d12f6f17fdd2",
+      "evals/rust_baseline/test_shim_measurement.py": "22ec172af201c6123eac68cacb237795ece860d4fd07eec286d6fb2bbabbf76b",
+      "evals/rust_baseline/transport.py": "345a47a45ce510ee0a9e75b6282e2f46773ae8b32a979108c3483a1de8fec826"
+    },
+    "process_helper_sha256": {
+      "processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5"
+    },
+    "runtime_provenance_sha256": {
+      "provenance.py": "8ea7c835a1cc6c4efb966dd4b858861434d0a1ea91c113947a4effd0eec7d212"
+    }
+  },
+  "python_oracle": {
+    "oracle_head": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
+    "production_source_matches_pin": true
+  },
+  "candidate_identity": {
+    "executable_basename": "pseudolife-stdio",
+    "executable_sha256": "deb40db5dea608fa54955c9b533c7aa5adab54d021c32f0cd96b3f590184dd21",
+    "executable_bytes": 16757408,
+    "arguments": null,
+    "public_cli_module": false,
+    "source_head": "779c588c8c96fe5265b3877bdb15f9d2942b0111",
+    "source_tree": "ed24dba033ef74d399b6cb5493a76763978a506c",
+    "source_dirty": false,
+    "source_files_sha256": {
+      "rust/Cargo.lock": "83e7fc78a5470f214d1556c55fa29cc16da9e58e436c904fc1e829ad0af8fbd3",
+      "rust/Cargo.toml": "b903797625906a9921e5d929ea59f19248308ab8c93c5c2cc124578f3b4e41e8",
+      "rust/rust-toolchain.toml": "d3c8887dfc80164497209239779196b11a208a9c2a6394f2fa5a5f4c60980096",
+      "rust/shim/Cargo.toml": "c0dd4b3d3194e6de0ee44d6cf698a80dbf78451df9ced4e03291d74f37fc631a",
+      "rust/shim/src/board.rs": "1c99f1d4bf05e3f60a47ce7d440ff07414f2788b11f19f4143ed5a21601c62df",
+      "rust/shim/src/board/adapter.rs": "7abe57e8ea9fdc4df45e940ce54ec00d9d619b51a18b0e2fb9980f96760c9c75",
+      "rust/shim/src/board/claims.rs": "5f27cc20df4980d1ded4698c5ab8a20b6c2e77e0420c6e1460cd1f256661ab6f",
+      "rust/shim/src/board/delivery.rs": "9607cc730219593fa71a82f66b3f9dd505bfa80963819472c88e9c4beb0d0f25",
+      "rust/shim/src/board/doorbell.rs": "f5c3043b801e57fc1f81b10c480c22bfeda99d3808cd6cc4f1ff55a031e7e715",
+      "rust/shim/src/board/doorbell_posix.rs": "0b872ee862201bd7b446b2aaa89a33a152f6ef4fe3c53f9fd57c7ec49e07e8ff",
+      "rust/shim/src/board/doorbell_windows.rs": "101e56d7a68f98300401dfdfcba9ee8c327875463b3e8492a26d76ba71d4169d",
+      "rust/shim/src/board/identity.rs": "cc8a3f8b1b5d3e7debe7c26ecafecc0b2fffec608dad0192e0bb95788500deb1",
+      "rust/shim/src/board/liveness.rs": "aee765e9c561d96adc81b5f3d5d8bafb41e505140b73b33af9196bbba14989df",
+      "rust/shim/src/board/notice.rs": "720ade355e99fb0cb9270db5d805b9adf62f9308281a811e693a06ce7c4fd930",
+      "rust/shim/src/board/policy.rs": "49c468b766bdc621dba514b882cf04484a77fca5d1af1a1990a480d26045b080",
+      "rust/shim/src/board/state.rs": "5225aa7257b18ded462e846c3e379a4ea95d3c73e8257a8de06abe9ae56e80fe",
+      "rust/shim/src/board/unicode14.rs": "4dc9872ea59caf6a66f957da160b2e81a19366062760b5ef2ad33b2c1a4fa60f",
+      "rust/shim/src/cache.rs": "30e0f2235d785dd494df447d9be0cf39776c8faceb07331897970d63551ebde9",
+      "rust/shim/src/cli.rs": "3a47a4ad60b0e7e60dfa7f98a63f25249942a052e46e5761592a7c534ac76002",
+      "rust/shim/src/credentials.rs": "0b6a8a66b30d903e074148777e5036833a7cee3a27e6b28d73f7dbc781842227",
+      "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
+      "rust/shim/src/errors.rs": "fbc3d61cd678051ab68ea1a3d7f9a91b4df392e5019d143ad05f8e9a7a48290c",
+      "rust/shim/src/lib.rs": "795e26c6f2b3f24a5dcc5c27194bc9e7241748cb0cd46f0484b70e9814feba47",
+      "rust/shim/src/lifecycle.rs": "615e79af9b92c066e64813151d790be688d98d7f1b8b9d21d3a8132ca52ad30a",
+      "rust/shim/src/main.rs": "7ff732498fb2c523dd3f38fba31306ebf24841829f67423dfe26f498286fed8a",
+      "rust/shim/src/owned_transport.rs": "6723acb67817f2901774ff5ffd3ff401e96ab1fe50f1d063a985d50c7c23520e",
+      "rust/shim/src/raw_http.rs": "eaa04a61425a2bf0609e9151e36d1a0c630063d6462f5270931b46bc1af0b1a8",
+      "rust/shim/src/recovery.rs": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201",
+      "rust/shim/src/subscriptions.rs": "bd3b8522e1266a15316598a2a2ccbb965dbe1e7fa9ed556140a22c877f0e97a9",
+      "rust/shim/src/upstream.rs": "44c78d8044fde7fb8c4fe39f928063748f87271a1c4d6f50bbfa7622879db16d",
+      "rust/shim/src/wire_compatibility.rs": "e51c066fded5c2f6e4a9f3d1412fd9725ac1d26aff51ad10009e4d7fc6f0a283",
+      "rust/shim/src/wire_ids.rs": "6dc3fc3d3d0168e11d9b6419f051bb712f519be12b29ee85e1b874476f3bbcd0",
+      "rust/shim/src/wire_json.rs": "5dce53bca886fb8e8be9855a3eca6a7807cbf6fce9e1659932dfd09c08171648",
+      "rust/shim/tests/auth_credentials.rs": "9539228b6382cd7350fa947b198331eaeda659b5c6f5ea6dc5c7ff6bca9fe60a",
+      "rust/shim/tests/auth_fixture.rs": "3bde3d302ab7286401150748b4576e530328791b156bd2b3635e5903914d505b",
+      "rust/shim/tests/auth_lifecycle_cache.rs": "a9debf544fecf02ab3f3edc76da7956b4c5a92084011e9f0b21d20cb0f5c3a92",
+      "rust/shim/tests/auth_lifecycle_http.rs": "18703a4c987ad5b99c45b65539f61ccd828e123b6c70d40703a1ea4a84f78cff",
+      "rust/shim/tests/auth_lifecycle_runtime.rs": "0d3e465ae4f001e9db64f6b690b803ee5bae15d5ab0163eea665a62fae3618e9",
+      "rust/shim/tests/auth_lifecycle_updates.rs": "19415254eff1522649bca8ec0fa186059cd761e7d3a2e5f118a526f28b89aff7",
+      "rust/shim/tests/auth_lifecycle_url.rs": "cbe5f7bd1d0fc8d407c17e725736aec57bac827e99438eca5ff855bbf7f40a39",
+      "rust/shim/tests/auth_windows_private_state/mod.rs": "5014db9df33f6c7c2996d3134131affced1f175522f3b2dc5833d887ad9119f2",
+      "rust/shim/tests/auth_windows_security.rs": "875e6a669a67edc4dd552ea4776f5c075650cbe30de3fc3d5c5197ee87f11d21",
+      "rust/shim/tests/board_bridge_contract.rs": "0c753d08c88f7dbc4cc4b4a400bfce59200ded622aae2ea63e4bdac57e35d2c2",
+      "rust/shim/tests/board_capture.rs": "90d9c57911517c3215e9db7329c9ffc6cd6dadb97ced4837299e99935e85ec42",
+      "rust/shim/tests/board_channel_contract.rs": "49daa81482f53405240c2dfe81a216b5fc2ca42828c12d1210c4aabb29e6a6e3",
+      "rust/shim/tests/board_claims.rs": "476dfde25de4d7bdbc26579bb773476309a428ccb76cc82dc50507c06b7dc802",
+      "rust/shim/tests/board_delivery.rs": "fb359ca72d67b5fd1d3091f90b58183ec4a25159ccfac514855be6e312cb6d45",
+      "rust/shim/tests/board_doorbell.rs": "12f27b23e107ef44655c41a7ef7fdfddfab39a2055fd59043f3c4eabb5bea975",
+      "rust/shim/tests/board_doorbell_completion.rs": "6e5a4028af67ae73c643da6200d07b2e30cbb101002e0261012f51cfc6233689",
+      "rust/shim/tests/board_fixture.rs": "09799bdb63b4081da3b2e2e460fc1328829e9bdb9c716055417298ad7bc9e654",
+      "rust/shim/tests/board_identity.rs": "7df5a6b044efecc7e4e1d2903031b89822add9cba7f21b6ce6e763d8e20bba62",
+      "rust/shim/tests/board_network.rs": "144a80776a01dcd05509f24a63ee43741109afd601aa9cfec270afa3e20f99ac",
+      "rust/shim/tests/board_policy.rs": "f3e5ed4dc459d48d05fb7da17775ae5fc37c94a896a6c2fe42b1a4dd94de72ad",
+      "rust/shim/tests/board_renewal.rs": "d987669fbef9c3994182cd1646a53555b455dd9de7eb05f570147c1de931029a",
+      "rust/shim/tests/board_repository.rs": "9bb186d1740769384ceb54cb8bd935e25e772b76e939ff84201f3536dc96563c",
+      "rust/shim/tests/board_retry_contract.rs": "8212305540e6ffdcbf31f11ec9e0ccef6ad90f80e21eea2f6c7d89604c7c1be2",
+      "rust/shim/tests/board_ring_contract.rs": "5b9fbc0a90c882c1b07a1025ab6a14f20a322b62e7e748f6289a9538cd92108c",
+      "rust/shim/tests/board_state.rs": "5942785239526430ec301a7546bfd920af6858499a3f2687939b96e4bce6f30d",
+      "rust/shim/tests/claims_recovery_contract.rs": "cd8748d726de48a95ad79ea7b7ddef6816f7e335b054ab5697c7f0d27630e8cc",
+      "rust/shim/tests/cli_dispatch_contract.rs": "42f34a3cf9b27934073c58cfadcc57a9a37fcf7cb9e3933db61ca7263051f3e4",
+      "rust/shim/tests/common/mod.rs": "a5e44d18bbffc1e8ab67a3ebe652b8d28f88a501a7c91af82b8562a10707462c",
+      "rust/shim/tests/nonboard_contract.rs": "54c7fbc732b124892a806a3a46e7ae186edd3f9cca07930a81d3de92c3158318",
+      "rust/shim/tests/nonboard_final_assertions.rs": "bb267c38f3dfad889a8ac7b6b06e5cef6033f2a4782e9409ef066ea5812a9051",
+      "rust/shim/tests/nonboard_rotation.rs": "98c6607b1bafe20d3aeaedf475c15b3f436485ff4574b4c65f22be7daf9610c7",
+      "rust/shim/tests/nonboard_spawn_policy.rs": "ca12019a3e32106751205069ef4d59ccfff41c86dbbb170d473161fb0d6fd3f8",
+      "rust/shim/tests/nonboard_startup.rs": "5ca755dfc15944267d464b4a31ad1259371c20c2021ccb2a2841990a45b0167e",
+      "rust/shim/tests/shim_contract.rs": "1be701ae5cc8a8a8dbc6877a166e6d6a1c55586ba50eb575d6cfd8c3f15d2c84",
+      "rust/shim/tests/shim_transport_recovery_contract.rs": "dedcb3892c5ae8e7c6424dbc17881eb5b604a7013097ae1b08f9d5845d1579cb",
+      "rust/shim/tests/shim_wire_contract.rs": "d0b736102dea9d4ebec63d248918871d76ef69b323cacaac8135193cb019e110",
+      "rust/shim/tests/stdio_concurrent_contract.rs": "16faa583a47ad5c8b67e294e1a0d85cfa272aea223862ecc9f07c73e07d39791",
+      "rust/shim/tests/stdio_eof_contract.rs": "af605059e3a7739754bad195e81010a0c887e7ef3db96e5ec115159d63ccf308"
+    },
+    "source_binding": "clean native Git checkout; executable hash, not a build attestation"
+  },
+  "candidate_executable": {
+    "basename": "pseudolife-stdio",
+    "bytes": 16757408,
+    "sha256": "deb40db5dea608fa54955c9b533c7aa5adab54d021c32f0cd96b3f590184dd21"
+  },
+  "python_executable": {
+    "executable_basename": "python3.11",
+    "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+    "executable_bytes": 21662864,
+    "arguments": [
+      "-m",
+      "pseudolife_memory.cli"
+    ],
+    "public_cli_module": true
+  },
+  "mode": "help",
+  "argv": [
+    "help"
+  ],
+  "stream_contract": {
+    "stdout_stderr_encoding": "utf-8",
+    "argv_domain": "valid Unicode scalar strings",
+    "newlines": "Windows CRLF; LF on other platforms",
+    "deferred": [
+      "locale/default and other output encodings",
+      "non-UTF-8 or surrogate argv"
+    ]
+  },
+  "resource_check": {
+    "checked_at_utc": "2026-10-05T00:17:50Z",
+    "local_lease_check_exit": 0,
+    "local_lock_free": true,
+    "cli_board_available": false,
+    "lead_board_checked_free_at_utc": null,
+    "offline_resource_checked_at_utc": "2026-10-05T00:17:50Z",
+    "offline_resource_clearance_used": true,
+    "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance"
+  },
+  "repeat_resource_checks": [
+    {
+      "checked_at_utc": "2026-10-05T00:17:50Z",
+      "local_lease_check_exit": 0,
+      "local_lock_free": true,
+      "cli_board_available": false,
+      "lead_board_checked_free_at_utc": null,
+      "offline_resource_checked_at_utc": "2026-10-05T00:17:50Z",
+      "offline_resource_clearance_used": true,
+      "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance"
+    },
+    {
+      "checked_at_utc": "2026-10-05T00:17:52Z",
+      "local_lease_check_exit": 0,
+      "local_lock_free": true,
+      "cli_board_available": false,
+      "lead_board_checked_free_at_utc": null,
+      "offline_resource_checked_at_utc": "2026-10-05T00:17:50Z",
+      "offline_resource_clearance_used": true,
+      "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance"
+    },
+    {
+      "checked_at_utc": "2026-10-05T00:17:53Z",
+      "local_lease_check_exit": 0,
+      "local_lock_free": true,
+      "cli_board_available": false,
+      "lead_board_checked_free_at_utc": null,
+      "offline_resource_checked_at_utc": "2026-10-05T00:17:50Z",
+      "offline_resource_clearance_used": true,
+      "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance"
+    }
+  ],
+  "repeats": 3,
+  "samples_per_repeat": 10,
+  "runs": {
+    "python": [
+      {
+        "repeat": 0,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 125.93705501058139,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 0,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 116.73506299848668,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 0,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 135.4618780023884,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 0,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 124.53342700609937,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 0,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 123.64498601527885,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 0,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 124.26922799204476,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 0,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 117.29226098395884,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 0,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 120.28064799960703,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 0,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 125.43706901487894,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 0,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 123.30931500764564,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 122.84616602119058,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 107.61726199416444,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 118.49583699950017,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 123.97104399860837,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 121.13894999492913,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 123.53706697467715,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 117.62862702016719,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 125.47323098988272,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 121.3377169915475,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 1,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 132.7357790141832,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 120.5588599841576,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 122.9311139904894,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 122.65645997831598,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 124.62647500797175,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 129.6534780121874,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 121.3100670138374,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 126.18678997387178,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 130.83619700046256,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 122.23430900485255,
+        "executable_bytes": 21662864
+      },
+      {
+        "repeat": 2,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 123.345756001072,
+        "executable_bytes": 21662864
+      }
+    ],
+    "rust": [
+      {
+        "repeat": 0,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.633249019505456,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 0,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.4416080084629357,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 0,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.5218420012388378,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 0,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.34997398708947,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 0,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.490950002335012,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 0,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.3383440091274679,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 0,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.3889629917684942,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 0,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.3033490104135126,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 0,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.4585870085284114,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 0,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.7255179991479963,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.5772259794175625,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.3597030192613602,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.3791500241495669,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.3240310072433203,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.3555629993788898,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.2882680166512728,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.1118259862996638,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.0802839824464172,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.0567519930191338,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 1,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.171809999505058,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.1408480058889836,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.1504190042614937,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.0954549943562597,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.1704679927788675,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.196560013340786,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.0879810142796487,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.204962987685576,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.2073479883838445,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 1.1305090156383812,
+        "executable_bytes": 16757408
+      },
+      {
+        "repeat": 2,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 1.0597519867587835,
+        "executable_bytes": 16757408
+      }
+    ]
+  },
+  "metrics": {
+    "python": {
+      "cold_start_to_exit_ms": {
+        "distribution": {
+          "n": 30,
+          "p50": 123.30931500764564,
+          "p95": 132.7357790141832,
+          "median": 123.32753550435882,
+          "min": 107.61726199416444,
+          "max": 135.4618780023884
+        },
+        "median_control": {
+          "repeat_medians": [
+            123.9571070036618,
+            122.09194150636904,
+            123.1384349957807
+          ],
+          "noise_floor_abs": 1.8651654972927645,
+          "available": true,
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+        },
+        "p50": {
+          "value": 123.30931500764564,
+          "repeat_values": [
+            123.64498601527885,
+            121.3377169915475,
+            122.9311139904894
+          ],
+          "noise_floor_abs": 2.307269023731351,
+          "method": "max minus min of identical-input repeat block quantiles"
+        },
+        "p95": {
+          "value": 132.7357790141832,
+          "repeat_values": [
+            135.4618780023884,
+            132.7357790141832,
+            130.83619700046256
+          ],
+          "noise_floor_abs": 4.625681001925841,
+          "method": "max minus min of identical-input repeat block quantiles"
+        }
+      },
+      "executable_bytes": {
+        "distribution": {
+          "n": 30,
+          "p50": 21662864,
+          "p95": 21662864,
+          "median": 21662864.0,
+          "min": 21662864,
+          "max": 21662864
+        },
+        "median_control": {
+          "repeat_medians": [
+            21662864.0,
+            21662864.0,
+            21662864.0
+          ],
+          "noise_floor_abs": 0.0,
+          "available": true,
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+        },
+        "p50": {
+          "value": 21662864,
+          "repeat_values": [
+            21662864,
+            21662864,
+            21662864
+          ],
+          "noise_floor_abs": 0,
+          "method": "max minus min of identical-input repeat block quantiles"
+        },
+        "p95": {
+          "value": 21662864,
+          "repeat_values": [
+            21662864,
+            21662864,
+            21662864
+          ],
+          "noise_floor_abs": 0,
+          "method": "max minus min of identical-input repeat block quantiles"
+        }
+      }
+    },
+    "rust": {
+      "cold_start_to_exit_ms": {
+        "distribution": {
+          "n": 30,
+          "p50": 1.2882680166512728,
+          "p95": 1.633249019505456,
+          "median": 1.2958085135323927,
+          "min": 1.0567519930191338,
+          "max": 1.7255179991479963
+        },
+        "median_control": {
+          "repeat_medians": [
+            1.4500975084956735,
+            1.3061495119472966,
+            1.1456335050752386
+          ],
+          "noise_floor_abs": 0.3044640034204349,
+          "available": true,
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+        },
+        "p50": {
+          "value": 1.2882680166512728,
+          "repeat_values": [
+            1.4416080084629357,
+            1.2882680166512728,
+            1.1408480058889836
+          ],
+          "noise_floor_abs": 0.3007600025739521,
+          "method": "max minus min of identical-input repeat block quantiles"
+        },
+        "p95": {
+          "value": 1.633249019505456,
+          "repeat_values": [
+            1.7255179991479963,
+            1.5772259794175625,
+            1.2073479883838445
+          ],
+          "noise_floor_abs": 0.5181700107641518,
+          "method": "max minus min of identical-input repeat block quantiles"
+        }
+      },
+      "executable_bytes": {
+        "distribution": {
+          "n": 30,
+          "p50": 16757408,
+          "p95": 16757408,
+          "median": 16757408.0,
+          "min": 16757408,
+          "max": 16757408
+        },
+        "median_control": {
+          "repeat_medians": [
+            16757408.0,
+            16757408.0,
+            16757408.0
+          ],
+          "noise_floor_abs": 0.0,
+          "available": true,
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+        },
+        "p50": {
+          "value": 16757408,
+          "repeat_values": [
+            16757408,
+            16757408,
+            16757408
+          ],
+          "noise_floor_abs": 0,
+          "method": "max minus min of identical-input repeat block quantiles"
+        },
+        "p95": {
+          "value": 16757408,
+          "repeat_values": [
+            16757408,
+            16757408,
+            16757408
+          ],
+          "noise_floor_abs": 0,
+          "method": "max minus min of identical-input repeat block quantiles"
+        }
+      }
+    }
+  },
+  "byte_control": {
+    "python": {
+      "exit_code": 0,
+      "stdout_b64": "cHNldWRvbGlmZS1tY3Ag4oCUIHBlcnNpc3RlbnQgbG9uZy10ZXJtIG1lbW9yeSBmb3IgY29kaW5nIGFnZW50cyBvdmVyIE1DUAoKdXNhZ2U6IHBzZXVkb2xpZmUtbWNwIFttb2RlXQoKbW9kZXM6CiAgKG5vIGFyZykgICAgICAgc3RkaW8gc2hpbTogZmluZC9zdGFydCB0aGUgZGFlbW9uIGFuZCBwcm94eSB0byBpdAogIGNoYW5uZWwgICAgICAgIGV4cGVyaW1lbnRhbCBDbGF1ZGUgY2hhbm5lbCB0cmFuc3BvcnQgKHJlcXVpcmVzIGV4cGxpY2l0IG9wdC1pbikKICBjb29yZGluYXRpb24tcmVjb3ZlcnkgIG9mZmxpbmUgbWFpbGJveCByZWNvdmVyeSBhZnRlciBhIGRhdGFiYXNlIHJlc3RvcmUKICBib2FyZC1hdWRpdCAgICBleHBvcnQsIHZlcmlmeSwgcmVkYWN0IG9yIHN0YXRzIG9uIHRoZSBhZ2VudCBib2FyZCdzIGF1ZGl0IGxvZwogICAgICAgICAgICAgICAgIChvcGVyYXRvci1vbmx5OyByZWFkcyBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwsIGVsc2UgcnVucwogICAgICAgICAgICAgICAgIGluc2lkZSB0aGUgcHNldWRvbGlmZS1tY3AtZGFlbW9uIGNvbnRhaW5lcikKICBzZXJ2ZSAgICAgICAgICBydW4gdGhlIEhUVFAgbWVtb3J5IGRhZW1vbiAoZGVwbG95bWVudCBtb2RlKQogIGVtYmVkZGVkICAgICAgIGluLXByb2Nlc3Mgc3RkaW8gc2VydmVyIOKAlCBubyBkYWVtb24sIG5vIFBvc3RncmVzIChlc2NhcGUgaGF0Y2gpCiAgYnJpZWZpbmcgICAgICAgcHJpbnQgdGhlIHNlc3Npb24tc3RhcnQgYnJpZWZpbmcgKGZvciBhIFNlc3Npb25TdGFydCBob29rOwogICAgICAgICAgICAgICAgIC0taG9vay1qc29uIGVtaXRzIHRoZSBtZW1vcnkgY29yZSArIGJvdW5kZWQgYnJpZWZpbmcgYXMKICAgICAgICAgICAgICAgICBDbGF1ZGUgQ29kZS9Db2RleCBob29rIEpTT047IC0tY29vcmRpbmF0aW9uIHByaW50cyB0aGUKICAgICAgICAgICAgICAgICBhZ2VudC1ib2FyZCBjaGVjay1pbiwgb25seSB3aGVyZSB0aGUgYm9hcmQgd29ya3MpCiAgcHJvbXB0LWhvb2sgICAgcGVyLXR1cm4gVXNlclByb21wdFN1Ym1pdCBob29rOiBwcmludHMgYSBub3RlIG9ubHkgd2hlbiBuZXcKICAgICAgICAgICAgICAgICBsZXNzb25zIG9yIG90aGVyIHNlc3Npb25zJyBzdGF0dXMgbm90ZXMgbGFuZGVkIHNpbmNlIHRoaXMKICAgICAgICAgICAgICAgICBzZXNzaW9uJ3MgbGFzdCBvbmUgKGluc3RhbGxzIHdpdGhvdXQgdGhlIHBsdWdpbikKICBkb2N0b3IgICAgICAgICBjaGVjayBydW50aW1lLCBoZWFsdGgsIE1DUCBhbmQgY29vcmRpbmF0aW9uIChyZWFkLW9ubHkgYnkgZGVmYXVsdDsKICAgICAgICAgICAgICAgICAtLWRpc3Bvc2FibGUtcHJvb2Ygd3JpdGVzIG9ubHkgdG8gYW4gZXhwbGljaXQgZml4dHVyZSBzZXJ2ZXIpCiAgdHVubmVsICAgICAgICAgZ3VpZGVkIG9wdGlvbmFsIFNlY3VyZSBNQ1AgVHVubmVsIHNldHVwLCBjbG91ZCB2ZXJpZmljYXRpb24sCiAgICAgICAgICAgICAgICAgc3RhdHVzL2RvY3RvciwgcHJpdmF0ZSBrZXkgcmVuZXdhbCBhbmQgb3B0ZWQtaW4gYXV0b3N0YXJ0CiAgICAgICAgICAgICAgICAgKGB0dW5uZWwgc2V0dXBgIHJlc3VtZXMgc2F2ZWQgc3RlcHM7IGB0dW5uZWwgLS1oZWxwYCkKICBjb25uZWN0ICAgICAgICBwb2ludCB0aGlzIG1hY2hpbmUncyBjbGllbnQgcmVnaXN0cmF0aW9ucyBhdCBhIGRhZW1vbiBVUkwKICAgICAgICAgICAgICAgICAoYGNvbm5lY3QgPHVybD5gKTogcmVwbGFjZXMgdGhlIG9sZCBVUkwgYW5kLCB3aXRoCiAgICAgICAgICAgICAgICAgLS10b2tlbi1maWxlLCB0aGUgdG9rZW4gZmlsZTsgdmVyaWZpZXMgdGhlIGRhZW1vbiBhY2NlcHRzCiAgICAgICAgICAgICAgICAgdGhlbSBmaXJzdDsgYWxsLW9yLW5vdGhpbmcgd2l0aCBiYWNrdXBzICgtLWRyeS1ydW4gc2hvd3MKICAgICAgICAgICAgICAgICB0aGUgcGxhbjsgLS1oZWxwIGZvciBvcHRpb25zKQogIGludml0ZSAgICAgICAgIG9uIHRoZSBkYWVtb24gaG9zdDogZ2l2ZSBhbm90aGVyIG1hY2hpbmUgaXRzIG93biBwcmluY2lwYWwKICAgICAgICAgICAgICAgICAoYGludml0ZSA8bWFjaGluZT5gKTogcHJpbnRzIGEgc2hvcnQtbGl2ZWQsIHNpbmdsZS11c2UKICAgICAgICAgICAgICAgICBwYWlyaW5nIGNvZGUsIG5vIGRhZW1vbiByZXN0YXJ0OyAtLWxpc3QsIC0tcmV2b2tlIE5BTUUKICB0ZXN0LWxvZ2luICAgICBvbiB0aGUgZGFlbW9uIGhvc3Q6IGdpdmUgdGhlIHRlc3Qgc3VpdGUgaXRzIG93biBQb3N0Z3JlcwogICAgICAgICAgICAgICAgIGxvZ2luIChgdGVzdC1sb2dpbiBjcmVhdGVgKTogaXQgY3JlYXRlcyBhbmQgZHJvcHMgaXRzIG93bgogICAgICAgICAgICAgICAgIGRhdGFiYXNlcyBhbmQgY2Fubm90IGNvbm5lY3QgdG8gdGhlIGJhbms7IHdyaXRlcwogICAgICAgICAgICAgICAgIH4vLnBzZXVkb2xpZmUtbWNwL3Rlc3QtcGcuZW52LCBuZXZlciB0aGUgb3duZXIncyBwYXNzd29yZAogIHBhaXIgICAgICAgICAgIGpvaW4gYSBiYW5rIHdpdGggYSBwYWlyaW5nIGNvZGUgZnJvbSBgaW52aXRlYCBvbiB0aGUgZGFlbW9uCiAgICAgICAgICAgICAgICAgaG9zdCAoYHBhaXIgPHVybD4gPGNvZGU+YCwgb3IgLS1yZWFkLWNvZGUpOiBtaW50cyB0aGUgdG9rZW4KICAgICAgICAgICAgICAgICBoZXJlLCB3cml0ZXMgaXQgb3duZXItb25seSBhbmQgc2VuZHMgdGhlIGRhZW1vbiBvbmx5IGl0cwogICAgICAgICAgICAgICAgIFNIQS0yNTY7IG5ldmVyIHByaW50cyB0aGUgdG9rZW4gb3IgdGhlIGNvZGUKICBleHBvc2UgICAgICAgICBvbiB0aGUgZGFlbW9uIGhvc3Q6IHB1dCB0aGUgZGFlbW9uIG9uIHRoZSB0YWlsbmV0IHdpdGgKICAgICAgICAgICAgICAgICBUYWlsc2NhbGUgU2VydmUgKGBleHBvc2UgdGFpbHNjYWxlYCksIHJlZnVzaW5nIGEgZGFlbW9uCiAgICAgICAgICAgICAgICAgd2l0aG91dCBhIHRva2VuIGFuZCBuZXZlciByZXBsYWNpbmcgYW5vdGhlciBzZXJ2ZTsKICAgICAgICAgICAgICAgICBgZXhwb3NlIG9mZmAgcmVtb3ZlcyBvbmx5IHRoYXQgZm9yd2FyZCwgYGV4cG9zZSBzdGF0dXNgCiAgICAgICAgICAgICAgICAgcHJpbnRzIHRoZSBjbGllbnQgVVJMCiAgbW92ZSAgICAgICAgICAgbW92ZSB0aGlzIGhvc3QncyBEb2NrZXItdGllciBiYW5rIHRvIGFub3RoZXIgRG9ja2VyLXRpZXIKICAgICAgICAgICAgICAgICBjaGVja291dCBob3N0IG92ZXIga2V5LWJhc2VkIHNzaCAoYG1vdmUgLS10byA8c3NoLXRhcmdldD5gKToKICAgICAgICAgICAgICAgICBmaW5hbCBiYWNrdXAgZnJvbSB0aGUgc3RvcHBlZCBkYWVtb24sIGRhdGFiYXNlIGZlbmNlLAogICAgICAgICAgICAgICAgIHJlc3RvcmUgYW5kIHJvdy1jb3VudCBjaGVjayBvbiB0aGUgdGFyZ2V0LCBvbmUgc3RhcnQgdGhlcmUsCiAgICAgICAgICAgICAgICAgdGhlbiB0aGlzIG1hY2hpbmUncyBjbGllbnRzIHJlLXBvaW50ZWQ7IHRoZSBzb3VyY2UgaXMKICAgICAgICAgICAgICAgICBzdG9wcGVkIGFuZCBmZW5jZWQsIG5ldmVyIGRlbGV0ZWQsIGFuZCBhIGZhaWx1cmUgcm9sbHMgYmFjawogICAgICAgICAgICAgICAgICgtLWRyeS1ydW4gc2hvd3MgdGhlIHBsYW47IC0taGVscCBmb3Igb3B0aW9ucykKICB1cGRhdGUgICAgICAgICB1cGRhdGUgdGhlIGRhZW1vbiBhbmQgdGhlIGNsaWVudCBzaWRlIGZyb20gYSByZWxlYXNlLCB3aXRoCiAgICAgICAgICAgICAgICAgbm8gY2hlY2tvdXQ6IHB1bGwgdGhlIHBpbm5lZCBHSENSIGltYWdlLCBiYWNrIHRoZSBiYW5rIHVwLAogICAgICAgICAgICAgICAgIHRhZyBhIHJvbGxiYWNrLCByZWNyZWF0ZSBvbmx5IHRoZSBkYWVtb24sIHdhaXQgZm9yIGhlYWx0aCwKICAgICAgICAgICAgICAgICB0aGVuIHRoZSBzaGltIHJ1bnRpbWUsIHRoZSBwbHVnaW4gY2FjaGUgYW5kIHRoZSBDb2RleCBzdGVwCiAgICAgICAgICAgICAgICAgKGAtLWNoZWNrYCBvbmx5IHJlcG9ydHMgd2hldGhlciBhIG5ld2VyIHJlbGVhc2UgZXhpc3RzOwogICAgICAgICAgICAgICAgIGAtLXRhZyBYYCBwaW5zIG9uZTsgcGlwIGluc3RhbGxzIHVwZ3JhZGUgdGhlIHBhY2thZ2UpCiAgYmFja3VwICAgICAgICAgYmFjayB1cCB0aGUgYmFuazogcGdfZHVtcCArIHN0YXRlIGFyY2hpdmUgd2l0aCByb3RhdGlvbgogICAgICAgICAgICAgICAgIChwaXAgdGllcnM7IHRoZSBEb2NrZXIgdGllciBrZWVwcyBvcHMvYmFja3VwLnBzMSkKICBleHBvcnQgICAgICAgICB3cml0ZSBhIHBvcnRhYmxlIGxvZ2ljYWwgZXhwb3J0IG9mIHRoZSBiYW5rIChaSVAgb2YgSlNPTkwKICAgICAgICAgICAgICAgICB0YWJsZXMgKyBtYW5pZmVzdDsgdGllci0gYW5kIFBHLXZlcnNpb24taW5kZXBlbmRlbnQpCiAgaW1wb3J0ICAgICAgICAgbG9hZCBhIGxvZ2ljYWwgZXhwb3J0IGludG8gYSBmcmVzaCwgZW1wdHkgYmFuawogIGVwaXNvZGUtc3RhcnQgIG9wZW4gYSBzZXNzaW9uIGVwaXNvZGUgKGxlZ2FjeSBob29rIGhlbHBlcikKICBlcGlzb2RlLWVuZCAgICBjbG9zZSBpdAogIHdhaXQtbWFpbCAgICAgIGJsb2NrIHVudGlsIHRoZSBkYWVtb24gcmluZ3MgdGhpcyBzZXNzaW9uIGZvciBhZ2VudCBtYWlsCiAgICAgICAgICAgICAgICAgKHBsYWluIG1haWwgbmV2ZXIgd2FrZXMpLCBwcmludCB0aGUgbWFpbCBhbmQgZXhpdCAoYXJtIGFzIGEKICAgICAgICAgICAgICAgICBiYWNrZ3JvdW5kIGNvbW1hbmQgdG8gd2FrZSBhbiBpZGxlIHNlc3Npb247IGV4aXQgMCByaW5nLAogICAgICAgICAgICAgICAgIDMgdGltZW91dCwgMiBzZXR1cDsgLS1oZWxwIGZvciBvcHRpb25zKQogIGxlYXNlICAgICAgICAgIGhvbGQgYSBuYW1lZCBsZWFzZSBhcm91bmQgYSBjb21tYW5kOiBgbGVhc2UgcnVuIE5BTUUgLS0KICAgICAgICAgICAgICAgICBDT01NQU5ELi4uYCB0YWtlcyBhbiBPUyBmaWxlIGxvY2sgdGhlIGFnZW50IGJvYXJkIG1pcnJvcnMKICAgICAgICAgICAgICAgICAoRklGTyBxdWV1ZSwgaG9sZGVyLCBleHBlY3RlZCBlbmQpOyBgbGVhc2UgaG9sZCBOQU1FCiAgICAgICAgICAgICAgICAgLS13aGlsZS1waWQgUElEYCBob2xkcyBvbmUgZm9yIGEgcHJvY2VzcyBhbHJlYWR5IHJ1bm5pbmc7CiAgICAgICAgICAgICAgICAgYGxlYXNlIGNoZWNrIE5BTUVgIGV4aXRzIDEgd2hpbGUgaXQgaXMgaGVsZCAoYSBsYXVuY2ggZ2F0ZSk7CiAgICAgICAgICAgICAgICAgYGxlYXNlIGxpc3RgIHNob3dzIHRoZW07IG9wZXJhdG9yIG9ubHk6IGBsZWFzZSBicmVhayBOQU1FYAogICAgICAgICAgICAgICAgIGZyZWVzIGEgc3R1Y2sgb25lLCBgbGVhc2UgZGVsZWdhdGUgUFJPSkVDVCBBR0VOVGAgbWFrZXMKICAgICAgICAgICAgICAgICBvbmUgc2Vzc2lvbiB0aGUgbWFpbnRhaW5lcidzIGRlbGVnYXRlIGZvciBhIHByb2plY3QKICBtYWludGFpbmVyICAgIG9uIHRoZSBkYWVtb24gaG9zdCwgdGhlIG1haW50YWluZXIncyBwYXNza2V5cyAob3BlcmF0b3IKICAgICAgICAgICAgICAgICBvbmx5OyByZWFkcyBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwsIGVsc2UgcnVucyBpbnNpZGUKICAgICAgICAgICAgICAgICB0aGUgcHNldWRvbGlmZS1tY3AtZGFlbW9uIGNvbnRhaW5lcik6CiAgICAgICAgICAgICAgICAgYG1haW50YWluZXIgc2V0dXBgIGRvZXMgaXQgYWxsLCBndWlkZWQgKHRoZSBDb25zb2xlJ3MKICAgICAgICAgICAgICAgICBIVFRQUyBuYW1lLCB0aGUgY29uZmlnLCB0aGUgZmlyc3QgcGFzc2tleSk7IGBlbnJvbC1jb2RlYAogICAgICAgICAgICAgICAgIGFkbWl0cyB0aGUgZmlyc3QgcGFzc2tleSBmcm9tIHRoZSBDb25zb2xlLAogICAgICAgICAgICAgICAgIGBjb25maXJtIFBSRUZJWGAgYWN0aXZhdGVzIGl0LCBgcmV2b2tlIFBSRUZJWGAsIGByZXNldAogICAgICAgICAgICAgICAgIC0teWVzYCByZXZva2VzIGFsbCBhbmQgcmVvcGVucyBlbnJvbG1lbnQsIGBsaXN0YAogIHZlcnNpb24gICAgICAgcHJpbnQgdGhlIHBhY2thZ2UgdmVyc2lvbiwgYW5kIHRoZSBzaGltIHJ1bnRpbWUgaXQgcnVucwogICAgICAgICAgICAgICAgZnJvbSB3aXRoIHRoYXQgcnVudGltZSdzIHNvdXJjZSBjb21taXQgKGFsc28gLS12ZXJzaW9uKQogIGhlbHAgICAgICAgICAgc2hvdyB0aGlzIG1lc3NhZ2UgKGFsc28gLWggLyAtLWhlbHApCgpjcmVkZW50aWFscyAodG9rZW4tZ2F0ZWQgZGFlbW9uKTogUFNFVURPTElGRV9NQ1BfVE9LRU49PGJlYXJlcj4sIG9yCiAgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRT08b3duZXItb25seSBmaWxlIGhvbGRpbmcgaXQ+IGZvciBob3N0cyB0aGF0CiAgc2FuaXRpemUgdGhlIGxhdW5jaCBlbnZpcm9ubWVudCAoQ2xhdWRlIERlc2t0b3ApOyB0aGUgZmlsZSB3aW5zIHdoZW4gYm90aAogIGFyZSBzZXQuIG9wcy9yZWdpc3Rlcl9jbGF1ZGVfZGVza3RvcC5weSBwcm9iZXMgdGhpcyB0ZXh0IGZvciB0aGUgZmlsZSBmb3JtLgoKZG9jczogaHR0cHM6Ly9naXRodWIuY29tL1BzZXVkb2dpYW50LXhyL1BzZXVkb2xpZmUtTUNQCg==",
+      "stderr_b64": ""
+    },
+    "rust": {
+      "exit_code": 0,
+      "stdout_b64": "cHNldWRvbGlmZS1tY3Ag4oCUIHBlcnNpc3RlbnQgbG9uZy10ZXJtIG1lbW9yeSBmb3IgY29kaW5nIGFnZW50cyBvdmVyIE1DUAoKdXNhZ2U6IHBzZXVkb2xpZmUtbWNwIFttb2RlXQoKbW9kZXM6CiAgKG5vIGFyZykgICAgICAgc3RkaW8gc2hpbTogZmluZC9zdGFydCB0aGUgZGFlbW9uIGFuZCBwcm94eSB0byBpdAogIGNoYW5uZWwgICAgICAgIGV4cGVyaW1lbnRhbCBDbGF1ZGUgY2hhbm5lbCB0cmFuc3BvcnQgKHJlcXVpcmVzIGV4cGxpY2l0IG9wdC1pbikKICBjb29yZGluYXRpb24tcmVjb3ZlcnkgIG9mZmxpbmUgbWFpbGJveCByZWNvdmVyeSBhZnRlciBhIGRhdGFiYXNlIHJlc3RvcmUKICBib2FyZC1hdWRpdCAgICBleHBvcnQsIHZlcmlmeSwgcmVkYWN0IG9yIHN0YXRzIG9uIHRoZSBhZ2VudCBib2FyZCdzIGF1ZGl0IGxvZwogICAgICAgICAgICAgICAgIChvcGVyYXRvci1vbmx5OyByZWFkcyBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwsIGVsc2UgcnVucwogICAgICAgICAgICAgICAgIGluc2lkZSB0aGUgcHNldWRvbGlmZS1tY3AtZGFlbW9uIGNvbnRhaW5lcikKICBzZXJ2ZSAgICAgICAgICBydW4gdGhlIEhUVFAgbWVtb3J5IGRhZW1vbiAoZGVwbG95bWVudCBtb2RlKQogIGVtYmVkZGVkICAgICAgIGluLXByb2Nlc3Mgc3RkaW8gc2VydmVyIOKAlCBubyBkYWVtb24sIG5vIFBvc3RncmVzIChlc2NhcGUgaGF0Y2gpCiAgYnJpZWZpbmcgICAgICAgcHJpbnQgdGhlIHNlc3Npb24tc3RhcnQgYnJpZWZpbmcgKGZvciBhIFNlc3Npb25TdGFydCBob29rOwogICAgICAgICAgICAgICAgIC0taG9vay1qc29uIGVtaXRzIHRoZSBtZW1vcnkgY29yZSArIGJvdW5kZWQgYnJpZWZpbmcgYXMKICAgICAgICAgICAgICAgICBDbGF1ZGUgQ29kZS9Db2RleCBob29rIEpTT047IC0tY29vcmRpbmF0aW9uIHByaW50cyB0aGUKICAgICAgICAgICAgICAgICBhZ2VudC1ib2FyZCBjaGVjay1pbiwgb25seSB3aGVyZSB0aGUgYm9hcmQgd29ya3MpCiAgcHJvbXB0LWhvb2sgICAgcGVyLXR1cm4gVXNlclByb21wdFN1Ym1pdCBob29rOiBwcmludHMgYSBub3RlIG9ubHkgd2hlbiBuZXcKICAgICAgICAgICAgICAgICBsZXNzb25zIG9yIG90aGVyIHNlc3Npb25zJyBzdGF0dXMgbm90ZXMgbGFuZGVkIHNpbmNlIHRoaXMKICAgICAgICAgICAgICAgICBzZXNzaW9uJ3MgbGFzdCBvbmUgKGluc3RhbGxzIHdpdGhvdXQgdGhlIHBsdWdpbikKICBkb2N0b3IgICAgICAgICBjaGVjayBydW50aW1lLCBoZWFsdGgsIE1DUCBhbmQgY29vcmRpbmF0aW9uIChyZWFkLW9ubHkgYnkgZGVmYXVsdDsKICAgICAgICAgICAgICAgICAtLWRpc3Bvc2FibGUtcHJvb2Ygd3JpdGVzIG9ubHkgdG8gYW4gZXhwbGljaXQgZml4dHVyZSBzZXJ2ZXIpCiAgdHVubmVsICAgICAgICAgZ3VpZGVkIG9wdGlvbmFsIFNlY3VyZSBNQ1AgVHVubmVsIHNldHVwLCBjbG91ZCB2ZXJpZmljYXRpb24sCiAgICAgICAgICAgICAgICAgc3RhdHVzL2RvY3RvciwgcHJpdmF0ZSBrZXkgcmVuZXdhbCBhbmQgb3B0ZWQtaW4gYXV0b3N0YXJ0CiAgICAgICAgICAgICAgICAgKGB0dW5uZWwgc2V0dXBgIHJlc3VtZXMgc2F2ZWQgc3RlcHM7IGB0dW5uZWwgLS1oZWxwYCkKICBjb25uZWN0ICAgICAgICBwb2ludCB0aGlzIG1hY2hpbmUncyBjbGllbnQgcmVnaXN0cmF0aW9ucyBhdCBhIGRhZW1vbiBVUkwKICAgICAgICAgICAgICAgICAoYGNvbm5lY3QgPHVybD5gKTogcmVwbGFjZXMgdGhlIG9sZCBVUkwgYW5kLCB3aXRoCiAgICAgICAgICAgICAgICAgLS10b2tlbi1maWxlLCB0aGUgdG9rZW4gZmlsZTsgdmVyaWZpZXMgdGhlIGRhZW1vbiBhY2NlcHRzCiAgICAgICAgICAgICAgICAgdGhlbSBmaXJzdDsgYWxsLW9yLW5vdGhpbmcgd2l0aCBiYWNrdXBzICgtLWRyeS1ydW4gc2hvd3MKICAgICAgICAgICAgICAgICB0aGUgcGxhbjsgLS1oZWxwIGZvciBvcHRpb25zKQogIGludml0ZSAgICAgICAgIG9uIHRoZSBkYWVtb24gaG9zdDogZ2l2ZSBhbm90aGVyIG1hY2hpbmUgaXRzIG93biBwcmluY2lwYWwKICAgICAgICAgICAgICAgICAoYGludml0ZSA8bWFjaGluZT5gKTogcHJpbnRzIGEgc2hvcnQtbGl2ZWQsIHNpbmdsZS11c2UKICAgICAgICAgICAgICAgICBwYWlyaW5nIGNvZGUsIG5vIGRhZW1vbiByZXN0YXJ0OyAtLWxpc3QsIC0tcmV2b2tlIE5BTUUKICB0ZXN0LWxvZ2luICAgICBvbiB0aGUgZGFlbW9uIGhvc3Q6IGdpdmUgdGhlIHRlc3Qgc3VpdGUgaXRzIG93biBQb3N0Z3JlcwogICAgICAgICAgICAgICAgIGxvZ2luIChgdGVzdC1sb2dpbiBjcmVhdGVgKTogaXQgY3JlYXRlcyBhbmQgZHJvcHMgaXRzIG93bgogICAgICAgICAgICAgICAgIGRhdGFiYXNlcyBhbmQgY2Fubm90IGNvbm5lY3QgdG8gdGhlIGJhbms7IHdyaXRlcwogICAgICAgICAgICAgICAgIH4vLnBzZXVkb2xpZmUtbWNwL3Rlc3QtcGcuZW52LCBuZXZlciB0aGUgb3duZXIncyBwYXNzd29yZAogIHBhaXIgICAgICAgICAgIGpvaW4gYSBiYW5rIHdpdGggYSBwYWlyaW5nIGNvZGUgZnJvbSBgaW52aXRlYCBvbiB0aGUgZGFlbW9uCiAgICAgICAgICAgICAgICAgaG9zdCAoYHBhaXIgPHVybD4gPGNvZGU+YCwgb3IgLS1yZWFkLWNvZGUpOiBtaW50cyB0aGUgdG9rZW4KICAgICAgICAgICAgICAgICBoZXJlLCB3cml0ZXMgaXQgb3duZXItb25seSBhbmQgc2VuZHMgdGhlIGRhZW1vbiBvbmx5IGl0cwogICAgICAgICAgICAgICAgIFNIQS0yNTY7IG5ldmVyIHByaW50cyB0aGUgdG9rZW4gb3IgdGhlIGNvZGUKICBleHBvc2UgICAgICAgICBvbiB0aGUgZGFlbW9uIGhvc3Q6IHB1dCB0aGUgZGFlbW9uIG9uIHRoZSB0YWlsbmV0IHdpdGgKICAgICAgICAgICAgICAgICBUYWlsc2NhbGUgU2VydmUgKGBleHBvc2UgdGFpbHNjYWxlYCksIHJlZnVzaW5nIGEgZGFlbW9uCiAgICAgICAgICAgICAgICAgd2l0aG91dCBhIHRva2VuIGFuZCBuZXZlciByZXBsYWNpbmcgYW5vdGhlciBzZXJ2ZTsKICAgICAgICAgICAgICAgICBgZXhwb3NlIG9mZmAgcmVtb3ZlcyBvbmx5IHRoYXQgZm9yd2FyZCwgYGV4cG9zZSBzdGF0dXNgCiAgICAgICAgICAgICAgICAgcHJpbnRzIHRoZSBjbGllbnQgVVJMCiAgbW92ZSAgICAgICAgICAgbW92ZSB0aGlzIGhvc3QncyBEb2NrZXItdGllciBiYW5rIHRvIGFub3RoZXIgRG9ja2VyLXRpZXIKICAgICAgICAgICAgICAgICBjaGVja291dCBob3N0IG92ZXIga2V5LWJhc2VkIHNzaCAoYG1vdmUgLS10byA8c3NoLXRhcmdldD5gKToKICAgICAgICAgICAgICAgICBmaW5hbCBiYWNrdXAgZnJvbSB0aGUgc3RvcHBlZCBkYWVtb24sIGRhdGFiYXNlIGZlbmNlLAogICAgICAgICAgICAgICAgIHJlc3RvcmUgYW5kIHJvdy1jb3VudCBjaGVjayBvbiB0aGUgdGFyZ2V0LCBvbmUgc3RhcnQgdGhlcmUsCiAgICAgICAgICAgICAgICAgdGhlbiB0aGlzIG1hY2hpbmUncyBjbGllbnRzIHJlLXBvaW50ZWQ7IHRoZSBzb3VyY2UgaXMKICAgICAgICAgICAgICAgICBzdG9wcGVkIGFuZCBmZW5jZWQsIG5ldmVyIGRlbGV0ZWQsIGFuZCBhIGZhaWx1cmUgcm9sbHMgYmFjawogICAgICAgICAgICAgICAgICgtLWRyeS1ydW4gc2hvd3MgdGhlIHBsYW47IC0taGVscCBmb3Igb3B0aW9ucykKICB1cGRhdGUgICAgICAgICB1cGRhdGUgdGhlIGRhZW1vbiBhbmQgdGhlIGNsaWVudCBzaWRlIGZyb20gYSByZWxlYXNlLCB3aXRoCiAgICAgICAgICAgICAgICAgbm8gY2hlY2tvdXQ6IHB1bGwgdGhlIHBpbm5lZCBHSENSIGltYWdlLCBiYWNrIHRoZSBiYW5rIHVwLAogICAgICAgICAgICAgICAgIHRhZyBhIHJvbGxiYWNrLCByZWNyZWF0ZSBvbmx5IHRoZSBkYWVtb24sIHdhaXQgZm9yIGhlYWx0aCwKICAgICAgICAgICAgICAgICB0aGVuIHRoZSBzaGltIHJ1bnRpbWUsIHRoZSBwbHVnaW4gY2FjaGUgYW5kIHRoZSBDb2RleCBzdGVwCiAgICAgICAgICAgICAgICAgKGAtLWNoZWNrYCBvbmx5IHJlcG9ydHMgd2hldGhlciBhIG5ld2VyIHJlbGVhc2UgZXhpc3RzOwogICAgICAgICAgICAgICAgIGAtLXRhZyBYYCBwaW5zIG9uZTsgcGlwIGluc3RhbGxzIHVwZ3JhZGUgdGhlIHBhY2thZ2UpCiAgYmFja3VwICAgICAgICAgYmFjayB1cCB0aGUgYmFuazogcGdfZHVtcCArIHN0YXRlIGFyY2hpdmUgd2l0aCByb3RhdGlvbgogICAgICAgICAgICAgICAgIChwaXAgdGllcnM7IHRoZSBEb2NrZXIgdGllciBrZWVwcyBvcHMvYmFja3VwLnBzMSkKICBleHBvcnQgICAgICAgICB3cml0ZSBhIHBvcnRhYmxlIGxvZ2ljYWwgZXhwb3J0IG9mIHRoZSBiYW5rIChaSVAgb2YgSlNPTkwKICAgICAgICAgICAgICAgICB0YWJsZXMgKyBtYW5pZmVzdDsgdGllci0gYW5kIFBHLXZlcnNpb24taW5kZXBlbmRlbnQpCiAgaW1wb3J0ICAgICAgICAgbG9hZCBhIGxvZ2ljYWwgZXhwb3J0IGludG8gYSBmcmVzaCwgZW1wdHkgYmFuawogIGVwaXNvZGUtc3RhcnQgIG9wZW4gYSBzZXNzaW9uIGVwaXNvZGUgKGxlZ2FjeSBob29rIGhlbHBlcikKICBlcGlzb2RlLWVuZCAgICBjbG9zZSBpdAogIHdhaXQtbWFpbCAgICAgIGJsb2NrIHVudGlsIHRoZSBkYWVtb24gcmluZ3MgdGhpcyBzZXNzaW9uIGZvciBhZ2VudCBtYWlsCiAgICAgICAgICAgICAgICAgKHBsYWluIG1haWwgbmV2ZXIgd2FrZXMpLCBwcmludCB0aGUgbWFpbCBhbmQgZXhpdCAoYXJtIGFzIGEKICAgICAgICAgICAgICAgICBiYWNrZ3JvdW5kIGNvbW1hbmQgdG8gd2FrZSBhbiBpZGxlIHNlc3Npb247IGV4aXQgMCByaW5nLAogICAgICAgICAgICAgICAgIDMgdGltZW91dCwgMiBzZXR1cDsgLS1oZWxwIGZvciBvcHRpb25zKQogIGxlYXNlICAgICAgICAgIGhvbGQgYSBuYW1lZCBsZWFzZSBhcm91bmQgYSBjb21tYW5kOiBgbGVhc2UgcnVuIE5BTUUgLS0KICAgICAgICAgICAgICAgICBDT01NQU5ELi4uYCB0YWtlcyBhbiBPUyBmaWxlIGxvY2sgdGhlIGFnZW50IGJvYXJkIG1pcnJvcnMKICAgICAgICAgICAgICAgICAoRklGTyBxdWV1ZSwgaG9sZGVyLCBleHBlY3RlZCBlbmQpOyBgbGVhc2UgaG9sZCBOQU1FCiAgICAgICAgICAgICAgICAgLS13aGlsZS1waWQgUElEYCBob2xkcyBvbmUgZm9yIGEgcHJvY2VzcyBhbHJlYWR5IHJ1bm5pbmc7CiAgICAgICAgICAgICAgICAgYGxlYXNlIGNoZWNrIE5BTUVgIGV4aXRzIDEgd2hpbGUgaXQgaXMgaGVsZCAoYSBsYXVuY2ggZ2F0ZSk7CiAgICAgICAgICAgICAgICAgYGxlYXNlIGxpc3RgIHNob3dzIHRoZW07IG9wZXJhdG9yIG9ubHk6IGBsZWFzZSBicmVhayBOQU1FYAogICAgICAgICAgICAgICAgIGZyZWVzIGEgc3R1Y2sgb25lLCBgbGVhc2UgZGVsZWdhdGUgUFJPSkVDVCBBR0VOVGAgbWFrZXMKICAgICAgICAgICAgICAgICBvbmUgc2Vzc2lvbiB0aGUgbWFpbnRhaW5lcidzIGRlbGVnYXRlIGZvciBhIHByb2plY3QKICBtYWludGFpbmVyICAgIG9uIHRoZSBkYWVtb24gaG9zdCwgdGhlIG1haW50YWluZXIncyBwYXNza2V5cyAob3BlcmF0b3IKICAgICAgICAgICAgICAgICBvbmx5OyByZWFkcyBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwsIGVsc2UgcnVucyBpbnNpZGUKICAgICAgICAgICAgICAgICB0aGUgcHNldWRvbGlmZS1tY3AtZGFlbW9uIGNvbnRhaW5lcik6CiAgICAgICAgICAgICAgICAgYG1haW50YWluZXIgc2V0dXBgIGRvZXMgaXQgYWxsLCBndWlkZWQgKHRoZSBDb25zb2xlJ3MKICAgICAgICAgICAgICAgICBIVFRQUyBuYW1lLCB0aGUgY29uZmlnLCB0aGUgZmlyc3QgcGFzc2tleSk7IGBlbnJvbC1jb2RlYAogICAgICAgICAgICAgICAgIGFkbWl0cyB0aGUgZmlyc3QgcGFzc2tleSBmcm9tIHRoZSBDb25zb2xlLAogICAgICAgICAgICAgICAgIGBjb25maXJtIFBSRUZJWGAgYWN0aXZhdGVzIGl0LCBgcmV2b2tlIFBSRUZJWGAsIGByZXNldAogICAgICAgICAgICAgICAgIC0teWVzYCByZXZva2VzIGFsbCBhbmQgcmVvcGVucyBlbnJvbG1lbnQsIGBsaXN0YAogIHZlcnNpb24gICAgICAgcHJpbnQgdGhlIHBhY2thZ2UgdmVyc2lvbiwgYW5kIHRoZSBzaGltIHJ1bnRpbWUgaXQgcnVucwogICAgICAgICAgICAgICAgZnJvbSB3aXRoIHRoYXQgcnVudGltZSdzIHNvdXJjZSBjb21taXQgKGFsc28gLS12ZXJzaW9uKQogIGhlbHAgICAgICAgICAgc2hvdyB0aGlzIG1lc3NhZ2UgKGFsc28gLWggLyAtLWhlbHApCgpjcmVkZW50aWFscyAodG9rZW4tZ2F0ZWQgZGFlbW9uKTogUFNFVURPTElGRV9NQ1BfVE9LRU49PGJlYXJlcj4sIG9yCiAgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRT08b3duZXItb25seSBmaWxlIGhvbGRpbmcgaXQ+IGZvciBob3N0cyB0aGF0CiAgc2FuaXRpemUgdGhlIGxhdW5jaCBlbnZpcm9ubWVudCAoQ2xhdWRlIERlc2t0b3ApOyB0aGUgZmlsZSB3aW5zIHdoZW4gYm90aAogIGFyZSBzZXQuIG9wcy9yZWdpc3Rlcl9jbGF1ZGVfZGVza3RvcC5weSBwcm9iZXMgdGhpcyB0ZXh0IGZvciB0aGUgZmlsZSBmb3JtLgoKZG9jczogaHR0cHM6Ly9naXRodWIuY29tL1BzZXVkb2dpYW50LXhyL1BzZXVkb2xpZmUtTUNQCg==",
+      "stderr_b64": ""
+    }
+  },
+  "limitations": [
+    "Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
+    "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
+    "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
+    "Timing includes owned-process setup, complete output collection and clean exit.",
+    "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
+    "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
+    "Final samples require the caller's quiet CPU window."
+  ]
+}

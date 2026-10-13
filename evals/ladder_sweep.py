@@ -372,9 +372,9 @@ def reset_bench() -> str:
             conn.execute(f'CREATE DATABASE "{bench_db}"')
 
     url = bench_url()
-    from pseudolife_memory.storage.schema import (
-        assert_disposable_database,
-        ensure_schema,
+    from pseudolife_memory.storage.schema import assert_disposable_database
+    from pseudolife_memory.storage.re_evidence_schema import (
+        ensure_python_schema as ensure_schema,
     )
     with psycopg.connect(url, connect_timeout=5) as conn:
         assert_disposable_database(conn)  # first: before the reap below

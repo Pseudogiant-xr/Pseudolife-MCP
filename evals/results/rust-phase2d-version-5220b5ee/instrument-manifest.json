@@ -1,0 +1,1615 @@
+{
+  "schema": 1,
+  "instrument_head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+  "instrument_tree": "11e7267bd7a884ace22f57ebf5afd6c77ee25f91",
+  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "interpretation": "The broad oracle-metadata fingerprint records instrument files, including tests not executed by these CLI cells; it does not claim every fingerprinted file was imported. The measurement wrapper selects committed candidate evals. Oracle global dirtiness from a copied eval overlay is separate from the clean production/original-test guard.",
+  "platforms": {
+    "windows": {
+      "measurement_instrument": {
+        "head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+        "entries": {
+          "evals/memory_policy_bench.py": {
+            "git_blob": "cc3104069bdead43efddcad6cfd5fdc02737e347",
+            "canonical_git_blob_sha256": "4c707330d8b4d92ed483f186856bdc956e78db48caa3504bea7ba65adbec6678",
+            "captured_file_sha256": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/memory_policy_daemon.py": {
+            "git_blob": "6569e7ddee359385bb8110ecfd50a91cf5c836fb",
+            "canonical_git_blob_sha256": "03ca0a009fdfa55230c7f8bfbbd65a243e485ba1c6a155cd34e3ea3d1f339229",
+            "captured_file_sha256": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/__init__.py": {
+            "git_blob": "a20a9dd465428eebf7ab649ef8daee25e74b55e8",
+            "canonical_git_blob_sha256": "c1722478e4cc576b1f5623673c4730bbbe128bdb1bd5f1ac172cdea7ac65e674",
+            "captured_file_sha256": "b3f31d72369899c9c4c6d84fefc750c5e644c98c1318427069c93e83bea124df",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/ci.py": {
+            "git_blob": "4ae0a01b18870ad032c5532240c9cf2b769ee630",
+            "canonical_git_blob_sha256": "e9ce796dff12d128903f9c0678facef60ff70d15f6fe7abe06dc53a5e2a4de03",
+            "captured_file_sha256": "b2307be414101636e33472388006877c97145e0ff827e7c7438935b202514d28",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/cli_measurement.py": {
+            "git_blob": "a762e623de9296ba75542e9df08b9f361b6e9444",
+            "canonical_git_blob_sha256": "869e3a7ad1e0c1f271b1cc38e8827404b0afff62d049d00db934aaff32d7f62b",
+            "captured_file_sha256": "2c6196b980ab829513e3a9a53836aa94fc235a9d6e79b7132965bf5c2bb5c52f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/common.py": {
+            "git_blob": "f255588f5088cd7d8b98b850db4b775f60b35569",
+            "canonical_git_blob_sha256": "0f5ef9bcaf74feaf221b329688bc8684f027b9b6f849839bd18e2a1dbf1d973e",
+            "captured_file_sha256": "4135b33aac0339e525731d632b41f9cfe95b9336974b3dd55de985f181877b82",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/daemon.py": {
+            "git_blob": "c64bc55070aaa6f642877c8a5e5ea312703288cb",
+            "canonical_git_blob_sha256": "6968c2315da3bcd9fbcd4780c82faf11aef9b993ec5b0961a596727c53071e4d",
+            "captured_file_sha256": "e659db38d50358106f0a3967430a2fe7ec559ffd9440036b928f3e91d74dca9c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/daemon_child.py": {
+            "git_blob": "794b41a0d37eb161858ae409bfc2b569b8836dda",
+            "canonical_git_blob_sha256": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+            "captured_file_sha256": "aca0a0435df2e31c4a2058c33de9bb1bbd279223fee461ba2c99321486bd1c98",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/scaling.py": {
+            "git_blob": "4c07d30cb28d3687889aab8baf0fb272382a04f2",
+            "canonical_git_blob_sha256": "4df2f32c0e17b07a9ef2477d9037571cc7fffa204e64bfe3f60e30b830390bd7",
+            "captured_file_sha256": "8e8987b6ada5653c98b0a9cc0ba238808aa3e374412531add975f45ef5b904b1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/scaling_child.py": {
+            "git_blob": "6146d647e36c2ba301cdda0bd6f174ac4ceb9e72",
+            "canonical_git_blob_sha256": "481c77113ef0b6f02d6c5681baa9acb85236d52ee552a296676f2dfc3ddb1517",
+            "captured_file_sha256": "fc33e5d9780db29524c05d802d07a504efb8c98ea40e9a0168695e34ee844c5a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/shim.py": {
+            "git_blob": "7708f8f36855b80ef9b21ffa313eafc640b5f1f5",
+            "canonical_git_blob_sha256": "bdd028df521705cfbfdab32dfbcc28962680351bc449c8a89f6036e281725407",
+            "captured_file_sha256": "619c29c94b68505d5e61a1b8d03e15481eebbe77e42b05d5f4d2c41e50fe6bfd",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/shim_measurement.py": {
+            "git_blob": "1b0f19a182cda2801377171a5adce4e8dc5db83e",
+            "canonical_git_blob_sha256": "bcf25f3ac45177605a1d7d519b670f28f3f65dd02aedc9ad1a6b9ad1168c824e",
+            "captured_file_sha256": "7f67ede3125067a9f00462c6ba0eb49290b43006cb54122d4e3bc38300020af7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_baseline.py": {
+            "git_blob": "1c12b4e639453d0a971a4490c2c7bae10a142e07",
+            "canonical_git_blob_sha256": "865c10f02599a28123c9fbc88ed60cf20a9b3fe5597889e9f373b40af16871fa",
+            "captured_file_sha256": "075fa2765e95fc9ed65a5cc44ca5a2a20e4142699775d9351783ed5e3154ae0b",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_cli_measurement.py": {
+            "git_blob": "277aa10ecd632fe67c7caa99dd9af61bb1dea7c5",
+            "canonical_git_blob_sha256": "619303de576a03cc81b69e6ae62a7d9ae6a2bf8c0c499d95aa6eaa37c5d82964",
+            "captured_file_sha256": "d8d7d407d642f843b2e57c0c9d987c52a7f24611f951193384d1b21adb9662ae",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_cli_measurement_warm.py": {
+            "git_blob": "a02c217a63d31e0b756bab67d2f3e384ae16230c",
+            "canonical_git_blob_sha256": "d73947b5244996977525de4a68ed49fde9669540032d49b273b1f8d0ecbb1c0e",
+            "captured_file_sha256": "d73947b5244996977525de4a68ed49fde9669540032d49b273b1f8d0ecbb1c0e",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_baseline/test_review_fixes.py": {
+            "git_blob": "4b7305370e3fd16b9172c1e7895c1fa5519c05ab",
+            "canonical_git_blob_sha256": "2990a91b17906e241f2366e5604fcf175be43567acdcd2bcc3a72c3281445cb5",
+            "captured_file_sha256": "8e351f2501b39fd99199a060b21beb010e829316652b1b538e98f73a15025cd8",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_scaling.py": {
+            "git_blob": "41fe64133616459b3d47d6d177a7c3e77ed48ea5",
+            "canonical_git_blob_sha256": "36124408bc76d8d101031c633d5264166ca84241c43926db8e02d12f6f17fdd2",
+            "captured_file_sha256": "985fe830767576edc25185b71db9ef547557c440d4625f74eb41d44507f573ae",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_shim_measurement.py": {
+            "git_blob": "e3856a4fe6d59e51cd123ed5c216bffed1afaf8a",
+            "canonical_git_blob_sha256": "22ec172af201c6123eac68cacb237795ece860d4fd07eec286d6fb2bbabbf76b",
+            "captured_file_sha256": "8246ae2b4be761b5c5a2affa1bf89e60867435f3e10ed4670f23b2195703ce6c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/transport.py": {
+            "git_blob": "346ee47cd712dc450763846d4267707e6657b1de",
+            "canonical_git_blob_sha256": "345a47a45ce510ee0a9e75b6282e2f46773ae8b32a979108c3483a1de8fec826",
+            "captured_file_sha256": "c69e07cfed0440fe0ead0a3be7faa7400e7ffe1f376a7ee446f85eb38779380f",
+            "captured_newlines": "CRLF checkout"
+          }
+        }
+      },
+      "oracle_metadata_instrument_fingerprint": {
+        "head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+        "entries": {
+          "evals/memory_policy_bench.py": {
+            "git_blob": "cc3104069bdead43efddcad6cfd5fdc02737e347",
+            "canonical_git_blob_sha256": "4c707330d8b4d92ed483f186856bdc956e78db48caa3504bea7ba65adbec6678",
+            "captured_file_sha256": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/memory_policy_daemon.py": {
+            "git_blob": "6569e7ddee359385bb8110ecfd50a91cf5c836fb",
+            "canonical_git_blob_sha256": "03ca0a009fdfa55230c7f8bfbbd65a243e485ba1c6a155cd34e3ea3d1f339229",
+            "captured_file_sha256": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/__init__.py": {
+            "git_blob": "e04893b07bc55c2ae396616af4984a0cc51bbb82",
+            "canonical_git_blob_sha256": "b81bf969b568b1b1770afc917f5aa62c8f947eaa982b3a07e38be60c241de694",
+            "captured_file_sha256": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/acceptance.py": {
+            "git_blob": "649e075e726819cdc182acae23b12a803ca45dde",
+            "canonical_git_blob_sha256": "319dcb402754ae0ce7c65e98cb84fc02eeb7e976c5ca92bb3f3d33da3a4bc957",
+            "captured_file_sha256": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/broken_stdio.py": {
+            "git_blob": "81f26392c88b533e8f685db9d0377ae53f7b1a7d",
+            "canonical_git_blob_sha256": "f49fdafdb882e239230f56c3efb1b021ee62a6a6091ae47a21f895a2df61b9df",
+            "captured_file_sha256": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/candidate.py": {
+            "git_blob": "5f8f39109929fa9864b34c64a53d000cd8ba158b",
+            "canonical_git_blob_sha256": "b863c1bbca733dd27424d7c94874871e63850cd4bc102ef846426837a9e5828c",
+            "captured_file_sha256": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_argv.py": {
+            "git_blob": "16ad534223e56b0c1ce62d2e16b501d723d52f24",
+            "canonical_git_blob_sha256": "3430e802459663ecf5c4b2a6994a895fa24214cad9a2a31f19bc5e40c8adac40",
+            "captured_file_sha256": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_argv_corpus.json": {
+            "git_blob": "3924fc053b7e623303e301548cd395d36cba6f26",
+            "canonical_git_blob_sha256": "be7e2c3b6c52a3d93df313b0db08609b762055e31fe3968b74522f7315641919",
+            "captured_file_sha256": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_corpus.py": {
+            "git_blob": "8a3782e6c388d9b5410f59640313ae4a009251bb",
+            "canonical_git_blob_sha256": "5454398fa9accecd0782d473ec959ff1df46e0319e5f9b9828e66aec1283664f",
+            "captured_file_sha256": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_dispatch.py": {
+            "git_blob": "8710b81844bc42cdd4b1c145719fa0eb65eddd52",
+            "canonical_git_blob_sha256": "ec186905cfccb037992545c4d983827546c7ac83fd053034641111681940d53b",
+            "captured_file_sha256": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_process.py": {
+            "git_blob": "81070a4ad400791f85465a47789527d2048ab385",
+            "canonical_git_blob_sha256": "e29e7ada78bfc8254885184c542b520b1652919a60b1f77655524935862261f0",
+            "captured_file_sha256": "5982810a7870207f516c20c748a52cc65ddbc0ca1a21e9d265abaadf5c869c0c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_public.py": {
+            "git_blob": "afa29f49ceeea317a628d876afda402a82f7939f",
+            "canonical_git_blob_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+            "captured_file_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/cli_version.py": {
+            "git_blob": "962cc35e69211aabcd4700d5a4fc0cfbe03546a0",
+            "canonical_git_blob_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+            "captured_file_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/collection_guard.py": {
+            "git_blob": "36a37f7e705d0a2363a4bfaf2073026f8dcdde7b",
+            "canonical_git_blob_sha256": "93e5188d6914d29f5fbd60947b52d6f868dd41498c88d12a71111711acd8f24b",
+            "captured_file_sha256": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/controls.py": {
+            "git_blob": "d97897286865e0331568eb0538b660c54562dda0",
+            "canonical_git_blob_sha256": "fea40b5dc13517a83e681ffd38e786a9850162c0962668fef9daacd8be6e2e2a",
+            "captured_file_sha256": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/fixtures.py": {
+            "git_blob": "4d71cbbc7ab85f36a57fb1b579d2f52c4f5649e8",
+            "canonical_git_blob_sha256": "e5aa794cfe4abd49b50bcdb94c9769fd1990756d28bda4065fb563e5871fd8e8",
+            "captured_file_sha256": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/full_bank.py": {
+            "git_blob": "699d23963f7a94f268eca21815effbd69af96ee8",
+            "canonical_git_blob_sha256": "ba57fe5dd9adff378e97f7c2a93f7d8236c16d4565e2e41d61f386e5474b930b",
+            "captured_file_sha256": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/full_seed.json": {
+            "git_blob": "4068a1253749248f2af24b093bb774072a47891e",
+            "canonical_git_blob_sha256": "55ea8c2bfa6b242572f2a5de4d355ba95d370ba9ca4c228eb3e13e0de7e4a80a",
+            "captured_file_sha256": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/harness.py": {
+            "git_blob": "2c10cbeeb4ac1e20c37fca2eb9b7d33248859e82",
+            "canonical_git_blob_sha256": "9f31f158c4b14cb9f5fef95f29065b4be7c0be25342d656c4798ce2944e522a6",
+            "captured_file_sha256": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/onnx_cpu_compare.py": {
+            "git_blob": "e351def450ed3a6bb8973cbd718d5611c4664cee",
+            "canonical_git_blob_sha256": "ef38fdccc1e9baf0eee3735ef41a9c709c9372e950da9c7977d89ccaccaf91a9",
+            "captured_file_sha256": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/oracle.py": {
+            "git_blob": "8cd542c65f959ba0a7408dec9238661ad7d781eb",
+            "canonical_git_blob_sha256": "1090bfde35b5ebb930cf4c5ed5b113a2ffc380c8d9b5212b59d09f753c72fbf5",
+            "captured_file_sha256": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/oracle_tests.json": {
+            "git_blob": "f913150368bd224df3b044e65c4b568f025c7773",
+            "canonical_git_blob_sha256": "5db2ecfb248f351317986092650371866c83c2c072163e818a5d9d0f6bf8641d",
+            "captured_file_sha256": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1.py": {
+            "git_blob": "147fb2fc2504db432e6e0a874060d94866baf934",
+            "canonical_git_blob_sha256": "54d843a8077c044ee5edf89dc044d7aff71bd4a9185d2c729c0df74b90d07c1f",
+            "captured_file_sha256": "05a136be672dc06d7d080a9ea40edde86614ca27706662b3f5eebca5197f0d09",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_ci.py": {
+            "git_blob": "3af6ea9a5b48c01a01ea577c249a961a35fac66d",
+            "canonical_git_blob_sha256": "9661cc1370ade4fb6e2a496ce41b49f8e2e4e1917f7a49e4ace8e04c5f067b0a",
+            "captured_file_sha256": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_inventory.py": {
+            "git_blob": "432787f55e643d202b3f673aed8e67974d2d4139",
+            "canonical_git_blob_sha256": "5b0d787bf4944e0019689309ab88e7755327c6de66f3be7c13a26dd03d209c22",
+            "captured_file_sha256": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_oracle.py": {
+            "git_blob": "a0fd172e54e8d52d90079b4881ef44dcba8d5320",
+            "canonical_git_blob_sha256": "09c4a745802bfe6c534670097f742d1ed9e008da76051d0b73d0affc83193209",
+            "captured_file_sha256": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_receipts.py": {
+            "git_blob": "7a7a978456681b9fe40238593d1f310a41b2043c",
+            "canonical_git_blob_sha256": "9cd9ac7caad798c569e00b3de965f5e07e8283f8fc3a312a34220e7b725f81dd",
+            "captured_file_sha256": "2c19bc7b74aa6041f953629d459dd6bae98a287688f7a81a0bf77765484ff06c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/processes.py": {
+            "git_blob": "5484bc1404fc7c3606172b6522bf1597e2859d4f",
+            "canonical_git_blob_sha256": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+            "captured_file_sha256": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/provenance.py": {
+            "git_blob": "041896a7d25a38d139375d7e245bdcefb46fabb2",
+            "canonical_git_blob_sha256": "7328191c87a18dc8409f2cd072751374a662a5c34e086d133d5307d8b87b463c",
+            "captured_file_sha256": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/pytest_plugin.py": {
+            "git_blob": "2a380308ca9b4c8f48144da00857a400c8009313",
+            "canonical_git_blob_sha256": "3bf723757ed89fec3b56ea367cd93f478d3f26a1d55af9c8c64bfd7ae98b93da",
+            "captured_file_sha256": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/registration_policy.py": {
+            "git_blob": "05b35313e64d356857b855be9e8841648c289ad8",
+            "canonical_git_blob_sha256": "39b1a488da3d8b877e958358b47b1d511ed4889c2a5f46dd837b6be35246f240",
+            "captured_file_sha256": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/seed.json": {
+            "git_blob": "19ca8f4404376c4dbd01146c4b051b0d9ff5cbb6",
+            "canonical_git_blob_sha256": "bf1dfd16af73b2076dfebd224a6dd96c74b2fc2d35b617ba240bd65f8c8001c1",
+            "captured_file_sha256": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/selfcheck.py": {
+            "git_blob": "7c7bafbc1f2ee150a62b408dc87c549097310b1d",
+            "canonical_git_blob_sha256": "863627763c5816863d60d0903310a5d5080241473da4e3b338ef451bee879d66",
+            "captured_file_sha256": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio.py": {
+            "git_blob": "aa69e3b296c4af5f21426654c22b1684535925e5",
+            "canonical_git_blob_sha256": "fc751fdc8cf89090519c6325b701dec0207f0c2c7b8b4a08819f048994397cac",
+            "captured_file_sha256": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_capture.py": {
+            "git_blob": "be68131c84c3d577a00abd61d9fc2b93a2ba03b1",
+            "canonical_git_blob_sha256": "aa034c80aca07f2d81a02506a3e878081523f38ac9568ca70c8c6949d28caf4a",
+            "captured_file_sha256": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_concurrent_orders.json": {
+            "git_blob": "33d6cbd57030572ee0fa6868debd5646731a5be3",
+            "canonical_git_blob_sha256": "6be3b453c6f3d1a0976c21ac3f230072e1f448a35850165af0f7ac8e791ada53",
+            "captured_file_sha256": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_corpus.py": {
+            "git_blob": "ebe8c6bf0fd8ed38bd88076290415f79d4e6c413",
+            "canonical_git_blob_sha256": "62c2d64da5baa634fa5944939e59db422a8e510aeb5768b229159cce41da390f",
+            "captured_file_sha256": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_daemon.py": {
+            "git_blob": "c72c98e7bc86a106c30320c3f4b6576575b42563",
+            "canonical_git_blob_sha256": "7e9946034ebe844f8ca7d79ceead077970ae719acd12547c871c6eaae5875ea9",
+            "captured_file_sha256": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_eof.py": {
+            "git_blob": "63384351106b266a3f4cfecf7325c4a8e92835c9",
+            "canonical_git_blob_sha256": "26bbfb3fa5138ab6e0f832c58a18cb7e4b51ad8d5cd712eb5fd58611c856006d",
+            "captured_file_sha256": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_eof_orders.json": {
+            "git_blob": "9740b51caf9bfeefae1657100ef30762ebb16b9f",
+            "canonical_git_blob_sha256": "ea03917b4a533e0306adae84deecf5cdf1bcdb692b7425a862d6325330dbc9e9",
+            "captured_file_sha256": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_faults.py": {
+            "git_blob": "d535136d4659691c291e7709fa1ae6401fc07522",
+            "canonical_git_blob_sha256": "db05ecb243036c39a8724d3e45b5651cc1579c8b8f6da05f24e834543781c4d4",
+            "captured_file_sha256": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_fixture.py": {
+            "git_blob": "3befe8a45248783578ea3b8f90c02baf0cb93af3",
+            "canonical_git_blob_sha256": "e2e55debd1dbffd0a82d03b3b4884bac2ff2737a0088ad4053d284b43d0ac466",
+            "captured_file_sha256": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_judge.py": {
+            "git_blob": "78c58aa9cf464df6e479d4ada056de50198204d4",
+            "canonical_git_blob_sha256": "dab7380b2ac63785607b69f5538dc4f69d8b16971aca65aa76148bab9b102964",
+            "captured_file_sha256": "8a4819997315122ae85b07abc656c5dd8f891ed68e5515e22bfd4e2f418707b7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_minimal_daemon.py": {
+            "git_blob": "bd051b0fcbc1ab5287c65d35ab285b64175101ba",
+            "canonical_git_blob_sha256": "4b8fe5e24bec5a87623a08ddfd4693d5e00296bed41f0ad7bb64f8e18e214439",
+            "captured_file_sha256": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_process_controls.py": {
+            "git_blob": "8eccc755ebc532e148da8ea3bc8a710256adf18f",
+            "canonical_git_blob_sha256": "407eaa5dee2262bddc6e0d3fd83911ae3088ac3cfe7e7d221a52c4afc15d6773",
+            "captured_file_sha256": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_scenario_fixture.py": {
+            "git_blob": "44519681fdca9d50c157e97217f98383452fa5bc",
+            "canonical_git_blob_sha256": "5127ce6f313f9caa86e1ed73c1c82be86ad9c1c2cf601b618efd464f1245df30",
+            "captured_file_sha256": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_scenarios.py": {
+            "git_blob": "0ce8240aaa67b3631fc0c5cbef46b811fbbd462c",
+            "canonical_git_blob_sha256": "47be87c78ec61742280d1afeb80eadaa3077293028c2634ea72498232aec68fc",
+            "captured_file_sha256": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_startup_contract.f709.json": {
+            "git_blob": "36168a19025347626eaefb689a1d12f2c1c51b39",
+            "canonical_git_blob_sha256": "bee1db0cad4cc2e10b3e5069e0165d9f418b9151314d079d6cde28e41ebf0cdd",
+            "captured_file_sha256": "bee1db0cad4cc2e10b3e5069e0165d9f418b9151314d079d6cde28e41ebf0cdd",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/stdio_startup_contract.json": {
+            "git_blob": "3e281e191d7b886dbe17aaab0463ad113ac59c09",
+            "canonical_git_blob_sha256": "34afc7b0446c508bb987af01d2271a61c8f0324b810df092c0799abbf3eed313",
+            "captured_file_sha256": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_boundary_regressions.py": {
+            "git_blob": "47021bb2da866117196a3ace1f83b6eace6c6213",
+            "canonical_git_blob_sha256": "e6da13eb3765189605075434ee83abb6d40d7875105c84337a29605d2ff99c4a",
+            "captured_file_sha256": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_candidate.py": {
+            "git_blob": "400de3f004c79363337aa9c44caabd998fd99536",
+            "canonical_git_blob_sha256": "bf9cf7308367c53a3bbbcfd8f8723857b2ba50ab874ec7d281633e13fe593d13",
+            "captured_file_sha256": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_capture_provenance.py": {
+            "git_blob": "28f3a8e697e75bc3893ab690ed67c6036c7354b3",
+            "canonical_git_blob_sha256": "39d64e08ec8a828903a4f1726de78026fb1d0f4046ce391be0995e51a7384b6c",
+            "captured_file_sha256": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_argv.py": {
+            "git_blob": "9aaef84e7b42700b9fd3f44e60df566e4050b017",
+            "canonical_git_blob_sha256": "d78f906ef3119dc164887126c76d5e4ca4470e482a54234fcd8da133a8afcb45",
+            "captured_file_sha256": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_dispatch_lane.py": {
+            "git_blob": "3a6dacf19b4c276f475c0694d21ae5c6d00f19ef",
+            "canonical_git_blob_sha256": "bb20c5401946f4161decea3ed99d3d1ce18b3e01e8130c08bd5cf3a33792b23f",
+            "captured_file_sha256": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_environment.py": {
+            "git_blob": "b8c0b6b56f28251f6d3cc25b57542c6a6f142908",
+            "canonical_git_blob_sha256": "4e4241059113f96a6414f674c103d9fad7fb23f8e1dcc67923cd6fea3f01b517",
+            "captured_file_sha256": "17c1144ff270007ec8c119d7ffe01406016ca3f660e99bd3e1243d156ee7650f",
+            "captured_newlines": "mixed LF/CRLF: one CRLF at line85"
+          },
+          "evals/rust_port/test_cli_invocation.py": {
+            "git_blob": "7cd6cb1d37a2f02a0545cfba7f10f33c7efbd526",
+            "canonical_git_blob_sha256": "b5a957a852262bae698c27a51ad35d352736bd3be714b68662b10cf4311fa857",
+            "captured_file_sha256": "b5a957a852262bae698c27a51ad35d352736bd3be714b68662b10cf4311fa857",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_parent_helpers.py": {
+            "git_blob": "5c6661acca2c0ed7ce9e62d554730516dfdab8b8",
+            "canonical_git_blob_sha256": "502b7c7d585b4f9c5b717d41236f155abe2970e98c575ef4ecfe0e1f444af9e5",
+            "captured_file_sha256": "502b7c7d585b4f9c5b717d41236f155abe2970e98c575ef4ecfe0e1f444af9e5",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_process.py": {
+            "git_blob": "80a2ca06fde3854fc5aceff180e65d3def6c307f",
+            "canonical_git_blob_sha256": "8af4fd84fd7595970e327ff5fcc7fd3de652326b9f412620039250f6890ff609",
+            "captured_file_sha256": "3aa328f1c860ce1386aadf13f3ae382f3e9eae21bd1eb5744d087e4e2f09c6e1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_public_summary.py": {
+            "git_blob": "f74a7db92c010d8fcc33cd1d4b93d89124b88714",
+            "canonical_git_blob_sha256": "14ba484c6a14dd5e952db5cb6195dc593793d3ec519d745329769d40a828a7c7",
+            "captured_file_sha256": "14ba484c6a14dd5e952db5cb6195dc593793d3ec519d745329769d40a828a7c7",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_receipt_provenance.py": {
+            "git_blob": "5c57bbab325d360d8a9aa93e54740307ffcbcc87",
+            "canonical_git_blob_sha256": "e147c13a1ac51478eeb1acfda785e9b91d3e87907de8b6590fd6af756d32721b",
+            "captured_file_sha256": "e147c13a1ac51478eeb1acfda785e9b91d3e87907de8b6590fd6af756d32721b",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_relocated_admission.py": {
+            "git_blob": "329870fc46aaa4e5dec485a46df9c6829cf2b8da",
+            "canonical_git_blob_sha256": "0edbec938ec8375a1c43ebbaf6018f77ce80c602cc8f811952e300d7b7c72df9",
+            "captured_file_sha256": "0edbec938ec8375a1c43ebbaf6018f77ce80c602cc8f811952e300d7b7c72df9",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_version.py": {
+            "git_blob": "36024e6e75b38673048c7b8b5678dc851e07ba8b",
+            "canonical_git_blob_sha256": "5daeb0bea930f12ad459e884f83cbfea7950a63cde177a66820867bf5f081a12",
+            "captured_file_sha256": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_version_missing_console.py": {
+            "git_blob": "000ae214b84c5c9f6db8210e50d62305a39cfb19",
+            "canonical_git_blob_sha256": "67f855edf00035178e011fe1440dd2805f700901da6c0fae531d909659b5e93b",
+            "captured_file_sha256": "67f855edf00035178e011fe1440dd2805f700901da6c0fae531d909659b5e93b",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_collection_guard.py": {
+            "git_blob": "a87b564ba26b128671acf13d267c5ab35f70e1bf",
+            "canonical_git_blob_sha256": "b5f441014785ea8fa1df4a165a55d25025fbff80288f2c4ad7c29fd0d9486cf8",
+            "captured_file_sha256": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_full_bank.py": {
+            "git_blob": "b65259a5e10048d250f01bd07cef23116b5fc6e1",
+            "canonical_git_blob_sha256": "bb8cec4731e92f18eb17d61f1e01019c79b3273c899a064b09dfce0f6d04724e",
+            "captured_file_sha256": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_harness.py": {
+            "git_blob": "7e56d385985428e0c65f9c73341d7f83bc8f0a97",
+            "canonical_git_blob_sha256": "07f845ade5c19189e7311b9f2f588401c5409cc5861ed4c2ffac82658a055bc3",
+            "captured_file_sha256": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_instrument_routing.py": {
+            "git_blob": "5594f58bb48bd499ecea3905f20be1a91f329b96",
+            "canonical_git_blob_sha256": "537722fae96e2f26e341cbfa09a86fa86d894cd6a3a8ffea1363f1f4f8cbff25",
+            "captured_file_sha256": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_oracle_boundary.py": {
+            "git_blob": "179036428a48bcab0b0d5aefb406cc108ba16a16",
+            "canonical_git_blob_sha256": "0b5ebc5c8f788b4cb1f21a9c13c59a8298bfa9446ef3d707d929236f308269cc",
+            "captured_file_sha256": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase0b.py": {
+            "git_blob": "79824f2bd106833499a45d1f15688c12038ffcd4",
+            "canonical_git_blob_sha256": "465f59aec63f26210c2866457140cef64bc8193d847e0e00bb9b5eff99625f83",
+            "captured_file_sha256": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_completeness.py": {
+            "git_blob": "4e1d8e426b7c9faf9824b030e45191778629a1c0",
+            "canonical_git_blob_sha256": "4df65203d983a7345d6f5a8023fa297339281c8b528778e16e1016719a30919e",
+            "captured_file_sha256": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_full_suite.py": {
+            "git_blob": "303e0f585092c74a242291128c8baa32c98c0351",
+            "canonical_git_blob_sha256": "648e0a641a5fc79722fb6f3098b40a3df6f9aff692ea368dbe872e79990005b1",
+            "captured_file_sha256": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_inventory.py": {
+            "git_blob": "a56908a53ad55435bfb184c710a193b10af3ad6d",
+            "canonical_git_blob_sha256": "abfc2067a173d893aa914e20a00c31a093987758ace1da4cbc3ac8052be1a4ca",
+            "captured_file_sha256": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_inventory_regeneration.py": {
+            "git_blob": "bf3fd72d09063174535733693e998d9a601c4fc4",
+            "canonical_git_blob_sha256": "41eaf1be570c1e4a9d5a04a5f8baa2d93d866cc155bc0772c8e5389814968211",
+            "captured_file_sha256": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_oracle.py": {
+            "git_blob": "19f53e7d343f307487506b2a9a44161d34679da0",
+            "canonical_git_blob_sha256": "4720814239a3d617bcd9451e42d6fc806b891e928960b52f5cc576944a230f13",
+            "captured_file_sha256": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_receipts.py": {
+            "git_blob": "70d0a20ee89f709dcd1a61885e42fb3e671a210b",
+            "canonical_git_blob_sha256": "e0fe4d3572cc261a3c9370bac3004487401e185ccc96b90002513c70561238fa",
+            "captured_file_sha256": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_routing.py": {
+            "git_blob": "b715967669986e7e1167a4913131c473402d65cd",
+            "canonical_git_blob_sha256": "53276a443c42b94061ca4a638033feb6cdbd6d34a9c6140861e900679deaaefc",
+            "captured_file_sha256": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase2c_version_identity.py": {
+            "git_blob": "41d10bb68d09b4084642608ca5943156e496c9d1",
+            "canonical_git_blob_sha256": "a5ae3fef56d9bae69b71d353638ce3487be6c62a8b2efcdcbd57472379d0d054",
+            "captured_file_sha256": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_processes.py": {
+            "git_blob": "7981ab8ce8be098ea959d710f6d7b42fa95f872e",
+            "canonical_git_blob_sha256": "218a6c1853d9892f2409c3ffd4f1aa3998b2cbd6cecd7f48de0daf23651de669",
+            "captured_file_sha256": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_provenance.py": {
+            "git_blob": "5f430951e0833b3e71d5acae293a9b295e2e9da0",
+            "canonical_git_blob_sha256": "079faf8d8a3766478b38c59248ed04a90df6b5b14f735d546fa4ff3816c74624",
+            "captured_file_sha256": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_python_selection.py": {
+            "git_blob": "0c15b76a16cadf37a8085f2c7afae985a20d40be",
+            "canonical_git_blob_sha256": "c12bcbf883785ee074be8a3e53605e329deb88f9bd08ba6bc1ac58a8897382d2",
+            "captured_file_sha256": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_registration_policy.py": {
+            "git_blob": "76f0032b6767a2eae9e52472f14684108d2e4b06",
+            "canonical_git_blob_sha256": "93bb486900652c6c22f259fa258760d695b6165df3497236895091ffe58a4cbf",
+            "captured_file_sha256": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_runtime_provenance.py": {
+            "git_blob": "65cc9b8635e1fa8e699da2cbe5371ee1ee6e538b",
+            "canonical_git_blob_sha256": "da89105d5de21713ad0222f161fb59343b4a1a83567f9e94ff72c42cf1e895c4",
+            "captured_file_sha256": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stderr_retention.py": {
+            "git_blob": "972071e671a876644205b8f8eb6db14682d6c91e",
+            "canonical_git_blob_sha256": "9e523e0ebe887c83d265ed7c1d425bf5bf53b2a028afd187bd8d893bdcbebf95",
+            "captured_file_sha256": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stdio_boundary_retention.py": {
+            "git_blob": "864c11d7f7468cc99c7192d1bd2606437b10f123",
+            "canonical_git_blob_sha256": "7ff5dabcb2d1ded7d406b47add5080ca72be32949217eac9ea6a269108395d02",
+            "captured_file_sha256": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stdio_judge.py": {
+            "git_blob": "18b5ed15364f56077f6751f491acdf2027d9f62d",
+            "canonical_git_blob_sha256": "9e69b9025b937531495e546a39a5d99ef25b993b48903a72fd66ed79b9d35175",
+            "captured_file_sha256": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stdio_process_controls.py": {
+            "git_blob": "a184b9b77f9c8c11a636530774557788e2ae8ea4",
+            "canonical_git_blob_sha256": "2e0d7ffe91bfca528e907ec56071bdcaccabd1556826c29de5fe0222551477be",
+            "captured_file_sha256": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stdio_scenarios.py": {
+            "git_blob": "f5d89379a64b5f1873181270a3a28f3ecd158240",
+            "canonical_git_blob_sha256": "4a78be8a73f7deb1bc72ac29f86b91cc49463e1d3a613bba72d28fad64296f00",
+            "captured_file_sha256": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_wire.py": {
+            "git_blob": "fb77475b53a3a3ff0ab36c36ef442cda23d9b662",
+            "canonical_git_blob_sha256": "e173801afd859e63a63ed68eb319de7f58121d4bd7be0966ebde373c460f0318",
+            "captured_file_sha256": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/unicode14_reason.py": {
+            "git_blob": "a55293a64a8e1743f37dac25379397011907c786",
+            "canonical_git_blob_sha256": "89a4eaf24f908674f10ec8c09daea172cb3fd11ec5667f3fc80dc9dfaa3ac553",
+            "captured_file_sha256": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/url_reference.py": {
+            "git_blob": "fa97734d6b0b00c739367c3c1f9086dc5f402e87",
+            "canonical_git_blob_sha256": "07231218b05e1282f54a5aadb01954fd70b8d2c6af1ad7e121ccad54c374e453",
+            "captured_file_sha256": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/wire.py": {
+            "git_blob": "3bfe9a6656327d923cac752b901933b2ab87b5f1",
+            "canonical_git_blob_sha256": "e913d7ebe09966c0378a8173efca3cbb0ef779febf70435d7693a3ddad5525fa",
+            "captured_file_sha256": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f",
+            "captured_newlines": "CRLF checkout"
+          }
+        }
+      },
+      "cli_instrument": {
+        "head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+        "entries": {
+          "evals/rust_port/cli_process.py": {
+            "git_blob": "81070a4ad400791f85465a47789527d2048ab385",
+            "canonical_git_blob_sha256": "e29e7ada78bfc8254885184c542b520b1652919a60b1f77655524935862261f0",
+            "captured_file_sha256": "5982810a7870207f516c20c748a52cc65ddbc0ca1a21e9d265abaadf5c869c0c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_corpus.py": {
+            "git_blob": "8a3782e6c388d9b5410f59640313ae4a009251bb",
+            "canonical_git_blob_sha256": "5454398fa9accecd0782d473ec959ff1df46e0319e5f9b9828e66aec1283664f",
+            "captured_file_sha256": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_public.py": {
+            "git_blob": "afa29f49ceeea317a628d876afda402a82f7939f",
+            "canonical_git_blob_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+            "captured_file_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/cli_version.py": {
+            "git_blob": "962cc35e69211aabcd4700d5a4fc0cfbe03546a0",
+            "canonical_git_blob_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+            "captured_file_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/harness.py": {
+            "git_blob": "2c10cbeeb4ac1e20c37fca2eb9b7d33248859e82",
+            "canonical_git_blob_sha256": "9f31f158c4b14cb9f5fef95f29065b4be7c0be25342d656c4798ce2944e522a6",
+            "captured_file_sha256": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_receipts.py": {
+            "git_blob": "7a7a978456681b9fe40238593d1f310a41b2043c",
+            "canonical_git_blob_sha256": "9cd9ac7caad798c569e00b3de965f5e07e8283f8fc3a312a34220e7b725f81dd",
+            "captured_file_sha256": "2c19bc7b74aa6041f953629d459dd6bae98a287688f7a81a0bf77765484ff06c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/provenance.py": {
+            "git_blob": "041896a7d25a38d139375d7e245bdcefb46fabb2",
+            "canonical_git_blob_sha256": "7328191c87a18dc8409f2cd072751374a662a5c34e086d133d5307d8b87b463c",
+            "captured_file_sha256": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_capture.py": {
+            "git_blob": "be68131c84c3d577a00abd61d9fc2b93a2ba03b1",
+            "canonical_git_blob_sha256": "aa034c80aca07f2d81a02506a3e878081523f38ac9568ca70c8c6949d28caf4a",
+            "captured_file_sha256": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/processes.py": {
+            "git_blob": "5484bc1404fc7c3606172b6522bf1597e2859d4f",
+            "canonical_git_blob_sha256": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+            "captured_file_sha256": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/common.py": {
+            "git_blob": "f255588f5088cd7d8b98b850db4b775f60b35569",
+            "canonical_git_blob_sha256": "0f5ef9bcaf74feaf221b329688bc8684f027b9b6f849839bd18e2a1dbf1d973e",
+            "captured_file_sha256": "4135b33aac0339e525731d632b41f9cfe95b9336974b3dd55de985f181877b82",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/memory_policy_bench.py": {
+            "git_blob": "cc3104069bdead43efddcad6cfd5fdc02737e347",
+            "canonical_git_blob_sha256": "4c707330d8b4d92ed483f186856bdc956e78db48caa3504bea7ba65adbec6678",
+            "captured_file_sha256": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/memory_policy_daemon.py": {
+            "git_blob": "6569e7ddee359385bb8110ecfd50a91cf5c836fb",
+            "canonical_git_blob_sha256": "03ca0a009fdfa55230c7f8bfbbd65a243e485ba1c6a155cd34e3ea3d1f339229",
+            "captured_file_sha256": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/daemon_child.py": {
+            "git_blob": "794b41a0d37eb161858ae409bfc2b569b8836dda",
+            "canonical_git_blob_sha256": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+            "captured_file_sha256": "aca0a0435df2e31c4a2058c33de9bb1bbd279223fee461ba2c99321486bd1c98",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_daemon.py": {
+            "git_blob": "c72c98e7bc86a106c30320c3f4b6576575b42563",
+            "canonical_git_blob_sha256": "7e9946034ebe844f8ca7d79ceead077970ae719acd12547c871c6eaae5875ea9",
+            "captured_file_sha256": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/cli_measurement.py": {
+            "git_blob": "a762e623de9296ba75542e9df08b9f361b6e9444",
+            "canonical_git_blob_sha256": "869e3a7ad1e0c1f271b1cc38e8827404b0afff62d049d00db934aaff32d7f62b",
+            "captured_file_sha256": "2c6196b980ab829513e3a9a53836aa94fc235a9d6e79b7132965bf5c2bb5c52f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/shim_measurement.py": {
+            "git_blob": "1b0f19a182cda2801377171a5adce4e8dc5db83e",
+            "canonical_git_blob_sha256": "bcf25f3ac45177605a1d7d519b670f28f3f65dd02aedc9ad1a6b9ad1168c824e",
+            "captured_file_sha256": "7f67ede3125067a9f00462c6ba0eb49290b43006cb54122d4e3bc38300020af7",
+            "captured_newlines": "CRLF checkout"
+          }
+        }
+      },
+      "production_guard": {
+        "head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+        "entries": {
+          "pseudolife_memory/codex_doorbell.py": {
+            "git_blob": "bbd74cfa79a0a683865428891a4b7f60084ecc6f",
+            "canonical_git_blob_sha256": "8831cd54df769e93db79e8c8cfc40c537bdeadb33760f219bc7dcbf345724436",
+            "captured_file_sha256": "e3021d84eadf9c227866f7444069c8ed9bd9f91ce4ad74de3210ebe3cb50303c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "pseudolife_memory/storage/schema.py": {
+            "git_blob": "67485994544895878e5c88e3a2702ed4eb6a6db8",
+            "canonical_git_blob_sha256": "45290101c176157f64af8eba5b2ca406300478068d41f17e08a3b55f9c05dc78",
+            "captured_file_sha256": "86b14ae4a712c5095c4bda99a5e519aeadcffc8a35e576b31db5eeb6cc2aa3a0",
+            "captured_newlines": "CRLF checkout"
+          },
+          "tests/pg_defaults.py": {
+            "git_blob": "0d099e0b021a1a2b70b3aed578511ab4a108231a",
+            "canonical_git_blob_sha256": "59cbc86125af57b1491a0fdb1a3a28f4230c30c43b2aacf425ac6578a0eae677",
+            "captured_file_sha256": "f5426849bb0ca0f0b2da5118c876be27370569b1ac85a999f205c24442e51c01",
+            "captured_newlines": "CRLF checkout"
+          },
+          "tests/fake_embedder.py": {
+            "git_blob": "852fcb8cffdc9d1d923918f78462010c776e082d",
+            "canonical_git_blob_sha256": "0143f87137082c380b560b7e75920ac62028220d222abefdc8915e2939cdff86",
+            "captured_file_sha256": "4cce7779e5cb378d213df023dfa024f4b6cf0543abf4433f7b44a21d53113f3b",
+            "captured_newlines": "CRLF checkout"
+          }
+        }
+      }
+    },
+    "linux": {
+      "measurement_instrument": {
+        "head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+        "entries": {
+          "evals/memory_policy_bench.py": {
+            "git_blob": "cc3104069bdead43efddcad6cfd5fdc02737e347",
+            "canonical_git_blob_sha256": "4c707330d8b4d92ed483f186856bdc956e78db48caa3504bea7ba65adbec6678",
+            "captured_file_sha256": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/memory_policy_daemon.py": {
+            "git_blob": "6569e7ddee359385bb8110ecfd50a91cf5c836fb",
+            "canonical_git_blob_sha256": "03ca0a009fdfa55230c7f8bfbbd65a243e485ba1c6a155cd34e3ea3d1f339229",
+            "captured_file_sha256": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/__init__.py": {
+            "git_blob": "a20a9dd465428eebf7ab649ef8daee25e74b55e8",
+            "canonical_git_blob_sha256": "c1722478e4cc576b1f5623673c4730bbbe128bdb1bd5f1ac172cdea7ac65e674",
+            "captured_file_sha256": "b3f31d72369899c9c4c6d84fefc750c5e644c98c1318427069c93e83bea124df",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/ci.py": {
+            "git_blob": "4ae0a01b18870ad032c5532240c9cf2b769ee630",
+            "canonical_git_blob_sha256": "e9ce796dff12d128903f9c0678facef60ff70d15f6fe7abe06dc53a5e2a4de03",
+            "captured_file_sha256": "b2307be414101636e33472388006877c97145e0ff827e7c7438935b202514d28",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/cli_measurement.py": {
+            "git_blob": "a762e623de9296ba75542e9df08b9f361b6e9444",
+            "canonical_git_blob_sha256": "869e3a7ad1e0c1f271b1cc38e8827404b0afff62d049d00db934aaff32d7f62b",
+            "captured_file_sha256": "2c6196b980ab829513e3a9a53836aa94fc235a9d6e79b7132965bf5c2bb5c52f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/common.py": {
+            "git_blob": "f255588f5088cd7d8b98b850db4b775f60b35569",
+            "canonical_git_blob_sha256": "0f5ef9bcaf74feaf221b329688bc8684f027b9b6f849839bd18e2a1dbf1d973e",
+            "captured_file_sha256": "4135b33aac0339e525731d632b41f9cfe95b9336974b3dd55de985f181877b82",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/daemon.py": {
+            "git_blob": "c64bc55070aaa6f642877c8a5e5ea312703288cb",
+            "canonical_git_blob_sha256": "6968c2315da3bcd9fbcd4780c82faf11aef9b993ec5b0961a596727c53071e4d",
+            "captured_file_sha256": "e659db38d50358106f0a3967430a2fe7ec559ffd9440036b928f3e91d74dca9c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/daemon_child.py": {
+            "git_blob": "794b41a0d37eb161858ae409bfc2b569b8836dda",
+            "canonical_git_blob_sha256": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+            "captured_file_sha256": "aca0a0435df2e31c4a2058c33de9bb1bbd279223fee461ba2c99321486bd1c98",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/scaling.py": {
+            "git_blob": "4c07d30cb28d3687889aab8baf0fb272382a04f2",
+            "canonical_git_blob_sha256": "4df2f32c0e17b07a9ef2477d9037571cc7fffa204e64bfe3f60e30b830390bd7",
+            "captured_file_sha256": "8e8987b6ada5653c98b0a9cc0ba238808aa3e374412531add975f45ef5b904b1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/scaling_child.py": {
+            "git_blob": "6146d647e36c2ba301cdda0bd6f174ac4ceb9e72",
+            "canonical_git_blob_sha256": "481c77113ef0b6f02d6c5681baa9acb85236d52ee552a296676f2dfc3ddb1517",
+            "captured_file_sha256": "fc33e5d9780db29524c05d802d07a504efb8c98ea40e9a0168695e34ee844c5a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/shim.py": {
+            "git_blob": "7708f8f36855b80ef9b21ffa313eafc640b5f1f5",
+            "canonical_git_blob_sha256": "bdd028df521705cfbfdab32dfbcc28962680351bc449c8a89f6036e281725407",
+            "captured_file_sha256": "619c29c94b68505d5e61a1b8d03e15481eebbe77e42b05d5f4d2c41e50fe6bfd",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/shim_measurement.py": {
+            "git_blob": "1b0f19a182cda2801377171a5adce4e8dc5db83e",
+            "canonical_git_blob_sha256": "bcf25f3ac45177605a1d7d519b670f28f3f65dd02aedc9ad1a6b9ad1168c824e",
+            "captured_file_sha256": "7f67ede3125067a9f00462c6ba0eb49290b43006cb54122d4e3bc38300020af7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_baseline.py": {
+            "git_blob": "1c12b4e639453d0a971a4490c2c7bae10a142e07",
+            "canonical_git_blob_sha256": "865c10f02599a28123c9fbc88ed60cf20a9b3fe5597889e9f373b40af16871fa",
+            "captured_file_sha256": "075fa2765e95fc9ed65a5cc44ca5a2a20e4142699775d9351783ed5e3154ae0b",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_cli_measurement.py": {
+            "git_blob": "277aa10ecd632fe67c7caa99dd9af61bb1dea7c5",
+            "canonical_git_blob_sha256": "619303de576a03cc81b69e6ae62a7d9ae6a2bf8c0c499d95aa6eaa37c5d82964",
+            "captured_file_sha256": "d8d7d407d642f843b2e57c0c9d987c52a7f24611f951193384d1b21adb9662ae",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_cli_measurement_warm.py": {
+            "git_blob": "a02c217a63d31e0b756bab67d2f3e384ae16230c",
+            "canonical_git_blob_sha256": "d73947b5244996977525de4a68ed49fde9669540032d49b273b1f8d0ecbb1c0e",
+            "captured_file_sha256": "d73947b5244996977525de4a68ed49fde9669540032d49b273b1f8d0ecbb1c0e",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_baseline/test_review_fixes.py": {
+            "git_blob": "4b7305370e3fd16b9172c1e7895c1fa5519c05ab",
+            "canonical_git_blob_sha256": "2990a91b17906e241f2366e5604fcf175be43567acdcd2bcc3a72c3281445cb5",
+            "captured_file_sha256": "8e351f2501b39fd99199a060b21beb010e829316652b1b538e98f73a15025cd8",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_scaling.py": {
+            "git_blob": "41fe64133616459b3d47d6d177a7c3e77ed48ea5",
+            "canonical_git_blob_sha256": "36124408bc76d8d101031c633d5264166ca84241c43926db8e02d12f6f17fdd2",
+            "captured_file_sha256": "985fe830767576edc25185b71db9ef547557c440d4625f74eb41d44507f573ae",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/test_shim_measurement.py": {
+            "git_blob": "e3856a4fe6d59e51cd123ed5c216bffed1afaf8a",
+            "canonical_git_blob_sha256": "22ec172af201c6123eac68cacb237795ece860d4fd07eec286d6fb2bbabbf76b",
+            "captured_file_sha256": "8246ae2b4be761b5c5a2affa1bf89e60867435f3e10ed4670f23b2195703ce6c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/transport.py": {
+            "git_blob": "346ee47cd712dc450763846d4267707e6657b1de",
+            "canonical_git_blob_sha256": "345a47a45ce510ee0a9e75b6282e2f46773ae8b32a979108c3483a1de8fec826",
+            "captured_file_sha256": "c69e07cfed0440fe0ead0a3be7faa7400e7ffe1f376a7ee446f85eb38779380f",
+            "captured_newlines": "CRLF checkout"
+          }
+        }
+      },
+      "oracle_metadata_instrument_fingerprint": {
+        "head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+        "entries": {
+          "evals/memory_policy_bench.py": {
+            "git_blob": "cc3104069bdead43efddcad6cfd5fdc02737e347",
+            "canonical_git_blob_sha256": "4c707330d8b4d92ed483f186856bdc956e78db48caa3504bea7ba65adbec6678",
+            "captured_file_sha256": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/memory_policy_daemon.py": {
+            "git_blob": "6569e7ddee359385bb8110ecfd50a91cf5c836fb",
+            "canonical_git_blob_sha256": "03ca0a009fdfa55230c7f8bfbbd65a243e485ba1c6a155cd34e3ea3d1f339229",
+            "captured_file_sha256": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/__init__.py": {
+            "git_blob": "e04893b07bc55c2ae396616af4984a0cc51bbb82",
+            "canonical_git_blob_sha256": "b81bf969b568b1b1770afc917f5aa62c8f947eaa982b3a07e38be60c241de694",
+            "captured_file_sha256": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/acceptance.py": {
+            "git_blob": "649e075e726819cdc182acae23b12a803ca45dde",
+            "canonical_git_blob_sha256": "319dcb402754ae0ce7c65e98cb84fc02eeb7e976c5ca92bb3f3d33da3a4bc957",
+            "captured_file_sha256": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/broken_stdio.py": {
+            "git_blob": "81f26392c88b533e8f685db9d0377ae53f7b1a7d",
+            "canonical_git_blob_sha256": "f49fdafdb882e239230f56c3efb1b021ee62a6a6091ae47a21f895a2df61b9df",
+            "captured_file_sha256": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/candidate.py": {
+            "git_blob": "5f8f39109929fa9864b34c64a53d000cd8ba158b",
+            "canonical_git_blob_sha256": "b863c1bbca733dd27424d7c94874871e63850cd4bc102ef846426837a9e5828c",
+            "captured_file_sha256": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_argv.py": {
+            "git_blob": "16ad534223e56b0c1ce62d2e16b501d723d52f24",
+            "canonical_git_blob_sha256": "3430e802459663ecf5c4b2a6994a895fa24214cad9a2a31f19bc5e40c8adac40",
+            "captured_file_sha256": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_argv_corpus.json": {
+            "git_blob": "3924fc053b7e623303e301548cd395d36cba6f26",
+            "canonical_git_blob_sha256": "be7e2c3b6c52a3d93df313b0db08609b762055e31fe3968b74522f7315641919",
+            "captured_file_sha256": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_corpus.py": {
+            "git_blob": "8a3782e6c388d9b5410f59640313ae4a009251bb",
+            "canonical_git_blob_sha256": "5454398fa9accecd0782d473ec959ff1df46e0319e5f9b9828e66aec1283664f",
+            "captured_file_sha256": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_dispatch.py": {
+            "git_blob": "8710b81844bc42cdd4b1c145719fa0eb65eddd52",
+            "canonical_git_blob_sha256": "ec186905cfccb037992545c4d983827546c7ac83fd053034641111681940d53b",
+            "captured_file_sha256": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_process.py": {
+            "git_blob": "81070a4ad400791f85465a47789527d2048ab385",
+            "canonical_git_blob_sha256": "e29e7ada78bfc8254885184c542b520b1652919a60b1f77655524935862261f0",
+            "captured_file_sha256": "5982810a7870207f516c20c748a52cc65ddbc0ca1a21e9d265abaadf5c869c0c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_public.py": {
+            "git_blob": "afa29f49ceeea317a628d876afda402a82f7939f",
+            "canonical_git_blob_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+            "captured_file_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/cli_version.py": {
+            "git_blob": "962cc35e69211aabcd4700d5a4fc0cfbe03546a0",
+            "canonical_git_blob_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+            "captured_file_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/collection_guard.py": {
+            "git_blob": "36a37f7e705d0a2363a4bfaf2073026f8dcdde7b",
+            "canonical_git_blob_sha256": "93e5188d6914d29f5fbd60947b52d6f868dd41498c88d12a71111711acd8f24b",
+            "captured_file_sha256": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/controls.py": {
+            "git_blob": "d97897286865e0331568eb0538b660c54562dda0",
+            "canonical_git_blob_sha256": "fea40b5dc13517a83e681ffd38e786a9850162c0962668fef9daacd8be6e2e2a",
+            "captured_file_sha256": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/fixtures.py": {
+            "git_blob": "4d71cbbc7ab85f36a57fb1b579d2f52c4f5649e8",
+            "canonical_git_blob_sha256": "e5aa794cfe4abd49b50bcdb94c9769fd1990756d28bda4065fb563e5871fd8e8",
+            "captured_file_sha256": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/full_bank.py": {
+            "git_blob": "699d23963f7a94f268eca21815effbd69af96ee8",
+            "canonical_git_blob_sha256": "ba57fe5dd9adff378e97f7c2a93f7d8236c16d4565e2e41d61f386e5474b930b",
+            "captured_file_sha256": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/full_seed.json": {
+            "git_blob": "4068a1253749248f2af24b093bb774072a47891e",
+            "canonical_git_blob_sha256": "55ea8c2bfa6b242572f2a5de4d355ba95d370ba9ca4c228eb3e13e0de7e4a80a",
+            "captured_file_sha256": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/harness.py": {
+            "git_blob": "2c10cbeeb4ac1e20c37fca2eb9b7d33248859e82",
+            "canonical_git_blob_sha256": "9f31f158c4b14cb9f5fef95f29065b4be7c0be25342d656c4798ce2944e522a6",
+            "captured_file_sha256": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/onnx_cpu_compare.py": {
+            "git_blob": "e351def450ed3a6bb8973cbd718d5611c4664cee",
+            "canonical_git_blob_sha256": "ef38fdccc1e9baf0eee3735ef41a9c709c9372e950da9c7977d89ccaccaf91a9",
+            "captured_file_sha256": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/oracle.py": {
+            "git_blob": "8cd542c65f959ba0a7408dec9238661ad7d781eb",
+            "canonical_git_blob_sha256": "1090bfde35b5ebb930cf4c5ed5b113a2ffc380c8d9b5212b59d09f753c72fbf5",
+            "captured_file_sha256": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/oracle_tests.json": {
+            "git_blob": "f913150368bd224df3b044e65c4b568f025c7773",
+            "canonical_git_blob_sha256": "5db2ecfb248f351317986092650371866c83c2c072163e818a5d9d0f6bf8641d",
+            "captured_file_sha256": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1.py": {
+            "git_blob": "147fb2fc2504db432e6e0a874060d94866baf934",
+            "canonical_git_blob_sha256": "54d843a8077c044ee5edf89dc044d7aff71bd4a9185d2c729c0df74b90d07c1f",
+            "captured_file_sha256": "05a136be672dc06d7d080a9ea40edde86614ca27706662b3f5eebca5197f0d09",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_ci.py": {
+            "git_blob": "3af6ea9a5b48c01a01ea577c249a961a35fac66d",
+            "canonical_git_blob_sha256": "9661cc1370ade4fb6e2a496ce41b49f8e2e4e1917f7a49e4ace8e04c5f067b0a",
+            "captured_file_sha256": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_inventory.py": {
+            "git_blob": "432787f55e643d202b3f673aed8e67974d2d4139",
+            "canonical_git_blob_sha256": "5b0d787bf4944e0019689309ab88e7755327c6de66f3be7c13a26dd03d209c22",
+            "captured_file_sha256": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_oracle.py": {
+            "git_blob": "a0fd172e54e8d52d90079b4881ef44dcba8d5320",
+            "canonical_git_blob_sha256": "09c4a745802bfe6c534670097f742d1ed9e008da76051d0b73d0affc83193209",
+            "captured_file_sha256": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_receipts.py": {
+            "git_blob": "7a7a978456681b9fe40238593d1f310a41b2043c",
+            "canonical_git_blob_sha256": "9cd9ac7caad798c569e00b3de965f5e07e8283f8fc3a312a34220e7b725f81dd",
+            "captured_file_sha256": "2c19bc7b74aa6041f953629d459dd6bae98a287688f7a81a0bf77765484ff06c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/processes.py": {
+            "git_blob": "5484bc1404fc7c3606172b6522bf1597e2859d4f",
+            "canonical_git_blob_sha256": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+            "captured_file_sha256": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/provenance.py": {
+            "git_blob": "041896a7d25a38d139375d7e245bdcefb46fabb2",
+            "canonical_git_blob_sha256": "7328191c87a18dc8409f2cd072751374a662a5c34e086d133d5307d8b87b463c",
+            "captured_file_sha256": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/pytest_plugin.py": {
+            "git_blob": "2a380308ca9b4c8f48144da00857a400c8009313",
+            "canonical_git_blob_sha256": "3bf723757ed89fec3b56ea367cd93f478d3f26a1d55af9c8c64bfd7ae98b93da",
+            "captured_file_sha256": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/registration_policy.py": {
+            "git_blob": "05b35313e64d356857b855be9e8841648c289ad8",
+            "canonical_git_blob_sha256": "39b1a488da3d8b877e958358b47b1d511ed4889c2a5f46dd837b6be35246f240",
+            "captured_file_sha256": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/seed.json": {
+            "git_blob": "19ca8f4404376c4dbd01146c4b051b0d9ff5cbb6",
+            "canonical_git_blob_sha256": "bf1dfd16af73b2076dfebd224a6dd96c74b2fc2d35b617ba240bd65f8c8001c1",
+            "captured_file_sha256": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/selfcheck.py": {
+            "git_blob": "7c7bafbc1f2ee150a62b408dc87c549097310b1d",
+            "canonical_git_blob_sha256": "863627763c5816863d60d0903310a5d5080241473da4e3b338ef451bee879d66",
+            "captured_file_sha256": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio.py": {
+            "git_blob": "aa69e3b296c4af5f21426654c22b1684535925e5",
+            "canonical_git_blob_sha256": "fc751fdc8cf89090519c6325b701dec0207f0c2c7b8b4a08819f048994397cac",
+            "captured_file_sha256": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_capture.py": {
+            "git_blob": "be68131c84c3d577a00abd61d9fc2b93a2ba03b1",
+            "canonical_git_blob_sha256": "aa034c80aca07f2d81a02506a3e878081523f38ac9568ca70c8c6949d28caf4a",
+            "captured_file_sha256": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_concurrent_orders.json": {
+            "git_blob": "33d6cbd57030572ee0fa6868debd5646731a5be3",
+            "canonical_git_blob_sha256": "6be3b453c6f3d1a0976c21ac3f230072e1f448a35850165af0f7ac8e791ada53",
+            "captured_file_sha256": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_corpus.py": {
+            "git_blob": "ebe8c6bf0fd8ed38bd88076290415f79d4e6c413",
+            "canonical_git_blob_sha256": "62c2d64da5baa634fa5944939e59db422a8e510aeb5768b229159cce41da390f",
+            "captured_file_sha256": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_daemon.py": {
+            "git_blob": "c72c98e7bc86a106c30320c3f4b6576575b42563",
+            "canonical_git_blob_sha256": "7e9946034ebe844f8ca7d79ceead077970ae719acd12547c871c6eaae5875ea9",
+            "captured_file_sha256": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_eof.py": {
+            "git_blob": "63384351106b266a3f4cfecf7325c4a8e92835c9",
+            "canonical_git_blob_sha256": "26bbfb3fa5138ab6e0f832c58a18cb7e4b51ad8d5cd712eb5fd58611c856006d",
+            "captured_file_sha256": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_eof_orders.json": {
+            "git_blob": "9740b51caf9bfeefae1657100ef30762ebb16b9f",
+            "canonical_git_blob_sha256": "ea03917b4a533e0306adae84deecf5cdf1bcdb692b7425a862d6325330dbc9e9",
+            "captured_file_sha256": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_faults.py": {
+            "git_blob": "d535136d4659691c291e7709fa1ae6401fc07522",
+            "canonical_git_blob_sha256": "db05ecb243036c39a8724d3e45b5651cc1579c8b8f6da05f24e834543781c4d4",
+            "captured_file_sha256": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_fixture.py": {
+            "git_blob": "3befe8a45248783578ea3b8f90c02baf0cb93af3",
+            "canonical_git_blob_sha256": "e2e55debd1dbffd0a82d03b3b4884bac2ff2737a0088ad4053d284b43d0ac466",
+            "captured_file_sha256": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_judge.py": {
+            "git_blob": "78c58aa9cf464df6e479d4ada056de50198204d4",
+            "canonical_git_blob_sha256": "dab7380b2ac63785607b69f5538dc4f69d8b16971aca65aa76148bab9b102964",
+            "captured_file_sha256": "8a4819997315122ae85b07abc656c5dd8f891ed68e5515e22bfd4e2f418707b7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_minimal_daemon.py": {
+            "git_blob": "bd051b0fcbc1ab5287c65d35ab285b64175101ba",
+            "canonical_git_blob_sha256": "4b8fe5e24bec5a87623a08ddfd4693d5e00296bed41f0ad7bb64f8e18e214439",
+            "captured_file_sha256": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_process_controls.py": {
+            "git_blob": "8eccc755ebc532e148da8ea3bc8a710256adf18f",
+            "canonical_git_blob_sha256": "407eaa5dee2262bddc6e0d3fd83911ae3088ac3cfe7e7d221a52c4afc15d6773",
+            "captured_file_sha256": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_scenario_fixture.py": {
+            "git_blob": "44519681fdca9d50c157e97217f98383452fa5bc",
+            "canonical_git_blob_sha256": "5127ce6f313f9caa86e1ed73c1c82be86ad9c1c2cf601b618efd464f1245df30",
+            "captured_file_sha256": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_scenarios.py": {
+            "git_blob": "0ce8240aaa67b3631fc0c5cbef46b811fbbd462c",
+            "canonical_git_blob_sha256": "47be87c78ec61742280d1afeb80eadaa3077293028c2634ea72498232aec68fc",
+            "captured_file_sha256": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_startup_contract.f709.json": {
+            "git_blob": "36168a19025347626eaefb689a1d12f2c1c51b39",
+            "canonical_git_blob_sha256": "bee1db0cad4cc2e10b3e5069e0165d9f418b9151314d079d6cde28e41ebf0cdd",
+            "captured_file_sha256": "bee1db0cad4cc2e10b3e5069e0165d9f418b9151314d079d6cde28e41ebf0cdd",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/stdio_startup_contract.json": {
+            "git_blob": "3e281e191d7b886dbe17aaab0463ad113ac59c09",
+            "canonical_git_blob_sha256": "34afc7b0446c508bb987af01d2271a61c8f0324b810df092c0799abbf3eed313",
+            "captured_file_sha256": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_boundary_regressions.py": {
+            "git_blob": "47021bb2da866117196a3ace1f83b6eace6c6213",
+            "canonical_git_blob_sha256": "e6da13eb3765189605075434ee83abb6d40d7875105c84337a29605d2ff99c4a",
+            "captured_file_sha256": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_candidate.py": {
+            "git_blob": "400de3f004c79363337aa9c44caabd998fd99536",
+            "canonical_git_blob_sha256": "bf9cf7308367c53a3bbbcfd8f8723857b2ba50ab874ec7d281633e13fe593d13",
+            "captured_file_sha256": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_capture_provenance.py": {
+            "git_blob": "28f3a8e697e75bc3893ab690ed67c6036c7354b3",
+            "canonical_git_blob_sha256": "39d64e08ec8a828903a4f1726de78026fb1d0f4046ce391be0995e51a7384b6c",
+            "captured_file_sha256": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_argv.py": {
+            "git_blob": "9aaef84e7b42700b9fd3f44e60df566e4050b017",
+            "canonical_git_blob_sha256": "d78f906ef3119dc164887126c76d5e4ca4470e482a54234fcd8da133a8afcb45",
+            "captured_file_sha256": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_dispatch_lane.py": {
+            "git_blob": "3a6dacf19b4c276f475c0694d21ae5c6d00f19ef",
+            "canonical_git_blob_sha256": "bb20c5401946f4161decea3ed99d3d1ce18b3e01e8130c08bd5cf3a33792b23f",
+            "captured_file_sha256": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_environment.py": {
+            "git_blob": "b8c0b6b56f28251f6d3cc25b57542c6a6f142908",
+            "canonical_git_blob_sha256": "4e4241059113f96a6414f674c103d9fad7fb23f8e1dcc67923cd6fea3f01b517",
+            "captured_file_sha256": "17c1144ff270007ec8c119d7ffe01406016ca3f660e99bd3e1243d156ee7650f",
+            "captured_newlines": "mixed LF/CRLF: one CRLF at line85"
+          },
+          "evals/rust_port/test_cli_invocation.py": {
+            "git_blob": "7cd6cb1d37a2f02a0545cfba7f10f33c7efbd526",
+            "canonical_git_blob_sha256": "b5a957a852262bae698c27a51ad35d352736bd3be714b68662b10cf4311fa857",
+            "captured_file_sha256": "b5a957a852262bae698c27a51ad35d352736bd3be714b68662b10cf4311fa857",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_parent_helpers.py": {
+            "git_blob": "5c6661acca2c0ed7ce9e62d554730516dfdab8b8",
+            "canonical_git_blob_sha256": "502b7c7d585b4f9c5b717d41236f155abe2970e98c575ef4ecfe0e1f444af9e5",
+            "captured_file_sha256": "502b7c7d585b4f9c5b717d41236f155abe2970e98c575ef4ecfe0e1f444af9e5",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_process.py": {
+            "git_blob": "80a2ca06fde3854fc5aceff180e65d3def6c307f",
+            "canonical_git_blob_sha256": "8af4fd84fd7595970e327ff5fcc7fd3de652326b9f412620039250f6890ff609",
+            "captured_file_sha256": "3aa328f1c860ce1386aadf13f3ae382f3e9eae21bd1eb5744d087e4e2f09c6e1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_public_summary.py": {
+            "git_blob": "f74a7db92c010d8fcc33cd1d4b93d89124b88714",
+            "canonical_git_blob_sha256": "14ba484c6a14dd5e952db5cb6195dc593793d3ec519d745329769d40a828a7c7",
+            "captured_file_sha256": "14ba484c6a14dd5e952db5cb6195dc593793d3ec519d745329769d40a828a7c7",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_receipt_provenance.py": {
+            "git_blob": "5c57bbab325d360d8a9aa93e54740307ffcbcc87",
+            "canonical_git_blob_sha256": "e147c13a1ac51478eeb1acfda785e9b91d3e87907de8b6590fd6af756d32721b",
+            "captured_file_sha256": "e147c13a1ac51478eeb1acfda785e9b91d3e87907de8b6590fd6af756d32721b",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_relocated_admission.py": {
+            "git_blob": "329870fc46aaa4e5dec485a46df9c6829cf2b8da",
+            "canonical_git_blob_sha256": "0edbec938ec8375a1c43ebbaf6018f77ce80c602cc8f811952e300d7b7c72df9",
+            "captured_file_sha256": "0edbec938ec8375a1c43ebbaf6018f77ce80c602cc8f811952e300d7b7c72df9",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_cli_version.py": {
+            "git_blob": "36024e6e75b38673048c7b8b5678dc851e07ba8b",
+            "canonical_git_blob_sha256": "5daeb0bea930f12ad459e884f83cbfea7950a63cde177a66820867bf5f081a12",
+            "captured_file_sha256": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_cli_version_missing_console.py": {
+            "git_blob": "000ae214b84c5c9f6db8210e50d62305a39cfb19",
+            "canonical_git_blob_sha256": "67f855edf00035178e011fe1440dd2805f700901da6c0fae531d909659b5e93b",
+            "captured_file_sha256": "67f855edf00035178e011fe1440dd2805f700901da6c0fae531d909659b5e93b",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/test_collection_guard.py": {
+            "git_blob": "a87b564ba26b128671acf13d267c5ab35f70e1bf",
+            "canonical_git_blob_sha256": "b5f441014785ea8fa1df4a165a55d25025fbff80288f2c4ad7c29fd0d9486cf8",
+            "captured_file_sha256": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_full_bank.py": {
+            "git_blob": "b65259a5e10048d250f01bd07cef23116b5fc6e1",
+            "canonical_git_blob_sha256": "bb8cec4731e92f18eb17d61f1e01019c79b3273c899a064b09dfce0f6d04724e",
+            "captured_file_sha256": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_harness.py": {
+            "git_blob": "7e56d385985428e0c65f9c73341d7f83bc8f0a97",
+            "canonical_git_blob_sha256": "07f845ade5c19189e7311b9f2f588401c5409cc5861ed4c2ffac82658a055bc3",
+            "captured_file_sha256": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_instrument_routing.py": {
+            "git_blob": "5594f58bb48bd499ecea3905f20be1a91f329b96",
+            "canonical_git_blob_sha256": "537722fae96e2f26e341cbfa09a86fa86d894cd6a3a8ffea1363f1f4f8cbff25",
+            "captured_file_sha256": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_oracle_boundary.py": {
+            "git_blob": "179036428a48bcab0b0d5aefb406cc108ba16a16",
+            "canonical_git_blob_sha256": "0b5ebc5c8f788b4cb1f21a9c13c59a8298bfa9446ef3d707d929236f308269cc",
+            "captured_file_sha256": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase0b.py": {
+            "git_blob": "79824f2bd106833499a45d1f15688c12038ffcd4",
+            "canonical_git_blob_sha256": "465f59aec63f26210c2866457140cef64bc8193d847e0e00bb9b5eff99625f83",
+            "captured_file_sha256": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_completeness.py": {
+            "git_blob": "4e1d8e426b7c9faf9824b030e45191778629a1c0",
+            "canonical_git_blob_sha256": "4df65203d983a7345d6f5a8023fa297339281c8b528778e16e1016719a30919e",
+            "captured_file_sha256": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_full_suite.py": {
+            "git_blob": "303e0f585092c74a242291128c8baa32c98c0351",
+            "canonical_git_blob_sha256": "648e0a641a5fc79722fb6f3098b40a3df6f9aff692ea368dbe872e79990005b1",
+            "captured_file_sha256": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_inventory.py": {
+            "git_blob": "a56908a53ad55435bfb184c710a193b10af3ad6d",
+            "canonical_git_blob_sha256": "abfc2067a173d893aa914e20a00c31a093987758ace1da4cbc3ac8052be1a4ca",
+            "captured_file_sha256": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_inventory_regeneration.py": {
+            "git_blob": "bf3fd72d09063174535733693e998d9a601c4fc4",
+            "canonical_git_blob_sha256": "41eaf1be570c1e4a9d5a04a5f8baa2d93d866cc155bc0772c8e5389814968211",
+            "captured_file_sha256": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_oracle.py": {
+            "git_blob": "19f53e7d343f307487506b2a9a44161d34679da0",
+            "canonical_git_blob_sha256": "4720814239a3d617bcd9451e42d6fc806b891e928960b52f5cc576944a230f13",
+            "captured_file_sha256": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_receipts.py": {
+            "git_blob": "70d0a20ee89f709dcd1a61885e42fb3e671a210b",
+            "canonical_git_blob_sha256": "e0fe4d3572cc261a3c9370bac3004487401e185ccc96b90002513c70561238fa",
+            "captured_file_sha256": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase1_routing.py": {
+            "git_blob": "b715967669986e7e1167a4913131c473402d65cd",
+            "canonical_git_blob_sha256": "53276a443c42b94061ca4a638033feb6cdbd6d34a9c6140861e900679deaaefc",
+            "captured_file_sha256": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_phase2c_version_identity.py": {
+            "git_blob": "41d10bb68d09b4084642608ca5943156e496c9d1",
+            "canonical_git_blob_sha256": "a5ae3fef56d9bae69b71d353638ce3487be6c62a8b2efcdcbd57472379d0d054",
+            "captured_file_sha256": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_processes.py": {
+            "git_blob": "7981ab8ce8be098ea959d710f6d7b42fa95f872e",
+            "canonical_git_blob_sha256": "218a6c1853d9892f2409c3ffd4f1aa3998b2cbd6cecd7f48de0daf23651de669",
+            "captured_file_sha256": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_provenance.py": {
+            "git_blob": "5f430951e0833b3e71d5acae293a9b295e2e9da0",
+            "canonical_git_blob_sha256": "079faf8d8a3766478b38c59248ed04a90df6b5b14f735d546fa4ff3816c74624",
+            "captured_file_sha256": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_python_selection.py": {
+            "git_blob": "0c15b76a16cadf37a8085f2c7afae985a20d40be",
+            "canonical_git_blob_sha256": "c12bcbf883785ee074be8a3e53605e329deb88f9bd08ba6bc1ac58a8897382d2",
+            "captured_file_sha256": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_registration_policy.py": {
+            "git_blob": "76f0032b6767a2eae9e52472f14684108d2e4b06",
+            "canonical_git_blob_sha256": "93bb486900652c6c22f259fa258760d695b6165df3497236895091ffe58a4cbf",
+            "captured_file_sha256": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_runtime_provenance.py": {
+            "git_blob": "65cc9b8635e1fa8e699da2cbe5371ee1ee6e538b",
+            "canonical_git_blob_sha256": "da89105d5de21713ad0222f161fb59343b4a1a83567f9e94ff72c42cf1e895c4",
+            "captured_file_sha256": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stderr_retention.py": {
+            "git_blob": "972071e671a876644205b8f8eb6db14682d6c91e",
+            "canonical_git_blob_sha256": "9e523e0ebe887c83d265ed7c1d425bf5bf53b2a028afd187bd8d893bdcbebf95",
+            "captured_file_sha256": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stdio_boundary_retention.py": {
+            "git_blob": "864c11d7f7468cc99c7192d1bd2606437b10f123",
+            "canonical_git_blob_sha256": "7ff5dabcb2d1ded7d406b47add5080ca72be32949217eac9ea6a269108395d02",
+            "captured_file_sha256": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stdio_judge.py": {
+            "git_blob": "18b5ed15364f56077f6751f491acdf2027d9f62d",
+            "canonical_git_blob_sha256": "9e69b9025b937531495e546a39a5d99ef25b993b48903a72fd66ed79b9d35175",
+            "captured_file_sha256": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stdio_process_controls.py": {
+            "git_blob": "a184b9b77f9c8c11a636530774557788e2ae8ea4",
+            "canonical_git_blob_sha256": "2e0d7ffe91bfca528e907ec56071bdcaccabd1556826c29de5fe0222551477be",
+            "captured_file_sha256": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_stdio_scenarios.py": {
+            "git_blob": "f5d89379a64b5f1873181270a3a28f3ecd158240",
+            "canonical_git_blob_sha256": "4a78be8a73f7deb1bc72ac29f86b91cc49463e1d3a613bba72d28fad64296f00",
+            "captured_file_sha256": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/test_wire.py": {
+            "git_blob": "fb77475b53a3a3ff0ab36c36ef442cda23d9b662",
+            "canonical_git_blob_sha256": "e173801afd859e63a63ed68eb319de7f58121d4bd7be0966ebde373c460f0318",
+            "captured_file_sha256": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/unicode14_reason.py": {
+            "git_blob": "a55293a64a8e1743f37dac25379397011907c786",
+            "canonical_git_blob_sha256": "89a4eaf24f908674f10ec8c09daea172cb3fd11ec5667f3fc80dc9dfaa3ac553",
+            "captured_file_sha256": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/url_reference.py": {
+            "git_blob": "fa97734d6b0b00c739367c3c1f9086dc5f402e87",
+            "canonical_git_blob_sha256": "07231218b05e1282f54a5aadb01954fd70b8d2c6af1ad7e121ccad54c374e453",
+            "captured_file_sha256": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/wire.py": {
+            "git_blob": "3bfe9a6656327d923cac752b901933b2ab87b5f1",
+            "canonical_git_blob_sha256": "e913d7ebe09966c0378a8173efca3cbb0ef779febf70435d7693a3ddad5525fa",
+            "captured_file_sha256": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f",
+            "captured_newlines": "CRLF checkout"
+          }
+        }
+      },
+      "cli_instrument": {
+        "head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+        "entries": {
+          "evals/rust_port/cli_process.py": {
+            "git_blob": "81070a4ad400791f85465a47789527d2048ab385",
+            "canonical_git_blob_sha256": "e29e7ada78bfc8254885184c542b520b1652919a60b1f77655524935862261f0",
+            "captured_file_sha256": "5982810a7870207f516c20c748a52cc65ddbc0ca1a21e9d265abaadf5c869c0c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_corpus.py": {
+            "git_blob": "8a3782e6c388d9b5410f59640313ae4a009251bb",
+            "canonical_git_blob_sha256": "5454398fa9accecd0782d473ec959ff1df46e0319e5f9b9828e66aec1283664f",
+            "captured_file_sha256": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/cli_public.py": {
+            "git_blob": "afa29f49ceeea317a628d876afda402a82f7939f",
+            "canonical_git_blob_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+            "captured_file_sha256": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/cli_version.py": {
+            "git_blob": "962cc35e69211aabcd4700d5a4fc0cfbe03546a0",
+            "canonical_git_blob_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+            "captured_file_sha256": "9a932a5f945639a85b4ffe0182c659aa6a1359177e80dba965535b3f225eee8f",
+            "captured_newlines": "canonical"
+          },
+          "evals/rust_port/harness.py": {
+            "git_blob": "2c10cbeeb4ac1e20c37fca2eb9b7d33248859e82",
+            "canonical_git_blob_sha256": "9f31f158c4b14cb9f5fef95f29065b4be7c0be25342d656c4798ce2944e522a6",
+            "captured_file_sha256": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/phase1_receipts.py": {
+            "git_blob": "7a7a978456681b9fe40238593d1f310a41b2043c",
+            "canonical_git_blob_sha256": "9cd9ac7caad798c569e00b3de965f5e07e8283f8fc3a312a34220e7b725f81dd",
+            "captured_file_sha256": "2c19bc7b74aa6041f953629d459dd6bae98a287688f7a81a0bf77765484ff06c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/provenance.py": {
+            "git_blob": "041896a7d25a38d139375d7e245bdcefb46fabb2",
+            "canonical_git_blob_sha256": "7328191c87a18dc8409f2cd072751374a662a5c34e086d133d5307d8b87b463c",
+            "captured_file_sha256": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_capture.py": {
+            "git_blob": "be68131c84c3d577a00abd61d9fc2b93a2ba03b1",
+            "canonical_git_blob_sha256": "aa034c80aca07f2d81a02506a3e878081523f38ac9568ca70c8c6949d28caf4a",
+            "captured_file_sha256": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/processes.py": {
+            "git_blob": "5484bc1404fc7c3606172b6522bf1597e2859d4f",
+            "canonical_git_blob_sha256": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+            "captured_file_sha256": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/common.py": {
+            "git_blob": "f255588f5088cd7d8b98b850db4b775f60b35569",
+            "canonical_git_blob_sha256": "0f5ef9bcaf74feaf221b329688bc8684f027b9b6f849839bd18e2a1dbf1d973e",
+            "captured_file_sha256": "4135b33aac0339e525731d632b41f9cfe95b9336974b3dd55de985f181877b82",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/memory_policy_bench.py": {
+            "git_blob": "cc3104069bdead43efddcad6cfd5fdc02737e347",
+            "canonical_git_blob_sha256": "4c707330d8b4d92ed483f186856bdc956e78db48caa3504bea7ba65adbec6678",
+            "captured_file_sha256": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/memory_policy_daemon.py": {
+            "git_blob": "6569e7ddee359385bb8110ecfd50a91cf5c836fb",
+            "canonical_git_blob_sha256": "03ca0a009fdfa55230c7f8bfbbd65a243e485ba1c6a155cd34e3ea3d1f339229",
+            "captured_file_sha256": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/daemon_child.py": {
+            "git_blob": "794b41a0d37eb161858ae409bfc2b569b8836dda",
+            "canonical_git_blob_sha256": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+            "captured_file_sha256": "aca0a0435df2e31c4a2058c33de9bb1bbd279223fee461ba2c99321486bd1c98",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_port/stdio_daemon.py": {
+            "git_blob": "c72c98e7bc86a106c30320c3f4b6576575b42563",
+            "canonical_git_blob_sha256": "7e9946034ebe844f8ca7d79ceead077970ae719acd12547c871c6eaae5875ea9",
+            "captured_file_sha256": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/cli_measurement.py": {
+            "git_blob": "a762e623de9296ba75542e9df08b9f361b6e9444",
+            "canonical_git_blob_sha256": "869e3a7ad1e0c1f271b1cc38e8827404b0afff62d049d00db934aaff32d7f62b",
+            "captured_file_sha256": "2c6196b980ab829513e3a9a53836aa94fc235a9d6e79b7132965bf5c2bb5c52f",
+            "captured_newlines": "CRLF checkout"
+          },
+          "evals/rust_baseline/shim_measurement.py": {
+            "git_blob": "1b0f19a182cda2801377171a5adce4e8dc5db83e",
+            "canonical_git_blob_sha256": "bcf25f3ac45177605a1d7d519b670f28f3f65dd02aedc9ad1a6b9ad1168c824e",
+            "captured_file_sha256": "7f67ede3125067a9f00462c6ba0eb49290b43006cb54122d4e3bc38300020af7",
+            "captured_newlines": "CRLF checkout"
+          }
+        }
+      },
+      "production_guard": {
+        "head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+        "entries": {
+          "pseudolife_memory/storage/schema.py": {
+            "git_blob": "67485994544895878e5c88e3a2702ed4eb6a6db8",
+            "canonical_git_blob_sha256": "45290101c176157f64af8eba5b2ca406300478068d41f17e08a3b55f9c05dc78",
+            "captured_file_sha256": "86b14ae4a712c5095c4bda99a5e519aeadcffc8a35e576b31db5eeb6cc2aa3a0",
+            "captured_newlines": "CRLF checkout"
+          },
+          "tests/pg_defaults.py": {
+            "git_blob": "0d099e0b021a1a2b70b3aed578511ab4a108231a",
+            "canonical_git_blob_sha256": "59cbc86125af57b1491a0fdb1a3a28f4230c30c43b2aacf425ac6578a0eae677",
+            "captured_file_sha256": "f5426849bb0ca0f0b2da5118c876be27370569b1ac85a999f205c24442e51c01",
+            "captured_newlines": "CRLF checkout"
+          },
+          "tests/fake_embedder.py": {
+            "git_blob": "852fcb8cffdc9d1d923918f78462010c776e082d",
+            "canonical_git_blob_sha256": "0143f87137082c380b560b7e75920ac62028220d222abefdc8915e2939cdff86",
+            "captured_file_sha256": "4cce7779e5cb378d213df023dfa024f4b6cf0543abf4433f7b44a21d53113f3b",
+            "captured_newlines": "CRLF checkout"
+          }
+        }
+      }
+    }
+  },
+  "newline_qualification": {
+    "path": "evals/rust_port/test_cli_environment.py",
+    "canonical_sha256": "4e4241059113f96a6414f674c103d9fad7fb23f8e1dcc67923cd6fea3f01b517",
+    "captured_sha256": "17c1144ff270007ec8c119d7ffe01406016ca3f660e99bd3e1243d156ee7650f",
+    "canonical_bytes": 3452,
+    "captured_bytes": 3453,
+    "difference": "One CR byte at line85; normalized bytes and AST including positions are equal. This eval test is not imported by the capture helpers or the selected original CLI nodes."
+  }
+}

@@ -1,0 +1,584 @@
+"""CLI-BACKUP-DSN: ``pseudolife-mcp backup`` (explicit DSN and file mode).
+
+Argparse argv: ``backup [--data-dir P] [--out P] [--keep-days N]`` with
+inline or separate values, repeated and abbreviated options, pathlib path
+spellings and Python floats; help follows COLUMNS. The bank is the explicit
+``PSEUDOLIFE_MCP_DATABASE_URL``; without one, a data dir holding no embedded
+bank is archived in file mode. Every case that would need the lite tier's
+embedded instance defers (Rust tests cover the deferrals; this row compares
+only answered cases).
+
+Contract per arm: exit code, both streams byte-exact (the timestamp in the
+two new file names is normalized against the arm's own clock window), every
+file under the home, the state archive read back member by member (name,
+type, mode, uid, gid, mtime, size, link target, content hash; uname and gname
+validated against NSS on Linux, empty on Windows), the dump decompressed (pg_dump's per-run ``\\restrict`` key
+normalized only when the ``\\restrict`` and ``\\unrestrict`` keys agree),
+and the source bank unchanged. Container bytes (tar header layout, gzip
+headers, compression) are free.
+"""
+
+from __future__ import annotations
+
+import atexit
+import base64
+import gzip
+import hashlib
+import io
+import json
+import os
+import re
+import shutil
+import stat
+import tarfile
+import time
+from pathlib import Path
+
+from .. import normalize
+from ..core import WINDOWS, Case
+from ..mutants import Mutant
+from . import _bank
+
+DB = _bank.name("pl_cf_w1c_backup_src")
+ABSENT_DB = _bank.name("pl_cf_w1c_backup_absent")
+PG0 = Path.home() / ".pg0" / "installation"
+_SEEDED = False
+_CREATED = False
+_BASELINE: dict | None = None
+FIXED = 1_790_000_000.123456  # seeded mtimes, identical in both arms
+OLD = time.time() - 30 * 86400
+
+
+def _source() -> str:
+    global _SEEDED, _BASELINE, _CREATED
+    _bank.NAMES.require_process()
+    if not _SEEDED:
+        _CREATED = True
+        _bank.create(DB)
+        from tests.test_transfer_cli import _seed_bank  # noqa: PLC0415 (oracle seeder)
+        with _bank.connect(DB) as conn:
+            _seed_bank(conn)
+            conn.commit()
+        _BASELINE = _bank.dump(DB)
+        _SEEDED = True
+    return _bank.url(DB)
+
+
+@atexit.register
+def _drop_source() -> None:
+    if _CREATED:
+        _bank.drop(DB)
+
+
+def _pg0_version() -> Path:
+    versions = sorted(p for p in PG0.iterdir() if (p / "bin").is_dir())
+    return versions[-1]
+
+
+def _write(path: Path, data: bytes | str, mtime: float = FIXED) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data.encode() if isinstance(data, str) else data)
+    os.utime(path, (mtime, mtime))
+
+
+def tree(root_rel: str = "bank", old_backups: bool = True, bdir_rel: str | None = None):
+    """A data dir with the shapes a real one holds, plus old own and foreign
+    files in its backups dir for rotation."""
+    def setup(arm):
+        root = arm.home / root_rel
+        _write(root / "config.yaml", "storage: postgres\nname: ünïcödé ✓\n")
+        _write(root / "memory_state" / "state.json", json.dumps({"cursor": 7}))
+        _write(root / "chromadb" / "chroma.sqlite3", bytes(range(256)) * 64)
+        _write(root / "notes-ü" / "日本語.txt", "text\r\nwith crlf\n")
+        _write(root / "notes-ü" / ("long-" + "x" * 120 + ".txt"), "long name")
+        # Case-folded order at the top level on Windows, code points below it.
+        _write(root / "B-top.txt", "upper")
+        _write(root / "a-top.txt", "lower")
+        _write(root / "notes-ü" / "B.txt", "upper")
+        _write(root / "notes-ü" / "a.txt", "lower")
+        _write(root / "run.cmd", "@echo off\n")
+        _write(root / ".cmd", "dotfile named like an executable suffix\n")
+        _write(root / "locked" / "inner.txt", "inside a read-only dir")
+        _write(root / "locked.txt", "read-only file")
+        os.chmod(root / "locked.txt", stat.S_IREAD)
+        (root / "empty").mkdir()
+        _write(root / "embedded_pg" / "postmaster.opts", "excluded, no PG_VERSION")
+        if bdir_rel is not None:
+            # A backups dir the run does not write to is still excluded by name.
+            _write(root / "backups" / "docker-tier.sql.gz", b"not archived")
+        if old_backups:
+            bdir = arm.home / (bdir_rel or f"{root_rel}/backups")
+            for name, mtime in [
+                ("pseudolife_lite_memory-20200101-000000.sql.gz", OLD),
+                ("pseudolife_lite_memory-20200102-000000.sql.gz", OLD),
+                ("pseudolife_lite_state-20200101-000000.tar.gz", OLD),
+                ("pseudolife_lite_state-20200102-000000.tar.gz", OLD),
+                ("pseudolife_lite_state-29990101-000000.tar.gz", time.time()),
+                ("pseudolife_memory-20200101-000000.sql.gz", OLD),  # Docker tier: never ours
+                ("notes.txt", OLD),
+            ]:
+                _write(bdir / name, b"old", mtime)
+        for directory in [root / "memory_state", root / "chromadb", root / "notes-ü",
+                          root / "empty", root / "embedded_pg", root / "backups",
+                          root / "locked"]:
+            if directory.exists():
+                os.utime(directory, (FIXED, FIXED))
+        os.chmod(root / "locked", stat.S_IREAD | stat.S_IEXEC)
+    return setup
+
+
+def working_directory(setup, relative):
+    def prepare(arm):
+        setup(arm)
+        arm.cwd = arm.home / relative
+        arm.cwd.mkdir(parents=True, exist_ok=True)
+    return prepare
+
+
+def with_pg0(inner=None):
+    """Hard-link the real bundled pg_dump into the arm home's ~/.pg0."""
+    def setup(arm):
+        if inner:
+            inner(arm)
+        source = _pg0_version() / "bin"
+        target = arm.home / ".pg0" / "installation" / _pg0_version().name / "bin"
+        target.mkdir(parents=True)
+        for item in source.iterdir():
+            if item.is_file():
+                try:
+                    os.link(item, target / item.name)
+                except OSError:  # another filesystem (Linux /tmp)
+                    shutil.copy2(item, target / item.name)
+    return setup
+
+
+def with_symlink(arm):
+    tree()(arm)
+    link = arm.home / "bank" / "link"
+    os.symlink("config.yaml", link)
+    os.utime(link, (FIXED, FIXED), follow_symlinks=False)
+
+
+def discovery_denied(*, metadata_error: bool):
+    def setup(arm):
+        tree(old_backups=False)(arm)
+        installation = arm.home / ".pg0" / "installation"
+        installation.mkdir(parents=True)
+        os.chmod(installation.parent if metadata_error else installation, 0)
+    return setup
+
+
+def restore_pg0_permissions(arm, _obs):
+    for path in [arm.home / ".pg0", arm.home / ".pg0" / "installation"]:
+        os.chmod(path, 0o700)
+
+
+def drop_pg0(arm, _obs):
+    shutil.rmtree(arm.home / ".pg0", ignore_errors=True)
+
+
+def check_bank(arm, obs):
+    drop_pg0(arm, obs)
+    if _BASELINE is not None and _bank.dump(DB) != _BASELINE:
+        raise RuntimeError(f"{arm.name}: backup changed the source bank")
+    obs["db"] = {"source_unchanged": True}
+
+
+def member_kinds(arm):
+    root = arm.home / "bank"
+    _write(root / "directory" / "regular", b"durable state")
+    os.link(root / "directory" / "regular", root / "hardlink")
+    if not WINDOWS:
+        import socket
+        os.symlink("directory/regular", root / "symlink")
+        os.symlink("absent", root / "dangling")
+        os.mkfifo(root / "fifo", 0o640)
+        sock = socket.socket(socket.AF_UNIX)
+        sock.bind(str(root / "socket"))
+        sock.close()
+        for name in [b"sort-\xff", "sort-🚀".encode("utf-8")]:
+            _write(root / os.fsdecode(name), name)
+        os.symlink(b"sort-\xff", os.fsencode(root) + b"/raw-target")
+        for path in root.iterdir():
+            os.utime(path, (FIXED, FIXED), follow_symlinks=False)
+    os.utime(root / "directory", (FIXED, FIXED))
+
+
+def raw_rotation(arm):
+    tree()(arm)
+    backups = arm.home / "bank" / "backups"
+    for name in ["pseudolife_lite_state-old-注意.tar.gz".encode("utf-8"), b"foreign-\xff.txt"]:
+        path = backups / os.fsdecode(name)
+        _write(path, b"old file")
+        os.utime(path, (FIXED, FIXED))
+
+
+def restore_members(arm, obs):
+    """Extract each arm's actual archive with Python and compare the restored
+    tree with its source, including hard-link identity and raw link targets."""
+    archives = list((arm.home / "bank" / "backups").glob("*.tar.gz"))
+    if not archives:
+        obs["restore"] = {"archive_missing": True}
+        return
+    restored = arm.home / "restored"
+    restored.mkdir()
+    with tarfile.open(archives[0]) as archive:
+        archive.extractall(restored, filter="fully_trusted")
+    source = arm.home / "bank"
+    mismatches = []
+    for relative in ["directory", "directory/regular", "hardlink"] + ([] if WINDOWS else [
+            "symlink", "dangling", "fifo", "raw-target", os.fsdecode(b"sort-\xff"), "sort-🚀"]):
+        before, after = source / relative, restored / relative
+        if not after.exists() and not after.is_symlink():
+            mismatches.append(relative + ":missing")
+            continue
+        a, b = os.lstat(before), os.lstat(after)
+        if (stat.S_IFMT(a.st_mode), stat.S_IMODE(a.st_mode), a.st_uid, a.st_gid) != (
+                stat.S_IFMT(b.st_mode), stat.S_IMODE(b.st_mode), b.st_uid, b.st_gid):
+            mismatches.append(relative + ":metadata")
+        if stat.S_ISREG(a.st_mode) and before.read_bytes() != after.read_bytes():
+            mismatches.append(relative + ":content")
+        if stat.S_ISLNK(a.st_mode) and os.readlink(before) != os.readlink(after):
+            mismatches.append(relative + ":link-target")
+    obs["restore"] = {"mismatches": mismatches, "socket_omitted": not (restored / "socket").exists(),
+                      "hardlink_same_inode": (restored / "hardlink").exists() and (restored / "directory/regular").exists() and os.path.samefile(restored / "hardlink", restored / "directory/regular")}
+
+
+# ---------------------------------------------------------------- rules
+
+_TS = re.compile(rb"(pseudolife_lite_(?:memory|state)-)([0-9]{8}-[0-9]{6})(\.)")
+
+
+def _in_window(stamp: bytes, window: list[float]) -> bool:
+    wanted = stamp.decode()
+    return any(time.strftime("%Y%m%d-%H%M%S", time.localtime(t)) == wanted
+               for t in range(int(window[0]) - 1, int(window[1]) + 2))
+
+
+def _stamp(data: bytes, window: list[float]) -> bytes:
+    return _TS.sub(lambda m: m.group(1) + b"<ts>" + m.group(3)
+                   if _in_window(m.group(2), window) else m.group(0), data)
+
+
+def _owner_name(identifier: int, actual: str, *, group: bool) -> str:
+    # Names depend on the host's NSS database; validate them before replacing
+    # them with a portable token in observations and recorded goldens.
+    import grp
+    import pwd
+    try:
+        expected = grp.getgrgid(identifier).gr_name if group else pwd.getpwuid(identifier).pw_name
+    except KeyError:
+        expected = ""
+    if actual != expected:
+        raise ValueError(f"tar owner name does not match NSS for numeric id {identifier}")
+    return "<gid-name>" if group and expected else "<uid-name>" if expected else ""
+
+
+def _tar_view(data: bytes) -> bytes:
+    members = []
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        for member in tar.getmembers():
+            content = tar.extractfile(member).read() if member.isreg() else b""
+            members.append({
+                "name": member.name, "type": member.type.decode(), "mode": oct(member.mode),
+                "uid": member.uid, "gid": member.gid,
+                "uname": member.uname if WINDOWS else _owner_name(member.uid, member.uname, group=False),
+                "gname": member.gname if WINDOWS else _owner_name(member.gid, member.gname, group=True),
+                "mtime": repr(member.mtime), "size": member.size,
+                "linkname": member.linkname, "devmajor": member.devmajor, "devminor": member.devminor, "sha256": hashlib.sha256(content).hexdigest(),
+            })
+    return json.dumps(members, indent=1, ensure_ascii=True).encode()
+
+
+_RESTRICT = re.compile(rb"^\\restrict ([A-Za-z0-9]+)(?=\r?$)", re.M)
+
+
+def _dump_view(data: bytes) -> bytes:
+    """Decompressed SQL; the per-run key becomes <key> only when exactly one
+    \\restrict and one \\unrestrict carry the same key."""
+    text = gzip.decompress(data)
+    keys = _RESTRICT.findall(text)
+    if len(keys) == 1:
+        key = keys[0]
+        pair = (b"\\restrict " + key, b"\\unrestrict " + key)
+        if all(text.count(token) == 1 for token in pair):
+            text = text.replace(pair[0], b"\\restrict <key>").replace(
+                pair[1], b"\\unrestrict <key>")
+    return text
+
+
+@normalize.rule("backup-files")
+def backup_files(obs: dict) -> None:
+    """Timestamps in the new file names (validated against the arm's own
+    window), archives read back by member, dumps decompressed. Two files that
+    normalize to one name stay distinct, so an extra file still shows."""
+    window = obs["window"]
+    for field in ("stdout", "stderr"):
+        obs[field] = base64.b64encode(
+            _stamp(base64.b64decode(obs[field]), window)).decode()
+    # The same timestamped path keys both the content and permission snapshots.
+    for field in ("files", "modes"):
+        if field not in obs:
+            continue
+        values = {}
+        for rel, value in obs[field].items():
+            new_rel = _stamp(rel.encode("utf-8", "surrogatepass"), window).decode("utf-8", "surrogatepass")
+            if field == "files" and value.startswith("file:") and new_rel != rel:
+                data = base64.b64decode(value[5:])
+                view = _tar_view(data) if rel.endswith(".tar.gz") else _dump_view(data)
+                value = "file:" + base64.b64encode(view).decode()
+            while new_rel in values:
+                new_rel += " <normalized-collision>"
+            values[new_rel] = value
+        obs[field] = values
+
+
+_SHUTDOWN_FLUSH = re.compile(rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'"
+                             rb"[^\r\n]*\r?\n(?:BrokenPipeError|OSError): [^\r\n]*\r?\n\Z")
+
+
+@normalize.rule("backup-stdout-closed")
+def backup_stdout_closed(obs: dict) -> None:
+    """Declared substitution ``backup-stdout-closed``: CPython reports its
+    failed shutdown flush of a closed stdout with an ignored-exception trailer
+    and exit 120; the native leaf exits 120 without the interpreter trailer.
+    Only that exact trailer with exit 120 is removed."""
+    stderr = base64.b64decode(obs["stderr"])
+    if obs["exit"] == 120 and _SHUTDOWN_FLUSH.search(stderr):
+        obs["stderr"] = base64.b64encode(_SHUTDOWN_FLUSH.sub(b"", stderr)).decode()
+
+
+# Python's unhandled discovery OSError includes interpreter frames. Keep the
+# final exception line exact; discard only a complete preceding frame block.
+_DISCOVERY_TRACEBACK = re.compile(
+    rb'\ATraceback \(most recent call last\):\r?\n'
+    rb'(?:  File "[^\r\n]+", line [0-9]+, in [^\r\n]+\r?\n'
+    rb'(?:    [^\r\n]*\r?\n)*)+'
+    rb'(?P<error>(?:BlockingIOError|ChildProcessError|BrokenPipeError|ConnectionAbortedError|'
+    rb'ConnectionRefusedError|ConnectionResetError|FileExistsError|FileNotFoundError|InterruptedError|'
+    rb'IsADirectoryError|NotADirectoryError|PermissionError|ProcessLookupError|TimeoutError|OSError): '
+    rb'\[(?:Errno|WinError) [0-9]+\] [^\r\n]+\r?\n)\Z')
+
+
+@normalize.rule("backup-discovery-traceback")
+def discovery_traceback(obs: dict) -> None:
+    if obs["exit"] == 1:
+        stderr = base64.b64decode(obs["stderr"])
+        match = _DISCOVERY_TRACEBACK.fullmatch(stderr)
+        if match:
+            obs["stderr"] = base64.b64encode(match["error"]).decode()
+
+
+# ---------------------------------------------------------------- cases
+
+RULES = ("backup-files",)
+
+
+@normalize.rule("backup-restoration")
+def backup_restoration(obs: dict) -> None:
+    """Require the restoration observation even when both arms omitted it."""
+    if "restore" not in obs:
+        obs.setdefault("vacuous", []).append("backup restoration observation missing")
+
+
+def _have_pg0() -> bool:
+    return PG0.is_dir() and any((p / "bin").is_dir() for p in PG0.iterdir())
+
+
+def cases() -> list[Case]:
+    # DSN cases need the bundled pg_dump this host's home carries.
+    have_pg0 = _have_pg0()
+    dsn = _source() if have_pg0 else "postgresql://unused"
+    absent = _bank.url(ABSENT_DB) if have_pg0 else "postgresql://unused"
+    pg0_bin = str(_pg0_version() / "bin") if have_pg0 else ""
+    dsn_platforms = ("windows", "linux") if have_pg0 else ()
+    sep = "\\" if WINDOWS else "/"
+    data = ["--data-dir", f"{{HOME}}{sep}bank"]
+    no_pg_dump = {"PATH": f"{{HOME}}{sep}no-bin"}
+    return [
+        Case("help", ["backup", "--help"]),
+        *[Case(f"help-stdout-closed-{flag.lstrip('-')}", ["backup", flag],
+               stdout_closed=True, rules=("python-stdout-closed-trailer",))
+          for flag in ["--help", "-h"]],
+        *[Case(f"help-columns-{width}", ["backup", "-h"], env={"COLUMNS": str(width)})
+          for width in (20, 40, 60, 100, 120, "1_00", "１００", "999999999999999999999999999999")],
+        Case("help-columns-malformed-multiple-signs", ["backup", "--help"],
+             env={"COLUMNS": "++" + "9" * 4301}),
+        Case("file-mode-argparse-equals-repeat-abbrev",
+             ["backup", "--data-dir=absent", f"--data={{HOME}}{sep}bank", "--keep=+1e1", "--keep-days=.5"],
+             setup=tree(), rules=RULES),
+        Case("file-mode-parent-paths",
+             ["backup", "--data-dir", f"{{HOME}}{sep}bank{sep}notes-ü{sep}..",
+              "--out", f"{{HOME}}{sep}bank{sep}empty{sep}..{sep}backups"],
+             setup=tree(), rules=RULES),
+        Case("file-mode-pathlib-spelling",
+             ["backup", "--data-dir", f"{{HOME}}{sep}bank{sep}.{sep}", "--keep-days", "1_0"],
+             setup=tree(), rules=RULES),
+        *[Case(f"argparse-{label}", ["backup", *argv]) for label, argv in [
+            ("missing-value", ["--out"]), ("unknown", ["--unknown"]),
+            ("option-space-value", ["--keep-days", "--out=two words"]),
+            ("invalid-float", ["--keep=oops"]), ("help-inline-error", ["--help=value"]),
+            ("help-after-unknown", ["--unknown", "-h"]),
+            ("help-short-tail", ["-hx"]), ("help-short-cluster", ["-hh"]),
+            ("help-short-cluster-tail", ["-hhx"]), ("help-short-equals", ["-h=hh"]),
+            ("help-short-unknown-equals", ["-hx=foo"]),
+            ("help-short-cluster-equals", ["-hh=foo"]),
+            ("help-short-option-tail", ["-h-h"]),
+            ("negative-exponent-value", ["--keep-days", "-1e3"]),
+        ]],
+        *[Case(f"file-mode-keep-{label}", ["backup", *data, f"--keep-days={value}"],
+               setup=tree(), rules=RULES) for label, value in [
+            ("negative", "-1"), ("nan", "nan"),
+            ("infinity", "Infinity"), ("unicode", "١_٠.٥"),
+        ]],
+        Case("argparse-keep-zero", ["backup", "--keep-days=0", "--help"]),
+        # Windows clock ticks make independently created archives at zero
+        # retention nondeterministic. The named CI exception records the
+        # reference measurement; native boundary/API proofs cover retention.
+        Case("file-mode-keep-zero", ["backup", *data, "--keep-days=0"],
+             setup=tree(), platforms=("linux",), rules=RULES),
+        *[Case(f"argparse-negative-{label}",
+               ["backup", "--data-dir", "absent-fixture", "--keep-days", value])
+          for label, value in [("newline", "-1\n"), ("unicode-newline", "-١\n"),
+                               ("newer-unicode", "-\U0001e4f0")]],
+        Case("member-kinds-roundtrip", ["backup", *data], setup=member_kinds,
+             after=restore_members, rules=RULES + ("backup-restoration",)),
+        Case("raw-rotation-names", ["backup", *data], setup=raw_rotation,
+             platforms=("linux",), rules=RULES),
+        Case("missing-absolute", ["backup", "--data-dir", f"{{HOME}}{sep}absent-µ"]),
+        Case("missing-relative", ["backup", "--data-dir", "absent-µ"]),
+        Case("file-mode", ["backup", *data], setup=tree(), rules=RULES),
+        Case("file-mode-env-data-dir", ["backup"],
+             env={"PSEUDOLIFE_MCP_DATA_DIR": f"{{HOME}}{sep}bank"},
+             setup=tree(), rules=RULES),
+        Case("file-mode-cwd-data", ["backup"], setup=tree("cwd/data"), rules=RULES),
+        Case("file-mode-data-dir-dot", ["backup", "--data-dir", "."],
+             setup=working_directory(tree(), "bank"), rules=RULES),
+        Case("file-mode-out-dot", ["backup", *data, "--out", "."],
+             setup=working_directory(tree(bdir_rel="elsewhere"), "elsewhere"), rules=RULES),
+        Case("file-mode-out-absolute-keep-half-day",
+             ["backup", *data, "--out", f"{{HOME}}{sep}elsewhere", "--keep-days", "0.5"],
+             setup=tree(bdir_rel="elsewhere"), rules=RULES),
+        Case("file-mode-out-relative", ["backup", *data, "--out", "bk"],
+             setup=tree(bdir_rel="cwd/bk"), rules=RULES),
+        Case("file-mode-out-direct-child",
+             ["backup", *data, "--out", f"{{HOME}}{sep}bank{sep}mybk"],
+             setup=tree(bdir_rel="bank/mybk"), rules=RULES),
+        Case("file-mode-keep-one-minute", ["backup", *data, "--keep-days", "0.0007"],
+             setup=tree(), rules=RULES),
+        Case("file-mode-empty-data-dir", ["backup", *data],
+             setup=lambda arm: (arm.home / "bank").mkdir(), rules=RULES),
+        Case("file-mode-stdout-closed", ["backup", *data], setup=tree(), stdout_closed=True,
+             rules=RULES + ("backup-stdout-closed",)),
+        *[Case(f"discovery-permission-{kind}", ["backup", *data],
+               env={"PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://unused", **no_pg_dump},
+               setup=discovery_denied(metadata_error=kind == "metadata"),
+               after=restore_pg0_permissions, platforms=("linux",), programs=("pg_dump",),
+               rules=("backup-discovery-traceback",))
+          for kind in ("metadata", "read-dir")],
+        # DSN cases look pg_dump up (the home's ~/.pg0 bundle, then PATH):
+        # core's preflight proves PATH finds none outside the home, except
+        # in dsn-path, which runs this host's bundled pg_dump from its PATH.
+        Case("dsn-pg0-bundle", ["backup", *data],
+             env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn, **no_pg_dump},
+             setup=with_pg0(tree()), after=check_bank, platforms=dsn_platforms, rules=RULES, timeout=120,
+             programs=("pg_dump",)),
+        Case("dsn-path", ["backup", *data, "--keep-days", "10"],
+             env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn,
+                  "PATH": pg0_bin + os.pathsep + f"{{HOME}}{sep}no-bin"},
+             setup=tree(), after=check_bank, platforms=dsn_platforms, rules=RULES, timeout=120,
+             real_programs=("pg_dump",)),
+        Case("dsn-pg-dump-missing", ["backup", *data],
+             env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn, **no_pg_dump},
+             setup=tree(), platforms=dsn_platforms, rules=RULES, programs=("pg_dump",)),
+        Case("dsn-pg-dump-fails", ["backup", *data],
+             env={"PSEUDOLIFE_MCP_DATABASE_URL": absent, **no_pg_dump},
+             setup=with_pg0(tree()), after=drop_pg0, platforms=dsn_platforms, rules=RULES, timeout=60,
+             programs=("pg_dump",)),
+        Case("posix-symlink-member", ["backup", *data], setup=with_symlink,
+             platforms=("linux",), rules=RULES),
+    ]
+
+
+B = "shim/src/cli/backup/"
+MUTANTS = [
+    Mutant("backup-archives-backups-dir", "backup", B + "archive.rs",
+           'const EXCLUDE: [&str; 2] = ["embedded_pg", "backups"];',
+           'const EXCLUDE: [&str; 2] = ["embedded_pg", "embedded_pg"];',
+           ("file-mode", "file-mode-out-absolute-keep-half-day")),
+    Mutant("backup-rotates-dumps-in-file-mode", "backup", B + "mod.rs",
+           "    if include_dumps {\n        patterns.insert(0, (DUMP_PREFIX, \".sql.gz\"));",
+           "    if true {\n        patterns.insert(0, (DUMP_PREFIX, \".sql.gz\"));", ("file-mode",)),
+    Mutant("backup-rotation-order", "backup", B + "mod.rs",
+           "names.sort_by_key(|name| path_sort_key(name));",
+           "names.sort_by_key(|name| std::cmp::Reverse(path_sort_key(name)));", ("file-mode",)),
+    Mutant("backup-nested-member-order", "backup", B + "archive.rs",
+           "name_sort_key(name, top && cfg!(windows))",
+           "name_sort_key(name, cfg!(windows) || !top)", ("file-mode",)),
+    Mutant("backup-hardlink-identity", "backup", B + "archive.rs",
+           "kind = EntryType::Link;", "kind = EntryType::Regular;", ("member-kinds-roundtrip",)),
+    Mutant("backup-raw-member-name", "backup", B + "archive.rs",
+           "let mut name = arcname.to_vec();",
+           "let mut name = String::from_utf8_lossy(arcname).as_bytes().to_vec();",
+           ("member-kinds-roundtrip",), platforms=("linux",)),
+    Mutant("backup-omits-fifo", "backup", B + "archive.rs",
+           "kind = if file_type.is_fifo() {\n                EntryType::Fifo",
+           "kind = if file_type.is_fifo() {\n                return Ok(())",
+           ("member-kinds-roundtrip",), platforms=("linux",)),
+    Mutant("backup-dump-keeps-owner", "backup", B + "dump.rs",
+           '.args(["--no-owner", "--no-acl", "--dbname", dsn])',
+           '.args(["--no-acl", "--dbname", dsn])', ("dsn-path",)),
+    Mutant("backup-skipped-wording", "backup", B + "mod.rs",
+           "file-mode state archived only", "file mode state archived only", ("file-mode",)),
+    Mutant("backup-pg-dump-failure-strip", "backup", B + "dump.rs",
+           'format!("pg_dump failed: {}", python_strip(&text))',
+           'format!("pg_dump failed: {}", text)', ("dsn-pg-dump-fails",)),
+    Mutant("backup-stdout-failure-exit", "backup", B + "mod.rs",
+           "    } else {\n        120\n    })",
+           "    } else {\n        0\n    })",
+           ("file-mode-stdout-closed",)),
+    Mutant("backup-argparse-repeat-first-wins", "backup", B + "args.rs",
+           '"--data-dir" => args.data_dir = Some(pathlib(Path::new(value))),',
+           '"--data-dir" => { if args.data_dir.is_none() { args.data_dir = Some(pathlib(Path::new(value))); } },',
+           ("file-mode-argparse-equals-repeat-abbrev",)),
+    Mutant("backup-help-ignores-columns", "backup", B + "args.rs",
+           'pub(super) fn width() -> usize {\n    std::env::var("COLUMNS")',
+           'pub(super) fn width() -> usize {\n    std::env::var("IGNORED_COLUMNS")',
+           ("help-columns-40",)),
+    Mutant("backup-help-closed-exit-1", "backup", B + "mod.rs",
+           'return Some(if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                120',
+           'return Some(if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                1',
+           ("help-stdout-closed-help", "help-stdout-closed-h")),
+    Mutant("backup-dot-join-keeps-prefix", "backup", B + "args.rs",
+           '    pathlib(&base.join(name))', '    base.join(name)',
+           ("file-mode-data-dir-dot", "file-mode-out-dot")),
+    Mutant("backup-discovery-generic-errno-class", "backup", B + "dump.rs",
+           '        if number == code {\n            return class;',
+           '        if number == code {\n            let _ = class;\n            return "OSError";',
+           ("discovery-permission-metadata", "discovery-permission-read-dir"),
+           platforms=("linux",)),
+    Mutant("backup-owner-name-windows", "backup", B + "archive.rs",
+           '        let _ = (uid, gid);\n        Ok((Vec::new(), Vec::new()))',
+           '        let _ = (uid, gid);\n        Ok((b"unexpected-owner".to_vec(), Vec::new()))',
+           ("file-mode",), platforms=("windows",)),
+]
+if WINDOWS:
+    MUTANTS += [
+        Mutant("backup-member-mode-windows", "backup", B + "archive.rs",
+               "let mut mode = if readonly { 0o444 } else { 0o666 };",
+               "let mut mode = if readonly { 0o444 } else { 0o644 };", ("file-mode",)),
+        Mutant("backup-dotfile-suffix-windows", "backup", B + "archive.rs",
+               "let text = path.to_string_lossy();",
+               "let text = path.extension().map(|ext| format!(\".{}\", ext.to_string_lossy()))"
+               ".unwrap_or_default();",
+               ("file-mode",)),
+        Mutant("backup-top-order-windows", "backup", B + "archive.rs",
+               "name_sort_key(name, top && cfg!(windows))",
+               "name_sort_key(name, false)", ("file-mode",)),
+    ]
+else:
+    MUTANTS += [
+        Mutant("backup-member-mode-posix", "backup", B + "archive.rs",
+               "meta.permissions().mode() & 0o7777", "meta.permissions().mode() & 0o7700",
+               ("file-mode",)),
+    ]

@@ -8,15 +8,61 @@ import fnmatch
 import json
 import math
 import os
+import platform
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 from typing import Any
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from evals.rust_port.processes import owned_process
+
+# Deliberate application and MCP SDK headers. Content-Length is retained when
+# both peers use fixed framing; a fixed/chunked pair is compared by body instead.
+HTTP_HEADER_ALLOWLIST = ("content-type", "content-length", "cache-control", "location",
+    "www-authenticate", "allow", "retry-after", "mcp-protocol-version", "mcp-session-id", "x-pl-board")
+NORMALIZATION_RULES = ("source-text-lf", "session-id-bijection", "epoch-type-unit-magnitude",
+                       "raw-mcp-retained-not-compared", "content-length-fixed-framing", "content-length-authorized-wire-spans")
+
+
+class DuplicateJSONKey(ValueError):
+    """A JSON object repeated a member name before parsing could discard it."""
+
+
+def observe_boundary(operation, client=None):
+    try:
+        return operation()
+    except (OSError, subprocess.TimeoutExpired, ValueError) as error:
+        result = {"boundary_error": type(error).__name__}
+        raw = getattr(client, "last_wire_body", None)
+        if raw is not None:
+            result["boundary_raw_b64"] = base64.b64encode(raw).decode("ascii")
+        return result
+
+
+def strict_json_loads(raw):
+    def object_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise DuplicateJSONKey()
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=object_pairs)
+
+
+def capture_platform():
+    return {"os": platform.system(), "architecture": platform.machine()}
+
+
+def require_capture_platform(receipt):
+    captured = receipt.get("capture_platform")
+    if not isinstance(captured, dict) or captured != capture_platform():
+        raise ValueError("capture platform missing or differs from replay platform")
+    return captured
 
 
 @dataclass(frozen=True)
@@ -25,10 +71,11 @@ class Policy:
     abs_tol: float = 1e-6
     rel_tol: float = 0.0
     score_paths: tuple[str, ...] = ()
-    ignored_values: tuple[str, ...] = ()
+    ignored_values: tuple[str, ...] = ("/raw_mcp_body_b64", "/content_length/raw", "/content_length/adjustment")
     json_text_paths: tuple[str, ...] = ()
     ranking_paths: tuple[str, ...] = ()
     ranking_key: str = "id"
+    source_text_paths: tuple[str, ...] = ("/body/result/tools/*/description",)
 
     def __post_init__(self):
         for value in (self.abs_tol, self.rel_tol):
@@ -53,6 +100,29 @@ def compare(expected: Any, actual: Any, policy: Policy, path="") -> list[dict]:
     def error(reason):
         return [{"path": path or "/", "reason": reason}]
 
+    if not path and isinstance(expected, dict) and isinstance(actual, dict) and \
+            {expected.get("framing"), actual.get("framing")} == {"fixed", "chunked"}:
+        expected, actual = dict(expected), dict(actual)
+        for value in (expected, actual):
+            value["headers"] = {k: v for k, v in value["headers"].items() if k != "content-length"}
+            value.pop("content_length", None)
+            value["framing"] = "<fixed-or-chunked>"
+
+    if isinstance(actual, dict) and "boundary_error" in actual:
+        return error("duplicate_json_key" if actual["boundary_error"] == "DuplicateJSONKey" else "boundary_error")
+    if path.endswith("/isError") and expected is True and actual is False:
+        return error("tool_error_envelope")
+    if _matches(path, policy.source_text_paths) and isinstance(expected, str) and isinstance(actual, str):
+        expected, actual = (v.replace("\r\n", "\n").replace("\r", "\n") for v in (expected, actual))
+    if isinstance(expected, str) and isinstance(actual, str) and expected != actual and \
+            ":epoch-unit=" in expected and ":epoch-unit=" in actual:
+        if expected.split(":epoch-unit=")[0].rsplit(":", 1)[-1] != actual.split(":epoch-unit=")[0].rsplit(":", 1)[-1]:
+            return error("type")
+        if expected.split(":epoch-unit=")[1].split(":")[0] != actual.split(":epoch-unit=")[1].split(":")[0]:
+            return error("epoch_unit")
+        if expected.split(":magnitude=")[-1] != actual.split(":magnitude=")[-1]:
+            return error("epoch_magnitude")
+
     if any(type(value) is float and not math.isfinite(value) for value in (expected, actual)):
         return error("nonfinite_number")
     if _matches(path, policy.ignored_values):
@@ -64,7 +134,9 @@ def compare(expected: Any, actual: Any, policy: Policy, path="") -> list[dict]:
         if not isinstance(expected, str) or not isinstance(actual, str):
             return error("json_text_type")
         try:
-            expected, actual = json.loads(expected), json.loads(actual)
+            expected, actual = strict_json_loads(expected), strict_json_loads(actual)
+        except DuplicateJSONKey:
+            return error("duplicate_json_key")
         except (ValueError, TypeError):
             return error("invalid_embedded_json")
     numeric = lambda v: type(v) in (int, float)
@@ -134,9 +206,13 @@ def _ordinary_cli_exit(value):
     return type(value) is int and 0 <= value <= 255
 
 
-def run_cli(prefix, argv, *, cwd: Path, env: dict, timeout: float) -> dict:
+def run_cli(prefix, argv, *, cwd: Path, env: dict, timeout: float, stdin: bytes = b"",
+            process_timing: dict | None = None) -> dict:
     with owned_process([*prefix, *argv], cwd=cwd, env=env, stdin=subprocess.PIPE) as proc:
-        stdout, stderr = proc.communicate(input=b"", timeout=timeout)
+        stdout, stderr = proc.communicate(input=stdin, timeout=timeout)
+        if process_timing is not None:
+            # Communicate return bounds process completion before cleanup/capture.
+            process_timing["communicate_completed_monotonic"] = time.monotonic()
     if not _ordinary_cli_exit(proc.returncode):
         raise AbnormalTermination()
     return {"exit_code": proc.returncode,
@@ -160,14 +236,16 @@ def _base_url(url: str) -> str:
 
 class HttpClient:
     """An independent session per record/replay pass, with no proxy or redirects."""
-    def __init__(self, base_url, timeout=10):
+    def __init__(self, base_url, timeout=10, *, retain_wire=False):
         self.base_url = _base_url(base_url)
         self.timeout = timeout
         self.session = None
         self.protocol = None
+        self.retain_wire = retain_wire
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
     def execute(self, request: dict, surface: str, *, runtime_headers=None) -> dict:
+        self.last_wire_body = None
         path = request["path"]
         if not path.startswith("/") or path.startswith("//") or urllib.parse.urlsplit(path).netloc:
             raise ValueError("request path must be relative to the disposable origin")
@@ -195,13 +273,19 @@ class HttpClient:
             response = exc
         with response:
             raw = response.read()
+            self.last_wire_body = raw
             ctype = response.headers.get("Content-Type", "")
             if surface == "mcp":
-                self.session = response.headers.get("Mcp-Session-Id", self.session)
-            selected = {key: response.headers[key] for key in ("content-type", "cache-control", "location")
+                observed_session = response.headers.get("Mcp-Session-Id", self.session)
+                if self.session is not None and observed_session != self.session:
+                    raise ValueError("MCP session identity changed")
+                self.session = observed_session
+            selected = {key: response.headers[key] for key in HTTP_HEADER_ALLOWLIST
                         if key in response.headers}
+            if "mcp-session-id" in selected:
+                selected["mcp-session-id"] = "<mcp-session>"
             if "application/json" in ctype and raw:
-                body = json.loads(raw)
+                body = strict_json_loads(raw)
             elif "text/event-stream" in ctype:
                 # Parse events in arrival order, retaining every data envelope.
                 events, chunks = [], []
@@ -209,10 +293,10 @@ class HttpClient:
                     if line.startswith("data:"):
                         chunks.append(line[5:].lstrip(" "))
                     elif not line and chunks:
-                        events.append(json.loads("\n".join(chunks)))
+                        events.append(strict_json_loads("\n".join(chunks)))
                         chunks = []
                 if chunks:
-                    events.append(json.loads("\n".join(chunks)))
+                    events.append(strict_json_loads("\n".join(chunks)))
                 body = events[0] if len(events) == 1 else events
             elif not raw:
                 body = None
@@ -222,7 +306,14 @@ class HttpClient:
                 result = body.get("result", {})
                 if isinstance(result, dict) and "protocolVersion" in result:
                     self.protocol = result["protocolVersion"]
-            return {"status": response.status, "headers": selected, "body": body}
+            framing = ("chunked" if "chunked" in response.headers.get("Transfer-Encoding", "").lower()
+                       else "fixed" if "Content-Length" in response.headers else "connection-close")
+            observed = {"status": response.status, "headers": selected, "body": body, "framing": framing}
+            if self.retain_wire:
+                observed["_wire_body"] = raw
+            if surface == "mcp":
+                observed["raw_mcp_body_b64"] = base64.b64encode(raw).decode("ascii")
+            return observed
 
 
 def execute(cases, *, cli_prefix, base_url, cwd, home, timeout=10):
@@ -231,17 +322,14 @@ def execute(cases, *, cli_prefix, base_url, cwd, home, timeout=10):
     records = []
     for case in cases:
         surface, request = case["surface"], case["request"]
-        try:
+        def operation():
             if surface == "cli":
-                response = run_cli(cli_prefix, request["argv"], cwd=cwd, env=env, timeout=timeout)
+                return run_cli(cli_prefix, request["argv"], cwd=cwd, env=env, timeout=timeout)
             elif surface in {"http", "mcp"} and client:
-                response = client.execute(request, surface)
+                return client.execute(request, surface)
             else:
                 raise ValueError("surface requires an explicit configured target")
-        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
-            # Keep negative evidence without recording exception text, which may
-            # carry filesystem paths, credentials or private response values.
-            response = {"boundary_error": type(exc).__name__}
+        response = observe_boundary(operation, client if surface in {"http", "mcp"} else None)
         records.append({**case, "response": response})
     return records
 
@@ -252,17 +340,15 @@ def replay(transcript, *, cli_prefix, base_url, cwd, home, timeout=10):
             r["surface"] == "cli" and not _ordinary_cli_exit(r["response"].get("exit_code")))
             for r in records):
         raise ValueError("oracle transcript must contain successful boundary observations")
+    require_capture_platform(transcript)
     actual = execute([{k: v for k, v in r.items() if k != "response"} for r in records],
                      cli_prefix=cli_prefix, base_url=base_url, cwd=cwd, home=home, timeout=timeout)
     differences = []
     for oracle, candidate in zip(records, actual):
-        if "boundary_error" in candidate["response"]:
-            differences.append({"case": oracle["id"], "path": "/", "reason": "boundary_error"})
-            continue
         policy = Policy(**oracle.get("policy", {}))
         for item in compare(oracle["response"], candidate["response"], policy):
             differences.append({"case": oracle["id"], **item})
-    return {"schema": 1, "cases": len(records), "differences": differences,
+    return {"schema": 1, "capture_platform": capture_platform(), "cases": len(records), "differences": differences,
             "passed": not differences}
 
 
@@ -291,6 +377,7 @@ def main():
                        cwd=Path.cwd(), home=Path(directory), timeout=args.timeout)
         if args.mode == "record":
             result = {"schema": 1, "fixture": payload.get("fixture"),
+                      "capture_platform": capture_platform(),
                       "records": execute(payload["cases"], **options)}
             result["passed"] = not any("boundary_error" in r["response"] for r in result["records"])
         else:

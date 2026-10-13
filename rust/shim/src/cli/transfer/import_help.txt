@@ -1,0 +1,13 @@
+usage: pseudolife-mcp import [-h] [--force] [--data-dir DATA_DIR] archive
+
+Load a logical export into a fresh, empty bank.
+
+positional arguments:
+  archive              the export .zip
+
+options:
+  -h, --help           show this help message and exit
+  --force              import even while other connections hold the database
+  --data-dir DATA_DIR  bank data dir for the lite tier (default:
+                       PSEUDOLIFE_MCP_DATA_DIR, the lite per-user dir, or
+                       ./data)

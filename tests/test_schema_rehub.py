@@ -9,9 +9,13 @@ import pytest
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 
 from pseudolife_memory.storage.schema import (
-    REHUB_SCHEMA_VERSION,
     SCHEMA_META_VERSION,
-    ensure_schema,
+    ensure_schema as ensure_canonical_schema,
+)
+from pseudolife_memory.storage.re_evidence_schema import (
+    REHUB_SCHEMA_VERSION,
+    ensure_rehub_schema,
+    ensure_python_schema as ensure_schema,
 )
 
 
@@ -19,10 +23,43 @@ def test_rehub_schema_has_an_independent_namespaced_version():
     assert REHUB_SCHEMA_VERSION == "v34-rehub"
 
 
-def test_populated_v37_rehub_bank_upgrades_without_changing_proof(pg_conn):
+def test_canonical_schema_does_not_initialize_the_python_extension(pg_conn):
+    pg_conn.execute(
+        "DROP TABLE re_claim_evidence, re_claims, re_evidence_artifacts CASCADE")
+    pg_conn.commit()
+    try:
+        ensure_canonical_schema(pg_conn)
+        assert pg_conn.execute(
+            "SELECT to_regclass('public.re_evidence_artifacts')").fetchone()[0] is None
+    finally:
+        ensure_rehub_schema(pg_conn)
+
+
+def test_python_startup_refusal_rolls_back_canonical_upgrade(pg_conn, pg_url):
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    pg_conn.execute("UPDATE meta SET value = '54'::jsonb WHERE key = 'schema_version'")
+    pg_conn.execute("ALTER TABLE re_evidence_artifacts ALTER COLUMN id DROP DEFAULT")
+    pg_conn.commit()
+    try:
+        with pytest.raises(RuntimeError, match="incompatible.*default"):
+            PostgresStorage(pg_url)
+        assert pg_conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == 54
+    finally:
+        pg_conn.rollback()
+        pg_conn.execute(
+            "ALTER TABLE re_evidence_artifacts ALTER COLUMN id SET DEFAULT "
+            "nextval('re_evidence_artifacts_id_seq'::regclass)")
+        pg_conn.commit()
+        ensure_schema(pg_conn)
+
+
+def test_populated_v37_rehub_bank_upgrades_without_changing_proof(pg_conn, pg_url):
     from psycopg import sql
     from pseudolife_memory.re_evidence import parse_evidence_bytes
     from pseudolife_memory.storage.re_evidence import ReEvidenceArchiveStorage
+    from pseudolife_memory.storage.postgres import PostgresStorage
 
     # Frozen from the fork's pre-upgrade 1d1129d5 schema initializer. Use
     # actual historical DDL, rather than resetting a current bank's number.
@@ -47,16 +84,21 @@ def test_populated_v37_rehub_bank_upgrades_without_changing_proof(pg_conn):
             claim="calls the indexed function", status="verified", evidence_ids=[evidence_id])
         before = store.get_re_evidence_for_export(
             artifact_id=evidence_id, project="upgrade-proof", binary_id="client:test")
+        claims_before = store.query_re_claims(
+            project="upgrade-proof", binary_id="client:test")
         assert pg_conn.execute(
             "SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == 37
 
-        ensure_schema(pg_conn)
+        pg_conn.commit()
+        storage = PostgresStorage(pg_url)
+        storage.close()
         after = store.get_re_evidence_for_export(
             artifact_id=evidence_id, project="upgrade-proof", binary_id="client:test")
         assert after == before
         assert after["raw_bytes"] == raw
         assert after["content_hash"] == artifact["content_hash"]
         claims = store.query_re_claims(project="upgrade-proof", binary_id="client:test")
+        assert claims == claims_before
         assert [(row["id"], row["status"], row["evidence_ids"]) for row in claims] == [
             (claim_id, "verified", [evidence_id])]
         versions = dict(pg_conn.execute(

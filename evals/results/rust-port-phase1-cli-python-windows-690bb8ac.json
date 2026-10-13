@@ -1,0 +1,72 @@
+{
+  "status": "passed",
+  "nodes": [
+    "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
+    "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
+    "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
+    "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+    "tests/test_cli_dispatch.py::test_help_lists_version"
+  ],
+  "exit_code": 0,
+  "outcomes": [
+    {
+      "nodeid": "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tests/test_cli_dispatch.py::test_help_lists_version",
+      "outcome": "passed"
+    }
+  ],
+  "report_complete": true,
+  "unexpected_testcases": 0,
+  "all_nodes_passed": true,
+  "junit_sha256": "d5e3b87047de4f0d961389b76b05f0d12f1050fc75d229b2c441198764d07b69",
+  "candidate_identity": {
+    "executable_basename": "python.exe",
+    "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+    "executable_bytes": 274712,
+    "arguments": [
+      "-m",
+      "pseudolife_memory.cli"
+    ],
+    "public_cli_module": true,
+    "source_head": "690bb8acd855250c29145d623a039ddcd4dee6cb",
+    "source_tree": "9116cc4c98e79e947322fe2772476e255b73f033",
+    "source_binding": "Python CLI at the checked production oracle pin"
+  },
+  "capture_runtime": {
+    "python": "3.11.9",
+    "executable_basename": "python.exe",
+    "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+    "environment_kind": "virtualenv",
+    "distribution_versions": {
+      "pseudolife-mcp": "0.16.1",
+      "mcp": "2.1.1",
+      "httpx": "0.28.1",
+      "torch": "2.10.0+cu126",
+      "psycopg": "3.3.4",
+      "sentence-transformers": "5.3.0"
+    },
+    "package_runtime_version": "0.16.1",
+    "source_origin_matches_selected_root": true,
+    "source_file": "pseudolife_memory/__init__.py",
+    "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c"
+  },
+  "cleanup": {
+    "process_stopped": true,
+    "subtree_stopped": true
+  }
+}

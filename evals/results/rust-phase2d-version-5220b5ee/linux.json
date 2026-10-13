@@ -1,0 +1,184 @@
+{
+  "head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+  "tree": "11e7267bd7a884ace22f57ebf5afd6c77ee25f91",
+  "candidate_sha256": "0b10d4618844c7cb8b7f0194fb8cf89ce5cd0292090cca732c80f2ea72a9b4a5",
+  "candidate_bytes": 16826112,
+  "oracle_pin": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "capture_platform": "linux",
+  "corpus": {
+    "cases": 28,
+    "version_cases": 13,
+    "controls": 112,
+    "all_rejected": true,
+    "missing_console_exact": true,
+    "actual_non_ascii_home": true
+  },
+  "argv_cases": 1,
+  "cli_routes": {
+    "oracle": {
+      "nodes": [
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
+        "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+        "tests/test_cli_dispatch.py::test_help_lists_version",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]",
+        "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit"
+      ],
+      "passed_once_non_skipped": 8,
+      "junit_sha256": "5d02025e76b12eb1388af7f762ef5d2adc942cd9e99df16c7f3dd59dac4c0667"
+    },
+    "candidate": {
+      "nodes": [
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
+        "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+        "tests/test_cli_dispatch.py::test_help_lists_version",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+        "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]",
+        "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit"
+      ],
+      "passed_once_non_skipped": 8,
+      "junit_sha256": "79cc175b9fcd4bef7177f144bc375a4e52327e195d85de2df6c462299b9ae4a3"
+    }
+  },
+  "contracts": {
+    "default": 8,
+    "no_default": 8,
+    "protocol": "serial unchanged tests; parallel ETXTBSY remains unresolved"
+  },
+  "new_harness_tests": 12,
+  "measurements": {
+    "bare": {
+      "metrics": {
+        "python": {
+          "median_ms": 119.715366512537,
+          "p95_ms": 122.5815590005368,
+          "median_floor_ms": 1.634585001738742,
+          "p95_floor_ms": 1.9144859979860485
+        },
+        "rust": {
+          "median_ms": 2.529408026020974,
+          "p95_ms": 3.0267139663919806,
+          "median_floor_ms": 0.14734052820131183,
+          "p95_floor_ms": 1.844132028054446
+        }
+      },
+      "comparison": {
+        "median": {
+          "rust_minus_python_ms": -117.18595848651603,
+          "larger_both_arms_floor_ms": 1.634585001738742,
+          "absolute_delta_exceeds_floor": true
+        },
+        "p95": {
+          "rust_minus_python_ms": -119.55484503414482,
+          "larger_both_arms_floor_ms": 1.9144859979860485,
+          "absolute_delta_exceeds_floor": true
+        }
+      },
+      "warm_starts": 6,
+      "timed_starts": 60,
+      "byte_controls": 2,
+      "samples_per_arm": 30,
+      "alternating_once": true,
+      "raw_status_preserved": "quiet-cli-pair-final",
+      "raw_limitations_preserved": [
+        "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models.",
+        "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
+        "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
+        "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file checks are untimed.",
+        "The historical cold_start_to_exit_ms key measures fresh processes; image warmup is recorded separately in start_protocol.",
+        "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
+        "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
+        "Final samples require the caller's quiet CPU window."
+      ]
+    },
+    "installed": {
+      "metrics": {
+        "python": {
+          "median_ms": 578.6702375044115,
+          "p95_ms": 595.7231399952434,
+          "median_floor_ms": 3.843735990813002,
+          "p95_floor_ms": 5.836864002048969
+        },
+        "rust": {
+          "median_ms": 2.740657510003075,
+          "p95_ms": 3.2223699963651597,
+          "median_floor_ms": 0.07782498141750693,
+          "p95_floor_ms": 0.8596699917688966
+        }
+      },
+      "comparison": {
+        "median": {
+          "rust_minus_python_ms": -575.9295799944084,
+          "larger_both_arms_floor_ms": 3.843735990813002,
+          "absolute_delta_exceeds_floor": true
+        },
+        "p95": {
+          "rust_minus_python_ms": -592.5007699988782,
+          "larger_both_arms_floor_ms": 5.836864002048969,
+          "absolute_delta_exceeds_floor": true
+        }
+      },
+      "warm_starts": 6,
+      "timed_starts": 60,
+      "byte_controls": 2,
+      "samples_per_arm": 30,
+      "alternating_once": true,
+      "raw_status_preserved": "quiet-cli-pair-final",
+      "raw_limitations_preserved": [
+        "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models.",
+        "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
+        "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
+        "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file checks are untimed.",
+        "The historical cold_start_to_exit_ms key measures fresh processes; image warmup is recorded separately in start_protocol.",
+        "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
+        "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
+        "Final samples require the caller's quiet CPU window."
+      ]
+    }
+  },
+  "load": {
+    "before": {
+      "utc": "2026-10-06T16:50:57.8791552Z",
+      "cpu_percent_samples": [
+        26.0,
+        26.0,
+        18.0
+      ]
+    },
+    "during-installed": {
+      "utc": "2026-10-06T16:53:47.5813366Z",
+      "cpu_percent_samples": [
+        27.0,
+        11.0,
+        19.0
+      ]
+    },
+    "after": {
+      "utc": "2026-10-06T16:55:50.3560639Z",
+      "cpu_percent_samples": [
+        13.0,
+        11.0,
+        8.0
+      ]
+    }
+  },
+  "resource_context": "Recorded concurrent desktop CPU load; no controlled-idle conditions or CPU ceiling. Historical quiet labels/text remain raw and do not establish idle conditions.",
+  "cleanup": {
+    "fixture_homes_removed": true,
+    "owned_workloads_remaining": 0,
+    "physical_lease_free": true
+  },
+  "limitations": [
+    "Recorded concurrent desktop CPU load; no controlled-idle conditions or CPU ceiling. Historical quiet labels/text remain raw and do not establish idle conditions.",
+    "Old 95d evidence remains historical; no inherited timings.",
+    "First archive mtime=0 caused stale Cargo image reuse; attempt2 rebuilt new bytes. All failures retained.",
+    "Parallel ETXTBSY cause unresolved; serial contract pass does not imply parallel pass.",
+    "Oracle copied eval overlay is globally dirty; production and immutable ownership guards are pinned and clean.",
+    "No local stdio or full-suite acceptance claimed; hosted evidence is a separate stream.",
+    "Descriptive observed repeat floors, not confidence intervals; executable sizes exclude interpreter dependencies."
+  ]
+}
