@@ -7,9 +7,94 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 SELECTION_ENV = "PSEUDOLIFE_PORT_ORACLE_SELECTION"
+
+
+VERSION_FILES = {
+    "plugin/release.json", "server.json", "ops/docker-compose.yml",
+    "pseudolife_memory/compose/docker-compose.yml",
+}
+DOCUMENTS = {
+    "CHANGELOG.md", "CONTRIBUTING.md", "README.md", "SECURITY.md",
+    "llms.txt", "llms-full.txt", "docs/atlas/atlas.json",
+}
+
+
+def tree(root, head):
+    raw = subprocess.check_output(
+        ["git", "ls-tree", "-r", "-z", head], cwd=root, timeout=10)
+    entries = {}
+    for record in raw.split(b"\0"):
+        if record:
+            metadata, path = record.split(b"\t", 1)
+            entries[path.decode("utf-8")] = tuple(metadata.split())
+    return entries
+
+
+def blob(root, entry):
+    return subprocess.check_output(
+        ["git", "cat-file", "blob", entry[2].decode("ascii")], cwd=root, timeout=10)
+
+
+def version_metadata_matches(path, before, after, previous, current):
+    if path.endswith(".json"):
+        old, new = json.loads(before), json.loads(after)
+        if old.get("version") == previous:
+            old["version"] = current
+        if path == "server.json":
+            for package in old.get("packages", []):
+                if package.get("version") == previous:
+                    package["version"] = current
+        return old == new and before.replace(previous.encode(), current.encode()) == after
+    # Compose's only release field is the daemon image tag. An equal version
+    # string in an environment value or address is not release metadata.
+    pattern = rb"(?m)^([ \t]*image:[ \t]+pseudolife-daemon:)" + re.escape(previous.encode()) + rb"([ \t]*\r?$)"
+    return re.sub(pattern, lambda match: match[1] + current.encode() + match[2], before) == after
+
+
+def release_cut(root, base, head):
+    """Return release evidence only when Python behavior and tests are unchanged.
+
+    Rust is the candidate, not the Python oracle. Documentation may be folded
+    during a release, but unknown paths, executable documentation, original
+    tests, instruments and dependency changes retain the ordinary merge base.
+    """
+    before, after = tree(root, base), tree(root, head)
+    metadata = "pyproject.toml"
+    old_entry, new_entry = before.get(metadata), after.get(metadata)
+    if old_entry == new_entry or not old_entry or not new_entry:
+        return None
+    if old_entry[:2] != (b"100644", b"blob") or new_entry[:2] != old_entry[:2]:
+        return None
+    old_bytes, new_bytes = blob(root, old_entry), blob(root, new_entry)
+    old, new = tomllib.loads(old_bytes.decode("utf-8")), tomllib.loads(new_bytes.decode("utf-8"))
+    old_version = old.get("project", {}).pop("version", None)
+    new_version = new.get("project", {}).pop("version", None)
+    if (old != new or old_version == new_version
+            or any(not isinstance(value, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", value) is None
+                   for value in (old_version, new_version))):
+        return None
+    previous, current = old_version.encode("ascii"), new_version.encode("ascii")
+    if old_bytes.replace(previous, current) != new_bytes:
+        return None
+    for path in before.keys() | after.keys():
+        left, right = before.get(path), after.get(path)
+        if left == right or path == metadata or path.startswith("rust/"):
+            continue
+        # Only ordinary documentation files may be added, removed or rewritten.
+        if (path in DOCUMENTS
+                or path.startswith(("docs/", "changelog.d/")) and path.endswith(".md")):
+            if all(entry is None or entry[:2] == (b"100644", b"blob") for entry in (left, right)):
+                continue
+        if (path in VERSION_FILES and left and right
+                and left[:2] == right[:2] == (b"100644", b"blob")
+                and version_metadata_matches(path, blob(root, left), blob(root, right), old_version, new_version)):
+            continue
+        return None
+    return {"base_version": old_version, "version": new_version}
 
 
 def commit(value):
@@ -19,7 +104,7 @@ def commit(value):
 
 
 def git(root, *arguments):
-    return subprocess.check_output(["git", *arguments], cwd=root, text=True, timeout=10).strip()
+    return subprocess.check_output(["git", *arguments], cwd=root, encoding="utf-8", timeout=10).strip()
 
 
 def merge_base(root, base, head):
@@ -31,10 +116,14 @@ def merge_base(root, base, head):
 
 def select(root, event_name, event, checkout_head, *, github_ref=None):
     checkout_head = commit(checkout_head)
+    release = None
     if event_name == "pull_request":
         request = event["pull_request"]
         base, head = commit(request["base"]["sha"]), commit(request["head"]["sha"])
         oracle = merge_base(root, base, head)
+        release = release_cut(root, oracle, head)
+        if release is not None:
+            oracle = head
     elif event_name == "push":
         head = oracle = commit(event["after"])
         base = None
@@ -58,7 +147,8 @@ def select(root, event_name, event, checkout_head, *, github_ref=None):
     if git(root, "rev-parse", oracle + "^{commit}") != oracle:
         raise ValueError("selected oracle commit unavailable")
     return {"event": event_name, "github_ref": github_ref, "checkout_head": checkout_head,
-            "base_head": base, "candidate_head": head, "oracle_head": oracle}
+            "base_head": base, "candidate_head": head, "oracle_head": oracle,
+            **({"release_cut": release} if release is not None else {})}
 
 
 def selected_oracle(root=ROOT):

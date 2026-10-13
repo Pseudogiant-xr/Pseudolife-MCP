@@ -1,6 +1,6 @@
 # Porting contract
 
-New parity uses the PR's actual merge base as its Python behavioral oracle.
+New parity normally uses the PR's actual merge base as its Python behavioral oracle.
 Push validation selects the event's `after` commit; manual master captures select
 their exact `frozen_head`. Each receipt records its selected SHA and observed
 schema; a stale historical pin is informational. The harness still binds clean
@@ -14,6 +14,13 @@ Rust port and is first caught by the master push run, which selects the new
 Python commit. A PR changing Python behavior and its Rust port together fails
 PR parity until its base includes the Python change. This is the intended
 ordering for changes to `pseudolife_memory/`.
+
+A verified version-only release uses the immutable PR head instead; Python
+behavior and original tests must be unchanged. Bump the native crate, lock entry,
+runtime version and version-specific fixtures in that release PR. The selector
+checks the permitted metadata changes and records `release_cut`; all byte
+comparisons stay strict. The linked event-selection guide describes the exact
+eligibility rules. Historical inventory pins do not own current runtime identity.
 
 The fixed Phase 1 inventory pin is Python 0.18.0 at
 `1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4` (the v0.18.0 release commit), schema 55. The previous master target was Python 0.17.0 at
