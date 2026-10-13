@@ -137,3 +137,14 @@ for the MCP surface.
 - The value of `mcp-session-id` (a fresh uuid4 hex); only its presence is compared.
 - Header order, `date`, `server`, `content-length` and `transfer-encoding`.
 - Key order and float text inside a result's `content[0].text`, which repeats `structuredContent`.
+
+### MCP refusal cleanup (2026-10-13)
+
+MCP admission and cleanup share the SDK's 4 MiB body limit. A complete,
+in-budget refusal drain keeps the connection reusable; incomplete cleanup,
+read failure, an exhausted budget or an unread Expect body closes it. The
+shared 250 ms deadline bounds cleanup, including headers-only peers. This
+resolves the accidental use of the REST 256 KiB budget without weakening
+body admission or changing REST cleanup. `MCP-REFUSAL-CLEANUP` in
+`divergences.md` records the remaining Python connection-lifetime difference.
+The strict live comparator and committed goldens are unchanged.

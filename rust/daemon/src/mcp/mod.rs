@@ -35,7 +35,7 @@ const PING_EVERY: Duration = Duration::from_secs(15);
 const TERMINATED_KEPT: usize = 10_000;
 /// `transport_security.DEFAULT_MAX_REQUEST_BODY_SIZE`, enforced by the SDK's
 /// `RequestBodyLimitMiddleware` around the whole MCP app.
-const BODY_LIMIT: usize = 4 * 1024 * 1024;
+pub(crate) const BODY_LIMIT: usize = 4 * 1024 * 1024;
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;

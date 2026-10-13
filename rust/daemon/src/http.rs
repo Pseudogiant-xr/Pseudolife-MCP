@@ -796,9 +796,11 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
         .get_all("expect")
         .iter()
         .any(|value| value.as_bytes().eq_ignore_ascii_case(b"100-continue"));
+    let mcp_path = path == "/mcp" || path.starts_with("/mcp/");
     let cap = match path.as_str() {
         "/api/pair" => PAIR_BODY_LIMIT,
         "/api/hook/session-end" => SESSION_END_BODY_LIMIT,
+        _ if mcp_path => crate::mcp::BODY_LIMIT,
         _ => body_limit(&path),
     };
     let mut body = RequestBody::new(body);
@@ -814,6 +816,7 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 | "/api/hook/coordination-start"
         );
     if (response.status().as_u16() >= 400 || bodyless_hook) && !body.inner.is_end_stream() {
+        let mut complete = false;
         // Polling an Expect body would send 100 Continue after admission refused it.
         if !expect_continue {
             let outcome = finish_unread_body(
@@ -822,6 +825,7 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE,
             )
             .await;
+            complete = outcome == DrainOutcome::Complete && body.received <= cap;
             if outcome != DrainOutcome::Complete || body.received > cap {
                 eprintln!(
                     "http refusal cleanup: outcome={outcome:?} received={} cap={cap} overshoot={} frames={} max_frame={}",
@@ -832,9 +836,14 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 );
             }
         }
-        response
-            .headers_mut()
-            .insert(header::CONNECTION, HeaderValue::from_static("close"));
+        // A fully drained MCP refusal can reuse the connection, matching
+        // the SDK mount. An unfinished/oversized body must still close;
+        // REST and hook cleanup retain their existing connection policy.
+        if !mcp_path || !complete {
+            response
+                .headers_mut()
+                .insert(header::CONNECTION, HeaderValue::from_static("close"));
+        }
     }
     response
 }
@@ -1090,6 +1099,92 @@ async fn search_route(app: &App, raw_query: Option<&str>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mcp_refusal_app() -> Arc<App> {
+        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
+        Arc::new(App::new(
+            Arc::new(Service::new(
+                crate::config::Config::default(),
+                env,
+                PathBuf::from("unused"),
+                "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+                true,
+            )),
+            auth::EnvTokens {
+                single: Some("fixture-token".into()),
+                map: vec![],
+            },
+            Arc::new(auth::PrincipalStore::new()),
+            None,
+        ))
+    }
+
+    #[tokio::test]
+    async fn mcp_refusal_complete_drain_preserves_connection() {
+        for path in ["/mcp", "/mcp/"] {
+            let chunks = [
+                Ok::<_, std::io::Error>(vec![b' '; CONTROL_BODY_LIMIT]),
+                Ok(vec![b' '; 1]),
+            ];
+            let request = Request::builder()
+                .method("POST")
+                .uri(path)
+                .body(Body::from_stream(futures::stream::iter(chunks)))
+                .unwrap();
+            let response = handle(State(mcp_refusal_app()), request).await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert!(
+                response.headers().get(header::CONNECTION).is_none(),
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_refusal_incomplete_drain_closes_connection() {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .body(Body::from_stream(futures::stream::pending::<
+                Result<Vec<u8>, std::io::Error>,
+            >()))
+            .unwrap();
+        let response = tokio::time::timeout(
+            Duration::from_secs(2),
+            handle(State(mcp_refusal_app()), request),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.headers()[header::CONNECTION], "close");
+    }
+
+    #[tokio::test]
+    async fn mcp_refusal_expect_does_not_poll_and_cap_stops_cleanup() {
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for expect in [false, true] {
+            let polls = Arc::new(AtomicUsize::new(0));
+            let count = polls.clone();
+            let chunks = futures::stream::iter([vec![b' '; crate::mcp::BODY_LIMIT], vec![b' '; 1]])
+                .map(move |chunk| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Ok::<_, std::io::Error>(chunk)
+                });
+            let mut request = Request::builder().method("POST").uri("/mcp");
+            if expect {
+                request = request.header("expect", "100-continue");
+            }
+            let response = handle(
+                State(mcp_refusal_app()),
+                request.body(Body::from_stream(chunks)).unwrap(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(response.headers()[header::CONNECTION], "close");
+            assert_eq!(polls.load(Ordering::SeqCst), usize::from(!expect));
+        }
+    }
 
     #[tokio::test]
     async fn tokenless_mcp_remains_unserved() {

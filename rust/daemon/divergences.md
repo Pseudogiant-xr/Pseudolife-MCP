@@ -33,45 +33,71 @@ before cutover, so no client sees it. The harness (`harness/mcp_compare.py`,
 deletes its row in both places, and from then on the harness compares that
 tool's answers by value.
 
-| Tool | Body owner |
-|---|---|
-| `memory_agents` | W2-F |
-| `memory_message` | W2-F |
-| `memory_search` | W2-D |
-| `memory_recall` | W2-D |
-| `memory_world_search` | W2-D |
-| `memory_lesson_search` | W2-D |
-| `memory_get` | W2-D |
-| `memory_recent` | W2-D |
-| `memory_history` | W2-D |
-| `memory_stats` | W2-D |
-| `memory_graph` | W2-D |
-| `memory_fact_get` | W2-D |
-| `document_search` | W2-D |
-| `memory_episode_summary` | W2-D |
-| `memory_consolidation_candidates` | W2-D |
-| `memory_store` | W2-E |
-| `memory_fact_set` | W2-E |
-| `memory_set_add` | W2-E |
-| `memory_set_remove` | W2-E |
-| `memory_fact_resolve` | W2-E |
-| `memory_world_set` | W2-E |
-| `memory_outcome` | W2-E |
-| `memory_episode_start` | W2-E |
-| `memory_episode_end` | W2-E |
-| `memory_session_title` | W2-E |
-| `memory_supersede` | W2-E |
-| `memory_reinstate` | W2-E |
-| `memory_reinforce` | W2-E |
-| `memory_forget` | W2-E |
-| `document_ingest` | W2-E |
-| `memory_dream` | W3-H |
-| `memory_graph_review` | W3-H |
-| `memory_consolidate` | W3-H |
-| `memory_graph_relate` | W3-H |
-| `memory_graph_unrelate` | W3-H |
-| `memory_alias` | W3-H |
-| `memory_relation_define` | W3-H |
+| Tool | Body owner | Missing service prerequisite |
+|---|---|---|
+| `memory_agents` | W2-F | Board context, authenticated adapter and roster service are absent. |
+| `memory_message` | W2-F | Mailbox, audit and wake service are absent. |
+| `memory_search` | W2-D | Only the foundation REST ranker exists; MCP filters, compact results, cortex and read telemetry need W2-D. |
+| `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion remains deferred. |
+| `memory_world_search` | W2-D | No resident world-cortex search service. |
+| `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
+| `memory_get` | W2-D | No entry lookup service with its access-count and trace effects. |
+| `memory_recent` | W2-D | No recent-entry service or MCP compaction. |
+| `memory_history` | W2-D | No canonical history service. |
+| `memory_stats` | W2-D | No complete statistics service or MCP projection. |
+| `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
+| `memory_fact_get` | W2-D | Startup holds canonical inputs, but no resident cortex lookup service. |
+| `document_search` | W2-D | No reference-pool search service. |
+| `memory_episode_summary` | W2-D | No episode summary service. |
+| `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
+| `memory_store` | W2-E | No resident write store, surprise gate or contradiction service. |
+| `memory_fact_set` | W2-E | No canonical fact mutation service or resident-store synchronization. |
+| `memory_set_add` | W2-E | No set-valued slot mutation service. |
+| `memory_set_remove` | W2-E | No set-valued slot removal service. |
+| `memory_fact_resolve` | W2-E | No contender promotion service. |
+| `memory_world_set` | W2-E | No world-fact mutation service. |
+| `memory_outcome` | W2-E | No outcome/lesson mutation service. |
+| `memory_episode_start` | W2-E | Background reaping exists, but episode start/resume and identity attribution do not. |
+| `memory_episode_end` | W2-E | Background close helpers exist, but the public episode close/outcome service does not. |
+| `memory_session_title` | W2-E | No session title service or public session identity resolution. |
+| `memory_supersede` | W2-E | No supersession service, audit lineage or resident publication. |
+| `memory_reinstate` | W2-E | No reinstatement decision service. |
+| `memory_reinforce` | W2-E | No reinforcement service. |
+| `memory_forget` | W2-E | No forget/cascade service. |
+| `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
+| `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
+| `memory_graph_review` | W3-H | No graph review/proposal service. |
+| `memory_consolidate` | W3-H | No consolidation service. |
+| `memory_graph_relate` | W3-H | Edge storage exists, but service-level validation, provenance and fact projection do not. |
+| `memory_graph_unrelate` | W3-H | Edge storage exists, but the public unrelate service does not. |
+| `memory_alias` | W3-H | Alias storage exists, but the public alias service and resident graph synchronization do not. |
+| `memory_relation_define` | W3-H | Relation storage exists, but the public relation-definition service does not. |
+
+The 2026-10-13 service audit found no complete tool-body path to register
+beyond `memory_toolset`. `Service` supplies initialization and warmup;
+`http::search_route` is the foundation REST search, not the complete MCP
+search contract. Graph storage and background-session helpers are not public
+tool services. Wiring those lower-level functions directly would bypass the
+missing validation, attribution and resident-state behavior listed per tool.
+Other Wave 2 branches are intentionally not imported into this slice.
+
+**MCP-REFUSAL-CLEANUP:** MCP refusals use the shared counted reader with the
+MCP 4 MiB budget, not the REST 256 KiB budget. Fully drained in-budget bodies
+preserve the connection. An exhausted budget, failed read, 250 ms cleanup
+deadline, or unread `Expect: 100-continue` body closes the connection. The
+selected response may be delayed by that deadline, unlike Python's immediate
+response and subsequent discard. Over-budget frame overshoot retains the
+shared HTTP bound. The strict MCP comparator retains any resulting connection
+header or transport differences; they are not normalized away.
+
+**MCP-TOKENLESS-GUARD:** the Host/Origin helper exists inside the transport,
+but the production tokenless mount still returns 501 before reaching it.
+This slice does not enable tokenless MCP or claim live rebinding parity.
+**MCP-BOUND-IDENTITY:** authenticated binding remains deferred because the
+board context service and its durable bank/principal authorization are absent
+from this branch. Only `memory_toolset` executes, scoped to the resolved
+bearer/writer tier key; no bank tool body is enabled by this deferral. W2-F's
+context must be wired before its or other bank tool bodies are registered.
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
@@ -80,7 +106,6 @@ tool's answers by value.
 | `X-PL-Bank` / `X-PL-Principal` binding on `/mcp` (`bound_identity`, `enforce_bound_identity` against the board context) | checked before forwarding; a mismatch is a coordination error | forwarded unchecked; no served tool reads the binding yet | W2-F supplies the check, W2-G calls it |
 | A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) |
 | Terminated session ids | kept for the process lifetime (404 "has been terminated") | the latest 10,000; older ones answer 404 "Session not found" | bounded memory |
-| A refused non-`initialize` request with no session id | registers a live, uninitialized session under the fresh id it reports | registers nothing; that id is later unknown | non-canonical (no client reuses a refusal's id) |
 | `logging/setLevel`, `completion/complete` | -32602 for these params (capabilities do not advertise them) | -32601 `Method not found` | non-canonical |
 | `Last-Event-ID` on GET (replay) | the SDK's replay path with no event store | ignored | non-canonical |
 | JSON-RPC message validation: batches, non-object messages, ids that are not integers or strings | pydantic union validation | 400 -32602 with a fixed message (the text after `Validation error: ` is free) | non-canonical |
