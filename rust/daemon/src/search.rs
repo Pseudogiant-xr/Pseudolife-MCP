@@ -533,7 +533,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
             bank.entries[a.0]
                 .ts
                 .total_cmp(&bank.entries[b.0].ts)
-                .then(a.0.cmp(&b.0))
+                .then(bank.entries[a.0].id.cmp(&bank.entries[b.0].id))
         });
     }
     if p.count_access && !crate::mutants::active("search-no-access-bump") {
@@ -802,7 +802,8 @@ pub fn annotate_supersession_in(bank: &Bank, served: &mut [(usize, Value)]) {
 
 /// `temporal_neighbors` (cms.py:620-664): stream-adjacent entries of the
 /// hit, same episode (or same source among episode-less entries), ordered
-/// by `(timestamp, seq)`; `seq` is resident order.
+/// by `(timestamp, seq)`; hydration assigns sequence in insertion-id order,
+/// before band seating changes resident indices.
 pub fn temporal_neighbors(
     bank: &Bank,
     idx: usize,
@@ -839,12 +840,17 @@ pub fn temporal_neighbors(
         pool.push(i);
         seen.insert(&e.text);
     }
-    let key = |i: usize| (bank.entries[i].ts, i);
+    let key = |i: usize| (bank.entries[i].ts, bank.entries[i].id);
     let a = key(idx);
-    let le = |x: (f64, usize)| x.0 < a.0 || (x.0 == a.0 && x.1 <= a.1);
+    let le = |x: (f64, i64)| x.0 < a.0 || (x.0 == a.0 && x.1 <= a.1);
     let mut before: Vec<usize> = pool.iter().copied().filter(|&i| le(key(i))).collect();
     let mut after: Vec<usize> = pool.iter().copied().filter(|&i| !le(key(i))).collect();
-    let cmp = |x: &usize, y: &usize| key(*x).0.total_cmp(&key(*y).0).then(x.cmp(y));
+    let cmp = |x: &usize, y: &usize| {
+        key(*x)
+            .0
+            .total_cmp(&key(*y).0)
+            .then(key(*x).1.cmp(&key(*y).1))
+    };
     before.sort_by(cmp);
     after.sort_by(cmp);
     let mut before = before[before.len().saturating_sub(n_each)..].to_vec();
@@ -1117,6 +1123,38 @@ mod tests {
         assert!(has_temporal_cue("what happened in August"));
         assert!(!has_temporal_cue("may I deploy"));
         assert!(!has_temporal_cue("whenever"));
+    }
+
+    #[test]
+    fn gate_timeline_same_tick_uses_insertion_order_across_bands() {
+        let bank = equal_time_bands();
+        let mut p = params("when did deploy happen", 2);
+        p.band_order.push("slow".into());
+        p.timeline_enabled = true;
+        let ranked = rank(&bank, &unit(1.0), &p, None);
+        assert_eq!(ranked.params["timeline"]["fired"], true);
+        assert_eq!(ids(&bank, &ranked), vec![1, 2]);
+    }
+
+    #[test]
+    fn gate_neighbors_same_tick_use_insertion_order_across_bands() {
+        assert_eq!(
+            temporal_neighbors(&equal_time_bands(), 0, 1, false),
+            (vec![1], vec![])
+        );
+    }
+
+    fn equal_time_bands() -> Bank {
+        let mut first = entry(1, "deploy first", "x", false);
+        first.band = "slow".into();
+        first.ts = 10.0;
+        let mut second = entry(2, "deploy second", "x", false);
+        second.ts = 10.0;
+        Bank {
+            dim: DIM,
+            entries: vec![second, first],
+            matrix: [unit(0.9), unit(0.8)].concat(),
+        }
     }
 
     #[test]

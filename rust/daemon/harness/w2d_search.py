@@ -19,7 +19,8 @@ Declared rules, never applied by hand:
   (bool, int, float, string), must match exactly.
 * Tie order: two entries may swap places only when their scores are within
   SCORE_TOL of each other (spec "Free": tie order), and never in a list that
-  is ordered by stream position (contiguity or timeline entries present).
+  is ordered by stream position (contiguity entries or a fired timeline,
+  including dense-only timeline results).
   A swap renumbers only the swapped rows' ``rank`` in the event.
 * Coverage: each scenario names the channels it must exercise (REQUIRE); a
   run where the oracle did not exercise them fails.
@@ -348,13 +349,13 @@ def diff(a, b, path="", tol_keys=("score",)) -> list[str]:
     return [] if a == b else [f"{path}: python {json.dumps(a)[:160]} vs rust {json.dumps(b)[:160]}"]
 
 
-def align_ties(py_list: list, rs_list: list, key: str = "id") -> tuple[list, list[str]]:
+def align_ties(py_list: list, rs_list: list, key: str = "id", *, ordered=False) -> tuple[list, list[str]]:
     """Reorder the Rust list to Python's where the only difference is a swap
     among entries whose scores are within SCORE_TOL; report each swap. Lists
     ordered by stream position (any contiguity or timeline entry) are never
     reordered: their order is exact."""
     notes = []
-    if len(py_list) != len(rs_list):
+    if ordered or len(py_list) != len(rs_list):
         return rs_list, notes
     if any(isinstance(x, dict) and x.get("via") in ("contiguity", "timeline") for x in py_list + rs_list):
         return rs_list, notes
@@ -372,7 +373,7 @@ def align_ties(py_list: list, rs_list: list, key: str = "id") -> tuple[list, lis
     return rs, notes
 
 
-def compare(py: dict, rs: dict) -> tuple[list[str], list[str]]:
+def compare(py: dict, rs: dict, *, timeline_fired=False) -> tuple[list[str], list[str]]:
     diffs, notes = [], []
     if py["status"] != rs["status"]:
         diffs.append(f"status: python {py['status']} vs rust {rs['status']}")
@@ -389,7 +390,7 @@ def compare(py: dict, rs: dict) -> tuple[list[str], list[str]]:
             if isinstance(a.get(k), list) and isinstance(b.get(k), list):
                 key = "id" if k == "entries" else "value"
                 b = dict(b)
-                b[k], n = align_ties(a[k], b[k], key)
+                b[k], n = align_ties(a[k], b[k], key, ordered=timeline_fired and k == "entries")
                 notes += [f"{k}: {x}" for x in n]
     diffs += diff(a, b)
     return diffs, notes
@@ -410,6 +411,14 @@ def scrub(state: dict) -> list[str]:
     return declared
 
 
+def timeline_queries(state: dict) -> set[str]:
+    """Oracle telemetry supplies ordering context even without via=timeline."""
+    events = state["rows"].get("public.retrieval_events") or {}
+    records = [dict(zip(events.get("columns", []), row)) for row in events.get("rows", [])]
+    return {r["query"] for r in records
+            if ((r.get("params") or {}).get("timeline") or {}).get("fired")}
+
+
 def bank_diff(py_state: dict, rs_state: dict) -> list[str]:
     out = []
     ev = "public.retrieval_events"
@@ -422,13 +431,15 @@ def bank_diff(py_state: dict, rs_state: dict) -> list[str]:
         if len(a["rows"]) != len(b["rows"]):
             out.append(f"{ev}: python {len(a['rows'])} rows vs rust {len(b['rows'])}")
         for ra, rb in zip(a["rows"], b["rows"]):
+            params = dict(zip(cols, ra)).get("params") or {}
+            ordered = bool((params.get("timeline") or {}).get("fired"))
             for c, x, y in zip(cols, ra, rb):
                 if c == "created_at":
                     if (x is None) != (y is None):
                         out.append(f"{ev}[{ra[0]}].{c}: null on one side")
                     continue
                 if c == "served" and isinstance(x, list) and isinstance(y, list):
-                    aligned, notes = align_ties(x, y, "entry_id")
+                    aligned, notes = align_ties(x, y, "entry_id", ordered=ordered)
                     if notes:
                         # A tie swap renumbers `rank` for the swapped rows only.
                         moved = {i for i, (u, v) in enumerate(zip(y, aligned)) if u is not v}
@@ -570,12 +581,14 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         golden = json.loads((GOLDENS / f"{scn.name}.json").read_text(encoding="utf-8")) if mode == "golden" else None
         rows = []
         py_seen = []
+        response_pairs = []
         for i, c in enumerate(scn.cases()):
             if c.get("disconnect"):
                 for d in procs.values():
                     disconnect(d.port, c["path"], c["headers"])
                 time.sleep(15)  # both finish (or abandon) the search before the next case
                 py_seen.append({"disconnected": True})
+                response_pairs.append(None)
                 rows.append({"case": c["name"], "path": c["path"][:140], "python_status": None,
                              "rust_status": None, "diffs": [], "notes": [], "_python": None})
                 continue
@@ -583,9 +596,9 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
                     else golden["responses"][i])
             rs_r = call(procs["rust"].port, "GET", c["path"], c["headers"])
             py_seen.append(py_r)
-            diffs, notes = compare(py_r, rs_r)
+            response_pairs.append((py_r, rs_r))
             rows.append({"case": c["name"], "path": c["path"][:140], "python_status": py_r["status"],
-                         "rust_status": rs_r["status"], "diffs": diffs, "notes": notes,
+                         "rust_status": rs_r["status"], "diffs": [], "notes": [],
                          "_python": py_r if record else None})
     finally:
         for d in procs.values():
@@ -600,6 +613,13 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         py_state = golden["db_state"]
     else:
         py_state = states["python"]
+    ordered_queries = timeline_queries(py_state)
+    for row, pair in zip(rows, response_pairs):
+        if pair is not None:
+            py_r, rs_r = pair
+            body = py_r.get("json")
+            ordered = isinstance(body, dict) and body.get("query") in ordered_queries
+            row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered)
     cov = coverage(py_seen, py_state)
     cov_fail = unmet(cov, scn.require)
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"])

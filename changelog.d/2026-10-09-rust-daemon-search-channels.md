@@ -24,3 +24,5 @@
 - Search pool sizing saturates on large requests, and failed or panicking
   reranker initialization stays disabled. Offline search harness regressions
   run in CI; live model/database proofs remain named coverage exceptions.
+- Same-tick timeline and neighbor ordering retain insertion order across
+  bands; the harness keeps timeline order exact even for dense-only hits.
