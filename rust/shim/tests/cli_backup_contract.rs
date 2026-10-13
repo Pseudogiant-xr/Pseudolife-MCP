@@ -123,7 +123,7 @@ fn captured_public_help_precedes_bank_resolution() {
 }
 
 #[test]
-fn help_at_another_width_defers() {
+fn help_accepts_default_and_wide_columns() {
     let home = Home::new("width");
     for columns in [Some("120"), None] {
         let mut command = command(home.path());
@@ -132,11 +132,58 @@ fn help_at_another_width_defers() {
             None => command.env_remove("COLUMNS"),
         };
         let output = command.arg("--help").output().unwrap();
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty());
-        assert_eq!(output.stderr, cli::native_text(DEFERRED));
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("Back up the memory bank")
+        );
     }
     assert!(home.listing().is_empty());
+}
+
+#[test]
+fn argparse_spellings_and_parent_paths_archive_the_selected_tree() {
+    let separator = std::path::MAIN_SEPARATOR;
+    let parent = format!("bank{separator}sub{separator}..{separator}.");
+    for arguments in [
+        vec![format!("--data-dir={parent}"), "--out=backup".into()],
+        vec![
+            "--data-dir=absent".into(),
+            "--data".into(),
+            parent.clone(),
+            "--o".into(),
+            "backup".into(),
+        ],
+        vec![
+            "--data-dir".into(),
+            parent,
+            "--out".into(),
+            format!("bank{separator}sub{separator}..{separator}backups"),
+            "--keep=1e3".into(),
+        ],
+    ] {
+        // Each spelling needs a fresh output: Python's Windows rename refuses
+        // an archive with the same second's timestamp from a preceding run.
+        let home = Home::new("argv");
+        let bank = home.path().join("bank");
+        fs::create_dir_all(bank.join("sub")).unwrap();
+        fs::write(bank.join("state.json"), "state").unwrap();
+        let output = command(home.path()).args(&arguments).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{arguments:?}: {output:?}");
+        assert!(output.stderr.is_empty());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let state = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("state archive: "))
+            .unwrap();
+        assert!(
+            members(&home.path().join(state))
+                .iter()
+                .any(|(name, data)| name == "state.json" && data == b"state")
+        );
+    }
 }
 
 #[test]
@@ -152,56 +199,24 @@ fn missing_canonical_paths_are_refused_verbatim() {
 }
 
 #[test]
-fn noncanonical_argv_defers_without_effects() {
-    let home = Home::new("argv");
-    fs::create_dir(home.path().join("bank")).unwrap();
-    let bank = text(&home.path().join("bank"));
-    let separator = std::path::MAIN_SEPARATOR;
-    let dotted = format!("{bank}{separator}.{separator}missing-µ");
-    let doubled = format!("{bank}{separator}{separator}missing-µ");
-    let trailing = format!("{bank}{separator}");
-    let joined = format!("--data-dir={bank}");
+fn invalid_argv_reports_argparse_usage_without_effects() {
+    let home = Home::new("invalid-argv");
     for arguments in [
-        vec!["--data-dir", dotted.as_str()],
-        vec!["--data-dir", doubled.as_str()],
-        vec!["--data-dir", trailing.as_str()],
-        vec![joined.as_str()],
-        vec!["--data", bank.as_str()],
-        vec!["--data-dir", bank.as_str(), "--data-dir", bank.as_str()],
-        vec!["--data-dir", bank.as_str(), "--keep-days", "1e3"],
-        vec!["--data-dir", bank.as_str(), "--keep-days", "-1"],
-        vec!["--data-dir", bank.as_str(), "--keep-days", ".5"],
-        vec!["--data-dir", bank.as_str(), "--keep-days", "0"],
-        vec!["--data-dir", bank.as_str(), "--keep-days", "0.0006"],
-        vec!["--data-dir", bank.as_str(), "--out"],
-        vec!["--data-dir", bank.as_str(), "--out", "-x"],
-        vec!["--data-dir", bank.as_str(), "extra"],
-        vec!["-h"],
+        vec!["--out"],
+        vec!["--out", "-x"],
+        vec!["extra"],
+        vec!["--keep=oops"],
+        vec!["-h=hh"],
     ] {
-        assert_deferred(&home, &arguments);
-    }
-}
-
-#[cfg(not(windows))]
-#[test]
-fn leading_double_slash_defers() {
-    let home = Home::new("root");
-    let argument = format!("/{}/missing", home.path().display());
-    assert_deferred(&home, &["--data-dir", &argument]);
-}
-
-#[cfg(windows)]
-#[test]
-fn extended_unc_and_slash_spellings_defer_without_effects() {
-    let home = Home::new("prefix");
-    let display = home.path().display();
-    for argument in [
-        format!("{display}/missing-µ"),
-        format!("\\\\?\\{display}\\missing-µ"),
-        String::from("\\\\localhost\\absent-share-µ\\missing"),
-        String::from("C:relative-µ"),
-    ] {
-        assert_deferred(&home, &["--data-dir", &argument]);
+        let output = run(home.path(), &arguments);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("pseudolife-mcp backup: error:")
+        );
+        assert!(home.listing().is_empty());
     }
 }
 
@@ -244,11 +259,30 @@ fn outputs_that_would_archive_themselves_defer() {
     for out in [
         bank_text.clone(),
         text(&bank.join("sub").join("bk")),
-        parent.clone(),
+        text(&bank.join("new-child").join("bk")),
+        text(&bank.join("sub").join("..").join("new-child").join("bk")),
     ] {
         assert_deferred(&home, &["--data-dir", &bank_text, "--out", &out]);
     }
-    assert_deferred(&home, &["--data-dir", &parent]);
+    let output = run(home.path(), &["--data-dir", &parent]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn parent_after_missing_component_still_resolves_later_symlinks() {
+    let home = Home::new("parent-symlink");
+    let bank = home.path().join("bank");
+    fs::create_dir_all(bank.join("sub")).unwrap();
+    fs::write(bank.join("state"), "state").unwrap();
+    std::os::unix::fs::symlink(bank.join("sub"), home.path().join("alias")).unwrap();
+    let out = home.path().join("missing/../alias/bk");
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    // Creating the missing ancestor could also make a currently broken
+    // symlink resolve into the tree after admission.
+    fs::remove_file(home.path().join("alias")).unwrap();
+    std::os::unix::fs::symlink("missing/../bank/sub", home.path().join("alias")).unwrap();
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
 }
 
 #[test]
@@ -625,6 +659,310 @@ fn file_mode_archives_state_and_rotates_only_its_own_state_files() {
         .map(|(n, d)| (n.as_str(), d.as_str()))
         .collect();
     assert_eq!(names, expected);
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_archive_records_resolved_owner_names() {
+    let home = Home::new("owners");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    fs::write(bank.join("state.json"), "state").unwrap();
+    let output = run(home.path(), &["--data-dir", &text(&bank)]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let archive = fs::read_dir(bank.join("backups"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let python = std::env::var_os("PSEUDOLIFE_MCP_PYTHON").unwrap_or_else(|| "python3".into());
+    let output = Command::new(python)
+        .args([
+            "-c",
+            r#"
+import grp, pwd, sys, tarfile
+with tarfile.open(sys.argv[1]) as archive:
+    for member in archive.getmembers():
+        try:
+            uname = pwd.getpwuid(member.uid).pw_name
+        except KeyError:
+            uname = ''
+        try:
+            gname = grp.getgrgid(member.gid).gr_name
+        except KeyError:
+            gname = ''
+        assert (member.uname, member.gname) == (uname, gname)
+"#,
+            &text(&archive),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_relative_outputs_cannot_hide_inside_the_source() {
+    use std::path::{Component, Prefix};
+    for label in ["dot", "nested-dot", "new-child", "drive-relative"] {
+        let home = Home::new(label);
+        let bank = home.path().join("bank");
+        fs::create_dir_all(bank.join("sub/deeper")).unwrap();
+        fs::write(bank.join("state"), "state").unwrap();
+        let (cwd, out) = match label {
+            "dot" => (bank.clone(), ".".to_owned()),
+            "nested-dot" => (bank.join("sub/deeper"), ".".to_owned()),
+            "new-child" => (bank.clone(), "new-child\\bk".to_owned()),
+            _ => {
+                let drive = match bank.components().next().unwrap() {
+                    Component::Prefix(prefix) => match prefix.kind() {
+                        Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive,
+                        _ => panic!("fixture requires a local drive"),
+                    },
+                    _ => panic!("fixture requires an absolute path"),
+                };
+                (bank.clone(), format!("{}:new-child\\bk", char::from(drive)))
+            }
+        };
+        let data = if label == "dot" {
+            ".".to_owned()
+        } else {
+            text(&bank)
+        };
+        let before = home.listing();
+        let output = command(home.path())
+            .current_dir(cwd)
+            .args(["--data-dir", &data, "--out", &out])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{label}: {output:?}");
+        assert_eq!(output.stderr, cli::native_text(DEFERRED));
+        assert!(output.stdout.is_empty());
+        assert_eq!(home.listing(), before);
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_junction_parent_paths_cannot_bypass_output_containment() {
+    let home = Home::new("junction-parent");
+    let bank = home.path().join("bank");
+    fs::create_dir_all(bank.join("sub")).unwrap();
+    let target = home.path().join("x").join("y");
+    fs::create_dir_all(&target).unwrap();
+    let link = home.path().join("j");
+    let output = Command::new("cmd")
+        .args(["/C", "mklink", "/J", &text(&link), &text(&target)])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let out = link.join("..").join("bank/sub/bk");
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    fs::remove_dir(link).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn local_unc_output_alias_cannot_archive_its_own_partial_file() {
+    use std::path::{Component, Prefix};
+    let home = Home::new("unc-output-alias");
+    let bank = home.path().join("bank");
+    fs::create_dir_all(bank.join("sub")).unwrap();
+    let canonical = fs::canonicalize(&bank).unwrap();
+    let drive = match canonical.components().next().unwrap() {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive,
+            _ => panic!("fixture requires a local drive"),
+        },
+        _ => panic!("fixture requires an absolute directory"),
+    };
+    let mut alias = PathBuf::from(format!(r"\\localhost\{}$", char::from(drive)));
+    for component in canonical.components().skip(2) {
+        alias.push(component.as_os_str());
+    }
+    if !alias.try_exists().unwrap_or(false) {
+        assert!(
+            std::env::var_os("CI").is_none() && std::env::var_os("GITHUB_ACTIONS").is_none(),
+            "CI UNC alias fixture requires the local administrative share"
+        );
+        eprintln!("UNC alias fixture unverified locally: administrative share unavailable");
+        return;
+    }
+    let out = alias.join("sub").join("bk");
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+}
+
+#[cfg(windows)]
+#[test]
+fn unc_share_rooted_in_archived_child_cannot_include_partial_file() {
+    struct Share(String);
+    impl Share {
+        fn remove(&self) -> Output {
+            Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command",
+                    "$ErrorActionPreference='Stop'; Remove-SmbShare -Name $env:PSEUDOLIFE_TEST_SHARE_NAME -Force"])
+                .env("PSEUDOLIFE_TEST_SHARE_NAME", &self.0)
+                .output().unwrap()
+        }
+    }
+    impl Drop for Share {
+        fn drop(&mut self) {
+            if !self.0.is_empty() {
+                let _ = self.remove();
+            }
+        }
+    }
+    let home = Home::new("unc-child-share");
+    let bank = home.path().join("bank");
+    let child = bank.join("sub").join("nested");
+    fs::create_dir_all(&child).unwrap();
+    let name = format!("pseudolife-backup-{}", uuid::Uuid::new_v4());
+    let creation = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command",
+            "$ErrorActionPreference='Stop'; $sid=[System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'); $account=$sid.Translate([System.Security.Principal.NTAccount]).Value; New-SmbShare -Name $env:PSEUDOLIFE_TEST_SHARE_NAME -Path $env:PSEUDOLIFE_TEST_SHARE_PATH -FullAccess $account | Out-Null"])
+        .env("PSEUDOLIFE_TEST_SHARE_NAME", &name)
+        .env("PSEUDOLIFE_TEST_SHARE_PATH", &child)
+        .output().unwrap();
+    if !creation.status.success() {
+        assert!(
+            std::env::var_os("CI").is_none() && std::env::var_os("GITHUB_ACTIONS").is_none(),
+            "CI child-share fixture must be available: {creation:?}"
+        );
+        eprintln!("UNC child-share fixture unverified locally: SMB share creation unavailable");
+        return;
+    }
+    let mut share = Share(name);
+    let alias = PathBuf::from(format!(r"\\localhost\{}", share.0));
+    let probe = alias.join("write-probe");
+    fs::create_dir(&probe).unwrap();
+    fs::remove_dir(&probe).unwrap();
+    let out = alias.join("bk");
+    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    let removal = share.remove();
+    assert!(removal.status.success(), "{removal:?}");
+    share.0.clear();
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_discovery_paths_defer_before_output_creation() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let home = Home::new("raw-discovery");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    fs::create_dir_all(
+        home.path()
+            .join(".pg0")
+            .join("installation")
+            .join(OsString::from_vec(b"version-\xff".to_vec())),
+    )
+    .unwrap();
+    let before = home.listing();
+    let output = command(home.path())
+        .env(
+            "PSEUDOLIFE_MCP_DATABASE_URL",
+            "postgresql://unused@127.0.0.1:9/unused",
+        )
+        .env("PATH", home.path().join("no-bin"))
+        .args(["--data-dir", &text(&bank)])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
+    assert_eq!(home.listing(), before);
+}
+
+#[test]
+fn columns_beyond_python_integer_limit_defer_before_effects() {
+    let home = Home::new("long-columns");
+    let before = home.listing();
+    let output = command(home.path())
+        .env("COLUMNS", "9".repeat(4301))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_eq!(home.listing(), before);
+}
+
+#[test]
+fn malformed_columns_with_multiple_signs_keep_fallback_help() {
+    let home = Home::new("malformed-columns");
+    let ordinary = command(home.path()).arg("--help").output().unwrap();
+    let malformed = command(home.path())
+        .env("COLUMNS", format!("++{}", "9".repeat(4301)))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert_eq!(malformed.status.code(), ordinary.status.code());
+    assert_eq!(malformed.stdout, ordinary.stdout);
+    assert_eq!(malformed.stderr, ordinary.stderr);
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_path_discovery_defers_before_output_creation() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let home = Home::new("raw-path-discovery");
+    let bank = home.path().join("bank");
+    fs::create_dir(&bank).unwrap();
+    let before = home.listing();
+    let raw_path = home.path().join(OsString::from_vec(b"bin-\xff".to_vec()));
+    let output = command(home.path())
+        .env(
+            "PSEUDOLIFE_MCP_DATABASE_URL",
+            "postgresql://unused@127.0.0.1:9/unused",
+        )
+        .env("PATH", raw_path)
+        .args(["--data-dir", &text(&bank)])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert!(!bank.join("backups").exists());
+    assert_eq!(home.listing(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn discovery_permission_errors_preserve_python_diagnostic_and_effects() {
+    use std::os::unix::fs::PermissionsExt;
+    for metadata_error in [false, true] {
+        let home = Home::new("discovery");
+        let bank = home.path().join("bank");
+        let installation = home.path().join(".pg0").join("installation");
+        fs::create_dir_all(&installation).unwrap();
+        fs::create_dir(&bank).unwrap();
+        let denied = if metadata_error {
+            installation.parent().unwrap()
+        } else {
+            &installation
+        };
+        fs::set_permissions(denied, fs::Permissions::from_mode(0o0)).unwrap();
+        let output = command(home.path())
+            .env("PSEUDOLIFE_MCP_DATABASE_URL", "postgresql://unused")
+            .args(["--data-dir", &text(&bank)])
+            .output()
+            .unwrap();
+        fs::set_permissions(denied, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stderr,
+            format!(
+                "PermissionError: [Errno 13] Permission denied: '{}'\n",
+                installation.display()
+            )
+            .as_bytes()
+        );
+        assert!(bank.join("backups").is_dir());
+        assert_eq!(fs::read_dir(bank.join("backups")).unwrap().count(), 0);
+    }
 }
 
 #[cfg(unix)]
