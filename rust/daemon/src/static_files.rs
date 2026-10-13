@@ -334,11 +334,16 @@ fn serve_with_resolver(
     #[cfg(not(windows))]
     let ambiguous_segment = false;
     // Refuse out-of-root paths before filesystem access, including getcwd.
-    let original_root = lexical_path(root);
-    let joined = original_root.join(rel);
+    let lexical_root = lexical_path(root);
+    let joined = lexical_root.join(rel);
+    let request = Path::new(rel);
+    let changes_anchor = !root.has_root()
+        && (request.has_root()
+            || matches!(request.components().next(), Some(Component::Prefix(_))));
     if !safe_relative_tail(rel)
         || ambiguous_segment
-        || !contained(&lexical_path(&joined), &original_root)
+        || changes_anchor
+        || !contained(&lexical_path(&joined), &lexical_root)
     {
         if crate::mutants::active("static-traversal-open") {
             // An observable open without asking the OS to open devices or
@@ -356,7 +361,7 @@ fn serve_with_resolver(
         // `Path.resolve()` raises on an embedded NUL: the 500 path.
         return Err(std::io::Error::other("embedded NUL in path"));
     }
-    let original_root = lexical_path(&std::env::current_dir()?.join(original_root));
+    let original_root = lexical_path(&std::env::current_dir()?.join(root));
     let joined = original_root.join(rel);
     let root = resolve(&original_root)?;
     let mut target = resolve(&joined)?;
@@ -502,6 +507,31 @@ mod tests {
                 "/ui/a/../../static/js/app.js",
             ],
         );
+    }
+
+    #[test]
+    fn relative_roots_refuse_rooted_requests_before_filesystem_resolution() {
+        for root in [".", "", "a/..", ".."] {
+            assert_lexical_refusal(Path::new(root), &["/ui//outside"]);
+            #[cfg(windows)]
+            assert_lexical_refusal(
+                Path::new(root),
+                &[r"/ui/\\host\share\x", r"/ui/\\.\pipe\x", "/ui/D:x"],
+            );
+        }
+    }
+
+    #[test]
+    fn relative_root_parents_are_preserved_when_resolving() {
+        let cwd = std::env::current_dir().unwrap();
+        let expected = cwd.parent().unwrap().join("static");
+        let mut reached = false;
+        let result = serve_with_resolver(Path::new("../static"), "/ui/index.html", |path| {
+            reached = true;
+            assert_eq!(path, expected);
+            Err(std::io::Error::other("stop before filesystem access"))
+        });
+        assert!(reached && result.is_err());
     }
 
     #[cfg(windows)]
