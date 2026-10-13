@@ -285,7 +285,9 @@ CAPTURE — as durable things arise (one claim per call):
 - `memory_store` for durable context; set `origin` honestly
   (`user`/`action`/`agent`) and use a stable `source` per project/topic.
 - `memory_fact_set(entity, attribute, value)` for a canonical single-value
-  fact; correct by re-setting the same slot.
+  fact; correct by re-setting the same slot. Pass `origin="user"` when the
+  human stated the value: a default (agent) write is parked as a contender,
+  not applied, when the slot's value is user- or action-backed.
 - Label what must not drift: `distortion_tolerance="constraint"` on a rule
   that must survive verbatim (served first in recall, `pinned`);
   `authority="quoted"` on what a doc or third party said — a quote is
@@ -361,7 +363,8 @@ spot (`memory_fact_set` at the same slot, then `memory_outcome` with
 `correction`).
 
 Capture durable context with `memory_store` and canonical values with
-`memory_fact_set`; keep status under `source="status"`. Route verified
+`memory_fact_set` (`origin="user"` when the human stated the value); keep
+status under `source="status"`. Route verified
 external facts to `memory_world_set` with their source. Never store secrets.
 At task end record success, failure, or correction with `memory_outcome`
 and the `used_ids` of the recall entries that informed the work.
