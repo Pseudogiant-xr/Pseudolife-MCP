@@ -7,3 +7,8 @@
 - The MCP divergence ledger names the missing service prerequisite for each
   unserved tool, the retained tokenless 501 boundary and the pending board
   identity check. No bank tool is enabled by this change.
+- Initialization now validates known nested client capabilities while allowing
+  unknown capability fields, matching the pinned SDK.
+- Standalone SSE notifications use bounded delivery; DELETE and disconnect
+  release blocked producers. Mutation controls now require differences beyond
+  an explicit ordinary baseline report.

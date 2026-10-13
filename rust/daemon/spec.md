@@ -148,3 +148,11 @@ resolves the accidental use of the REST 256 KiB budget without weakening
 body admission or changing REST cleanup. `MCP-REFUSAL-CLEANUP` in
 `divergences.md` records the remaining Python connection-lifetime difference.
 The strict live comparator and committed goldens are unchanged.
+
+Initialization validates known client-capability object fields and the SDK's
+boolean spellings for `roots.listChanged`; unknown capability fields remain
+open. Standalone SSE notifications have a 16-item delivery queue and the
+existing 8-item HTTP output queue. A slow consumer backpressures delivery;
+DELETE and disconnect cancel blocked delivery without holding the sessions
+lock. Mutant runs require `--baseline <compare.json>` and must add or change
+strict differences beyond that ordinary run.

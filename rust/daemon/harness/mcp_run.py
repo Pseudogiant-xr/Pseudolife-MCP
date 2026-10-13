@@ -1,6 +1,6 @@
 """Run the MCP-surface harness end to end on disposable banks.
 
-usage: python mcp_run.py <rust-binary> <out-dir> [--mutant NAME]
+usage: python mcp_run.py <rust-binary> <out-dir> [--mutant NAME --baseline <compare.json>]
                          [--tokenless | --config2] [--record <golden.json>]
 
 Creates pl_cf_w2g_py and pl_cf_w2g_rs through the test login, starts the
@@ -8,11 +8,13 @@ Python oracle (from this checkout) and the Rust daemon on them with the
 harness environment (mcp_compare.py's docstring), runs `mcp_compare.py
 compare`, stops both daemons by PID and drops the banks. `--mutant NAME`
 sets PSEUDOLIFE_DAEMON_MUTANT for the Rust side (a `--features mutants`
-build) and inverts the verdict: the run passes only if the harness goes red.
+build) and requires an ordinary baseline report: the run passes only if the
+strict comparison finds changed or additional differences beyond that baseline.
 Exit 0 means the expected verdict.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -54,10 +56,27 @@ def seed_stored(dsn):
             assert row is not None and row.principal == name, (name, row)
 
 
+def mutant_caught(code, result, baseline):
+    return (code == 1 and result["summary"]["diffs"] > 0
+            and any(diff not in baseline["diffs"] for diff in result["diffs"]))
+
+
 def main():
     args = sys.argv[1:]
     binary, out = Path(args[0]), Path(args[1])
     mutant = args[args.index("--mutant") + 1] if "--mutant" in args else None
+    baseline = None
+    if mutant:
+        if "--baseline" not in args:
+            print("--mutant requires --baseline from an ordinary comparison", file=sys.stderr)
+            return 2
+        try:
+            baseline = json.loads(Path(args[args.index("--baseline") + 1]).read_text(encoding="utf-8"))
+            if not isinstance(baseline["diffs"], list):
+                raise ValueError("baseline diffs must be a list")
+        except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+            print(f"cannot load mutant baseline: {exc}", file=sys.stderr)
+            return 2
     record = args[args.index("--record") + 1] if "--record" in args else None
     env = dict(ENV)
     if "--tokenless" in args:
@@ -111,14 +130,14 @@ def main():
             except Exception as exc:  # noqa: BLE001
                 print(f"drop {name} failed: {exc}", file=sys.stderr)
     if mutant:
-        # Caught means the comparison ran and found diffs, not that it crashed.
-        import json
+        # Existing declared differences cannot establish that a mutation ran.
         try:
-            summary = json.loads((out / f"mutant-{mutant}.json").read_text(encoding="utf-8"))["summary"]
-        except (OSError, ValueError, KeyError):
-            summary = {"diffs": 0}
-        caught = code == 1 and summary["diffs"] > 0
-        print(f"mutant {mutant}: harness exit {code}, {summary['diffs']} diffs "
+            result = json.loads((out / f"mutant-{mutant}.json").read_text(encoding="utf-8"))
+            caught = mutant_caught(code, result, baseline)
+            count = result["summary"]["diffs"]
+        except (OSError, ValueError, KeyError, TypeError):
+            caught, count = False, 0
+        print(f"mutant {mutant}: harness exit {code}, {count} diffs "
               f"({'caught' if caught else 'MISSED'})")
         return 0 if caught else 1
     return code
