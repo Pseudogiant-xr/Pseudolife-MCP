@@ -2653,8 +2653,13 @@ class DreamOps:
             lo = float(target.get("started_at") or 0)
             hi = float(target.get("finished_at") or rollback_started)
 
+            # This row's own record: one run may displace the same value
+            # more than once, and the journal stamps each row just after its
+            # write, so the newest candidate at or before the row is its own.
+            row_at = float(row.get("at") or hi)
+
             def _displaced_by_run(r) -> bool:
-                if not lo <= (r.superseded_at or 0) <= hi:
+                if not lo <= (r.superseded_at or 0) <= min(hi, row_at):
                     return False
                 return (r.status != "superseded" or r.kind != "scalar"
                         or row["kind"] != "scalar"

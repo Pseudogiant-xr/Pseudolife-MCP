@@ -1313,3 +1313,40 @@ def test_a_direct_confirmation_racing_a_rollback_keeps_its_tier(rollback_svc):
     assert raced and cur["value"] == "vim"
     assert "user" in cur["support"]
     assert "dream:user" not in cur["provenance"]
+
+
+class _CitingEach(StubExtractor):
+    """Each claim cites the batch note containing its own phrase (batch order
+    is not insertion order within one clock tick)."""
+
+    def __init__(self, pairs):
+        super().__init__([c for c, _ in pairs])
+        self._cites = [t for _, t in pairs]
+
+    def extract(self, texts, vocab, known_facts=None):
+        return [dict(c, source=next(i for i, t in enumerate(texts) if cite in t))
+                for c, cite in zip(self._claims, self._cites)]
+
+
+def test_rollback_restores_each_rows_own_record_when_a_value_repeats(
+        rollback_svc):
+    """One run displaces the same value twice (vim -> nano -> vim -> nano):
+    unwinding restores each row's own displaced record, so the original
+    agent-backed vim comes back at agent tier."""
+    svc = rollback_svc
+    svc.store("my preferred editor is vim", source="agent")
+    svc.dream_run(StubExtractor([_claim("vim")]))
+    before = svc.cortex_lookup("editor-pref", "editor", track=False)
+    svc.store("first note: my preferred editor is nano", source="user")
+    svc.store("second note: my preferred editor is vim", source="user")
+    svc.store("third note: my preferred editor is nano", source="user")
+    svc.dream_run(_CitingEach([
+        (_claim("nano"), "first note"),
+        (_claim("vim"), "second note"),
+        (_claim("nano"), "third note")]))
+    assert svc.cortex_lookup("editor-pref", "editor")["value"] == "nano"
+    svc.dream_rollback()
+    after = svc.cortex_lookup("editor-pref", "editor", track=False)
+    assert after["value"] == "vim"
+    assert after["support"] == before["support"]
+    assert not [p for p in after["provenance"] if p.startswith("dream:")]
