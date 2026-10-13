@@ -1309,7 +1309,9 @@ class StaticPaths(StaticBuild):
                   "/ui/a/./b/../c.css", "/ui/COM0.js", "/ui/lpt0.css",
                   "/ui/prefix-escape/secret.txt"]
         if os.name == "nt":
-            other = "R" if daemons.scratch_root().drive.upper() == "Q:" else "Q"
+            drive = daemons.scratch_root().drive.upper()
+            paths = [f"/ui/{drive}index.html" if p == "/ui/C:index.html" else p for p in paths]
+            other = "R" if drive == "Q:" else "Q"
             paths += [f"/ui/{other}:x", f"/ui/{other}:%5capp%5cstatic%5cx",
                       f"/ui/%5c%5c%3f%5c{other}:%5cx"]
             paths += ["/ui/NUL", "/ui/nul.txt", "/ui/a/CON", "/ui/COM1.js",

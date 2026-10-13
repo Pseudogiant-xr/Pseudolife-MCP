@@ -1,5 +1,5 @@
 """Safety controls for the static harness's loopback-only bind fixture."""
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 import subprocess
 from unittest.mock import patch
@@ -68,6 +68,8 @@ def test_directory_index_parity_compares_oracle_response():
 ])
 def test_lexical_path_rows_compare_the_oracle_without_substitution(monkeypatch, platform, path):
     monkeypatch.setattr(run, "os", SimpleNamespace(name=platform))
+    if platform == "nt":
+        monkeypatch.setattr(run.daemons, "scratch_root", lambda: PureWindowsPath("C:/scratch"))
     c = next(c for c in run.StaticPaths().cases() if c["path"] == path)
     response = {"status": 200, "bytes": "shell", "headers": {
         "content-type": "text/html; charset=utf-8", "cache-control": "no-store"}}
@@ -78,3 +80,13 @@ def test_lexical_path_rows_compare_the_oracle_without_substitution(monkeypatch, 
         row = run.compare_case(c, py, rs)
         assert row["diffs"]
         assert "substitution" not in row
+
+
+@pytest.mark.parametrize("drive", ["C:", "D:", "Q:"])
+def test_windows_same_drive_case_tracks_the_fixture_drive(monkeypatch, drive):
+    monkeypatch.setattr(run, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(run.daemons, "scratch_root", lambda: PureWindowsPath(drive + "/scratch"))
+    paths = [c["path"] for c in run.StaticPaths().cases()]
+    assert f"/ui/{drive}index.html" in paths
+    other = "R" if drive == "Q:" else "Q"
+    assert f"/ui/{other}:x" in paths
