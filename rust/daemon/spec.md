@@ -151,8 +151,8 @@ or load schemas from the network.
 
 `mcp_run.py <binary> <output> --validation-sweep` generates field variants from
 both validation layers and compares HTTP/JSON-RPC codes, readiness and tier on
-both live daemons, before and after initialization. The pinned corpus has 14,491
-cases and requires all 28,982 paired observations with zero differences. It
+both live daemons, before and after initialization. The pinned corpus has 15,339
+cases and requires all 30,678 paired observations with zero differences. It
 retains the separate strict transport corpus and its declared differences.
 
 ### Free (MCP surface)

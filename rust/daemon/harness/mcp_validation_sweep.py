@@ -15,7 +15,7 @@ import time
 from mcp_validation_cases import cases
 from mcp_wire import ACCEPT, PROTOCOL, header, request, sse_data
 
-EXPECTED_CASES = 14491
+EXPECTED_CASES = 15339
 
 INIT = {'protocolVersion': PROTOCOL, 'capabilities': {},
         'clientInfo': {'name': 'validation-fixture', 'version': '1'}}

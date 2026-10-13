@@ -89,10 +89,11 @@ fn integer_string(raw: &str) -> bool {
         Some(b'1'..=b'9' | b'-') => (),
         _ => return false,
     }
-    if let Some((whole, fraction)) = s.split_once('.') {
-        if !fraction.is_empty() && fraction.bytes().all(|b| b == b'0') {
-            s = whole;
-        }
+    if let Some((whole, fraction)) = s.split_once('.')
+        && !fraction.is_empty()
+        && fraction.bytes().all(|b| b == b'0')
+    {
+        s = whole;
     }
     let mut cleaned =
         if s.contains('_') && !s.starts_with('_') && !s.ends_with('_') && !s.contains("__") {
@@ -115,21 +116,15 @@ fn number(value: &Value) -> Option<f64> {
     match value {
         Value::Bool(v) => Some(u8::from(*v) as f64),
         Value::Number(n) => n.as_f64(),
-        Value::String(s) => {
-            let s = s.trim();
-            // Underscores are accepted only between ASCII digits.
-            let bytes = s.as_bytes();
-            if bytes.iter().enumerate().any(|(i, b)| {
-                *b == b'_'
-                    && (i == 0
-                        || i + 1 == bytes.len()
-                        || !bytes[i - 1].is_ascii_digit()
-                        || !bytes[i + 1].is_ascii_digit())
-            }) {
-                return None;
+        Value::String(s) => s.trim().parse().ok().or_else(|| {
+            // The SDK retries underscore removal on the original string,
+            // without trimming again or requiring digit-adjacent separators.
+            if s.starts_with('_') || s.ends_with('_') || !s.contains('_') || s.contains("__") {
+                None
+            } else {
+                s.replace('_', "").parse().ok()
             }
-            s.replace('_', "").parse().ok()
-        }
+        }),
         _ => None,
     }
 }
@@ -244,6 +239,16 @@ fn valid(schema: &Value, value: &Value, defs: &Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn sdk_number_accepts_cleaned_underscores() {
+        assert_eq!(number(&json!("0_._1")), Some(0.1));
+    }
+
+    #[test]
+    fn sdk_number_refuses_whitespace_after_underscore_cleanup() {
+        assert_eq!(number(&json!(" 0_1 ")), None);
+    }
 
     #[test]
     fn sdk_file_urls_refuse_other_schemes() {

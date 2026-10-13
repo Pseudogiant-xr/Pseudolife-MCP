@@ -14,6 +14,10 @@ INTEGER_STRINGS = ('0-1', '00-1', '-0-1', '+0-1', '0_0-1', '0_-1', '0__1',
                    ' 1 ', '1_2', '01', '0.00', '-1', '9' * 4299, '9' * 4300,
                    '9' * 4301, '-' + '9' * 4299, '-' + '9' * 4300)
 
+FLOAT_STRINGS = ('0_._1', ' 0_1 ', '+_0.1', '1_e-1', '0_.1', '0._1',
+                 '1__0', '_1', '1_', 'NaN', 'inf', '0.1', ' 0.1 ', '0_1',
+                 '1e999', '-inf')
+
 
 def resolve(schema, defs):
     while '$ref' in schema:
@@ -60,6 +64,9 @@ def variants(schema, defs, base=None, path=()):
         yield path, value
     if schema.get('type') == 'integer':
         for value in INTEGER_STRINGS:
+            yield path, value
+    if schema.get('type') == 'number':
+        for value in FLOAT_STRINGS:
             yield path, value
     if schema.get('format') == 'uri':
         for value in ('file:///fixture', 'https://example.test/resource', 'fixture:opaque'):
