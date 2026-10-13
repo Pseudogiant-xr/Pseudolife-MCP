@@ -415,7 +415,7 @@ def timeline_queries(state: dict) -> set[str]:
     """Oracle telemetry supplies ordering context even without via=timeline."""
     events = state["rows"].get("public.retrieval_events") or {}
     records = [dict(zip(events.get("columns", []), row)) for row in events.get("rows", [])]
-    return {r["query"] for r in records
+    return {r["query_text"] for r in records
             if ((r.get("params") or {}).get("timeline") or {}).get("fired")}
 
 

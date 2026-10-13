@@ -44,7 +44,7 @@ class MutantQualification(unittest.TestCase):
 
     def test_timeline_queries_use_oracle_event_context(self):
         state = {"rows": {"public.retrieval_events": {
-            "columns": ["query", "params"],
+            "columns": ["query_text", "params"],
             "rows": [["when", {"timeline": {"fired": True}}],
                      ["other", {"timeline": {"fired": False}}]]}}}
         self.assertEqual(search.timeline_queries(state), {"when"})
