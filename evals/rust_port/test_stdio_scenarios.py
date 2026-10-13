@@ -41,7 +41,7 @@ def test_current_startup_contract_binds_selected_pin_and_literal_version():
             assert hashlib.sha256(selected).hexdigest() == binding["git_blob_sha256"]
 
 
-@pytest.mark.parametrize("wrong_version", ["0.16.1", "99.0.0"])
+@pytest.mark.parametrize("wrong_version", ["0.17.0", "99.0.0"])
 def test_current_version_mismatch_keeps_the_exact_version_assertion(wrong_version):
     contract = json.loads(Path(__file__).with_name("stdio_startup_contract.json").read_text())
     expected = expected_stderr(contract, "version-mismatch", "fixture-origin")
@@ -49,7 +49,7 @@ def test_current_version_mismatch_keeps_the_exact_version_assertion(wrong_versio
               "stdout_frames_b64": ["initialize-frame"], "exit_code": 0}
     records = [{"method": "GET", "path": "/health"}]
     assert startup_difference(result, contract, "version-mismatch", "fixture-origin", None, records) == []
-    mutated = expected.replace(b"pseudolife-mcp 0.17.0", b"pseudolife-mcp " + wrong_version.encode())
+    mutated = expected.replace(b"pseudolife-mcp 0.18.0", b"pseudolife-mcp " + wrong_version.encode())
     result["stderr_b64"] = base64.b64encode(mutated).decode()
     assert startup_difference(result, contract, "version-mismatch", "fixture-origin", None, records) == [
         {"path": "/stderr", "reason": "startup_stderr_bytes"}]
