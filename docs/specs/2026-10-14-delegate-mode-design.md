@@ -27,9 +27,11 @@ Sep 23 to Oct 13:
 
 The session's value is its long context, so restarting it often is the
 wrong fix. What should change is how often it wakes, and how much
-throwaway output it reads into that context. The 2026-10-14 review of
-this design added a third point: instructions alone are a weak lever,
-especially for OpenAI models, so the output rule is enforced by a hook.
+throwaway output it reads into that context. Instructions in a 300k
+context are a weak lever on their own, so the output rule is repeated
+every turn, and an enforcing hook is held in reserve for a session whose
+model does not keep to it (revision 3, 2026-10-14; the maintainer runs
+the delegate on Opus 5.5 or Fable 5.1).
 
 ## Goal and success measure
 
@@ -42,18 +44,20 @@ session for one week after release, against the baseline above:
 - the share of turns that take no action, from 34%;
 - the Bash and board share of the context, from 64%;
 - requests per active hour;
-- guard denials per session, and whether the Bash share fell with them.
-  Many denials with no fall means the model is routing around the guard.
+- Bash results over 8k characters per session, the count the per-turn
+  reminder is meant to drive down.
 
 ## Three pieces
 
 1. **A watcher** that waits for decision events without a model and
    delivers them as board mail. Any session can start one; the mail wakes
    the session through the daemon's existing ring.
-2. **An output guard**: a PreToolUse hook that refuses a parent session's
-   known-heavy commands and names the alternative. Subagents are exempt.
-3. **A brief** served at session start only to the maintainer's delegate,
-   the session holding an operator-granted `delegate:<project>` lease.
+2. **A brief and a per-turn reminder**, served only to the maintainer's
+   delegate, the session holding an operator-granted `delegate:<project>`
+   lease: the brief at session start, one line on every turn.
+3. **An escalation ladder** for the output rule, built only when the
+   measured week says the reminder is not enough: a PostToolUse nudge
+   after a large result, then the refusing guard of the appendix.
 
 Each lands as its own Python PR, then a Rust-only PR ports what has a
 Rust counterpart. `rust/PORTING.md` sets that order: a Python change
@@ -171,7 +175,79 @@ keep-warm timer can go.
   fixtures file above. `gh` is faked in the harness, as the Python tests
   fake it.
 
-## 2. The output guard: `plugin/hooks/output-guard.sh`
+## 2. The brief and the per-turn reminder
+
+### The brief, served only to the delegate at session start
+
+> You are the maintainer's delegate for <project>. Keep this session's
+> context for decisions:
+> - Start a watcher once: `pseudolife-mcp delegate-watch --detach`. Park
+>   with `park_needs="decision events"` and `park_clear_by=<its id>`
+>   before ending a turn that waits. On a wake, read with
+>   `memory_message(action="receive", ack=true)`, act, and park again.
+> - Hand raw output (CI logs, test runs, long diffs) to a subagent that
+>   returns at most ten lines. Put what you already know in its brief
+>   (paths, symbols, what is settled) so it reads little. Run it in the
+>   foreground while you are working; a background one wakes you when it
+>   finishes.
+> - Ask workers for decision-ready mail and to keep progress in their
+>   board status.
+> - Answer a quiet wake in one line, with no tool calls.
+
+### The reminder, one line on every turn
+
+> Delegate: raw output goes to a subagent; a quiet wake gets one line.
+
+It rides the plugin's existing `UserPromptSubmit` hook, which already
+appends the "Memory changed since your last turn" note, so there is no
+new hook and nothing for Codex users to approve again. About 60 tokens at
+the tail of the conversation, where the cached prefix is untouched and a
+long context still reads reliably. This is the same mechanism Claude
+Code uses for its own per-turn notices. The watcher's wake mail ends
+with the same line, at no cost, though as agent-origin text it carries
+no authority.
+
+### Mechanics
+
+- `coordination-start.sh` and the prompt hook pass `?agent=<id>` when the
+  `.agent` file exists, the shape the park gate already uses. The daemon
+  appends the brief or the reminder when that agent belongs to the
+  bearer's principal and holds an operator-granted `delegate:<project>`
+  lease: the `lease_delegate` audit record for the lease's current fence,
+  the same proof `_authority` applies to delegate mail. A held lease alone
+  is not proof; the prefix predates its reservation. The daemon caches
+  the answer per agent for a few minutes so the per-turn call stays one
+  cheap query.
+- The check-in text itself does not change. It is pinned to a measured
+  eval; the brief and the reminder are separate blocks after it.
+- A grant that lands mid-session shows on the next turn's reminder and at
+  the next session start.
+- Rust: the Rust daemon serves the hook endpoints too, so it gets the
+  same `agent` parameter and check, with a board parity scenario for
+  delegate, non-delegate, expired, another principal's agent, and a lease
+  held without the operator record.
+
+## 3. The escalation ladder for the output rule
+
+Built in this order, each step only when the measured week shows the
+previous one did not move the Bash share:
+
+1. **The per-turn reminder** above. Expected to be enough for Opus 5.5
+   and Fable 5.1.
+2. **A PostToolUse nudge.** After a Bash or PowerShell result over 8k
+   characters, the hook appends one line: "that output was 24k
+   characters; next time hand it to a subagent." Feedback at the moment
+   of the mistake, no refusal, no false positives. It needs a
+   `PostToolUse` matcher on `Bash|PowerShell` in `hooks.json`, so it costs
+   the one Codex re-approval; the pin in
+   `tests/test_codex_hook_launcher.py` moves and the changelog says so.
+3. **The refusing guard** of the appendix, for a session whose model does
+   not keep to a reminder, which today means a Codex delegate.
+
+## Appendix: the refusing guard, `plugin/hooks/output-guard.sh`
+
+Specified so it can be built without a new design round; not built in
+this change.
 
 ### Rule
 
@@ -199,8 +275,7 @@ from a measured catch.
 ### Mechanics
 
 - `hooks.json` gets a second PreToolUse group, matcher `^(Bash|
-  PowerShell)$`. This is the one `hooks.json` change in this design:
-  Codex users approve the hooks once more, the pin in
+  PowerShell)$`. Codex users approve the hooks once more, the pin in
   `tests/test_codex_hook_launcher.py` moves, and the changelog says so.
   Tests that unpack exactly one PreToolUse group (`_entry()` in
   `tests/test_subagent_board_guard.py` and its siblings) are updated.
@@ -233,43 +308,6 @@ with the alternative applied allowed; the pattern text quoted inside a
 message or heredoc not matched; the opt-out; a broken copy blocking
 nothing; the PowerShell path through `pwsh_run`.
 
-## 3. The brief
-
-### Text, served only to the delegate
-
-> You are the maintainer's delegate for <project>. Keep this session's
-> context for decisions:
-> - Start a watcher once: `pseudolife-mcp delegate-watch --detach`. Park
->   with `park_needs="decision events"` and `park_clear_by=<its id>`
->   before ending a turn that waits. On a wake, read with
->   `memory_message(action="receive", ack=true)`, act, and park again.
-> - Hand raw output (CI logs, test runs, long diffs) to a subagent that
->   returns at most ten lines: a cheaper model for mechanical digests, a
->   stronger one for diagnosis or fixes. Run them in the foreground
->   while you are working; a background one wakes you when it finishes.
-> - Ask workers for decision-ready mail and to keep progress in their
->   board status.
-> - Answer a quiet wake in one line, with no tool calls.
-
-### Mechanics
-
-- `coordination-start.sh` passes `?agent=<id>` when the `.agent` file
-  exists, the shape the park gate already uses. The daemon's
-  `/api/hook/coordination-start` appends the brief when that agent
-  belongs to the bearer's principal and holds an operator-granted
-  `delegate:<project>` lease: the `lease_delegate` audit record for the
-  lease's current fence, the same proof `_authority` applies to delegate
-  mail. A held lease alone is not proof; the prefix predates its
-  reservation.
-- The check-in text itself does not change. It is pinned to a measured
-  eval; the brief is a separate block after it.
-- A grant that lands mid-session shows at the next session start or
-  resume. That is enough: the lease is granted for days.
-- Rust: the Rust daemon serves the hook endpoints too, so it gets the
-  same `agent` parameter and check, with a board parity scenario for
-  delegate, non-delegate, expired, another principal's agent, and a lease
-  held without the operator record.
-
 ## Not in this design
 
 - Changing the check-in text to recommend `ack=true` for every session.
@@ -283,13 +321,13 @@ nothing; the PowerShell path through `pwsh_run`.
 ## Order of work
 
 1. Python PR: the watcher, replacing #755. No `hooks.json` change.
-2. Python PR: the guard. The one re-approval.
-3. Python PR: the brief, daemon side.
-4. Rust-only PRs: the watcher port; the brief's daemon parity.
-5. One measured week on the delegate, then the numbers above decide
-   whether the guard's list or the brief needs changing.
+2. Python PR: the brief and the reminder, daemon and hook scripts. No
+   `hooks.json` change.
+3. Rust-only PRs: the watcher port; the brief's daemon parity.
+4. One measured week on the delegate, then the numbers above decide
+   whether to climb the ladder.
 
 Each PR carries tests seen red first, the dependent-file run, and the
-two reviews. The guard and brief PRs change the plugin, so their deploy
+two reviews. The brief PR changes the plugin's scripts, so its deploy
 needs the client step (`update --all`); sessions pick them up on
 restart.
