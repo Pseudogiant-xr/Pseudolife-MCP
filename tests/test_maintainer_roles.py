@@ -689,6 +689,21 @@ def test_no_brief_after_the_grant_expires_or_is_revoked(svc):
     assert _asks(svc, delegate) == []
 
 
+def test_the_lookup_reports_how_long_the_delegate_lease_has_left(svc):
+    delegate = peer(svc)
+    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
+    board(svc).grant_delegate("q", delegate["agent_id"], hold=HOUR)
+    store = board(svc)
+    sql(svc, "UPDATE coordination_leases SET expires_at=%s WHERE name='delegate:q'",
+        (store.clock() + 10,))
+    with svc._coordination_lock:
+        out = store.delegate_of(delegate["agent_id"], PRINCIPAL)
+    assert out["projects"] == ["p", "q"] and 0 < out["remaining"] <= 10
+    with svc._coordination_lock:
+        assert coordination._store(svc).delegate_of(delegate["agent_id"], "other-user") == {
+            "projects": [], "remaining": None}
+
+
 def test_no_brief_for_another_principals_agent_or_a_malformed_id(svc):
     svc.config.coordination.allowed_principals = [PRINCIPAL, "other-user"]
     delegate = peer(svc)
@@ -702,8 +717,12 @@ def test_no_brief_for_another_principals_agent_or_a_malformed_id(svc):
                                               agent=bad, token_map=_TOKENS) == []
 
 
-def test_the_hook_endpoints_serve_the_brief_and_the_reminder_to_the_delegate_only(svc):
+def test_the_hook_endpoints_serve_the_brief_and_the_reminder_to_the_delegate_only(
+        svc, monkeypatch):
     from pseudolife_memory.coordination import CHECKIN_TEXT, DELEGATE_REMINDER
+    # A loaded host's first lookup may pass the hooks' budget; this test is
+    # about who gets the text, not how fast (the budget has its own test).
+    monkeypatch.setattr(coordination, "DELEGATE_LOOKUP_BUDGET", 30)
     from pseudolife_memory.web.api import build_console_app
     from tests.asgi_helpers import call as asgi_call, stub_mcp
     delegate, other = peer(svc), peer(svc, label="other")

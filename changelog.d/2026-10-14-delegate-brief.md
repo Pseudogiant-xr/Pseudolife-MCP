@@ -11,7 +11,11 @@ Other sessions see no change, and the check-in text itself is unchanged.
 `agent=` on the requests they already make; there is no new request per
 prompt. The daemon answers only for an address the bearer's principal owns,
 with the same operator-or-maintainer grant proof as delegate mail, and caches
-each answer for 60 seconds, so a grant or a revoke shows within a minute.
+each answer for 60 seconds (never past the delegate lease's own expiry), so a
+grant or a revoke shows within a minute. The lookup waits at most half a
+second; past that the hook gets its usual text and the answer arrives on the
+next call, so a slow lookup never costs a session its check-in or memory
+note.
 Sessions pick the scripts up after the client update (`pseudolife-mcp update
 --all`, or `python ops/update_clients.py`) and a restart. `hooks.json` did
 not change, so Codex users do not approve the hooks again.

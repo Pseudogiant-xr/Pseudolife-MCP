@@ -602,14 +602,14 @@ def build_console_app(
                 # The maintainer's delegate's one-line reminder (spec
                 # 2026-10-14), after the cursor and any note: only beside a
                 # cursor, since an empty answer must stay empty for the hook.
+                # The lookup waits at most DELEGATE_LOOKUP_BUDGET.
                 if text and params.get("agent"):
                     from pseudolife_memory.coordination import delegate_reminder
                     headers = {k.decode().lower(): v.decode("latin-1")
                                for k, v in scope.get("headers", [])}
-                    text += await asyncio.get_running_loop().run_in_executor(
-                        None, functools.partial(delegate_reminder, service, headers,
-                                                agent=params.get("agent"),
-                                                token_map=token_map, token=token))
+                    text += await delegate_reminder(service, headers,
+                                                    agent=params.get("agent"),
+                                                    token_map=token_map, token=token)
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store")
             return
@@ -676,13 +676,13 @@ def build_console_app(
             text = "" if reason else CHECKIN_TEXT + "\n"
             # ?agent=<id> (the session's board address, spec 2026-10-14):
             # the maintainer's delegate gets its brief as a block after the
-            # unchanged check-in. The lookup is the one storage read here.
+            # unchanged check-in. The lookup is the one storage read here, and
+            # waits at most DELEGATE_LOOKUP_BUDGET.
             agent = _parse_query(scope).get("agent") if not reason else None
             if agent:
                 from pseudolife_memory.coordination import delegate_brief
-                text += await asyncio.get_running_loop().run_in_executor(
-                    None, functools.partial(delegate_brief, service, headers, agent=agent,
-                                            token_map=token_map, token=token))
+                text += await delegate_brief(service, headers, agent=agent,
+                                             token_map=token_map, token=token)
             # X-PL-Board names why the board is off, so the installer and
             # doctor report the daemon's reason instead of guessing one.
             # The codes reveal no more than /api's own 401 already does.

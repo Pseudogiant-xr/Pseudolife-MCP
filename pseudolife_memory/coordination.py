@@ -10,6 +10,8 @@ initialization once. Waiting for messages belongs to the async web adapter.
 """
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import logging
 import os
 import re
@@ -242,6 +244,13 @@ DELEGATE_REMINDER = "Delegate: raw output goes to a subagent; a quiet wake gets 
 # per-prompt path then costs one cheap lookup a minute per session, and a
 # grant or a revoke shows within a minute.
 DELEGATE_CACHE_SECONDS = 60
+# How long a hook route waits for a delegate lookup the cache cannot answer
+# (review of 7ecda4ee, 2026-10-14). The hooks give the whole request two
+# seconds of curl time and drop everything past it, so a lookup stalled on
+# the coordination lock or a query would cost every session with a board
+# address its memory note or check-in, delegate or not. Past this budget the
+# route sends what it has, and the lookup fills the cache for the next call.
+DELEGATE_LOOKUP_BUDGET = 0.5
 # Bound on cached answers; expired ones are dropped first, then the oldest.
 _DELEGATE_CACHE_MAX = 1024
 _DELEGATE_CACHE_LOCK = threading.Lock()
@@ -394,6 +403,67 @@ def subagent(service, headers: Mapping[str, str], *, agent, event, child, kind=N
     return "ok\n" if result.get("recorded") else ""
 
 
+def _delegate_key(service, headers: Mapping[str, str], agent, token_map, token):
+    """``(principal, agent)`` when a delegate lookup may run for this
+    caller, else None: the board is served to this bearer, ``agent`` is a
+    32-hex id, and the durable tier is up. No storage I/O. A cold daemon's
+    first board connection waits on the service lock, and the check-in or
+    the memory note these requests carry must not wait on it for a brief;
+    any board call opens it."""
+    if unavailable_reason(service, headers, token_map=token_map, token=token) is not None:
+        return None
+    if not (isinstance(agent, str) and len(agent) == 32
+            and all(c in "0123456789abcdef" for c in agent)):
+        return None
+    try:
+        principal = authenticated_principal(headers, token_map=token_map, token=token)
+    except ValueError:
+        return None
+    if not _tier_ready(service, full=False):
+        return None
+    return principal, agent
+
+
+def _delegate_cached(service, key, now):
+    with _DELEGATE_CACHE_LOCK:
+        cache = getattr(service, "_delegate_cache", None)
+        if cache is None:
+            cache = service._delegate_cache = {}
+        hit = cache.get(key)
+        return list(hit[1]) if hit is not None and hit[0] > now else None
+
+
+def _delegate_fetch(service, key, clock) -> list[str]:
+    """Ask the store, cache the answer and return it; [] on any failure,
+    which is not cached. A yes is kept for ``DELEGATE_CACHE_SECONDS`` but
+    never past the earliest proven lease's expiry."""
+    principal, agent = key
+    try:
+        _ensure_tier(service, full=False)
+        with service._coordination_lock:
+            answer = _store(service).delegate_of(agent, principal)
+        projects = list(answer["projects"])
+        remaining = answer.get("remaining")
+    except Exception:  # noqa: BLE001 - the brief never surfaces an error to the hook
+        logger.debug("delegate lookup failed", exc_info=True)
+        return []
+    now = clock()
+    ttl = float(DELEGATE_CACHE_SECONDS)
+    if projects and remaining is not None:
+        ttl = max(0.0, min(ttl, float(remaining)))
+    with _DELEGATE_CACHE_LOCK:
+        cache = getattr(service, "_delegate_cache", None)
+        if cache is None:
+            cache = service._delegate_cache = {}
+        if len(cache) >= _DELEGATE_CACHE_MAX:
+            for stale in [k for k, (until, _) in cache.items() if until <= now]:
+                del cache[stale]
+            while len(cache) >= _DELEGATE_CACHE_MAX:
+                del cache[next(iter(cache))]
+        cache[key] = (now + ttl, tuple(projects))
+    return projects
+
+
 def delegate_projects(service, headers: Mapping[str, str], *, agent,
                       token_map=None, token=None, clock=None) -> list[str]:
     """The projects whose operator-granted delegate ``agent`` is, as the
@@ -406,46 +476,77 @@ def delegate_projects(service, headers: Mapping[str, str], *, agent,
 
     Each answer is kept per (principal, agent) in the daemon process for
     ``DELEGATE_CACHE_SECONDS``, so the per-prompt call stays one cheap
-    lookup and a grant or a revoke shows within a minute. A failure is not
-    cached. ``clock`` (monotonic seconds) is for tests."""
-    if unavailable_reason(service, headers, token_map=token_map, token=token) is not None:
+    lookup and a grant or a revoke shows within a minute; a yes never
+    outlives the delegate lease itself. A failure is not cached. This form
+    waits for the store; the hook routes use ``delegate_projects_soon``.
+    ``clock`` (monotonic seconds) is for tests."""
+    clock = clock or time.monotonic
+    key = _delegate_key(service, headers, agent, token_map, token)
+    if key is None:
         return []
-    if not (isinstance(agent, str) and len(agent) == 32
-            and all(c in "0123456789abcdef" for c in agent)):
-        return []
-    try:
-        principal = authenticated_principal(headers, token_map=token_map, token=token)
-    except ValueError:
-        return []
-    now = (clock or time.monotonic)()
-    key = (principal, agent)
+    hit = _delegate_cached(service, key, clock())
+    return hit if hit is not None else _delegate_fetch(service, key, clock)
+
+
+def _delegate_lookup(service, key) -> concurrent.futures.Future:
+    """The one lookup in flight for ``key``, started on a daemon thread if
+    none is: concurrent misses share it, and a stalled one holds one thread,
+    never the hook's answer or the process's exit."""
     with _DELEGATE_CACHE_LOCK:
-        cache = getattr(service, "_delegate_cache", None)
-        if cache is None:
-            cache = service._delegate_cache = {}
-        hit = cache.get(key)
-        if hit is not None and hit[0] > now:
-            return list(hit[1])
-    # A cold daemon's first board connection waits on the service lock; the
-    # hooks give these requests two seconds, and the check-in or the memory
-    # note they carry must not be lost to a brief. Any board call opens it.
-    if not _tier_ready(service, full=False):
+        inflight = getattr(service, "_delegate_inflight", None)
+        if inflight is None:
+            inflight = service._delegate_inflight = {}
+        future = inflight.get(key)
+        if future is not None:
+            return future
+        future = inflight[key] = concurrent.futures.Future()
+
+    def run():
+        try:
+            projects = _delegate_fetch(service, key, time.monotonic)
+        except BaseException:  # noqa: BLE001 - _delegate_fetch already fails closed
+            projects = []
+        with _DELEGATE_CACHE_LOCK:
+            if inflight.get(key) is future:
+                del inflight[key]
+        future.set_result(projects)
+
+    threading.Thread(target=run, name="pl-delegate-lookup", daemon=True).start()
+    return future
+
+
+async def delegate_projects_soon(service, headers: Mapping[str, str], *, agent,
+                                 token_map=None, token=None) -> list[str]:
+    """``delegate_projects`` for the hook routes, waiting at most
+    ``DELEGATE_LOOKUP_BUDGET`` on a cache miss. Past it the answer is [],
+    so the route sends the text it already has, and the lookup finishes in
+    the background, filling the cache for the next call."""
+    key = _delegate_key(service, headers, agent, token_map, token)
+    if key is None:
         return []
+    hit = _delegate_cached(service, key, time.monotonic())
+    if hit is not None:
+        return hit
+    future = _delegate_lookup(service, key)
+    loop = asyncio.get_running_loop()
+    waiter = loop.create_future()
+
+    def settle():
+        if not waiter.done():
+            waiter.set_result(None)
+
+    def wake(_done):
+        try:
+            loop.call_soon_threadsafe(settle)
+        except RuntimeError:  # the loop has closed; nobody is waiting
+            pass
+
+    future.add_done_callback(wake)
     try:
-        _ensure_tier(service, full=False)
-        with service._coordination_lock:
-            projects = list(_store(service).delegate_of(agent, principal))
-    except Exception:  # noqa: BLE001 - the brief never surfaces an error to the hook
-        logger.debug("delegate lookup failed", exc_info=True)
+        await asyncio.wait_for(waiter, DELEGATE_LOOKUP_BUDGET)
+    except asyncio.TimeoutError:
         return []
-    with _DELEGATE_CACHE_LOCK:
-        if len(cache) >= _DELEGATE_CACHE_MAX:
-            for stale in [k for k, (until, _) in cache.items() if until <= now]:
-                del cache[stale]
-            while len(cache) >= _DELEGATE_CACHE_MAX:
-                del cache[next(iter(cache))]
-        cache[key] = (now + DELEGATE_CACHE_SECONDS, tuple(projects))
-    return projects
+    return list(future.result())
 
 
 def render_delegate_brief(projects) -> str:
@@ -455,22 +556,22 @@ def render_delegate_brief(projects) -> str:
     return DELEGATE_BRIEF.format(projects=joined)
 
 
-def delegate_brief(service, headers: Mapping[str, str], *, agent,
-                   token_map=None, token=None) -> str:
+async def delegate_brief(service, headers: Mapping[str, str], *, agent,
+                         token_map=None, token=None) -> str:
     """The block ``/api/hook/coordination-start`` appends after the check-in
     for the maintainer's delegate (a blank line, the brief, a newline), or
     ''."""
-    projects = delegate_projects(service, headers, agent=agent,
-                                 token_map=token_map, token=token)
+    projects = await delegate_projects_soon(service, headers, agent=agent,
+                                            token_map=token_map, token=token)
     return "\n" + render_delegate_brief(projects) + "\n" if projects else ""
 
 
-def delegate_reminder(service, headers: Mapping[str, str], *, agent,
-                      token_map=None, token=None) -> str:
+async def delegate_reminder(service, headers: Mapping[str, str], *, agent,
+                            token_map=None, token=None) -> str:
     """The line ``/api/hook/memory-changes`` appends for the maintainer's
     delegate on every turn, or ''."""
-    projects = delegate_projects(service, headers, agent=agent,
-                                 token_map=token_map, token=token)
+    projects = await delegate_projects_soon(service, headers, agent=agent,
+                                            token_map=token_map, token=token)
     return DELEGATE_REMINDER + "\n" if projects else ""
 
 

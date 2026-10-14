@@ -522,7 +522,10 @@ class _DelegateStore:
 
     def delegate_of(self, agent, principal):
         self.calls.append((agent, principal))
-        return list(self.answers.get(agent, []))
+        answer = self.answers.get(agent, [])
+        if isinstance(answer, dict):
+            return answer
+        return {"projects": list(answer), "remaining": 3600.0 if answer else None}
 
 
 def _delegate_service(monkeypatch, answers):
@@ -631,11 +634,11 @@ def test_coordination_start_appends_the_brief_after_the_unchanged_checkin(monkey
     from pseudolife_memory.coordination import CHECKIN_TEXT, render_delegate_brief
     seen = []
 
-    def projects(service, headers, *, agent, token_map=None, token=None, clock=None):
+    async def projects(service, headers, *, agent, token_map=None, token=None):
         seen.append((agent, headers.get("authorization")))
         return ["p"] if agent == "a" * 32 else []
 
-    monkeypatch.setattr(coordination, "delegate_projects", projects)
+    monkeypatch.setattr(coordination, "delegate_projects_soon", projects)
     app = build_console_app(stub_mcp, "fixture-secret", lambda: {}, _board_service())
     bearer = [(b"authorization", b"Bearer fixture-secret")]
     status, body = call(app, "GET", "/api/hook/coordination-start", headers=bearer,
@@ -659,9 +662,10 @@ def test_memory_changes_appends_the_reminder_for_the_delegate(monkeypatch):
     from pseudolife_memory import coordination
     from pseudolife_memory.coordination import DELEGATE_REMINDER
     from pseudolife_memory.web import api
-    monkeypatch.setattr(coordination, "delegate_projects",
-                        lambda service, headers, *, agent, token_map=None, token=None,
-                        clock=None: ["p"] if agent == "a" * 32 else [])
+    async def projects(service, headers, *, agent, token_map=None, token=None):
+        return ["p"] if agent == "a" * 32 else []
+
+    monkeypatch.setattr(coordination, "delegate_projects_soon", projects)
     answers = iter(["100.000000\n", "100.000000\nMemory changed since your last turn:\n- x\n",
                     "", "100.000000\n"])
     monkeypatch.setattr(api, "hook_memory_changes", lambda *a: next(answers))
@@ -680,3 +684,113 @@ def test_memory_changes_appends_the_reminder_for_the_delegate(monkeypatch):
     # No cursor (a failed note) gets no reminder: the hook would read it as one.
     assert ask(delegate) == ""
     assert ask("session_id=s1&agent=" + "b" * 32) == "100.000000\n"
+
+
+def test_a_cached_yes_ends_with_the_delegate_lease(monkeypatch):
+    """The 60 s lag applies to a revoke or a new grant, but a cached yes is
+    never served past the delegate lease's own expiry."""
+    from pseudolife_memory.coordination import delegate_projects
+    answers = {"a" * 32: {"projects": ["p"], "remaining": 10.0}}
+    service, calls = _delegate_service(monkeypatch, answers)
+    now = [1000.0]
+    headers = {"authorization": "Bearer fixture-secret"}
+
+    def ask():
+        return delegate_projects(service, headers, agent="a" * 32, token_map={},
+                                 token="fixture-secret", clock=lambda: now[0])
+
+    assert ask() == ["p"] and len(calls) == 1
+    answers["a" * 32] = []                       # the lease has lapsed
+    now[0] += 9.5
+    assert ask() == ["p"] and len(calls) == 1    # still inside the lease
+    now[0] += 1
+    assert ask() == [] and len(calls) == 2       # 10.5 s: asked again, not at 60 s
+
+
+class _SlowStore:
+    def __init__(self, calls, release):
+        self.calls, self.release = calls, release
+
+    def delegate_of(self, agent, principal):
+        self.calls.append(agent)
+        self.release.wait(10)
+        return {"projects": ["p"], "remaining": 3600.0}
+
+
+def _slow_service(monkeypatch, budget=0.2):
+    import threading
+    from pseudolife_memory import coordination
+    calls, release = [], threading.Event()
+    service = _board_service()
+    service._storage = object()
+    service._coordination_lock = threading.Lock()
+    monkeypatch.setattr(coordination, "_store", lambda s: _SlowStore(calls, release))
+    monkeypatch.setattr(coordination, "DELEGATE_LOOKUP_BUDGET", budget)
+    return service, calls, release
+
+
+def _wait_for_cache(service, agent, timeout=5.0):
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if any(key[1] == agent for key in getattr(service, "_delegate_cache", {})):
+            return
+        time.sleep(0.02)
+    raise AssertionError("the background lookup never filled the cache")
+
+
+def test_a_slow_delegate_lookup_never_holds_the_hook_answer(monkeypatch):
+    """A stalled coordination lock or query must not cost a session its
+    memory note or check-in: past the budget the route sends the text it
+    already has, the lookup finishes in the background and fills the cache,
+    and the next call carries the reminder from it."""
+    import time
+    from pseudolife_memory.coordination import (CHECKIN_TEXT, DELEGATE_LOOKUP_BUDGET,
+                                                DELEGATE_REMINDER)
+    from pseudolife_memory.web import api
+    assert DELEGATE_LOOKUP_BUDGET == 0.5
+    service, calls, release = _slow_service(monkeypatch)
+    monkeypatch.setattr(api, "hook_memory_changes", lambda *a: "100.000000\n")
+    app = build_console_app(stub_mcp, "fixture-secret", lambda: {}, service)
+    bearer = [(b"authorization", b"Bearer fixture-secret")]
+    agent = "a" * 32
+    try:
+        for path, query, base in (
+                ("/api/hook/memory-changes", f"session_id=s1&agent={agent}", "100.000000\n"),
+                ("/api/hook/coordination-start", f"agent={agent}", CHECKIN_TEXT + "\n")):
+            started = time.monotonic()
+            status, body = call(app, "GET", path, headers=bearer, query=query)
+            assert status == 200 and body.decode() == base
+            assert time.monotonic() - started < 1.5
+        assert calls == [agent]                  # the second miss joined the first
+    finally:
+        release.set()
+    _wait_for_cache(service, agent)
+    status, body = call(app, "GET", "/api/hook/memory-changes", headers=bearer,
+                        query=f"session_id=s1&agent={agent}")
+    assert body.decode() == "100.000000\n" + DELEGATE_REMINDER + "\n"
+    assert calls == [agent]
+
+
+def test_concurrent_misses_for_one_agent_start_one_lookup(monkeypatch):
+    import asyncio
+    from pseudolife_memory.coordination import delegate_projects_soon
+    service, calls, release = _slow_service(monkeypatch, budget=0.1)
+    headers = {"authorization": "Bearer fixture-secret"}
+
+    async def both():
+        ask = [delegate_projects_soon(service, headers, agent=agent, token_map={},
+                                      token="fixture-secret")
+               for agent in ("a" * 32, "a" * 32, "b" * 32)]
+        return await asyncio.gather(*ask)
+
+    try:
+        assert asyncio.run(both()) == [[], [], []]
+        # One lookup per key in flight (b's waits for the coordination lock).
+        assert len(service._delegate_inflight) == 2
+    finally:
+        release.set()
+    _wait_for_cache(service, "a" * 32)
+    _wait_for_cache(service, "b" * 32)
+    assert asyncio.run(both()) == [["p"], ["p"], ["p"]]
+    assert sorted(calls) == ["a" * 32, "b" * 32]

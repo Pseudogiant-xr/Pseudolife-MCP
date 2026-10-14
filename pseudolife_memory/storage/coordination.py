@@ -2818,14 +2818,19 @@ class CoordinationStore:
         ``project``, that one only. Read from the lease table and the audit
         log; a held lease alone, or a record by any other actor, is no
         proof."""
+        return [row["name"][len(DELEGATE_PREFIX):]
+                for row in self._delegate_rows(agent_id, now, project=project)]
+
+    def _delegate_rows(self, agent_id, now, *, project=None):
+        """``delegate_projects``' proven leases: their names and expiries."""
         if project is None:
             # The prefix is matched with left(), not LIKE: a name's own
             # characters are never a pattern.
             match, params = "left(l.name, %s)=%s", (len(DELEGATE_PREFIX), DELEGATE_PREFIX)
         else:
             match, params = "l.name=%s", (DELEGATE_PREFIX + project,)
-        rows = self._all(
-            "SELECT l.name FROM coordination_leases l WHERE " + match + " "
+        return self._all(
+            "SELECT l.name, l.expires_at FROM coordination_leases l WHERE " + match + " "
             "AND l.holder_agent_id=%s AND l.expires_at>%s AND EXISTS (SELECT 1 "
             "FROM coordination_events e WHERE e.event='lease_delegate' "
             "AND e.actor=ANY(%s) AND e.agent_id=l.holder_agent_id "
@@ -2834,18 +2839,23 @@ class CoordinationStore:
             "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END) "
             "ORDER BY l.name",
             (*params, agent_id, now, list(ROLE_ACTORS)))
-        return [row["name"][len(DELEGATE_PREFIX):] for row in rows]
 
     def delegate_of(self, agent_id, principal):
         """``delegate_projects`` now, for the hook endpoints that brief the
-        delegate (spec 2026-10-14): empty for an address the caller's
-        principal does not own, or none at all, as ``park_gate`` answers."""
+        delegate (spec 2026-10-14), as ``{"projects": [...], "remaining":
+        seconds}``: ``remaining`` until the earliest of those leases expires
+        (a cache must not outlive it), None without one. No projects for an
+        address the caller's principal does not own, or none at all, as
+        ``park_gate`` answers."""
         row = self._one("SELECT 1 AS hit FROM coordination_agents WHERE agent_id=%s "
                         "AND principal=%s AND credential_hash IS NOT NULL",
                         (agent_id, principal))
         if row is None:
-            return []
-        return self.delegate_projects(agent_id, self.clock())
+            return {"projects": [], "remaining": None}
+        now = self.clock()
+        rows = self._delegate_rows(agent_id, now)
+        return {"projects": [r["name"][len(DELEGATE_PREFIX):] for r in rows],
+                "remaining": min(r["expires_at"] for r in rows) - now if rows else None}
 
     def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id,
                        maintainer=False):
