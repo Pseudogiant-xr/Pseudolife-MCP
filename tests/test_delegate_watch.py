@@ -108,6 +108,8 @@ class FakeBoard:
         self.updates = []
         self.registers = []
         self.refuse = {}
+        self.fail_after_send = []
+        self.truncated = False
         self.agent_id = None
         self.closed = False
 
@@ -118,7 +120,9 @@ class FakeBoard:
     def _maybe_refuse(self, action):
         queue = self.refuse.get(action)
         if queue:
-            raise queue.pop(0)
+            exc = queue.pop(0)
+            if exc is not None:
+                raise exc
 
     def register(self, *, task, project, label, status=""):
         self._maybe_refuse("register")
@@ -128,18 +132,22 @@ class FakeBoard:
     def forget(self):
         self.agent_id = None
 
-    def agents(self, **_):
+    def agents_page(self, **_):
         self._maybe_refuse("agents")
-        assert self.registered
-        return ([self.owner] if self.owner_present else []) + self.others
+        assert self.registered, "a board call without an address"
+        return ([self.owner] if self.owner_present else []) + self.others, self.truncated
 
     def send(self, to, text, request_id, *, clears=None, urgent=False, **_):
         self._maybe_refuse("send")
+        assert self.registered, "a board call without an address"
         self.sent.append({"t": self.clock(), "to": to, "text": text, "request_id": request_id,
                           "clears": clears, "urgent": urgent})
+        if self.fail_after_send:
+            raise self.fail_after_send.pop(0)        # recorded, but the reply was lost
 
     def update(self, *, status=None, task=None):
         self._maybe_refuse("update")
+        assert self.registered, "a board call without an address"
         self.updates.append(status)
 
     def leases(self, name=None):
@@ -152,7 +160,8 @@ class FakeBoard:
 
     # views
     def events(self):
-        return [m for m in self.sent if m["clears"] == watch.CLEARS and not m["text"].startswith("quiet ")]
+        return [m for m in self.sent if m["clears"] == watch.CLEARS
+                and not m["text"].startswith(("quiet ", "delegate-watch stopped:"))]
 
     def quiet(self):
         return [m for m in self.sent if m["text"].startswith("quiet ")]
@@ -185,7 +194,8 @@ class Harness:
         code = watch.main(argv, runner=self.world, clock=self.clock, sleep=sleep, board=self.board,
                           environ={})
         texts = [m["text"] for m in self.board.sent[before:]
-                 if m["clears"] == watch.CLEARS and not m["text"].startswith("quiet ")]
+                 if m["clears"] == watch.CLEARS
+                 and not m["text"].startswith(("quiet ", "delegate-watch stopped:"))]
         return code, texts, None
 
     def ledger(self):
@@ -205,7 +215,7 @@ def lines(texts):
     for text in texts:
         body = text.splitlines()
         assert body[-1] == watch.REMINDER
-        out += body[:-1]
+        out += [line for line in body[:-1] if not line.endswith("more events follow")]
     return out
 
 
@@ -315,12 +325,26 @@ def test_status_is_updated_every_poll_to_stay_listed(h):
     assert all(status.startswith("watching 2 open PRs; ") for status in h.board.updates)
 
 
-def test_a_long_batch_stays_under_the_boards_message_limit():
+def test_a_long_batch_is_cut_to_the_boards_limit_and_keeps_the_rest():
     found = [f"PR #{n} opened: " + "x" * 70 for n in range(200)]
-    text = watch.message_text(found)
+    text, kept, rest = watch.next_batch(found)
     assert len(text.encode("utf-8")) <= watch.MAX_TEXT_BYTES
     assert text.splitlines()[-1] == watch.REMINDER
-    assert "more" in text.splitlines()[-2]
+    assert text.splitlines()[-2] == f"{len(rest)} more events follow"
+    assert kept + rest == found and kept and rest
+    text, kept, rest = watch.next_batch(found[:3])
+    assert rest == [] and text.splitlines() == found[:3] + [watch.REMINDER]
+
+
+def test_an_oversized_batch_is_delivered_across_messages_with_nothing_lost(h):
+    h.main(max_age="60")
+    h.world.prs = [pr(n, title="x" * 70) for n in range(1, 101)]
+    code, texts, _ = h.main("--settle", "0")
+    assert code == 0 and len(texts) == 2
+    assert all(len(t.encode("utf-8")) <= watch.MAX_TEXT_BYTES for t in texts)
+    assert lines(texts) == [f"PR #{n} opened: " + "x" * 70 for n in range(1, 101)]
+    assert sum(" sent " in line for line in h.ledger()) == 2
+    assert "PR #100 opened" in "".join(h.ledger())
 
 
 # ── the loop: behaviours carried from ops/delegate_watch.py ─────────────────
@@ -419,17 +443,20 @@ def test_gh_failing_repeatedly_tells_the_owner_once_then_exits_2(h):
     err = h.capsys.readouterr().err
     assert "last: HTTP 502" in err and "[" not in err
     assert h.clock.t < 3300
-    plain = [m for m in h.board.sent if m["clears"] is None]
-    assert len(plain) == 1 and len(h.board.sent) == 1
-    assert plain[0]["to"] == OWNER and "gh failed on 5 polls in a row" in plain[0]["text"]
-    assert plain[0]["text"].startswith("delegate-watch stopped:")
+    assert len(h.board.sent) == 1
+    final = h.board.sent[0]
+    # It clears the park: after a re-registration the owner's park_clear_by
+    # names an old id, so only the need match can still ring it.
+    assert final["clears"] == "decision events"
+    assert final["to"] == OWNER and "gh failed on 5 polls in a row" in final["text"]
+    assert final["text"].startswith("delegate-watch stopped:")
 
 
 def test_gh_missing_tells_the_owner_and_exits_2(h):
     h.world.gh_missing = True
     code, _, _ = h.main()
     assert code == watch.EXIT_SETUP
-    assert len(h.board.sent) == 1 and h.board.sent[0]["clears"] is None
+    assert len(h.board.sent) == 1 and h.board.sent[0]["clears"] == "decision events"
     assert "gh is not installed" in h.board.sent[0]["text"]
 
 
@@ -607,11 +634,22 @@ def test_the_owner_leaving_the_board_ends_the_watch(h):
     assert "exit owner gone" in h.ledger()[-1]
 
 
-def test_a_full_page_without_the_owner_is_not_proof_it_left(h):
+def test_a_cut_page_without_the_owner_is_not_proof_it_left(h):
     h.board.owner_present = False
-    h.board.others = [{"agent_id": f"{n:032x}", "park_reason": None} for n in range(watch.LIST_LIMIT)]
+    h.board.truncated = True
     code, _, _ = h.main(max_age="300")
     assert code == 0 and "exit max age" in h.ledger()[-1]
+
+
+def test_a_done_owner_off_a_cut_page_still_gets_no_quiet_mail(h):
+    h.board.owner["park_reason"] = "done"
+
+    def between(poll):
+        if poll == 1:
+            h.board.owner_present = False
+            h.board.truncated = True
+    code, _, _ = h.main("--quiet-after", "300", between=between, max_age="1000")
+    assert code == 0 and h.board.quiet() == []
 
 
 def test_until_lease_exits_once_the_owner_no_longer_holds_it(h):
@@ -633,6 +671,18 @@ def test_a_forgotten_address_registers_again_once(h):
     assert "exit max age" in h.ledger()[-1]
 
 
+def test_a_failed_registration_retry_is_retried_next_poll(h):
+    h.world.prs = [pr(1)]
+    h.main(max_age="60")
+    h.board.refuse["agents"] = [_Refused("gone", "instance_not_found")]
+    h.board.refuse["register"] = [None, _Transient("HTTP 503")]
+    h.world.prs = [pr(1), pr(2, title="x")]
+    code, texts, _ = h.main("--settle", "0")
+    assert code == 0 and lines(texts) == ["PR #2 opened: x"]
+    # first run, this run's start, the failed retry, the retry that worked
+    assert len(h.board.registers) == 3
+
+
 def test_a_second_refusal_after_registering_again_exits_2(h):
     h.board.refuse["agents"] = [_Refused("gone", "instance_not_found"),
                                 _Refused("gone", "invalid_credential")]
@@ -649,6 +699,23 @@ def test_a_transient_board_failure_keeps_the_events_for_the_next_poll(h):
     assert code == 0 and lines(texts) == ["PR #2 opened: x"]
 
 
+def test_a_send_whose_reply_was_lost_is_retried_with_the_same_request_id(h):
+    h.world.prs = [pr(1)]
+    h.main(max_age="60")
+    h.world.prs = [pr(1), pr(2, title="x")]
+    h.board.fail_after_send = [_Transient("timed out")]
+
+    def between(poll):
+        if poll == 1:                                # arrives while the first batch is pending
+            h.world.prs = [pr(1), pr(2, title="x"), pr(3, title="y")]
+    h.main("--settle", "0", between=between)
+    first, retry, later = h.board.events()
+    assert (retry["request_id"], retry["text"]) == (first["request_id"], first["text"])
+    assert lines([first["text"]]) == ["PR #2 opened: x"]
+    assert lines([later["text"]]) == ["PR #3 opened: y"]
+    assert later["request_id"] != first["request_id"]
+
+
 def test_the_pid_file_names_the_watcher_while_it_runs(h):
     seen = {}
 
@@ -660,6 +727,42 @@ def test_the_pid_file_names_the_watcher_while_it_runs(h):
     assert seen["agent_id"] == f"{1:032x}"
     assert not h.state.with_suffix(".pid").exists()
     assert h.board.closed
+
+
+def test_a_second_watcher_on_the_same_state_exits_quietly(h, capsys):
+    from pseudolife_memory.os_lock import OsLock
+
+    lock = OsLock(h.state.with_suffix(".lock"))
+    assert lock.acquire()
+    try:
+        code, _, _ = h.main(max_age="300")
+    finally:
+        lock.release()
+    assert code == 0 and h.board.registers == [] and h.board.sent == []
+    assert "another watcher holds" in capsys.readouterr().err
+
+
+def test_the_state_lock_excludes_a_watcher_in_another_process(h, capsys):
+    """Two starts racing past the pid check: the one whose lock is held by
+    another process exits without registering."""
+    import subprocess
+    import sys
+
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         "import sys; from pathlib import Path; from pseudolife_memory.os_lock import OsLock; "
+         "lock = OsLock(Path(sys.argv[1])); print(lock.acquire(), flush=True); sys.stdin.read()",
+         str(h.state.with_suffix(".lock"))],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, cwd=Path(__file__).resolve().parents[1])
+    try:
+        assert holder.stdout.readline().strip() == "True"
+        code, _, _ = h.main(max_age="300")
+        assert code == 0 and h.board.registers == []
+        assert "another watcher holds" in capsys.readouterr().err
+    finally:
+        holder.communicate("", timeout=30)
+    code, _, _ = h.main(max_age="60")                   # free again: this one runs
+    assert code == 0 and len(h.board.registers) == 1
 
 
 # ── --stop ──────────────────────────────────────────────────────────────────
@@ -745,9 +848,27 @@ def test_no_owner_exits_2_naming_the_flag(tmp_path, capsys):
     assert len(err) == 1 and "--owner" in err[0]
 
 
-def test_the_default_state_without_a_session(tmp_path, monkeypatch):
+def test_the_default_state_without_a_session_is_per_owner(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    assert watch.default_state({}) == tmp_path / ".pseudolife-mcp" / "watch" / "delegate.json"
+    assert watch.default_state({}, OWNER) == tmp_path / ".pseudolife-mcp" / "watch" / f"{OWNER}.json"
+    assert watch.default_state({}, "f" * 32) != watch.default_state({}, OWNER)
+
+
+def test_a_state_held_for_another_owner_is_refused(tmp_path, capsys):
+    state = tmp_path / "w.json"
+    watch._write_pid(state, agent_id="a" * 32, owner="f" * 32)
+
+    def spawn(argv, log):
+        raise AssertionError("must not start")
+    code = watch.main(["--detach", "--owner", OWNER, "--state", str(state)], environ={}, spawn=spawn)
+    assert code == watch.EXIT_SETUP
+    err = capsys.readouterr().err.strip().splitlines()
+    assert len(err) == 1 and "f" * 32 in err[0] and "--state" in err[0]
+
+
+def test_stop_without_a_session_needs_the_owner_or_the_state(capsys):
+    assert watch.main(["--stop"], environ={}) == watch.EXIT_SETUP
+    assert "--owner" in capsys.readouterr().err
 
 
 # ── --detach ───────────────────────────────────────────────────────────────
@@ -774,9 +895,12 @@ def test_detach_starts_the_watcher_and_prints_its_address(tmp_path, capsys):
 
     def spawn(argv, log):
         started.update(argv=argv, log=log)
+        # A Windows venv's python.exe is a launcher: the watcher's own pid
+        # differs from the one Popen returns. The nonce ties them.
+        nonce = argv[argv.index("--nonce") + 1]
         state.with_suffix(".pid").write_text(json.dumps(
-            {"pid": 4242, "agent_id": "c" * 32, "owner": OWNER, "started": 1, "process_start": None}),
-            encoding="utf-8")
+            {"pid": 5555, "agent_id": "c" * 32, "owner": OWNER, "started": 1, "process_start": None,
+             "nonce": nonce}), encoding="utf-8")
         return 4242
     clock = Clock()
     code = watch.main(["--detach", "--owner", OWNER, "--state", str(state), "--interval", "30"],
@@ -784,12 +908,37 @@ def test_detach_starts_the_watcher_and_prints_its_address(tmp_path, capsys):
     assert code == 0
     argv = started["argv"]
     assert "--detach" not in argv and argv[argv.index("--interval") + 1] == "30"
+    assert len(argv[argv.index("--nonce") + 1]) == 32
     assert argv[argv.index("--owner") + 1] == OWNER and argv[argv.index("--state") + 1] == str(state)
     assert argv[1:4] == ["-m", "pseudolife_memory.cli", "delegate-watch"]
     assert started["log"] == state.with_suffix(".log")
     out = capsys.readouterr().out.strip()
     assert out == (f"delegate-watch {'c' * 32} watching for {OWNER}; park with "
                    f"park_needs=\"decision events\" park_clear_by={'c' * 32}")
+
+
+def test_detach_says_still_starting_while_the_child_runs_without_a_record(tmp_path, capsys):
+    state = tmp_path / "w.json"
+    clock = Clock()
+    code = watch.main(["--detach", "--owner", OWNER, "--state", str(state)], environ={},
+                      spawn=lambda argv, log: os.getpid(), clock=clock, sleep=clock.sleep)
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "still starting" in out and str(state.with_suffix(".log")) in out
+
+
+def test_detach_that_lost_a_race_reports_the_winner(tmp_path, capsys):
+    state = tmp_path / "w.json"
+
+    def spawn(argv, log):
+        watch._write_pid(state, agent_id="d" * 32, owner=OWNER)      # the other start won
+        return 999999999                                              # ours exited at once
+    clock = Clock()
+    code = watch.main(["--detach", "--owner", OWNER, "--state", str(state)], environ={},
+                      spawn=spawn, clock=clock, sleep=clock.sleep)
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "already running" in out and "d" * 32 in out
 
 
 def test_detach_reports_a_child_that_never_came_up(tmp_path, capsys):
@@ -827,6 +976,18 @@ def test_board_send_carries_clears_and_urgent_only_when_set():
     assert bodies == [{"to": "x" * 32, "text": "hi", "request_id": "r1"},
                       {"to": "x" * 32, "text": "hi", "request_id": "r2", "clears": "decision events"},
                       {"to": "x" * 32, "text": "hi", "request_id": "r3", "urgent": True}]
+
+
+def test_board_agents_page_says_when_the_page_was_cut():
+    def handler(request):
+        action = request.url.path.rsplit("/", 1)[-1]
+        if action == "register":
+            return httpx.Response(200, json={"agent_id": OWNER, "credential": "cred"})
+        return httpx.Response(200, json={"agents": [{"agent_id": "a" * 32}, "junk"], "truncated": True})
+    board = _Board("http://127.0.0.1:1", "tok", httpx.MockTransport(handler))
+    board.register(task="t", project="p")
+    assert board.agents_page() == ([{"agent_id": "a" * 32}], True)
+    assert board.agents() == [{"agent_id": "a" * 32}]
 
 
 def test_board_update_posts_only_the_fields_given():

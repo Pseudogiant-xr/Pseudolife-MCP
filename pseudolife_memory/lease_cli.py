@@ -435,12 +435,18 @@ class _Board:
 
     def agents(self, *, timeout: float = ANNOUNCE_TIMEOUT) -> list[dict]:
         """The peers the board lists for this address (bounded page)."""
+        return self.agents_page(timeout=timeout)[0]
+
+    def agents_page(self, *, timeout: float = ANNOUNCE_TIMEOUT) -> tuple[list[dict], bool]:
+        """The listed peers, and whether the page was cut short: a peer
+        missing from a cut page may still be on the board."""
         reply = self._post("agents", {"limit": LIST_LIMIT}, timeout=timeout)
         agents = reply.get("agents")
         if not isinstance(agents, list):
             raise _Refused("the daemon's agents reply was not understood")
-        return [agent for agent in agents
-                if isinstance(agent, dict) and isinstance(agent.get("agent_id"), str)]
+        return ([agent for agent in agents
+                 if isinstance(agent, dict) and isinstance(agent.get("agent_id"), str)],
+                reply.get("truncated") is True)
 
     def send(self, to: str, text: str, request_id: str, *, clears: str | None = None,
              urgent: bool = False, timeout: float = ANNOUNCE_TIMEOUT) -> None:
