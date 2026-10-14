@@ -442,10 +442,25 @@ class _Board:
         return [agent for agent in agents
                 if isinstance(agent, dict) and isinstance(agent.get("agent_id"), str)]
 
-    def send(self, to: str, text: str, request_id: str, *,
-             timeout: float = ANNOUNCE_TIMEOUT) -> None:
-        self._post("send", {"to": to, "text": text, "request_id": request_id},
-                   timeout=timeout)
+    def send(self, to: str, text: str, request_id: str, *, clears: str | None = None,
+             urgent: bool = False, timeout: float = ANNOUNCE_TIMEOUT) -> None:
+        """``clears`` names the park need the message answers, so it rings a
+        recipient parked on it; ``urgent`` rings past any park. Each is sent
+        only when set."""
+        body: dict = {"to": to, "text": text, "request_id": request_id}
+        if clears is not None:
+            body["clears"] = clears
+        if urgent:
+            body["urgent"] = True
+        self._post("send", body, timeout=timeout)
+
+    def update(self, *, status: str | None = None, task: str | None = None,
+               timeout: float = ANNOUNCE_TIMEOUT) -> None:
+        """This address's status or task; only the fields given are sent.
+        Any action keeps an ephemeral address listed."""
+        body = {key: value for key, value in (("status", status), ("task", task))
+                if value is not None}
+        self._post("update", body, timeout=timeout)
 
     def lease(self, name: str, ttl: int, *, expect: int | None = None,
               purpose: str | None = None) -> dict:
