@@ -210,6 +210,43 @@ CHECKIN_TEXT = (
     "subagent has its own address and keeps its own status and mail. The board "
     "lists a session's subagents by itself; name yours with "
     "memory_agents(action=update, children=[...]) only if they do not appear.")
+# The maintainer's delegate's brief and per-turn reminder (spec
+# docs/specs/2026-10-14-delegate-mode-design.md, section 2), served only to
+# the session holding an operator-granted ``delegate:<project>`` lease: the
+# brief after the check-in at session start, as a separate block so
+# CHECKIN_TEXT stays byte-identical to its eval, and the reminder after the
+# per-prompt memory note. Measured 2026-10-14 over six orchestrating
+# sessions' Claude Code transcripts (Sep 23 to Oct 13): context averaged
+# 230k-500k tokens per request, about a third of turns took no action, and
+# Bash output (39%) and board results (25%) filled most of it. The brief
+# names the watcher that wakes the delegate only for decisions and the
+# subagent that keeps raw output out of its context; the reminder repeats
+# the output rule on every turn, about 60 tokens at the uncached tail,
+# because an instruction given once in a 300k context is a weak lever.
+DELEGATE_BRIEF = (
+    "You are the maintainer's delegate for {projects}. Keep this session's context for "
+    "decisions:\n"
+    "- Start a watcher once: `pseudolife-mcp delegate-watch --detach`; it prints its board "
+    "id. Park with park_needs=\"decision events\" and park_clear_by=<that id> before ending "
+    "a turn that waits. On a wake, read with memory_message(action=\"receive\", ack=true), "
+    "act, and park again. If it has stopped, run it again; it answers \"already running\" "
+    "when it is live.\n"
+    "- Hand raw output (CI logs, test runs, long diffs) to a subagent that returns at most "
+    "ten lines. Put what you already know in its brief (paths, symbols, what is settled) "
+    "so it reads little. Run it in the foreground while you are working; a background one "
+    "wakes you when it finishes.\n"
+    "- Ask workers for decision-ready mail and to keep progress in their board status.\n"
+    "- Answer a quiet wake in one line, with no tool calls.")
+DELEGATE_REMINDER = "Delegate: raw output goes to a subagent; a quiet wake gets one line."
+# How long the daemon process keeps one agent's delegate answer: the
+# per-prompt path then costs one cheap lookup a minute per session, and a
+# grant or a revoke shows within a minute.
+DELEGATE_CACHE_SECONDS = 60
+# Bound on cached answers; expired ones are dropped first, then the oldest.
+_DELEGATE_CACHE_MAX = 1024
+_DELEGATE_CACHE_LOCK = threading.Lock()
+
+
 # The check-in sentence the v49 park-record decision asked for (maintainer,
 # 2026-09-28). NOT served yet: CHECKIN_TEXT is pinned byte for byte to the
 # text evals/coordination_checkin_bench.py measured (#435), so this sentence
@@ -355,6 +392,86 @@ def subagent(service, headers: Mapping[str, str], *, agent, event, child, kind=N
     except Exception:  # noqa: BLE001 - liveness never surfaces an error to the hook
         return ""
     return "ok\n" if result.get("recorded") else ""
+
+
+def delegate_projects(service, headers: Mapping[str, str], *, agent,
+                      token_map=None, token=None, clock=None) -> list[str]:
+    """The projects whose operator-granted delegate ``agent`` is, as the
+    hook endpoints ask with ``agent=<id>`` (spec 2026-10-14): the store's
+    ``delegate_of``, the proof ``_authority`` applies to delegate mail.
+    Empty wherever the board is not served to this bearer, for an address
+    that is not a 32-hex id or that the bearer's principal does not own,
+    and on any failure: a missing brief costs nothing, a wrong one would
+    tell a worker it is the delegate.
+
+    Each answer is kept per (principal, agent) in the daemon process for
+    ``DELEGATE_CACHE_SECONDS``, so the per-prompt call stays one cheap
+    lookup and a grant or a revoke shows within a minute. A failure is not
+    cached. ``clock`` (monotonic seconds) is for tests."""
+    if unavailable_reason(service, headers, token_map=token_map, token=token) is not None:
+        return []
+    if not (isinstance(agent, str) and len(agent) == 32
+            and all(c in "0123456789abcdef" for c in agent)):
+        return []
+    try:
+        principal = authenticated_principal(headers, token_map=token_map, token=token)
+    except ValueError:
+        return []
+    now = (clock or time.monotonic)()
+    key = (principal, agent)
+    with _DELEGATE_CACHE_LOCK:
+        cache = getattr(service, "_delegate_cache", None)
+        if cache is None:
+            cache = service._delegate_cache = {}
+        hit = cache.get(key)
+        if hit is not None and hit[0] > now:
+            return list(hit[1])
+    # A cold daemon's first board connection waits on the service lock; the
+    # hooks give these requests two seconds, and the check-in or the memory
+    # note they carry must not be lost to a brief. Any board call opens it.
+    if not _tier_ready(service, full=False):
+        return []
+    try:
+        _ensure_tier(service, full=False)
+        with service._coordination_lock:
+            projects = list(_store(service).delegate_of(agent, principal))
+    except Exception:  # noqa: BLE001 - the brief never surfaces an error to the hook
+        logger.debug("delegate lookup failed", exc_info=True)
+        return []
+    with _DELEGATE_CACHE_LOCK:
+        if len(cache) >= _DELEGATE_CACHE_MAX:
+            for stale in [k for k, (until, _) in cache.items() if until <= now]:
+                del cache[stale]
+            while len(cache) >= _DELEGATE_CACHE_MAX:
+                del cache[next(iter(cache))]
+        cache[key] = (now + DELEGATE_CACHE_SECONDS, tuple(projects))
+    return projects
+
+
+def render_delegate_brief(projects) -> str:
+    """DELEGATE_BRIEF for ``projects`` (one or more names)."""
+    names = ["".join(c for c in p if c.isprintable()) for p in projects]
+    joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return DELEGATE_BRIEF.format(projects=joined)
+
+
+def delegate_brief(service, headers: Mapping[str, str], *, agent,
+                   token_map=None, token=None) -> str:
+    """The block ``/api/hook/coordination-start`` appends after the check-in
+    for the maintainer's delegate (a blank line, the brief, a newline), or
+    ''."""
+    projects = delegate_projects(service, headers, agent=agent,
+                                 token_map=token_map, token=token)
+    return "\n" + render_delegate_brief(projects) + "\n" if projects else ""
+
+
+def delegate_reminder(service, headers: Mapping[str, str], *, agent,
+                      token_map=None, token=None) -> str:
+    """The line ``/api/hook/memory-changes`` appends for the maintainer's
+    delegate on every turn, or ''."""
+    projects = delegate_projects(service, headers, agent=agent,
+                                 token_map=token_map, token=token)
+    return DELEGATE_REMINDER + "\n" if projects else ""
 
 
 def unavailable_reason(service, headers: Mapping[str, str], *,

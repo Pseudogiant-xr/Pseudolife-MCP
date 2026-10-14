@@ -708,6 +708,15 @@ in `also_broken`). `pseudolife-mcp lease designate`, the command's name in
 can also be given and taken from the Console, signed with your passkey: see
 [Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console).
 
+The delegate's session also gets a short brief after the startup check-in
+and one reminder line on every prompt, served by the daemon to the plugin's
+hooks (they pass the session's board address with the requests they already
+make). Both say to hand raw output to a subagent and to wake for decisions
+only; the check-in text itself is the same for every session. Only a grant
+by the operator or the maintainer counts, as for its urgent mail; the daemon
+rechecks it at most once a minute per session, so a grant or a revoke shows
+within a minute, and on the next session start for the brief.
+
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
 a grant made under the old name reopens nothing after the upgrade, so

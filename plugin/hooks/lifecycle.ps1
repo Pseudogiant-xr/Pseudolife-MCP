@@ -111,6 +111,23 @@ function Get-DigestKey([string]$SessionId) {
     return ([BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
 }
 
+# The thread's board address, which the shim names in <key>.agent beside its
+# digest: 32 lower-case hex from a regular file (no reparse point), else ''.
+# The hook endpoints take it as agent=<id>, and the daemon appends the
+# maintainer's delegate's brief or reminder for a session holding an
+# operator-granted delegate:<project> lease (spec 2026-10-14).
+function Get-SessionAgent([string]$SessionId) {
+    try {
+        if ($SessionId -cnotmatch '^[A-Za-z0-9._-]{1,128}\z') { return '' }
+        $agentPath = Join-Path (Get-DigestDir) ((Get-DigestKey $SessionId) + '.agent')
+        if (-not (Test-Path -LiteralPath $agentPath -PathType Leaf) -or
+            ((Get-Item -LiteralPath $agentPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { return '' }
+        $agentId = ([IO.File]::ReadAllText($agentPath) -split "`r?`n")[0]
+        if ($agentId -cmatch '^[0-9a-f]{32}\z') { return $agentId }
+    } catch {}
+    return ''
+}
+
 # Returns the digest text to print this turn ('' when nothing changed) and
 # advances the shared .seen marker; appends one ledger line per call.
 function Read-TurnDigest([string]$SessionId) {
@@ -463,7 +480,9 @@ try {
         # The daemon serves the check-in, or an empty body when this bearer
         # cannot use the board. One request, no retry: at most two seconds
         # inside the five-second hook budget; no answer adds nothing.
-        $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/coordination-start" -Headers $headers -TimeoutSec 2 -MaximumRedirection 0
+        $agentId = Get-SessionAgent $sessionId
+        $startQuery = if ($agentId) { "?agent=$agentId" } else { '' }
+        $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/coordination-start$startQuery" -Headers $headers -TimeoutSec 2 -MaximumRedirection 0
         $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
         if ($text.Trim()) { Write-Context $text.TrimEnd() }
         exit 0
@@ -481,6 +500,8 @@ try {
         }
         $query = '?session_id=' + [Uri]::EscapeDataString($sessionId)
         if ($since -cmatch '^[0-9.]{1,22}\z') { $query += '&since=' + $since }
+        $agentId = Get-SessionAgent $sessionId
+        if ($agentId) { $query += '&agent=' + $agentId }
         $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/memory-changes$query" -Headers $headers -TimeoutSec 2 -MaximumRedirection 0
         $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
         $lines = $text -split "`n", 2
