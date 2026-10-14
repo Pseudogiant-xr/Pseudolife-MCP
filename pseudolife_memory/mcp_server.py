@@ -622,7 +622,10 @@ def memory_message(
     peer: Annotated[str | None, Field(
         description="history: exact peer agent id; omit for all your "
                     "retained mail.")] = None,
+    # Strict: the plugin's subagent guard matches "ack": true, and a lax
+    # boolean would turn 1 or "yes" into true past it (review, 2026-10-14).
     ack: Annotated[bool, Field(
+        strict=True,
         description="receive: true also acknowledges the mail returned, "
                     "in a compact result; default false. Never from a "
                     "subagent sharing its parent's address.")] = False,
