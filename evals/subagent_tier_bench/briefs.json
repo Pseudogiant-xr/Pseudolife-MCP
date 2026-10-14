@@ -1,0 +1,153 @@
+{
+  "_about": "Exploration briefs for the subagent tier bench. Each brief is given verbatim to a read-only Explore subagent. 'keys' are regexes (case-insensitive, DOTALL) the answer must match, one per fact; 'traps' are regexes that mark a wrong claim. Every fact was verified against the tree at origin/master f21fe8e0 on 2026-10-14 (evals/subagent_tier_bench/README.md).",
+  "briefs": [
+    {
+      "id": "stop-hook",
+      "prompt": "Read-only research in this repo (plugin/hooks/stop-wake.sh and plugin/hooks/hooks.json). How does the Claude Code Stop hook wait for board mail and wake the session? Give, with file:line references: the poll interval and the slower idle interval; the maximum wait; the per-hour wake cap and its window; which files beside the digest it reads (the ring marker and the shown-up-to marker); what exit code and output wake the session; and how it ensures only one watcher per session. Under 400 words.",
+      "keys": [
+        "POLL=5|5 ?s(ec)?",
+        "IDLE_POLL=30|30 ?s(ec)?",
+        "1209540|14 days",
+        "MAX_WAKES|20 wakes|cap of 20|20 per|20 .{0,20}(hour|3600)",
+        "3600|one hour|an hour",
+        "\\.ring",
+        "\\.seen",
+        "exit(s|ed)? (code )?2|exit 2",
+        "stderr|fd 3",
+        "\\.wake\\b|owner token|token"
+      ],
+      "traps": [
+        "exit(s)? (code )?0 to wake|exits 0 (to|and) wake",
+        "commandWindows.{0,80}Claude Code runs"
+      ]
+    },
+    {
+      "id": "digest-preview",
+      "prompt": "Read-only research in this repo. The shim writes a per-session coordination digest file that hooks print when they wake a session. Find, with file:line references: how many pending messages are previewed and how long each excerpt is (the constants in pseudolife_memory/storage/coordination.py); the exact shape of a preview line as render_digest in pseudolife_memory/coordination_adapter.py formats it; the first line of the digest file; and whether the Stop hook prints the whole digest body or a truncated one. Under 300 words.",
+      "keys": [
+        "PREVIEW_LIMIT|five|5 messages|5 pending|oldest (five|5)",
+        "PREVIEW_EXCERPT|100 char",
+        "watermark",
+        "from .{0,40}\\(|sender\\[:24\\]|sender_label|HH:MM|%H:%M",
+        "whole|entire|full|not truncated|complete body"
+      ],
+      "traps": [
+        "PREVIEW_LIMIT ?= ?(?!5)\\d",
+        "PREVIEW_EXCERPT ?= ?(?!100)\\d"
+      ]
+    },
+    {
+      "id": "multi-ack",
+      "prompt": "Read-only research in this repo. memory_message(action=\"ack\") accepts several message ids at once. Explain, with file:line references into pseudolife_memory/storage/coordination.py: the accepted forms of the message_id string; the maximum number of ids; what a single id returns versus several (the result shapes); what happens to an id that is not this mailbox's in a batch versus a single call; and what an ambiguous id prefix does. Under 300 words.",
+      "keys": [
+        "comma",
+        "JSON array|JSON list|\\[\"",
+        "MAX_PAGE|50",
+        "receipts",
+        "missing",
+        "message_not_found",
+        "ambiguous_message_id|refuse"
+      ],
+      "traps": [
+        "(up to|at most|maximum of) (?!50)\\d+ ids"
+      ]
+    },
+    {
+      "id": "lease-check",
+      "prompt": "Read-only research in this repo. `pseudolife-mcp lease check <name>` reports whether a lease is held. From pseudolife_memory/lease_cli.py (_check_lease and around it) and pseudolife_memory/storage/coordination.py, give with file:line references: the exit codes for free and held; what the --json output's top-level keys are; what the command answers when the board is unreachable and the local lock is free; the lease name prefix the maintainer's delegate lease uses and how long a grant may last; and which audit event proves a delegate grant. Under 300 words.",
+      "keys": [
+        "exit(s)? (code )?0.{0,40}free|free.{0,40}(exit(s)? (code )?)?0",
+        "exit(s)? (code )?1.{0,40}held|held.{0,40}(exit(s)? (code )?)?1",
+        "\"?held\"?.{0,80}\"?local\"?|\"?local\"?.{0,80}\"?board\"?",
+        "free",
+        "delegate:",
+        "7 days|604800|168 ?h",
+        "60 s|60 seconds|one minute",
+        "lease_delegate"
+      ],
+      "traps": [
+        "board (is )?unreachable.{0,120}(reports|answers|returns|exit) (held|1)"
+      ]
+    },
+    {
+      "id": "rust-cli-add",
+      "prompt": "Read-only research in this repo's Rust shim (rust/shim/src). A new CLI subcommand is to be added to the Rust shim. State, with file:line references: whether the shim uses clap or a hand-written dispatch; each file that must change to add a subcommand (the module list, the dispatch in main.rs, the deferred-modes list, and the help text) and the model to copy (the `lease` mode); whether `wait-mail` is already ported and in which file; and what pins the Rust help text to Python. Under 350 words.",
+      "keys": [
+        "no clap|not use clap|hand-?written|does not use clap|without clap",
+        "cli\\.rs",
+        "main\\.rs",
+        "DEFERRED_MODES",
+        "cli_help\\.txt",
+        "wait_mail\\.rs",
+        "_USAGE|test_cli_dispatch_lane|byte",
+        "run_lease|lease"
+      ],
+      "traps": [
+        "uses clap|clap::|derive\\(Parser\\)"
+      ]
+    },
+    {
+      "id": "board-guard",
+      "prompt": "Read-only research in this repo. plugin/hooks/subagent-board-guard.sh is a PreToolUse hook. Explain, with file:line references: how it tells a subagent's call from the parent's; which tool/action pairs it denies and which it allows; what it does when it cannot read the payload; how hooks.json guards against the script failing to parse; the two markers that put it in Codex context and what it does then; and what the PowerShell path in lifecycle.ps1 does. Under 350 words.",
+      "keys": [
+        "agent_id",
+        "update",
+        "claim",
+        "release",
+        "send",
+        "ack",
+        "receive.{0,120}(allow|pass|permit)|(allow|pass|permit).{0,120}receive",
+        "history",
+        "fail(s|-)? ?open|lets the call through|allow(s|ed)?( the call)? (when|if) .{0,40}(cannot|can't|unreadable)",
+        "bash -n",
+        "PSEUDOLIFE_CODEX_HOOK",
+        "PLUGIN_ROOT",
+        "no-?op|exit(s)? 0|does nothing|allows everything"
+      ],
+      "traps": [
+        "denies? receive(?! with)"
+      ]
+    },
+    {
+      "id": "suite-lock",
+      "prompt": "Read-only research in this repo. tests/suite_lock.py and tests/conftest.py enforce one full test suite per machine. State, with file:line references: the lock file's path; the queue directory beside it and how waiters are ordered; the environment variable that makes a full run exit instead of waiting, and the value that skips the lock; where the slot count comes from (variable and file); the file that makes this Windows host refuse native full runs and the variable that overrides it; and what the suite does to CUDA_VISIBLE_DEVICES and why not an empty string. Under 350 words.",
+      "keys": [
+        "full-suite\\.lock",
+        "full-suite\\.queue",
+        "arrival|ticket|earliest|oldest",
+        "PSEUDOLIFE_SUITE_LOCK",
+        "fail",
+        "off",
+        "PSEUDOLIFE_SUITE_SLOTS",
+        "full-suite\\.slots",
+        "full-suite\\.windows",
+        "PSEUDOLIFE_SUITE_WINDOWS",
+        "CUDA_VISIBLE_DEVICES=-1|-1",
+        "empty (string|value).{0,120}(GPU|Windows|is_available|driver|unset)"
+      ],
+      "traps": []
+    },
+    {
+      "id": "wake-decision",
+      "prompt": "Read-only research in this repo. When one board agent sends mail to another, the daemon decides whether the recipient is woken (_wake_decision in pseudolife_memory/storage/coordination.py). Give, with file:line references: the decision for a recipient active in the last window and not parked; the four ways a parked recipient with a need can be rung (its clearer, anyone, a matching clears text, urgent) and the decision when none applies; what a done park accepts; the decision for an unparked idle recipient getting plain mail; the default caps (per recipient per hour, urgent per sender per hour, nightly total); and the word rule _need_matches uses. Under 350 words.",
+      "keys": [
+        "hinted",
+        "clearer|park_clear_by",
+        "anyone",
+        "clears",
+        "urgent",
+        "withheld",
+        "done",
+        "not_needed|no_park",
+        "20",
+        "\\b6\\b",
+        "200",
+        "4 (or more )?(letters|characters)|four (or more )?(letters|characters)|at least 4|>= ?4|\\b4\\+"
+      ],
+      "traps": [
+        "plain mail (wakes|rings)",
+        "nudge(d|s)? .{0,40}(wakes|rings)"
+      ]
+    }
+  ]
+}
