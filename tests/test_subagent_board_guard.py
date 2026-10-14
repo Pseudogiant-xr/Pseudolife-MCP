@@ -78,12 +78,16 @@ WRITES = [("memory_agents", {"action": "update", "status": "reviewing"}),
           ("memory_agents", {"action": "claim", "lease": "claim:src"}),
           ("memory_agents", {"action": "release", "lease": "claim:src"}),
           ("memory_message", {"action": "send", "to": "all", "text": "hi", "request_id": "r1"}),
-          ("memory_message", {"action": "ack", "message_id": "m1"})]
+          ("memory_message", {"action": "ack", "message_id": "m1"}),
+          # A receive with ack acknowledges the parent's mail, like ack.
+          ("memory_message", {"action": "receive", "ack": True}),
+          ("memory_message", {"action": "receive", "limit": 5, "ack": "true"})]
 READS = [("memory_agents", {"action": "list"}),
          ("memory_agents", {}),                       # action defaults to list
          ("memory_agents", {"action": "list", "project": "x"}),
          ("memory_message", {"action": "receive"}),
          ("memory_message", {"action": "receive", "after": "abc:3"}),
+         ("memory_message", {"action": "receive", "ack": False}),
          # history is read-only: no ack, no delivery, no wake.
          ("memory_message", {"action": "history"}),
          ("memory_message", {"action": "history", "peer": "a1", "limit": 5})]

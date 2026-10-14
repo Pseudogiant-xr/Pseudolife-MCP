@@ -86,6 +86,7 @@ pub const PUBLIC_ERROR_CODES: &[&str] = &[
     "child_send_refused",
     "recipient_reserved",
     "invalid_name",
+    "invalid_ack",
 ];
 
 pub fn is_public(code: &str) -> bool {
