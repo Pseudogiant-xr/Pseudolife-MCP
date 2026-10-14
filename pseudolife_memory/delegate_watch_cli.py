@@ -30,8 +30,13 @@ the owner's prompt cache warm, unless the owner is parked done.
 It exits 0 when the owner leaves the board, when --until-lease names a lease
 the owner no longer holds, after --max-age, or on --stop; it exits 2 when gh
 is missing or fails on 5 polls in a row (after telling the owner), or when
-the board refuses it. The first run without a state file records a baseline
-and reports nothing for what is already true.
+the board refuses it. "Leaves the board" includes going idle: the board
+lists an attached session for three hours after its last action
+(ATTACHED_IDLE_WINDOW in storage/coordination.py), and an owner parked done
+gets no quiet mail, so after about three hours of a done park the watcher
+exits. That matches done (no follow-up expected); --detach is idempotent,
+so an owner runs it again on any turn that waits. The first run without a
+state file records a baseline and reports nothing for what is already true.
 """
 from __future__ import annotations
 
