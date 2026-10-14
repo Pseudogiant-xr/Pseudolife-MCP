@@ -34,6 +34,8 @@ class World:
         self.prs = []
         self.runs = []
         self.leases = {"full-suite": 0, "full-suite@box": 0}
+        self.board_up = True
+        self.gh_timeout = False
         self.pr_states = {}
         self.fail_gh = False
         self.calls = []
@@ -45,6 +47,8 @@ class World:
     def __call__(self, cmd):
         self.calls.append(cmd)
         if cmd[0] == "gh":
+            if self.gh_timeout:
+                raise watch.subprocess.TimeoutExpired(cmd, 120)
             if self.fail_gh:
                 return 1, "", "HTTP 502"
             if cmd[1:3] == ["pr", "list"]:
@@ -53,8 +57,11 @@ class World:
                 return 0, json.dumps(self.runs), ""
             if cmd[1:3] == ["pr", "view"]:
                 return 0, json.dumps({"state": self.pr_states.get(cmd[3], "MERGED")}), ""
-        if cmd[1:3] == ["lease", "check"]:
-            return self.leases[cmd[3]], "", ""
+        if cmd[1:4] == ["lease", "check", "--json"]:
+            held = self.leases[cmd[4]] == 1
+            body = {"name": cmd[4], "held": held, "local": {"state": "free"},
+                    "board": {"available": self.board_up}}
+            return int(held), json.dumps(body), ""
         raise AssertionError(cmd)
 
     def suite(self, name, **fields):
@@ -170,7 +177,7 @@ def test_a_new_head_reports_its_result_again(tmp_path, capsys):
 def test_master_runs_failing_and_recovering(tmp_path, capsys):
     world, clock = World(tmp_path), Clock()
     world.runs = [{"databaseId": 1, "workflowName": "CI", "status": "completed", "conclusion": "success",
-                   "headSha": "d" * 40, "event": "push"}]
+                   "headSha": "d" * 40, "event": "push", "attempt": 1}]
     main(world, clock, tmp_path, capsys, "--timeout", "60")
     world.runs = [{"databaseId": 3, "workflowName": "CI", "status": "in_progress", "conclusion": "",
                    "headSha": "f" * 40, "event": "push"},
@@ -255,3 +262,80 @@ def test_bad_arguments_are_refused(tmp_path, capsys, bad):
     with pytest.raises(SystemExit) as exc:
         main(world, clock, tmp_path, capsys, *bad)
     assert exc.value.code == 2
+
+
+# ── review findings, 2026-10-14 ────────────────────────────────────────────
+
+def _run(id_, conclusion, status="completed", attempt=1, sha="e"):
+    return {"databaseId": id_, "attempt": attempt, "workflowName": "CI", "status": status,
+            "conclusion": conclusion, "headSha": sha * 40, "event": "push"}
+
+
+def test_rerunning_a_failed_master_run_is_not_a_false_recovery(tmp_path, capsys):
+    """A re-run keeps its id and runs again; an older run must not stand in
+    for it while it runs, and its result is news when it lands."""
+    world, clock = World(tmp_path), Clock()
+    world.runs = [_run(10, "failure"), _run(9, "success", sha="9")]
+    main(world, clock, tmp_path, capsys, "--timeout", "60")
+    world.runs = [_run(10, "", status="in_progress", attempt=2), _run(9, "success", sha="9")]
+    assert main(world, clock, tmp_path, capsys, "--timeout", "120")[0] == watch.EXIT_QUIET
+    world.runs = [_run(10, "success", attempt=2), _run(9, "success", sha="9")]
+    code, out, _ = main(world, clock, tmp_path, capsys, "--timeout", "600", "--settle", "0")
+    assert out.splitlines()[0] == "master CI green again at eeeeeeee (push)"
+
+
+def test_a_board_outage_never_reads_as_a_free_lease(tmp_path, capsys):
+    world, clock = World(tmp_path), Clock()
+    world.leases["full-suite"] = 1
+    main(world, clock, tmp_path, capsys, "--timeout", "60")
+    world.leases["full-suite"] = 0
+    world.board_up = False                     # lease check says free, board unreachable
+    assert main(world, clock, tmp_path, capsys, "--timeout", "120")[0] == watch.EXIT_QUIET
+    world.leases["full-suite"] = 1             # still running once the board is back
+    world.board_up = True
+    assert main(world, clock, tmp_path, capsys, "--timeout", "120")[0] == watch.EXIT_QUIET
+    world.leases["full-suite"] = 0             # the real end
+    code, out, _ = main(world, clock, tmp_path, capsys, "--timeout", "600", "--settle", "0")
+    assert out.splitlines()[0] == "full-suite free"
+
+
+def test_a_gh_timeout_counts_as_a_failed_poll(tmp_path, capsys):
+    world, clock = World(tmp_path), Clock()
+    world.prs = [pr(1, checks=[run_("a", status="QUEUED", conclusion="")])]
+    main(world, clock, tmp_path, capsys, "--timeout", "60")
+
+    def between(poll):
+        world.gh_timeout = poll == 1
+        if poll == 2:
+            world.prs = [pr(1, checks=[run_("a")])]
+    code, out, err = main(world, clock, tmp_path, capsys, "--timeout", "600", "--settle", "0",
+                          between=between)
+    assert code == watch.EXIT_EVENTS and out.startswith("PR #1 green")
+    assert "timed out" in err
+
+
+def test_a_conflict_seen_through_unknown_is_not_news_again(tmp_path, capsys):
+    """GitHub reports UNKNOWN while it recomputes mergeability after the base
+    moves; a PR that was conflicting before is not newly conflicting."""
+    world, clock = World(tmp_path), Clock()
+    world.prs = [pr(2, mergeable="CONFLICTING")]
+    main(world, clock, tmp_path, capsys, "--timeout", "60")
+    world.prs = [pr(2, mergeable="UNKNOWN")]
+    assert main(world, clock, tmp_path, capsys, "--timeout", "120")[0] == watch.EXIT_QUIET
+    world.prs = [pr(2, mergeable="CONFLICTING")]
+    assert main(world, clock, tmp_path, capsys, "--timeout", "120")[0] == watch.EXIT_QUIET
+
+
+def test_output_is_utf8_whatever_the_console_code_page():
+    """A background command's stdout is a file, which Python before 3.15
+    encodes with the ANSI code page on Windows: a title with an arrow
+    would crash every re-arm before the state is saved."""
+    class Stream:
+        def __init__(self):
+            self.args = None
+
+        def reconfigure(self, **kw):
+            self.args = kw
+    out, err = Stream(), Stream()
+    watch._utf8_stdio(out, err)
+    assert out.args == err.args == {"encoding": "utf-8", "errors": "replace"}

@@ -66,7 +66,7 @@ DEFAULT_SETTLE = 45.0
 MAX_GH_FAILURES = 5
 DEFAULT_LEASES = ("full-suite", "full-suite@box")
 PR_FIELDS = "number,title,headRefOid,mergeable,mergeStateStatus,isDraft,statusCheckRollup"
-RUN_FIELDS = "databaseId,workflowName,status,conclusion,headSha,event"
+RUN_FIELDS = "attempt,databaseId,workflowName,status,conclusion,headSha,event"
 FAILED_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
 MASTER_FAILED = {"failure", "timed_out", "startup_failure"}
 TITLE = 70
@@ -111,12 +111,17 @@ class Watcher:
         self.args = args
         self.runner = runner
         self.repo = ["-R", args.repo] if args.repo else []
+        self.warned_cli = False
 
     def gh(self, *argv):
         try:
             code, out, err = self.runner(["gh", *argv, *self.repo])
         except FileNotFoundError:
             raise SystemExit(self.setup("gh is not installed or not on PATH")) from None
+        except subprocess.TimeoutExpired:
+            raise GhError("gh timed out") from None
+        except OSError as exc:
+            raise GhError(f"gh could not run ({exc})") from None
         if code != 0:
             lines = (err or out).strip().splitlines()
             raise GhError(lines[-1] if lines else f"gh exited {code}")
@@ -129,35 +134,52 @@ class Watcher:
 
     # ── sources: each returns its snapshot, or raises GhError ──────────────
 
-    def prs(self):
+    def prs(self, old):
         args = ["pr", "list", "--state", "open", "--limit", "100", "--json", PR_FIELDS]
         if self.args.author:
             args += ["--author", self.args.author]
         snap = {}
         for p in self.gh(*args):
             checks, failed = checks_state(p.get("statusCheckRollup"))
-            snap[str(p["number"])] = {
+            number = str(p["number"])
+            mergeable = p.get("mergeable") or ""
+            if mergeable == "UNKNOWN" and number in (old or {}):
+                # GitHub recomputes mergeability lazily after the base moves;
+                # keep the last known answer so CONFLICTING -> UNKNOWN ->
+                # CONFLICTING is not news (review, 2026-10-14).
+                mergeable = old[number]["mergeable"]
+            snap[number] = {
                 "title": (p.get("title") or "")[:TITLE], "head": p.get("headRefOid") or "",
-                "checks": checks, "failed": failed, "mergeable": p.get("mergeable") or "",
+                "checks": checks, "failed": failed, "mergeable": mergeable,
                 "merge_state": (p.get("mergeStateStatus") or "unknown").lower()}
         return snap
 
     def master(self, old):
         """The newest completed, non-cancelled push or schedule run per
         workflow; a workflow whose newest such run is out of the page keeps
-        its previous entry."""
+        its previous entry. An older run never replaces the one held, and a
+        held run being re-run stays as it was until its new attempt finishes,
+        so a re-run is neither a false recovery nor missed (review,
+        2026-10-14)."""
         snap = dict(old or {})
         seen = set()
         for r in self.gh("run", "list", "--branch", "master", "--limit", "30", "--json", RUN_FIELDS):
             name = r.get("workflowName") or "workflow"
-            if (name in seen or r.get("event") not in {"push", "schedule"}
-                    or r.get("status") != "completed"):
+            if name in seen or r.get("event") not in {"push", "schedule"}:
+                continue
+            held = snap.get(name)
+            run_id = r.get("databaseId") or 0
+            if held and (run_id < held["id"] or (run_id == held["id"]
+                                                 and r.get("status") != "completed")):
+                seen.add(name)
+                continue
+            if r.get("status") != "completed":
                 continue
             conclusion = r.get("conclusion") or ""
             if conclusion != "success" and conclusion not in MASTER_FAILED:
                 continue
             seen.add(name)
-            snap[name] = {"id": r.get("databaseId"), "conclusion": conclusion,
+            snap[name] = {"id": run_id, "attempt": r.get("attempt"), "conclusion": conclusion,
                           "sha": r.get("headSha") or "", "event": r.get("event")}
         return snap
 
@@ -179,14 +201,30 @@ class Watcher:
                                "summary": str(body.get("summary", ""))[:120]}
         return snap
 
-    def leases(self):
-        snap = {}
+    def leases(self, old):
+        """held or free per lease, keeping the previous value when the answer
+        is unknown. Free counts only when the board answered: on the Windows
+        host both suite leases live on the board (WSL and the box hold their
+        own locks), and `lease check` reads a free local lock as free when
+        the board is down (review, 2026-10-14)."""
+        snap = dict(old or {})
         for name in self.args.lease:
             try:
-                code, _, _ = self.runner([self.args.lease_cli, "lease", "check", name])
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                code = None
-            snap[name] = {0: "free", 1: "held"}.get(code, "unknown")
+                code, out, _ = self.runner([self.args.lease_cli, "lease", "check", "--json", name])
+                body = json.loads(out)
+            except FileNotFoundError:
+                if not self.warned_cli:
+                    print(f"delegate_watch: {self.args.lease_cli} not found; leases unknown",
+                          file=sys.stderr)
+                    self.warned_cli = True
+                continue
+            except (OSError, subprocess.TimeoutExpired, ValueError):
+                continue
+            board_up = (body.get("board") or {}).get("available") is True
+            if code == 1 and body.get("held") is True:
+                snap[name] = "held"
+            elif code == 0 and body.get("held") is False and board_up:
+                snap[name] = "free"
         return snap
 
     def closed_as(self, number):
@@ -201,14 +239,15 @@ class Watcher:
         failed. Returns the snapshot and the gh error, if any."""
         old = old or {}
         snap, error = {}, None
-        for key, fetch in (("prs", self.prs), ("master", lambda: self.master(old.get("master")))):
+        for key, fetch in (("prs", lambda: self.prs(old.get("prs"))),
+                           ("master", lambda: self.master(old.get("master")))):
             try:
                 snap[key] = fetch()
             except (GhError, ValueError) as exc:
                 error = exc
                 snap[key] = old.get(key)
         snap["suites"] = self.suites(old.get("suites"))
-        snap["leases"] = self.leases()
+        snap["leases"] = self.leases(old.get("leases"))
         return snap, error
 
     # ── events ────────────────────────────────────────────────────────────
@@ -219,7 +258,7 @@ class Watcher:
             out += self.pr_events(old["prs"], new["prs"])
         for name, run_ in (new.get("master") or {}).items():
             before = (old.get("master") or {}).get(name)
-            if before and before["id"] == run_["id"]:
+            if before and all(before.get(k) == run_.get(k) for k in ("id", "attempt", "conclusion")):
                 continue
             if run_["conclusion"] in MASTER_FAILED and (not before or before["conclusion"] == "success"):
                 out.append(f"master {name} failed at {run_['sha'][:8]} ({run_['event']})")
@@ -328,7 +367,18 @@ def _ledger(path: Path, kind: str, detail: str):
         f.write(f"{stamp} {kind} {detail}\n")
 
 
+def _utf8_stdio(out=None, err=None):
+    """A background command's stdout is a file, which Python before 3.15
+    encodes with the ANSI code page on Windows; a PR title with an arrow
+    would then crash every run before the state is saved (review,
+    2026-10-14)."""
+    for stream in (out or sys.stdout, err or sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv=None, *, runner=run, clock=time.monotonic, sleep=time.sleep) -> int:
+    _utf8_stdio()
     args = parser().parse_args(argv)
     args.lease = args.lease or list(DEFAULT_LEASES)
     watcher = Watcher(args, runner)
