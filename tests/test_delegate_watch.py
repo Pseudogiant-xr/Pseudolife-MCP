@@ -36,6 +36,7 @@ class World:
         self.leases = {"full-suite": 0, "full-suite@box": 0}
         self.board_up = True
         self.gh_timeout = False
+        self.fail_view = False
         self.pr_states = {}
         self.fail_gh = False
         self.calls = []
@@ -56,6 +57,8 @@ class World:
             if cmd[1:3] == ["run", "list"]:
                 return 0, json.dumps(self.runs), ""
             if cmd[1:3] == ["pr", "view"]:
+                if self.fail_view:
+                    return 1, "", "HTTP 502"
                 return 0, json.dumps({"state": self.pr_states.get(cmd[3], "MERGED")}), ""
         if cmd[1:4] == ["lease", "check", "--json"]:
             held = self.leases[cmd[4]] == 1
@@ -339,3 +342,43 @@ def test_output_is_utf8_whatever_the_console_code_page():
     out, err = Stream(), Stream()
     watch._utf8_stdio(out, err)
     assert out.args == err.args == {"encoding": "utf-8", "errors": "replace"}
+
+
+# ── Codex review findings, 2026-10-14 ──────────────────────────────────────
+
+def test_a_failed_closure_lookup_keeps_tracking_until_the_state_is_known(tmp_path, capsys):
+    world, clock = World(tmp_path), Clock()
+    world.prs = [pr(8, title="fix: x")]
+    main(world, clock, tmp_path, capsys, "--timeout", "60")
+    world.prs = []
+    world.fail_view = True                       # the merge happened; the lookup fails
+    assert main(world, clock, tmp_path, capsys, "--timeout", "120")[0] == watch.EXIT_QUIET
+    world.fail_view = False
+    world.pr_states = {"8": "MERGED"}
+    code, out, _ = main(world, clock, tmp_path, capsys, "--timeout", "600", "--settle", "0")
+    assert out.splitlines()[0] == "PR #8 merged: fix: x"
+
+
+def test_a_pull_request_still_open_is_not_reported_closed(tmp_path, capsys):
+    """Missing from the list but OPEN by number: the page was full or the
+    list lagged; keep tracking it."""
+    world, clock = World(tmp_path), Clock()
+    world.prs = [pr(9)]
+    main(world, clock, tmp_path, capsys, "--timeout", "60")
+    world.prs = []
+    world.pr_states = {"9": "OPEN"}
+    assert main(world, clock, tmp_path, capsys, "--timeout", "120")[0] == watch.EXIT_QUIET
+    world.prs = [pr(9, checks=[run_("a")])]
+    code, out, _ = main(world, clock, tmp_path, capsys, "--timeout", "600", "--settle", "0")
+    assert out.splitlines()[0] == "PR #9 green at aaaaaaaa, merge state clean"
+
+
+def test_a_setup_failure_on_a_fresh_install_still_exits_2(tmp_path, capsys):
+    world, clock = World(tmp_path), Clock()
+    world.fail_gh = True
+    state = tmp_path / "new" / "dir" / "state.json"
+    code = watch.main(["--state", str(state), "--suite-results", str(world.suites),
+                       "--digest", str(tmp_path / "digest.txt")],
+                      runner=world, clock=clock, sleep=clock.sleep)
+    assert code == watch.EXIT_SETUP
+    assert "setup" in state.with_suffix(".ledger").read_text(encoding="utf-8")

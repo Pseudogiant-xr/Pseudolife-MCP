@@ -70,6 +70,9 @@ RUN_FIELDS = "attempt,databaseId,workflowName,status,conclusion,headSha,event"
 FAILED_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
 MASTER_FAILED = {"failure", "timed_out", "startup_failure"}
 TITLE = 70
+# gh paginates up to this; a pull request missing from the list is looked up
+# by number before it counts as closed, so a full page cannot fake one.
+PR_LIMIT = 500
 
 
 class GhError(Exception):
@@ -135,7 +138,7 @@ class Watcher:
     # ── sources: each returns its snapshot, or raises GhError ──────────────
 
     def prs(self, old):
-        args = ["pr", "list", "--state", "open", "--limit", "100", "--json", PR_FIELDS]
+        args = ["pr", "list", "--state", "open", "--limit", str(PR_LIMIT), "--json", PR_FIELDS]
         if self.args.author:
             args += ["--author", self.args.author]
         snap = {}
@@ -228,11 +231,15 @@ class Watcher:
         return snap
 
     def closed_as(self, number):
+        """``merged`` or ``closed``, or None while that is not known: the
+        lookup failed, or the pull request is still open (it fell off the
+        list). None keeps it tracked and asks again next poll (Codex review,
+        2026-10-14)."""
         try:
             state = self.gh("pr", "view", number, "--json", "state").get("state", "")
         except (GhError, ValueError, AttributeError):
-            return "closed"
-        return "merged" if state == "MERGED" else "closed"
+            return None
+        return {"MERGED": "merged", "CLOSED": "closed"}.get(state)
 
     def snapshot(self, old):
         """Every source, keeping the old value of a source whose gh call
@@ -287,8 +294,12 @@ class Watcher:
                 out.append(f"PR #{number} green at {p['head'][:8]}, merge state {p['merge_state']}")
             if p["mergeable"] == "CONFLICTING" and before["mergeable"] != "CONFLICTING":
                 out.append(f"PR #{number} conflicts with its base")
-        for number in old.keys() - new.keys():
-            out.append(f"PR #{number} {self.closed_as(number)}: {old[number]['title']}")
+        for number in sorted(old.keys() - new.keys(), key=int):
+            how = self.closed_as(number)
+            if how is None:
+                new[number] = old[number]
+            else:
+                out.append(f"PR #{number} {how}: {old[number]['title']}")
         return out
 
     def mail(self):
@@ -362,9 +373,16 @@ def _save(path: Path, state):
 
 
 def _ledger(path: Path, kind: str, detail: str):
+    """One line per exit. A ledger that cannot be written never changes the
+    exit code (Codex review, 2026-10-14: a fresh install's first setup
+    failure came before any state file created the directory)."""
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    with open(path.with_suffix(".ledger"), "a", encoding="utf-8") as f:
-        f.write(f"{stamp} {kind} {detail}\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path.with_suffix(".ledger"), "a", encoding="utf-8") as f:
+            f.write(f"{stamp} {kind} {detail}\n")
+    except OSError as exc:
+        print(f"delegate_watch: ledger not written ({exc})", file=sys.stderr)
 
 
 def _utf8_stdio(out=None, err=None):
