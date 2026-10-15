@@ -799,7 +799,8 @@ def test_concurrent_misses_for_one_agent_start_one_lookup(monkeypatch):
 def test_a_cached_yes_counts_the_lease_from_before_a_slow_query(monkeypatch):
     """The lease's remaining time is read inside the query, so the cache
     counts it from the query's start: a query that stalls past the lease's
-    end leaves no yes behind (Codex review of the 2026-10-16 batch)."""
+    end answers no, to its caller and to every hook waiting on it, and
+    leaves no yes behind (Codex reviews of the 2026-10-16 batch)."""
     from pseudolife_memory import coordination
     from pseudolife_memory.coordination import delegate_projects
     now = [1000.0]
@@ -819,8 +820,8 @@ def test_a_cached_yes_counts_the_lease_from_before_a_slow_query(monkeypatch):
         return delegate_projects(service, headers, agent="a" * 32, token_map={},
                                  token="fixture-secret", clock=lambda: now[0])
 
-    assert ask() == ["p"] and len(calls) == 1
-    assert ask() == ["p"] and len(calls) == 2    # the lease had ended: asked again
+    assert ask() == [] and len(calls) == 1       # the lease ended during the query
+    assert ask() == [] and len(calls) == 2       # nothing cached: asked again
 
 
 def test_delegate_lookups_in_flight_are_bounded(monkeypatch):
@@ -830,6 +831,7 @@ def test_delegate_lookups_in_flight_are_bounded(monkeypatch):
     never the hook's own text (Codex review of the 2026-10-16 batch)."""
     import asyncio
     import threading
+    import time
     from pseudolife_memory import coordination
     from pseudolife_memory.coordination import delegate_projects_soon
     service, calls, release = _slow_service(monkeypatch, budget=0.05)
@@ -849,14 +851,21 @@ def test_delegate_lookups_in_flight_are_bounded(monkeypatch):
     _wait_for_cache(service, "a" * 32)
     _wait_for_cache(service, "b" * 32)
     assert "c" * 32 not in calls
+    # A lookup leaves the in-flight map just after it fills the cache.
+    deadline = time.monotonic() + 5.0
+    while service._delegate_inflight and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert service._delegate_inflight == {}
 
     start = threading.Thread.start
+    refused = []
 
     def refuse(thread):
         if thread.name == "pl-delegate-lookup":
+            refused.append(thread.name)
             raise RuntimeError("can't start new thread")
         return start(thread)
 
     monkeypatch.setattr(threading.Thread, "start", refuse)
     assert ask("d" * 32) == []
-    assert service._delegate_inflight == {}
+    assert refused and service._delegate_inflight == {}

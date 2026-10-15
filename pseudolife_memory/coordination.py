@@ -486,7 +486,8 @@ def _delegate_fetch(service, key, clock) -> list[str]:
     principal, agent = key
     # The lease's remaining time is read inside the query, so a yes is
     # counted from before it: a query that stalls past the lease's end
-    # leaves no yes behind.
+    # answers no, to its caller and every hook waiting on it, and caches
+    # nothing.
     now = clock()
     try:
         _ensure_tier(service, full=False)
@@ -500,6 +501,8 @@ def _delegate_fetch(service, key, clock) -> list[str]:
     ttl = float(DELEGATE_CACHE_SECONDS)
     if projects and remaining is not None:
         ttl = max(0.0, min(ttl, float(remaining)))
+        if clock() >= now + ttl:   # the lease ended while the query ran
+            return []
     with _DELEGATE_CACHE_LOCK:
         cache = getattr(service, "_delegate_cache", None)
         if cache is None:
