@@ -225,6 +225,39 @@ brought in line as they are touched, with no retrofit sweep.
   builds only by checkout mode. A default install and release-mode update
   do neither.
 
+## Runtime experience (every surface a user or their agent meets)
+
+Maintainer rule, 2026-10-15: a user, or the agent working for them, should
+never hit friction that Pseudolife caused. That covers MCP tools and their
+errors, the plugin's hooks (session start, per-turn notes, Stop and wake,
+PreToolUse guards), CLI output, the Console and the served instructions.
+On 2026-10-15 the subagent board guard refused a main session's status
+update as a subagent's call, because an argument the model guessed matched
+its marker by text. The session believed the refusal and stopped updating
+its status.
+
+- **Friction met in our own sessions is a product bug.** A confusing
+  error, a false refusal, a hook that misfires, or a tool whose shape
+  invites the wrong call is what users will hit. Fix it in the product
+  with a regression test, in the same session or as a PR opened before the
+  session ends. A memory lesson or a CLAUDE.md workaround is not a fix: it
+  helps only the sessions that read it.
+- **A guard never blocks a legitimate path.** Anything that denies,
+  refuses or rewrites a call decides on the exact signal it documents,
+  never on a text match that something else can produce. Its tests include
+  the near-miss: the legitimate call that looks most like the forbidden
+  one.
+- **An error states the true cause and the next step.** Agents act on
+  error text literally, so a wrong cause is worse than none. Name the real
+  reason, the parameter or setting involved, and the one fix.
+- **The natural guess works or fails helpfully.** If agents keep making the
+  same wrong call (an invented parameter, a field echoed back from a
+  result), change the tool, its description or its error until that guess
+  either succeeds or is refused with the right answer.
+- **Reproduce before attributing.** Don't put a Pseudolife misbehaviour down
+  to the host (compaction, a flake, the network) until you've reproduced it
+  or ruled it out.
+
 ## Derived state / caches / indexes
 
 When adding any derived structure over mutable state (an index over band
