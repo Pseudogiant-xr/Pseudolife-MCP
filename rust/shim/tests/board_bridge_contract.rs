@@ -234,7 +234,7 @@ async fn board_bridge_cancelled_registry_verification_closes_owned_socket() {
     tokio::time::timeout(Duration::from_secs(10), async {
         tokio::select! {
             _ = board.prepare_call("memory_stats", None, &params) => {
-                panic!("preparation finished while the host held verification")
+                panic!("preparation finished before the host saw verification")
             }
             seen = verify_seen => seen.unwrap(),
         }
