@@ -266,8 +266,9 @@ def test_sweep_reset_close_uses_native_linger_layout(monkeypatch, platform, layo
     assert closed == [True] and connection.sock is None
 
 
+@pytest.mark.parametrize('code', ['EADDRINUSE', 'ENOBUFS'])
 @pytest.mark.parametrize('failures', [0, 2, 4, 5])
-def test_sweep_retries_a_connect_refused_with_address_in_use(monkeypatch, failures):
+def test_sweep_retries_a_connect_refused_for_want_of_a_local_port(monkeypatch, failures, code):
     """Hosted Windows run 38535960260 (2026-10-14) lost a whole sweep to one
     connect() refused with WinError 10048. A refused connect sends nothing,
     so a short retry cannot change what the sweep compares; each retry is
@@ -286,7 +287,7 @@ def test_sweep_retries_a_connect_refused_with_address_in_use(monkeypatch, failur
         def create(*args, **kwargs):
             attempts.append(True)
             if len(attempts) <= failures:
-                raise OSError(errno.EADDRINUSE, 'address in use')
+                raise OSError(getattr(errno, code), code)
             return real(*args, **kwargs)
 
         connection._create_connection = create
@@ -294,7 +295,7 @@ def test_sweep_retries_a_connect_refused_with_address_in_use(monkeypatch, failur
             if failures > len(sweep.CONNECT_BACKOFF):
                 with pytest.raises(OSError) as raised:
                     connection.connect()
-                assert raised.value.errno == errno.EADDRINUSE
+                assert raised.value.errno == getattr(errno, code)
                 assert connection.opened == 0
             else:
                 connection.connect()
