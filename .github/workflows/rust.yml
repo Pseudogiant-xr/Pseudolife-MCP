@@ -47,14 +47,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # Hosted windows, cold rust-cache: 21.7-23.9 min on 2026-10-10/13, then
-    # cancelled at 25 min inside the override builds on 2026-10-15 (jobs
-    # 116301727515, 116323387861, 116326383784) after the daemon's release
-    # compile roughly doubled. Warm runs peak at 17.5 min. A cold run must
-    # finish, or the cache is never saved and every later run is cold too:
-    # the cache key hashes the runner image's own Rust, so each image
-    # rollout starts cold (windows-latest 1.98.1 -> 1.99.0, 2026-10-15).
-    timeout-minutes: 35
+    # Hosted windows, cold rust-cache: 21.7-23.9 min on 2026-10-10/13. On
+    # 2026-10-15 three cold runs were cancelled at 25 min (jobs 116301727515,
+    # 116323387861, 116326383784), 20 min in before the override builds,
+    # after the daemon's warm release compile went from about 1 to 2 min.
+    # No cold run has finished since: an estimated 26-34 min. Warm runs
+    # peak at 17.5 min. A cold run must finish, or the cache is never saved
+    # and every later run is cold too: the cache key hashes the runner
+    # image's own Rust, so each image rollout starts cold (windows-latest
+    # 1.98.1 -> 1.99.0, 2026-10-15).
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: rust
@@ -158,9 +160,10 @@ jobs:
 
       - name: Daemon override build configurations
         working-directory: ${{ github.workspace }}
-        # Hosted windows, cold cache: about 7 min on 2026-10-10/13 (the
-        # release build alone 5-6 min), 3.2 min warm since 2026-10-14.
-        timeout-minutes: 15
+        # Hosted windows: about 7 min cold on 2026-10-10/13 (release build
+        # 5-6 min), 3.2 min warm since 2026-10-14. The cold release build
+        # was still running 6m20s in when job 116323387861 was cancelled.
+        timeout-minutes: 20
         shell: pwsh
         run: |
           # Each build's output is printed only once it finishes; these lines

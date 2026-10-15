@@ -912,5 +912,5 @@ def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
     # Hosted windows 2026-10-13: a cold-cache run took 23.9 minutes; on
     # 2026-10-15 three cold runs were cancelled at 25 inside this step. A
     # cancelled run saves no cache, so the next run on that image is cold too.
-    assert job["timeout-minutes"] >= 35
+    assert job["timeout-minutes"] >= 45
     assert 0 < override["timeout-minutes"] < job["timeout-minutes"]
