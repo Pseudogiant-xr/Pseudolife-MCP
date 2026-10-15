@@ -205,6 +205,9 @@ def main() -> None:
     elif mode == "wait-mail":
         from pseudolife_memory.wait_mail_cli import run_wait_mail
         sys.exit(run_wait_mail(sys.argv[2:]))
+    elif mode == "delegate-watch":
+        from pseudolife_memory.delegate_watch_cli import main as delegate_watch_main
+        sys.exit(delegate_watch_main(sys.argv[2:]))
     elif mode == "lease":
         from pseudolife_memory.lease_cli import main as lease_main
         sys.exit(lease_main(sys.argv[2:]))
