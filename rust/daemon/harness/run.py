@@ -829,6 +829,7 @@ class DimMismatch(Scenario):
     name = "dim-mismatch"
     settle = False
     snapshot_settle = False  # schema refusal never reaches healthy initialization
+    golden_replay = True  # the timeline only waits; its cases replay against the golden
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -840,6 +841,21 @@ class DimMismatch(Scenario):
     def cases(self):
         return [case("health, dim refusal", "GET", "/health"),
                 case("search during refusal", "GET", "/api/search?q=x")]
+
+    def timeline(self, procs, holders):
+        # Rust records init_refusal in its warmup task, after its listener
+        # answers; /health says ok until then. Golden mode has no Python arm
+        # to delay the first case (Linux run 38699015278 compared Rust's
+        # pre-warmup 200 with the recorded 503), so wait as StampedBank does.
+        waiting = dict(procs)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            waiting = {side: d for side, d in waiting.items()
+                       if not (call(d.port, "GET", "/health").get("json") or {}).get("init_refusal")}
+            if not waiting:
+                return self.cases()
+            time.sleep(0.1)
+        raise RuntimeError(f"dim-mismatch startup did not refuse: {', '.join(sorted(waiting))}")
 
 
 class StampedBank(Scenario):

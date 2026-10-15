@@ -127,3 +127,32 @@ def test_no_wait_policy_still_detects_bank_changes(snapshot_harness, tmp_path, m
     monkeypatch.setattr(run.dbstate, "dump", changed)
     result = run._run_scenario(scn, tmp_path / "daemon", tmp_path, "live", False)
     assert result["db_diffs"]
+
+
+def test_dim_mismatch_waits_for_rust_to_refuse_before_its_first_case(snapshot_harness, tmp_path, monkeypatch):
+    """Rust records its init refusal in a warmup task that starts after its
+    listener answers, and /health says ok until then. Golden mode has no
+    Python arm to delay the first case, so the scenario must wait for the
+    refusal itself: Linux run 38699015278 compared Rust's pre-warmup 200 ok
+    with the recorded 503."""
+    events, _ = snapshot_harness
+    refusal = {"status": 503, "headers": {}, "json": {"status": "degraded", "init_refusal": "dimension"}}
+    warming = {"status": 200, "headers": {}, "json": {"status": "ok"}}
+    rust_health = []
+
+    def call(port, method, path, *args, **kwargs):
+        events.append(("request", port))
+        if port == 2 and path == "/health":
+            rust_health.append(path)
+            if len(rust_health) <= 2:
+                return copy.deepcopy(warming)
+        return copy.deepcopy(refusal)
+
+    monkeypatch.setattr(run, "call", call)
+    scn = run.DimMismatch()
+    scn.prepare_template = lambda dsn: None
+    run.save_golden(scn.name, [{"_python": run.normalize_response(refusal, c["path"], [])}
+                               for c in scn.cases()], None)
+    result = run._run_scenario(scn, tmp_path / "daemon", tmp_path, "golden", False)
+    assert [c["diffs"] for c in result["cases"]] == [[], []]
+    assert len(rust_health) > 2
