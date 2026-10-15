@@ -599,6 +599,17 @@ def build_console_app(
                 text = await asyncio.get_running_loop().run_in_executor(
                     None, hook_memory_changes, service, params.get("session_id"),
                     params.get("since"))
+                # The maintainer's delegate's one-line reminder (spec
+                # 2026-10-14), after the cursor and any note: only beside a
+                # cursor, since an empty answer must stay empty for the hook.
+                # The lookup waits at most DELEGATE_LOOKUP_BUDGET.
+                if text and params.get("agent"):
+                    from pseudolife_memory.coordination import delegate_reminder
+                    headers = {k.decode().lower(): v.decode("latin-1")
+                               for k, v in scope.get("headers", [])}
+                    text += await delegate_reminder(service, headers,
+                                                    agent=params.get("agent"),
+                                                    token_map=token_map, token=token)
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store")
             return
@@ -648,7 +659,8 @@ def build_console_app(
         # 4c) plugin coordination SessionStart hook: the board check-in as
         # plain text, or an empty body when this bearer cannot use the board
         # (disabled, no or unknown bearer, unlisted principal, file mode).
-        # 200 always, like session-start; the check touches no storage.
+        # 200 always, like session-start; the check touches no storage (only
+        # the delegate lookup below does, and only given ?agent=).
         if path == "/api/hook/coordination-start":
             denied = _browser_gate(scope)
             if denied:
@@ -662,6 +674,15 @@ def build_console_app(
                        for k, v in scope.get("headers", [])}
             reason = unavailable_reason(service, headers, token_map=token_map, token=token)
             text = "" if reason else CHECKIN_TEXT + "\n"
+            # ?agent=<id> (the session's board address, spec 2026-10-14):
+            # the maintainer's delegate gets its brief as a block after the
+            # unchanged check-in. The lookup is the one storage read here, and
+            # waits at most DELEGATE_LOOKUP_BUDGET.
+            agent = _parse_query(scope).get("agent") if not reason else None
+            if agent:
+                from pseudolife_memory.coordination import delegate_brief
+                text += await delegate_brief(service, headers, agent=agent,
+                                             token_map=token_map, token=token)
             # X-PL-Board names why the board is off, so the installer and
             # doctor report the daemon's reason instead of guessing one.
             # The codes reveal no more than /api's own 401 already does.

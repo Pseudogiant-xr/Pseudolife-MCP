@@ -367,6 +367,23 @@ if [ -z "$CONNECTION_ERROR" ] && [ -n "$TOKEN" ]; then
     AUTH=(-H "Authorization: Bearer $TOKEN")
 fi
 [ -z "$CONNECTION_ERROR" ] || exit 0
+# The session's board address, when the shim has named it in <key>.agent
+# beside the digest (32 lower-case hex, a regular file, as stop-wake.sh
+# reads it): the daemon then appends the maintainer's delegate's brief after
+# the check-in, for a session holding an operator-granted delegate:<project>
+# lease, and nothing for any other.
+AGENT_QS=""
+# KEY is the one the record work above settled on (set only there).
+if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ] && [ -n "$(valid_key "${KEY:-}")" ]; then
+    AGENT_FILE="$DIGEST_DIR/$KEY.agent"
+    if [ -f "$AGENT_FILE" ] && [ ! -L "$AGENT_FILE" ]; then
+        AGENT_ID=""
+        IFS= read -r AGENT_ID 2>/dev/null < "$AGENT_FILE"
+        AGENT_ID=${AGENT_ID%$'\r'}
+        case "$AGENT_ID" in *[!0123456789abcdef]*) AGENT_ID="" ;; esac
+        [ "${#AGENT_ID}" -eq 32 ] && AGENT_QS="?agent=$AGENT_ID"
+    fi
+fi
 curl -L --max-redirs 0 -sf --connect-timeout 1 --max-time 2 \
-    "${AUTH[@]}" "${URL}/api/hook/coordination-start" 2>/dev/null
+    "${AUTH[@]}" "${URL}/api/hook/coordination-start${AGENT_QS}" 2>/dev/null
 exit 0
