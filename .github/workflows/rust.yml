@@ -47,7 +47,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Hosted windows, cold rust-cache: 21.7-23.9 min on 2026-10-10/13. On
+    # 2026-10-15 three cold runs were cancelled at 25 min (jobs 116301727515,
+    # 116323387861, 116326383784), 20 min in before the override builds,
+    # after the daemon's warm release compile went from about 1 to 2 min.
+    # No cold run has finished since: an estimated 26-34 min. Warm runs
+    # peak at 17.5 min. A cold run must finish, or the cache is never saved
+    # and every later run is cold too: the cache key hashes the runner
+    # image's own Rust, so each image rollout starts cold (windows-latest
+    # 1.98.1 -> 1.99.0, 2026-10-15).
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: rust
@@ -151,20 +160,29 @@ jobs:
 
       - name: Daemon override build configurations
         working-directory: ${{ github.workspace }}
+        # Hosted windows: about 7 min cold on 2026-10-10/13 (release build
+        # 5-6 min), 3.2 min warm since 2026-10-14. The cold release build
+        # was still running 6m20s in when job 116323387861 was cancelled.
+        timeout-minutes: 20
         shell: pwsh
         run: |
+          # Each build's output is printed only once it finishes; these lines
+          # show which one was running if the step times out.
           $env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND = '1'
           $daemonDefaultLog = Join-Path $env:RUNNER_TEMP 'daemon-default-override.log'
+          Write-Host "$(Get-Date -Format o) debug override test: start"
           cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonDefaultLog
           $result = $LASTEXITCODE
           Get-Content $daemonDefaultLog
           if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonDefaultLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
           $daemonReleaseLog = Join-Path $env:RUNNER_TEMP 'daemon-release-override.log'
+          Write-Host "$(Get-Date -Format o) release override test: start"
           cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked --release --features mutants -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonReleaseLog
           $result = $LASTEXITCODE
           Remove-Item env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND
           Get-Content $daemonReleaseLog
           if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonReleaseLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
+          Write-Host "$(Get-Date -Format o) mutants dev build: start"
           cargo +1.94.0 build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --features mutants -j 3
           exit $LASTEXITCODE
       - name: Retain debug bind fixture
