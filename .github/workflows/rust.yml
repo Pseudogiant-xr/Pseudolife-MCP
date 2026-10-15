@@ -47,7 +47,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Hosted windows, cold rust-cache: 21.7-23.9 min on 2026-10-10/13, then
+    # cancelled at 25 min inside the override builds on 2026-10-15 (jobs
+    # 116301727515, 116323387861, 116326383784) after the daemon's release
+    # compile roughly doubled. Warm runs peak at 17.5 min. A cold run must
+    # finish, or the cache is never saved and every later run is cold too.
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: rust
@@ -114,6 +119,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+          # The key already hashes rust/rust-toolchain.toml, the toolchain
+          # every build uses. The environment hash adds the runner image's
+          # own Rust, so an image rollout (windows-latest 1.98.1 -> 1.99.0,
+          # 2026-10-15) restored no cache at all.
+          add-rust-environment-hash-key: false
       - name: Install pinned nextest in the runner temporary directory
         shell: pwsh
         run: |
@@ -151,20 +161,28 @@ jobs:
 
       - name: Daemon override build configurations
         working-directory: ${{ github.workspace }}
+        # Hosted windows, cold cache: about 7 min on 2026-10-10/13 (the
+        # release build alone 5-6 min), 3.2 min warm since 2026-10-14.
+        timeout-minutes: 15
         shell: pwsh
         run: |
+          # Each build's output is printed only once it finishes; these lines
+          # show which one was running if the step times out.
           $env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND = '1'
           $daemonDefaultLog = Join-Path $env:RUNNER_TEMP 'daemon-default-override.log'
+          Write-Host "$(Get-Date -Format o) debug override test: start"
           cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonDefaultLog
           $result = $LASTEXITCODE
           Get-Content $daemonDefaultLog
           if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonDefaultLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
           $daemonReleaseLog = Join-Path $env:RUNNER_TEMP 'daemon-release-override.log'
+          Write-Host "$(Get-Date -Format o) release override test: start"
           cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked --release --features mutants -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonReleaseLog
           $result = $LASTEXITCODE
           Remove-Item env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND
           Get-Content $daemonReleaseLog
           if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonReleaseLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
+          Write-Host "$(Get-Date -Format o) mutants dev build: start"
           cargo +1.94.0 build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --features mutants -j 3
           exit $LASTEXITCODE
       - name: Retain debug bind fixture
@@ -197,6 +215,7 @@ jobs:
         with:
           workspaces: rust
           shared-key: shim-release
+          add-rust-environment-hash-key: false  # see the rust job
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3
       - name: Retain default static candidate
@@ -309,6 +328,7 @@ jobs:
         if: "!startsWith(matrix.suite, 'w1c-')"
         with:
           workspaces: rust
+          add-rust-environment-hash-key: false  # see the rust job
       - name: Install checkout and test dependencies
         timeout-minutes: 10
         run: |
@@ -924,6 +944,7 @@ jobs:
         with:
           workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
           key: cli-source-mutants
+          add-rust-environment-hash-key: false  # see the rust job
       - name: Install source harness dependencies
         # Network-bound setup keeps the existing ten-minute dependency floor.
         timeout-minutes: 10

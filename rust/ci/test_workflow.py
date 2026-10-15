@@ -904,3 +904,26 @@ def test_board_runner_checks_execute_on_both_platforms():
     require_command(commands(step["run"]), ("python", "-m", "pytest"),
                     ("rust/daemon/harness/board/test_norm.py",
                      "rust/daemon/harness/board/test_run.py"), PYTEST_FILTERS)
+
+
+def test_rust_cache_keys_ignore_the_runner_images_own_rust():
+    """Every build uses the pinned toolchain, which the cache key already
+    covers through rust/rust-toolchain.toml. The default environment hash
+    also covers the runner image's preinstalled Rust, so the 2026-10-15
+    windows-latest rollout (1.98.1 to 1.99.0) left every job on the new
+    image with no cache; cold, the Rust job ran out of time and never saved
+    one."""
+    uses = [(name, step) for name, job in workflow()["jobs"].items() for step in job.get("steps", [])
+            if step.get("uses", "").startswith("Swatinem/rust-cache@")]
+    assert uses
+    for name, step in uses:
+        assert step["with"].get("add-rust-environment-hash-key") is False, name
+
+
+def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
+    job = workflow()["jobs"]["rust"]
+    override = next(step for step in job["steps"] if step.get("name") == "Daemon override build configurations")
+    # Hosted windows 2026-10-13: a cold-cache run took 23.9 minutes; on
+    # 2026-10-15 three cold runs were cancelled at 25 inside this step.
+    assert job["timeout-minutes"] >= 35
+    assert 0 < override["timeout-minutes"] < job["timeout-minutes"]
