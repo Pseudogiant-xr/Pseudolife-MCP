@@ -48,27 +48,68 @@ if [ -n "${PSEUDOLIFE_AGENT_COORDINATION:-}" ]; then
     esac
 fi
 
-# Only a top-level key counts: preceded by { or , (plus whitespace), never by
-# a backslash, which is how the same characters look inside an escaped
-# string such as a message text (see coordination-prompt.sh). Each pattern
-# captures the key's string value.
-AGENT_RE='[{,][[:space:]]*"agent_id"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
-SID_RE='[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
-TOOL_RE='[{,][[:space:]]*"tool_name"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
-ACTION_RE='[{,][[:space:]]*"action"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
-INPUT_RE='[{,][[:space:]]*"tool_input"[[:space:]]*:[[:space:]]*\{(.*)$'
-# A receive's ack, as a boolean or as the string a host may stringify it to.
-ACK_RE='[{,][[:space:]]*"ack"[[:space:]]*:[[:space:]]*("true"|true)'
-
-[[ $INPUT =~ $AGENT_RE ]] && [ -n "${BASH_REMATCH[1]}" ] || exit 0
+# The keys it needs, read by walking the JSON in bash (no process per call).
+# A key counts only where Claude Code puts it: agent_id, session_id and
+# tool_name in the payload itself, action and ack in its tool_input object,
+# in any order. The same name anywhere else never counts: inside a string
+# (a message text), in an object nested in an argument, or as an argument
+# the model guessed (2026-10-15: a main session passed agent_id to
+# memory_agents and was refused as a subagent, which sent it chasing the
+# wrong cause; the daemon refuses that argument itself, by name). A payload
+# that is not one complete JSON object allows the call.
+[[ $INPUT == *'"agent_id"'* ]] || exit 0
+[[ $INPUT =~ ^[[:space:]]*\{ ]] || exit 0
+STR_RE='^"(([^"\\]|\\.)*)"'
+COLON_RE='^[[:space:]]*:[[:space:]]*'
+SKIP_RE='^[^]"{}[]+'
+AGENT="" SID="" TOOL="" ARGS="" ACTION="" ACK=""
+rest=$INPUT depth=0 args=0 key="" key_depth=-1 value="" whole=""
+while [ -n "$rest" ]; do
+    case ${rest:0:1} in
+        '"')
+            [[ $rest =~ $STR_RE ]] || exit 0
+            value=${BASH_REMATCH[1]}
+            rest=${rest:${#BASH_REMATCH[0]}}
+            if [[ $rest =~ $COLON_RE ]]; then
+                rest=${rest:${#BASH_REMATCH[0]}}
+                key=$value key_depth=$depth
+                continue
+            fi ;;
+        '{'|'[')
+            if [ "${rest:0:1}" = '{' ] && [ "$depth:$key_depth:$key" = "1:1:tool_input" ]; then
+                ARGS=1 args=2
+            fi
+            depth=$((depth + 1)) key_depth=-1 rest=${rest:1}
+            continue ;;
+        '}'|']')
+            depth=$((depth - 1)) key_depth=-1 rest=${rest:1}
+            [ "$depth" -gt 0 ] || { [ "$depth" = 0 ] && whole=1; break; }
+            [ "$depth" -ge 2 ] || args=0
+            continue ;;
+        *)
+            [[ $rest =~ $SKIP_RE ]] || exit 0
+            rest=${rest:${#BASH_REMATCH[0]}}
+            value=${BASH_REMATCH[0]%%[,[:space:]]*} ;;
+    esac
+    # A value: a string, or the literal a skipped run starts with.
+    if [ "$key_depth" = "$depth" ]; then
+        case "$depth:$args:$key" in
+            1:0:agent_id) AGENT=$value ;;
+            1:0:session_id) SID=$value ;;
+            1:0:tool_name) TOOL=$value ;;
+            2:2:action) ACTION=$value ;;
+            2:2:ack) ACK=$value ;;
+        esac
+    fi
+    key_depth=-1
+done
+[ -n "$whole" ] && [ -n "$AGENT" ] || exit 0
 
 # Claude Code sets CLAUDECODE=1 and CLAUDE_CODE_SESSION_ID (the payload's
 # session_id) in a hook's environment. A Codex run nested inside a Claude
 # Bash tool inherits both, with the outer session's id; a hook Claude Code
 # started for this very session stays Claude's whatever Codex marker it
 # inherited.
-SID=""
-[[ $INPUT =~ $SID_RE ]] && SID=${BASH_REMATCH[1]}
 CODEX=""
 if [ "${PSEUDOLIFE_CODEX_HOOK:-}" = 1 ] ||
         { [ -n "${PLUGIN_ROOT:-}" ] && [ "${PLUGIN_ROOT}" = "${CLAUDE_PLUGIN_ROOT:-}" ]; }; then
@@ -79,24 +120,17 @@ if [ "${CLAUDECODE:-}" = 1 ] && [ -n "$SID" ] && [ "${CLAUDE_CODE_SESSION_ID:-}"
 fi
 [ -z "$CODEX" ] && [ "${CLAUDECODE:-}" = 1 ] || exit 0
 
-[[ $INPUT =~ $TOOL_RE ]] || exit 0
-TOOL=${BASH_REMATCH[1]}
 case "$TOOL" in
     mcp__?*__memory_agents) NAME=memory_agents ;;
     mcp__?*__memory_message) NAME=memory_message ;;
     *) exit 0 ;;
 esac
 
-# The arguments: an object after the top-level tool_input key. The action is
-# the first top-level-shaped "action" key from there on: tool_input comes
-# before the payload's remaining keys, and neither tool takes a nested
-# object that could carry one.
-[[ $INPUT =~ $INPUT_RE ]] || exit 0
-ARGS="{${BASH_REMATCH[1]}"
-ACTION=""
-[[ $ARGS =~ $ACTION_RE ]] && ACTION=${BASH_REMATCH[1]}
+# A receive's ack counts as the boolean or as the string a host may
+# stringify it to.
+[ -n "$ARGS" ] || exit 0
 case "$NAME:$ACTION" in
-    memory_message:receive) [[ $ARGS =~ $ACK_RE ]] || exit 0 ;;
+    memory_message:receive) [ "$ACK" = true ] || exit 0 ;;
     memory_agents:|memory_agents:list|memory_message:history) exit 0 ;;
 esac
 

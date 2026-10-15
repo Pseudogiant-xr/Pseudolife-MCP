@@ -143,6 +143,42 @@ def test_a_parent_message_quoting_agent_id_is_still_the_parents(tmp_path):
     assert _run(_env(tmp_path), _payload("memory_message", tool_input, child=False)) == ""
 
 
+@pytest.mark.parametrize("tool,tool_input", [
+    ("memory_agents", {"action": "update", "agent_id": "bcbdca6ceeb7436eb31e96f488c8068a",
+                       "status": "merging"}),
+    ("memory_agents", {"agent_id": "a1", "action": "update"}),
+    ("memory_message", {"action": "ack", "message_id": "m1", "extra": {"agent_id": "a1"}}),
+    ("memory_agents", {"action": "update", "children": [{"agent_id": "a1"}]}),
+], ids=["argument", "first-argument", "nested-object", "in-array"])
+def test_a_parents_call_carrying_an_agent_id_argument_is_still_the_parents(tmp_path, tool, tool_input):
+    """Only Claude Code's own top-level key marks a subagent. A parent that
+    guesses an agent_id argument (2026-10-15: a main session did, after a
+    compaction) gets the daemon's unknown-parameter error, not a denial that
+    tells it it is a subagent and sends it chasing the wrong cause."""
+    assert _run(_env(tmp_path), _payload(tool, tool_input, child=False)) == ""
+
+
+def test_a_subagent_is_found_whatever_the_key_order(tmp_path):
+    payload = json.loads(_payload("memory_agents", {"action": "update", "agent_id": "a1"},
+                                  child=False))
+    payload.update(agent_id=CHILD, agent_type="general-purpose")    # after tool_input
+    assert _denied(_run(_env(tmp_path), json.dumps(payload)))
+
+
+@pytest.mark.parametrize("tool_input", [
+    {"extra": {"action": "list"}, "action": "update", "status": "x"},
+    {"action": "update", "status": "x", "extra": {"action": "list"}},
+], ids=["nested-first", "nested-last"])
+def test_an_action_inside_a_nested_object_is_not_the_calls_action(tmp_path, tool_input):
+    reason = _denied(_run(_env(tmp_path), _payload("memory_agents", tool_input)))
+    assert "memory_agents(action=update)" in reason
+
+
+def test_an_ack_inside_a_nested_object_is_not_the_calls_ack(tmp_path):
+    tool_input = {"action": "receive", "extra": {"ack": True}}
+    assert _run(_env(tmp_path), _payload("memory_message", tool_input)) == ""
+
+
 @pytest.mark.parametrize("stdin", [
     "", "not json", "{", '{"agent_id":"a1"}',
     # No tool_input at all, or one Claude Code did not send as an object.
@@ -150,7 +186,11 @@ def test_a_parent_message_quoting_agent_id_is_still_the_parents(tmp_path):
     '{"agent_id":"a1","tool_name":"mcp__pseudolife-memory__memory_agents","tool_input":"update"}',
     # An empty agent id is no subagent.
     '{"agent_id":"","tool_name":"mcp__pseudolife-memory__memory_agents","tool_input":{"action":"update"}}',
-], ids=["empty", "text", "brace", "no-tool", "no-input", "string-input", "empty-agent"])
+    # Cut off mid-payload: not JSON, whatever its first keys say.
+    '{"agent_id":"a1","tool_name":"mcp__pseudolife-memory__memory_agents","tool_input":{"action":"update"',
+    '{"agent_id":"a1","tool_name":"mcp__pseudolife-memory__memory_agents","tool_input":{"action":"upd',
+], ids=["empty", "text", "brace", "no-tool", "no-input", "string-input", "empty-agent",
+        "unclosed-object", "unclosed-string"])
 def test_a_payload_it_cannot_read_is_allowed(tmp_path, stdin):
     assert _run(_env(tmp_path), stdin) == ""
 
