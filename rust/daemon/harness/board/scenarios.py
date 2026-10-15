@@ -374,6 +374,9 @@ class Mail(Scenario):
             act("history bad peer", "history", token="alice", agent="B", body={"peer": "a b"}, write=False),
             act("agents with pending preview", "heartbeat", token="bob", agent="C",
                 body=lambda c: {"attachment_id": "att-c", "generation": c.vals["genC"]}),
+            act("receive ack not bool", "receive", agent="A", body={"ack": "yes"}, write=False),
+            act("receive A with ack", "receive", agent="A", body={"ack": True}),
+            act("receive A after ack", "receive", agent="A", body={"ack": True}, write=False),
         ]
 
 
