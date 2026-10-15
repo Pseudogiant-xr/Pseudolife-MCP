@@ -132,6 +132,32 @@ class _Clock:
         self.mono += seconds
 
 
+def _during_wait(monkeypatch, at, action):
+    """Run the waiter on a ``_Clock`` and run ``action`` inside the sleep that
+    carries it past ``at`` seconds. The change then lands mid-wait with a poll
+    after it on any runner; the returned event is set once it has run. A
+    wall-clock timer could not promise that: on a 2026-10-15 Windows runner
+    (run 38689133227) a 0.1 s timer had not written by the end of a 0.6 s
+    wait."""
+    from pseudolife_memory import wait_mail_cli, wake_liveness
+
+    clock = _Clock()
+    clock.strftime = time.strftime
+    start = clock.mono
+    done = threading.Event()
+
+    def sleep(seconds):
+        clock.advance(seconds)
+        if not done.is_set() and clock.mono - start >= at:
+            action()
+            done.set()
+
+    clock.sleep = sleep
+    monkeypatch.setattr(wait_mail_cli, "time", clock)
+    monkeypatch.setattr(wake_liveness, "time", clock)
+    return done
+
+
 def test_waiter_renews_its_short_listener_lease_and_disarms_on_timeout(digests, monkeypatch):
     # The lease runs one minute past each renewal, capped at the waiter's own
     # deadline. A sub-minute wait on wall time therefore re-stamps that deadline
@@ -163,18 +189,15 @@ def test_waiter_renews_its_short_listener_lease_and_disarms_on_timeout(digests, 
 
 # --- firing rule ------------------------------------------------------------
 
-def test_plain_mail_does_not_end_the_wait(digests, capsysbinary):
+def test_plain_mail_does_not_end_the_wait(digests, monkeypatch, capsysbinary):
     """Regular mail never wakes (maintainer decision 2026-10-02): mail the
     daemon decided no ring for reaches the digest, and the waiter keeps
     waiting; the mail is still pending at the session's next turn."""
     digest = _digest(digests)
     _write(digest, 1)
-    timer = _later(0.1, lambda: _write(digest, 2, MAIL))
-    try:
-        assert run_wait_mail(["--timeout", "0.6", *FAST]) == 3
-    finally:
-        timer.cancel()
-    assert timer.done.is_set()
+    done = _during_wait(monkeypatch, 0.1, lambda: _write(digest, 2, MAIL))
+    assert run_wait_mail(["--timeout", "0.6", *FAST]) == 3
+    assert done.is_set()
     assert capsysbinary.readouterr().out == b""
     assert not _seen(digest).exists()
 
@@ -202,19 +225,16 @@ def test_a_rung_marker_ends_the_wait_once(digests, capsysbinary):
     assert capsysbinary.readouterr().out == b""
 
 
-def test_a_stale_ring_marker_never_fires(digests, capsysbinary):
+def test_a_stale_ring_marker_never_fires(digests, monkeypatch, capsysbinary):
     """A marker at or below ``.seen`` is a ring the session already took (the
     Stop hook's rule): plain mail arriving after it does not borrow it."""
     digest = _digest(digests)
     _write(digest, 3, MAIL)
     _ring(digest, 3)
     _seen(digest).write_text("3\n")
-    timer = _later(0.1, lambda: _write(digest, 4, MAIL + "- 1 more pending\n"))
-    try:
-        assert run_wait_mail(["--timeout", "0.6", *FAST]) == 3
-    finally:
-        timer.cancel()
-    assert timer.done.is_set()
+    done = _during_wait(monkeypatch, 0.1, lambda: _write(digest, 4, MAIL + "- 1 more pending\n"))
+    assert run_wait_mail(["--timeout", "0.6", *FAST]) == 3
+    assert done.is_set()
     assert capsysbinary.readouterr().out == b""
     assert _seen(digest).read_text().strip() == "3"
 
@@ -330,19 +350,16 @@ def test_a_ring_arriving_during_the_wait_fires(digests, capsysbinary):
     assert _seen(digest).read_text().strip() == "2"
 
 
-def test_a_change_that_empties_the_digest_does_not_fire(digests, capsysbinary):
+def test_a_change_that_empties_the_digest_does_not_fire(digests, monkeypatch, capsysbinary):
     """Acknowledging the last message rewrites the digest with an empty body:
     the watermark moves but there is nothing to wake for, even when a ring
     for it lands too."""
     digest = _digest(digests)
     _write(digest, 5, MAIL)
     _seen(digest).write_text("5\n")
-    timer = _later(0.1, lambda: (_write(digest, 6), _ring(digest, 6)))
-    try:
-        assert run_wait_mail(["--timeout", "1.5", *FAST]) == 3
-    finally:
-        timer.cancel()
-    assert timer.done.is_set()
+    done = _during_wait(monkeypatch, 0.1, lambda: (_write(digest, 6), _ring(digest, 6)))
+    assert run_wait_mail(["--timeout", "1.5", *FAST]) == 3
+    assert done.is_set()
     assert capsysbinary.readouterr().out == b""
     assert _seen(digest).read_text().strip() == "5"
 
@@ -388,12 +405,9 @@ def test_polling_opens_the_digest_only_after_a_rewrite(digests, monkeypatch, cap
     reads = []
     real = wait_mail_cli._read_digest
     monkeypatch.setattr(wait_mail_cli, "_read_digest", lambda path: reads.append(path) or real(path))
-    timer = _later(0.15, lambda: _write(digest, 2, "\n"))
-    try:
-        assert run_wait_mail(["--timeout", "1.5", *FAST]) == 3
-    finally:
-        timer.cancel()
-    assert timer.done.is_set()
+    done = _during_wait(monkeypatch, 0.15, lambda: _write(digest, 2, "\n"))
+    assert run_wait_mail(["--timeout", "1.5", *FAST]) == 3
+    assert done.is_set()
     assert len(reads) == 2
 
 
