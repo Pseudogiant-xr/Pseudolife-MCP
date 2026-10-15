@@ -51,7 +51,9 @@ jobs:
     # cancelled at 25 min inside the override builds on 2026-10-15 (jobs
     # 116301727515, 116323387861, 116326383784) after the daemon's release
     # compile roughly doubled. Warm runs peak at 17.5 min. A cold run must
-    # finish, or the cache is never saved and every later run is cold too.
+    # finish, or the cache is never saved and every later run is cold too:
+    # the cache key hashes the runner image's own Rust, so each image
+    # rollout starts cold (windows-latest 1.98.1 -> 1.99.0, 2026-10-15).
     timeout-minutes: 35
     defaults:
       run:
@@ -119,11 +121,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          # The key already hashes rust/rust-toolchain.toml, the toolchain
-          # every build uses. The environment hash adds the runner image's
-          # own Rust, so an image rollout (windows-latest 1.98.1 -> 1.99.0,
-          # 2026-10-15) restored no cache at all.
-          add-rust-environment-hash-key: false
       - name: Install pinned nextest in the runner temporary directory
         shell: pwsh
         run: |
@@ -215,7 +212,6 @@ jobs:
         with:
           workspaces: rust
           shared-key: shim-release
-          add-rust-environment-hash-key: false  # see the rust job
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3
       - name: Retain default static candidate
@@ -328,7 +324,6 @@ jobs:
         if: "!startsWith(matrix.suite, 'w1c-')"
         with:
           workspaces: rust
-          add-rust-environment-hash-key: false  # see the rust job
       - name: Install checkout and test dependencies
         timeout-minutes: 10
         run: |
@@ -944,7 +939,6 @@ jobs:
         with:
           workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
           key: cli-source-mutants
-          add-rust-environment-hash-key: false  # see the rust job
       - name: Install source harness dependencies
         # Network-bound setup keeps the existing ten-minute dependency floor.
         timeout-minutes: 10
