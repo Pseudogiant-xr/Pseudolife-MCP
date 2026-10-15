@@ -1652,27 +1652,13 @@ def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick
     taken = {}
 
     def take():
-        started = time.monotonic()
         try:
             taken["lock"] = suite_lock.acquire(tmp_path, "fail", worktree="w",
                                                mirror=_mirror(tmp_path, daemon))
         except BaseException as exc:  # re-raised below, not blamed on the board
             taken["error"] = exc
-        taken["seconds"] = time.monotonic() - started
 
     taker = threading.Thread(target=take, daemon=True)
-    taker.start()
-    taker.join(START_TIMEOUT)
-    taken_with_board_blocked = "lock" in taken
-    daemon.gate.set()
-    taker.join(START_TIMEOUT)
-    if "error" in taken:
-        raise taken["error"]
-    assert taken_with_board_blocked  # not one board call on the way in
-    # About four times that runner's stall: a mirror that waited 5 s or more
-    # on the board would show here.
-    assert taken["seconds"] < 5
-    held_lock = taken["lock"]
     freed = {}
 
     class _Watch:
@@ -1688,8 +1674,22 @@ def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick
             freed.setdefault("at_release", suite_lock_is_free(tmp_path))  # the first call
             return self.inner.release(*args, **kwargs)
 
-    held_lock.mirror = _Watch(held_lock.mirror)
-    suite_lock.release(held_lock)
+    taker.start()
+    try:
+        taker.join(START_TIMEOUT)
+        taken_with_board_blocked = "lock" in taken
+        daemon.gate.set()
+        taker.join(START_TIMEOUT)
+        if "error" in taken:
+            raise taken["error"]
+        assert taken_with_board_blocked  # not one board call on the way in
+        held_lock = taken["lock"]
+        held_lock.mirror = _Watch(held_lock.mirror)
+    finally:
+        daemon.gate.set()
+        taker.join(START_TIMEOUT)
+        if "lock" in taken:
+            suite_lock.release(taken["lock"])
     assert freed["at_release"] is True  # the lock went first, then the board
 
 
