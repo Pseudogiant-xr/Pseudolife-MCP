@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+import errno
 import http.client
 import json
 import os
@@ -23,6 +24,13 @@ from mcp_wire import ACCEPT, PROTOCOL, header, request, sse_data
 
 EXPECTED_CASES = 18515
 EXPECTED_COERCION_CASES = 2137
+# Hosted Windows run 38535960260 (2026-10-14): one connect() of a coercion
+# sweep's ~46,000 was refused with WinError 10048 and failed the job.
+# These errors describe the host's local port table, not the daemon (see
+# _LOCAL_PORT_ERRORS in tests/pg_defaults.py, measured 2026-09-25), and a
+# refused connect sends nothing, so it is retried after these pauses.
+CONNECT_BACKOFF = (0.05, 0.1, 0.2, 0.4)
+LOCAL_PORT_ERRNOS = {errno.EADDRINUSE, errno.ENOBUFS}
 
 
 class SweepConnection(http.client.HTTPConnection):
@@ -31,9 +39,18 @@ class SweepConnection(http.client.HTTPConnection):
     def __init__(self, port):
         super().__init__('127.0.0.1', port, timeout=30)
         self.opened = 0
+        self.connect_retries = 0
 
     def connect(self):
-        super().connect()
+        for pause in (*CONNECT_BACKOFF, None):
+            try:
+                super().connect()
+                break
+            except OSError as exc:
+                if exc.errno not in LOCAL_PORT_ERRNOS or pause is None:
+                    raise
+            self.connect_retries += 1
+            time.sleep(pause)
         self.opened += 1
 
     def close(self):
@@ -158,9 +175,12 @@ def run(py_port, rs_port, output, *, coercions_only=False):
               'completed_observations': completed, 'methods': dict(counts),
               'tcp_connections': {name: sum(c.opened for c in connections if c.port == port)
                                   for name, port in [('python', py_port), ('rust', rs_port)]},
+              'connect_retries': sum(c.connect_retries for c in connections),
               'seconds': round(time.monotonic() - started, 1), 'diffs': failures}
     output.write_text(json.dumps(report, indent=2, default=report_default) + '\n', encoding='utf-8')
     print(f'validation sweep complete: {completed} observations, {len(failures)} differences', flush=True)
+    if report['connect_retries']:
+        print(f"validation sweep: {report['connect_retries']} connects retried for want of a local port", flush=True)
     assert completed == len(workload), 'incomplete validation sweep'
     if failures:
         raise ValidationMismatch(f'validation sweep differs: {output}')
