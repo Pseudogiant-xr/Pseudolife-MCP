@@ -294,6 +294,11 @@ DELEGATE_CACHE_SECONDS = 60
 DELEGATE_LOOKUP_BUDGET = 0.5
 # Bound on cached answers; expired ones are dropped first, then the oldest.
 _DELEGATE_CACHE_MAX = 1024
+# Bound on lookups in flight, each holding a thread while the coordination
+# lock stalls; past it a miss gets no brief (Codex review, 2026-10-16). Not
+# measured: well above one per open session, about 75 MCP shims on the
+# maintainer's host (2026-09-23).
+_DELEGATE_INFLIGHT_MAX = 256
 _DELEGATE_CACHE_LOCK = threading.Lock()
 
 
@@ -479,6 +484,10 @@ def _delegate_fetch(service, key, clock) -> list[str]:
     which is not cached. A yes is kept for ``DELEGATE_CACHE_SECONDS`` but
     never past the earliest proven lease's expiry."""
     principal, agent = key
+    # The lease's remaining time is read inside the query, so a yes is
+    # counted from before it: a query that stalls past the lease's end
+    # leaves no yes behind.
+    now = clock()
     try:
         _ensure_tier(service, full=False)
         with service._coordination_lock:
@@ -488,7 +497,6 @@ def _delegate_fetch(service, key, clock) -> list[str]:
     except Exception:  # noqa: BLE001 - the brief never surfaces an error to the hook
         logger.debug("delegate lookup failed", exc_info=True)
         return []
-    now = clock()
     ttl = float(DELEGATE_CACHE_SECONDS)
     if projects and remaining is not None:
         ttl = max(0.0, min(ttl, float(remaining)))
@@ -540,7 +548,11 @@ def _delegate_lookup(service, key) -> concurrent.futures.Future:
         future = inflight.get(key)
         if future is not None:
             return future
-        future = inflight[key] = concurrent.futures.Future()
+        future = concurrent.futures.Future()
+        if len(inflight) >= _DELEGATE_INFLIGHT_MAX:
+            future.set_result([])
+            return future
+        inflight[key] = future
 
     def run():
         try:
@@ -552,7 +564,13 @@ def _delegate_lookup(service, key) -> concurrent.futures.Future:
                 del inflight[key]
         future.set_result(projects)
 
-    threading.Thread(target=run, name="pl-delegate-lookup", daemon=True).start()
+    try:
+        threading.Thread(target=run, name="pl-delegate-lookup", daemon=True).start()
+    except RuntimeError:  # no thread to be had: no brief this time, the hook text stands
+        with _DELEGATE_CACHE_LOCK:
+            if inflight.get(key) is future:
+                del inflight[key]
+        future.set_result([])
     return future
 
 
