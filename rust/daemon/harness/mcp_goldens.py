@@ -5,16 +5,17 @@ usage: python mcp_goldens.py <record.json> <goldens/mcp.json>
 <record.json> is `mcp_compare.py record` output from the Python daemon (the
 harness environment, tokens configured). The goldens keep what the Rust unit
 tests can check without a daemon: the SHA-256 of each tier's tools/list
-result, every initialize result, and the result object of each
-memory_toolset call in the `toolset` and `calls` cases. Full list bytes live
-in src/mcp/tools.jsonl already, so the lists are stored as hashes.
+result, every initialize result, the result object of each memory_toolset
+call in the `toolset` and `calls` cases, and each `tool_binding` refusal.
+Full list bytes live in src/mcp/tools.jsonl already, so the lists are stored
+as hashes.
 """
 import hashlib
 import json
 import sys
 from pathlib import Path
 
-from mcp_compare import BASE_CASES, recording_errors
+from mcp_compare import BASE_CASES, BINDING, recording_errors
 
 PROTOCOL_CASES = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28",
                   "2030-01-01", "x"]
@@ -70,6 +71,15 @@ def main(record, out):
         goldens["binding"].append({"args": args, "result": result_text(ts[base + k])})
     goldens["binding"].append({"args": None, "result": result_text(rec["calls"][3])})
     goldens["unknown_tool"] = result_text(rec["calls"][0])
+    # mcp_compare.tool_binding's calls, in its order.
+    calls = []
+    for name, table in BINDING.items():
+        calls.append({"tool": name, "args": {"zzz": 1}})
+        if any("default" not in p for p in table["params"]):
+            calls.append({"tool": name, "args": {}})
+    assert len(calls) == len(rec["tool_binding"])
+    goldens["tool_binding"] = [{**call, "result": result_text(resp)}
+                               for call, resp in zip(calls, rec["tool_binding"])]
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     Path(out).write_text(json.dumps(goldens, indent=1, ensure_ascii=False) + "\n",
                          encoding="utf-8", newline="\n")

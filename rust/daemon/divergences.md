@@ -22,7 +22,9 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 
 
 Bearer-authenticated `/mcp` is served (spec.md, "MCP surface (W2-G)"); `tools/list` is byte-equal
-at every tier. A `tools/call` of a tool whose body has not landed answers the
+at every tier. Every tool's arguments are bound first (spec.md, "Tool argument
+binding"), so binding refusals match Python for every tool. A `tools/call` of a
+tool whose body has not landed then answers the
 declared stub (delegate ruling 2026-10-09): the normal refusal envelope,
 `isError: true`, structured content equal to the JSON text,
 `{"error": "not_implemented", "message": "not_implemented: <tool> is not yet served by the Rust daemon"}`,
@@ -49,7 +51,7 @@ tool's answers by value.
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_episode_summary` | W2-D | No episode summary service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
-| `memory_store` | W2-E | W2-E supplies the resident write store, surprise gate and contradiction service behind its harness route; MCP argument binding and dispatch remain unwired. |
+| `memory_store` | W2-E | W2-E supplies the resident write store, surprise gate and contradiction service behind its harness route; MCP dispatch remains unwired. |
 | `memory_fact_set` | W2-E | No canonical fact mutation service or resident-store synchronization. |
 | `memory_set_add` | W2-E | No set-valued slot mutation service. |
 | `memory_set_remove` | W2-E | No set-valued slot removal service. |
@@ -75,7 +77,7 @@ tool's answers by value.
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset`. W2-D supplies expanded REST search, W2-E supplies the
 harness-gated store body, and W2-F supplies the REST board. Their presence
-does not register MCP tool bodies: MCP argument binding, projections and
+does not register MCP tool bodies: projections and
 bound-identity enforcement remain the prerequisites listed above.
 
 **MCP-REFUSAL-CLEANUP:** MCP refusals use the shared counted reader with the
@@ -107,7 +109,6 @@ context must be wired before its or other bank tool bodies are registered.
 | MCP-HTTP1-ONLY | the current daemon listener serves HTTP/1 | the Rust listener enables Axum's `http1` feature only; SSE uses `Connection: keep-alive`, which must be removed before any HTTP/2 listener is enabled | HTTP/2 transport deferred |
 | MCP-SEALED-REQUEST-STATE | `tools/call`, `prompts/get` and `resources/read` unseal a non-null `requestState` before validation/dispatch; a valid server-minted token may resume a multi-round exchange | this slice never mints round-trip state and refuses every non-null token with -32602 `Invalid or expired requestState`, before readiness or tier changes; null remains absent | multi-round state issuance and authenticated unsealing are deferred with the unserved tool bodies; untrusted tokens cannot invoke a body |
 | MCP-REQUEST-CANCELLATION | `notifications/cancelled` cancels the matching in-flight response; a legacy response stream settles with -32800 | cancellation notifications receive 202 but are discarded; any matching request still in flight later emits its ordinary response. Currently `memory_toolset` blocked by a backpressured GET notification stream exposes this window | W2-G follow-up: add per-session request tracking and response cancellation separately from disconnect-surviving write bodies; no bank tool body is enabled here |
-| Argument binding for tools other than `memory_toolset` (`unknown_parameter`, pydantic type, enum, length and range refusals, the string-to-list pre-parse, `_non_blank`, `_check_as_of`) | refused before the body runs | not yet: every unserved tool answers the stub whatever its arguments | W2-G (next PR) |
 | The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`) | served | only the no-envelope refusal (400, -32602) | W2-G (follow-up); the shims and doctor use the handshake era, but README documents direct `--transport http` clients |
 | `X-PL-Bank` / `X-PL-Principal` binding on `/mcp` (`bound_identity`, `enforce_bound_identity` against the board context) | checked before forwarding; a mismatch is a coordination error | forwarded unchecked; `initialize`, `tools/list` and `memory_toolset` still answer | W2-F supplies the check, W2-G calls it |
 | A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) |
@@ -115,6 +116,17 @@ context must be wired before its or other bank tool bodies are registered.
 | `Last-Event-ID` on GET (replay) | the SDK's replay path with no event store | ignored | non-canonical |
 | JSON-RPC message validation: batches, non-object messages, ids that are not integers or strings | pydantic union validation | 400 -32602 with a fixed message (the text after `Validation error: ` is free) | non-canonical |
 | Duplicate `X-PL-Writer` / `X-PL-Session` headers | the SDK request context's header mapping | the first value | non-canonical |
+
+### MCP argument binding
+
+The binder matches Python on every generated case (spec.md, "Tool argument
+binding"). What it cannot or does not reproduce:
+
+| Name | Python | Rust | Why |
+|---|---|---|---|
+| MCP-BIND-PRE-PARSE | a JSON-text argument holding an unpaired surrogate escape decodes to a str with a lone surrogate; nesting fails at a stack-dependent depth (RecursionError; the text stays a string) | the text stays a string (a Rust `String` cannot hold a lone surrogate); nesting deeper than 900 levels stays a string | no shipped producer sends either; the depth bound keeps the parser's stack finite |
+| MCP-BIND-AS-OF-DIGITS | `float()` reads non-ASCII decimal digits in an `as_of` string | refused unless `fromisoformat` accepts it | `as_of` producers send ASCII epoch seconds or ISO text; closable with a decimal-digit table |
+| MCP-BIND-AS-OF-PYTHON | `fromisoformat` follows the running interpreter: CPython 3.14 reads `T24:00` and refuses `12:30:45:67`, which 3.11 does the other way round; on Windows a naive instant before 1970 raises OSError, which escapes `_check_as_of` | CPython 3.11's C parser (the CI oracle) with Linux semantics | the production image runs CPython 3.12 on Linux; 3.11 and 3.12 have not been compared on these edges |
 
 ## Startup and configuration
 
@@ -248,7 +260,7 @@ close it, or why it stays.
 | Per-call `_ensure_init` passes: writer-session probe, rehydrate after a changed lease, correction / reinstatement / curation / lesson-synthesis recovery | run before every store | not run | writer-session probe and reconnect: W2-E; recovery passes belong to the curation and dream slices |
 | Unicode newer than 14.0 in the label, meta-filter and slot regexes | Python 3.11 tables (Unicode 14.0) | the `regex` crate's tables (Unicode 16.0) | identical for every code point assigned by Unicode 14.0 (full scan) |
 | Non-ASCII decimal digits in a generic session title | `\d` matches them | ASCII digits only | titles are `strftime` output or caller text |
-| MCP argument binding and the error envelope | FastMCP / pydantic | not in this slice; the harness reaches the body through a feature-gated route | W2-G |
+| MCP dispatch of the store body | FastMCP | argument binding and the error envelope are served (spec.md, "Tool argument binding"); the harness still reaches the body through a feature-gated route | W2-G (body registration) |
 | `entries.embedding`, `entries.surprise` | torch fp32 | ONNX Runtime fp32 | compared within measured tolerances (`harness/goldens/w2e-tolerance.json`); an admission decision or reason must never differ |
 
 ### W2-E first increment boundaries

@@ -6,11 +6,14 @@
 //! app once the bearer gate has passed; `handle` answers for that app: the
 //! body-size limit, the trailing-slash redirect, the plain 404 and `/mcp`.
 
+mod as_of;
+pub mod binding;
 mod catalogue;
 mod difflib;
 pub mod dispatch;
 mod envelope;
 pub mod identity;
+mod py_loads;
 pub mod tiers;
 mod toolset;
 mod validation;
@@ -870,11 +873,21 @@ async fn call_tool(
     if catalogue::find(name).is_none() {
         return envelope::unknown_tool(name);
     }
+    // Binding precedes the body, so a refused argument answers the same
+    // whether or not the body has landed (`binding.rs`).
+    let bound = match binding::tool(name)
+        .expect("every catalogue tool has a binding")
+        .bind(name, args)
+    {
+        Ok(bound) => bound,
+        Err(payload) => return envelope::error_result(&payload),
+    };
     let state = &app.mcp;
     if name == "memory_toolset" {
-        let action = match toolset_action(args) {
-            Ok(a) => a,
-            Err(payload) => return envelope::error_result(&payload),
+        let action = match bound["action"].as_str() {
+            Some("expand") => toolset::Action::Expand,
+            Some("collapse") => toolset::Action::Collapse,
+            _ => toolset::Action::Status,
         };
         let key = identity::tier_key(principal, headers);
         let (out, changed) = toolset::run(state, &app.store, action, principal, key.as_deref());
@@ -892,58 +905,28 @@ async fn call_tool(
         return envelope::error_result(&dispatch::not_implemented(name));
     };
     let ident = identity::call_identity(principal, headers);
-    match body(
+    let call = body(
         app,
         dispatch::ToolCall {
-            args,
+            args: &bound,
             ident: &ident,
         },
-    )
-    .await
-    {
+    );
+    let outcome = guarded(name, call).await;
+    match outcome {
         Ok(v) => envelope::success_result(&v),
         Err(e) => envelope::error_result(&envelope::error_payload(name, &e)),
     }
 }
 
-/// memory_toolset's binding: `action: Literal["expand", "collapse", "status"]`.
-fn toolset_action(args: &Map<String, Value>) -> Result<toolset::Action, Value> {
-    let unknown: Vec<&String> = args.keys().filter(|k| k.as_str() != "action").collect();
-    if !unknown.is_empty() {
-        // One sentence per unknown name; the accepted list closes the last.
-        let message = unknown
-            .iter()
-            .map(|k| {
-                let guess = difflib::close_match(k, &["action"])
-                    .filter(|_| !crate::mutants::active("mcp-no-hint"));
-                let hint = match guess {
-                    Some(g) => format!("; did you mean '{g}'?"),
-                    None => ".".to_string(),
-                };
-                let listed = if Some(k) == unknown.last() {
-                    " Accepted: action"
-                } else {
-                    ""
-                };
-                format!("unknown parameter '{k}' for memory_toolset{hint}{listed}")
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        return Err(json!({
-            "error": "unknown_parameter", "message": message,
-            "param": unknown[0], "accepted": ["action"],
-        }));
-    }
-    match args.get("action").and_then(Value::as_str) {
-        Some("expand") => Ok(toolset::Action::Expand),
-        Some("collapse") => Ok(toolset::Action::Collapse),
-        Some("status") => Ok(toolset::Action::Status),
-        None if !args.contains_key("action") => Err(json!({
-            "error": "invalid_argument", "message": "action: Field required", "param": "action"})),
-        _ => Err(json!({
-            "error": "invalid_argument",
-            "message": "action: Input should be 'expand', 'collapse' or 'status'",
-            "param": "action"})),
+/// A panicking body answers internal_error, as Python's offload wrapper
+/// turns any exception into one, instead of dropping the response.
+async fn guarded(name: &str, call: dispatch::ToolFuture<'_>) -> dispatch::ToolResult {
+    match futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(call)).await {
+        Ok(outcome) => outcome,
+        Err(_) => Err(dispatch::ToolError::Internal(anyhow::anyhow!(
+            "tool {name} panicked"
+        ))),
     }
 }
 
@@ -1507,6 +1490,18 @@ mod goldens {
         }
     }
 
+    /// memory_toolset's binding through the generic binder.
+    fn toolset_action(args: &Map<String, Value>) -> Result<toolset::Action, Value> {
+        let bound = binding::tool("memory_toolset")
+            .unwrap()
+            .bind("memory_toolset", args)?;
+        Ok(match bound["action"].as_str() {
+            Some("expand") => toolset::Action::Expand,
+            Some("collapse") => toolset::Action::Collapse,
+            _ => toolset::Action::Status,
+        })
+    }
+
     #[test]
     fn toolset_sequences_match_the_oracle() {
         let store = crate::auth::PrincipalStore::new();
@@ -1530,6 +1525,32 @@ mod goldens {
                     "{principal} {args:?}"
                 );
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_panicking_body_answers_internal_error() {
+        let call: dispatch::ToolFuture<'static> = Box::pin(async { panic!("body bug") });
+        let err = guarded("memory_store", call).await.unwrap_err();
+        assert_eq!(
+            envelope::error_payload("memory_store", &err),
+            json!({"error": "internal_error",
+                   "message": "The server failed while running this call (the cause is in its log); retry once at most, then tell the user.",
+                   "mutation": "unknown"})
+        );
+    }
+
+    #[test]
+    fn every_tools_binding_refusals_match_the_oracle() {
+        for case in goldens()["tool_binding"].as_array().unwrap() {
+            let name = case["tool"].as_str().unwrap();
+            let args = case["args"].as_object().unwrap();
+            let payload = binding::tool(name).unwrap().bind(name, args).unwrap_err();
+            assert_eq!(
+                envelope::error_result(&payload).to_string(),
+                case["result"].as_str().unwrap(),
+                "{name} {args:?}"
+            );
         }
     }
 

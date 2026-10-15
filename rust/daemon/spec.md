@@ -365,6 +365,37 @@ for the MCP surface.
 | M16 | memory_toolset's argument binding: an unknown name gives `unknown_parameter`, one sentence per name (`unknown parameter 'K' for memory_toolset; did you mean 'G'?` from difflib at cutoff 0.6, else ending `.`), the last closed by ` Accepted: action`, with `param` the first name and `accepted: ["action"]`. A missing `action` gives `action: Field required`; any other value gives `action: Input should be 'expand', 'collapse' or 'status'` (both `invalid_argument`, `param: "action"`). | `mcp_server.py:358-432` |
 | M17 | The writer is the named principal, else `X-PL-Writer` (non-empty), else `PSEUDOLIFE_WRITER_ID`, else `unknown`; the session is `X-PL-Session` as sent. Tool bodies receive both through `CallIdentity` (`src/mcp/dispatch.rs`). | `writer_context.py:130-205`; `service.py:893` |
 
+### Tool argument binding (2026-10-16)
+
+Every `tools/call` of a catalogue tool binds its arguments before anything
+else runs, so a refused argument answers the same whether or not the tool's
+body has landed; a body receives the bound map (`dispatch::ToolCall::args`).
+Python references are to `mcp_server.py` (`_StringSafeMetadata`,
+`_bind_arguments`, `_non_blank`, `_check_as_of`) and the pinned SDK's
+`FuncMetadata` (`mcp/server/mcpserver/utilities/func_metadata.py`).
+Code: `src/mcp/binding.rs`, `py_loads.rs`, `as_of.rs`.
+
+| # | Exact item | Source |
+|---|---|---|
+| B1 | The per-tool parameter table, `src/mcp/binding.json`, is generated from each registered argument model's pydantic-core schema by `harness/mcp_binding_table.py`, reduced to a closed vocabulary (str, int, float, bool with lax/strict, literal, list, dict, any, nullable, smart union, the two after-validators, defaults). A schema outside it refuses generation. Literal and bound sentences are recorded from pydantic. `--check` keeps it current. | `_bind_arguments`; pydantic-core schemas |
+| B2 | Unknown names first: one sentence per unknown name in argument order, `unknown parameter 'K' for T` then `; did you mean 'G'?` (the `_PARAM_ALIASES` target when it is a parameter of the tool, else difflib at cutoff 0.6) or `.`; the last sentence closes with ` Accepted: <parameters, comma-separated>`. Payload `{"error":"unknown_parameter","message","param":<first unknown>,"accepted":[...]}`. Nothing else is validated. | `_bind`, `_unknown_message`, `_binding_payload` |
+| B3 | Pre-parse: a string value of a parameter whose annotation is not exactly `str` or `str \| None` is replaced by its `json.loads` value when that is null, an array or an object (scalars, including bools, stay the string). `json.loads` is Python's: `NaN`, `Infinity`, `-Infinity`, whitespace `[ \t\n\r]`, last duplicate key wins in first position, more than 4,300 int digits refused. | `pre_parse_json` (SDK and override) |
+| B4 | Each parameter in declaration order: present values are validated, absent ones take the recorded default, else `Field required`. Lax coercions: int from a bool, a whole float below 2**63 (else `Unable to parse input string as an integer, exceeded maximum size`), or an SDK-cleaned integer string; float from a bool, an int or an SDK-parsed string, infinity and NaN allowed; bool from 0/1, 0.0/1.0 and the twelve spellings in any case (an i64-valued number or other string fails to parse; any other number is the wrong type); str only from a string, its length in code points; list only from an array, too-long lists refused before their items. Strict fields take only their own JSON type. Bounds are checked in the order le, lt, ge, gt. A smart union takes the first choice that validates strictly, else the first in lax mode, else every choice's errors under its tag. | pydantic-core 2.50.0 lax mode |
+| B5 | `_non_blank` refuses a value that `str.strip()` empties (`Value error, must not be blank`). `_check_as_of` refuses a string that neither `float()` nor `datetime.fromisoformat` (CPython 3.11's C parser: separator any one character, week dates, `,` fractions, unchecked offset parts under 24 h) accepts, with the `_check_as_of` sentence. | `mcp_server.py:757-780`, `service.py:_parse_as_of` |
+| B6 | A refusal is `{"error":"invalid_argument","message","param"}`: the message joins `<loc joined by '.'>: <sentence>` with `; `, `param` is the first error's parameter. It is answered through the ordinary refusal envelope (M15). | `_binding_payload` |
+| B7 | The bound map holds every parameter in declaration order. A float binds as its shortest round-trip number, an infinity as an overflowing literal and a NaN as the number `NaN`; bodies read floats through `binding::float_arg`. | `model_dump_one_level` |
+
+`harness/mcp_binding_sweep.py` generates 36,880 argument sets (every
+parameter of every tool against numeric spellings, strings, JSON texts,
+length edges, ISO forms, unknown and missing names) and compares the two
+binders in process: Python's own `validate_arguments` on the registered tool
+against the Rust binder's probe mode, type-strictly. It needs no database or
+model and runs in seconds. `--mutants` requires 14 source mutants to be caught;
+the smart union's strict pass, which today's two unions cannot distinguish, is
+covered by a unit test. On the wire, the MCP harness's `tool_binding` case
+compares 70 binding refusals live and the Rust unit tests replay them from
+`harness/goldens/mcp.json`. A body that panics answers `internal_error`.
+
 ### SDK parameter validation
 
 `src/mcp/validation-schema.json` records the MCP and MCP-types 2.1.1

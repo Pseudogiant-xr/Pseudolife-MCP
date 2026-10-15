@@ -37,8 +37,12 @@ pub struct CallIdentity {
 }
 
 pub struct ToolCall<'a> {
-    /// Bound arguments: unknown names refused, values checked against the
-    /// tool's inputSchema, and every parameter present (defaults filled).
+    /// Bound arguments (`binding.rs`): unknown names refused, values checked
+    /// and coerced as pydantic does, and every parameter present (defaults
+    /// filled). Read a float parameter with `binding::float_arg`: a bound
+    /// infinity or NaN is a number `as_f64` refuses, and a NaN is one that
+    /// `serde_json::to_value` (and so `json!`) refuses to re-serialize:
+    /// clone argument values, never pass them through `json!`.
     pub args: &'a Map<String, Value>,
     pub ident: &'a CallIdentity,
 }
