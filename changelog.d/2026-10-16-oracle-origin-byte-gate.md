@@ -1,0 +1,2 @@
+### Fixed (2026-10-16 — reject unaccepted Python oracle bytes in the originating PR)
+- CI now checks byte-pinned Python modules in the candidate and integrated checkout before exporting the selected oracle, so a production change cannot pass against its merge base and break the next PR's parity judges. The preflight and wait-mail judge share one accepted Git blob registry; the event's oracle selection is unchanged.
