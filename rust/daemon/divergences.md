@@ -126,7 +126,7 @@ binding"). What it cannot or does not reproduce:
 |---|---|---|---|
 | MCP-BIND-PRE-PARSE | a JSON-text argument holding an unpaired surrogate escape decodes to a str with a lone surrogate; nesting fails at a stack-dependent depth (RecursionError; the text stays a string) | the text stays a string (a Rust `String` cannot hold a lone surrogate); nesting deeper than 900 levels stays a string | no shipped producer sends either; the depth bound keeps the parser's stack finite |
 | MCP-BIND-AS-OF-DIGITS | `float()` reads non-ASCII decimal digits in an `as_of` string | refused unless `fromisoformat` accepts it | `as_of` producers send ASCII epoch seconds or ISO text; closable with a decimal-digit table |
-| MCP-BIND-AS-OF-PYTHON | `fromisoformat` follows the running interpreter: CPython 3.14 reads `T24:00` and refuses `12:30:45:67`, which 3.11 does the other way round; on Windows a naive instant before 1970 raises OSError, which escapes `_check_as_of` | CPython 3.11's C parser (the CI oracle) with Linux semantics | the production image runs CPython 3.12 on Linux; 3.11 and 3.12 have not been compared on these edges |
+| MCP-BIND-AS-OF-PYTHON | `fromisoformat` follows the running interpreter: CPython 3.14 reads `T24:00` and refuses `12:30:45:67`, where 3.11 and 3.12.13 (the production base image, measured) do the opposite. `timestamp()` on a naive instant late on 9999-12-31 fails east of UTC (Tokyo refuses `9999-12-31T23:59`). On Windows a naive instant before 1970 raises OSError, which escapes `_check_as_of` | CPython 3.11/3.12's parser, and `timestamp()` as in UTC on Linux, the container default | the daemon runs in a Linux container; a local time zone east of UTC is not configured there |
 
 ## Startup and configuration
 

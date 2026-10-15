@@ -546,7 +546,10 @@ fn int_value(value: &Value, strict: bool) -> Result<String, Vec<Error>> {
         Value::Number(n) => {
             let text = n.to_string();
             if !text.contains(['.', 'e', 'E']) && text != NAN {
-                return Ok(validation::clean_int_string(&text).expect("JSON integer"));
+                // A JSON int literal is already canonical (no `+`, no leading
+                // zeros) and bounded: the transport and `py_loads` refuse
+                // longer ones. Python has no negative zero.
+                return Ok(if text == "-0" { "0".to_string() } else { text });
             }
             if strict {
                 return Err(vec![Error::new(TYPE)]);
@@ -568,6 +571,11 @@ fn int_value(value: &Value, strict: bool) -> Result<String, Vec<Error>> {
             }
             Ok((x as i64).to_string())
         }
+        // pydantic-core first reads the raw text as a JSON number, which
+        // refuses an integer part longer than 4,300 characters outright.
+        Value::String(s) if !strict && jiter_int_out_of_range(s) => Err(vec![Error::new(
+            "Unable to parse input string as an integer, exceeded maximum size",
+        )]),
         Value::String(s) if !strict && !crate::mutants::active("mcp-bind-int-no-string") => {
             validation::clean_int_string(s).ok_or_else(|| {
                 vec![Error::new(
@@ -579,10 +587,32 @@ fn int_value(value: &Value, strict: bool) -> Result<String, Vec<Error>> {
     }
 }
 
+/// Whether jiter's JSON number reader, given the raw string, stops with
+/// "number out of range": an optional `-` then a nonzero digit, with more
+/// than 4,300 characters before the digits end. A leading zero or space
+/// fails differently, and the string then goes to the SDK cleanup.
+fn jiter_int_out_of_range(s: &str) -> bool {
+    let b = s.as_bytes();
+    let start = usize::from(b.first() == Some(&b'-'));
+    if !matches!(b.get(start), Some(b'1'..=b'9')) {
+        return false;
+    }
+    let end = start + b[start..].iter().take_while(|c| c.is_ascii_digit()).count();
+    end > 4300
+}
+
 /// pydantic's float (infinity and NaN allowed).
 fn float_value(value: &Value, strict: bool) -> Result<f64, Vec<Error>> {
     const TYPE: &str = "Input should be a valid number";
     match value {
+        // A JSON int becomes a Python int, whose float() overflows past
+        // f64::MAX (a float literal that large is already infinity).
+        Value::Number(n)
+            if !n.to_string().contains(['.', 'e', 'E', 'N'])
+                && validation::number(value).is_some_and(f64::is_infinite) =>
+        {
+            Err(vec![Error::new(TYPE)])
+        }
         Value::Number(_) => validation::number(value).ok_or_else(|| vec![Error::new(TYPE)]),
         Value::Bool(_) if !strict => Ok(validation::number(value).expect("bool as number")),
         Value::String(_) if !strict => validation::number(value).ok_or_else(|| {
@@ -646,6 +676,10 @@ pub fn probe() {
     let mut out = std::io::BufWriter::new(stdout.lock());
     for line in std::io::stdin().lock().lines() {
         let case: Value = serde_json::from_str(&line.expect("probe input")).expect("probe case");
+        if super::validation::number_out_of_range(&case) {
+            writeln!(out, "{{\"parse_error\":true}}").expect("probe output");
+            continue;
+        }
         let name = case["tool"].as_str().expect("probe tool");
         let args = case["args"].as_object().expect("probe args");
         // Built by hand: `json!` would re-serialize a bound NaN and refuse it.

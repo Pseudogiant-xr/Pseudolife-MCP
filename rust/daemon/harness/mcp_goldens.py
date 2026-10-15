@@ -77,9 +77,10 @@ def main(record, out):
         calls.append({"tool": name, "args": {"zzz": 1}})
         if any("default" not in p for p in table["params"]):
             calls.append({"tool": name, "args": {}})
-    assert len(calls) == len(rec["tool_binding"])
+    assert len(calls) + 1 == len(rec["tool_binding"])
     goldens["tool_binding"] = [{**call, "result": result_text(resp)}
                                for call, resp in zip(calls, rec["tool_binding"])]
+    # The last response is the transport's parse error, not a binding.
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     Path(out).write_text(json.dumps(goldens, indent=1, ensure_ascii=False) + "\n",
                          encoding="utf-8", newline="\n")

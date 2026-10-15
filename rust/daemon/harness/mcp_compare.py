@@ -549,6 +549,11 @@ def tool_binding(port):
         out.append(norm(s.tool(name, {"zzz": 1})))
         if any("default" not in p for p in table["params"]):
             out.append(norm(s.tool(name, {})))
+    # The transport refuses an integer literal past 4,300 characters as a
+    # parse error before binding (json.dumps cannot write one).
+    raw = (b'{"jsonrpc":"2.0","id":99,"method":"tools/call","params":{"name":"memory_get",'
+           b'"arguments":{"entry_id":' + b"1" * 4301 + b"}}}")
+    out.append(norm(request(port, "POST", raw, s._headers())))
     s.close()
     return out
 
@@ -561,7 +566,7 @@ CASE_RESPONSE_COUNTS = {
     'handshake': 4, 'lists': 18, 'protocol_versions': 10, 'methods': 24,
     'calls': 4, 'toolset': 53, 'stored': 30, 'list_changed_stream': 2,
     'stream_reconnect': 3, 'init_gate': 21, 'body_limit': 6,
-    'messages': 13, 'concurrent': 8, 'transport': 21, 'paths': 7, 'tool_binding': 70,
+    'messages': 13, 'concurrent': 8, 'transport': 21, 'paths': 7, 'tool_binding': 71,
     'rebinding': 24, 'open_lists': 6, 'config_lists': 10,
 }
 if "--tokenless" in sys.argv:
@@ -692,7 +697,7 @@ def recording_errors(data, cases=None):
                  for response in stubs.values()):
             errors.append('stub_tools: oracle call failed')
     total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
-    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 331
+    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 332
     if total != expected_total:
         errors.append(f'corpus: {total} responses, expected {expected_total}')
     if not errors:

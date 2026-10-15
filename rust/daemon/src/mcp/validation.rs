@@ -16,6 +16,22 @@ pub fn request(method: &str, params: &Value, served: bool) -> bool {
     layer("requests", method, params) && (!served || layer("handlers", method, params))
 }
 
+/// The SDK transport parses bodies with `pydantic_core.from_json` (jiter),
+/// which refuses a number whose integer part, sign included, is longer than
+/// 4,300 characters ("number out of range"): a parse error before any
+/// validation. `serde_json` with arbitrary precision keeps such literals.
+pub fn number_out_of_range(value: &Value) -> bool {
+    match value {
+        Value::Number(n) => {
+            let text = n.to_string();
+            text.split(['.', 'e', 'E']).next().map_or(0, str::len) > 4300
+        }
+        Value::Array(items) => items.iter().any(number_out_of_range),
+        Value::Object(map) => map.values().any(number_out_of_range),
+        _ => false,
+    }
+}
+
 pub fn notification(method: &str, params: &Value) -> bool {
     layer("notifications", method, params)
 }

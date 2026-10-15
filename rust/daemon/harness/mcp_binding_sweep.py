@@ -21,6 +21,10 @@ match, then every binder mutant in MUTANTS must produce a difference. The
 strict first pass of a smart union is not in MUTANTS: neither union in
 today's table can tell it apart (lax `str` never takes a non-string, lax
 `list` never takes a string), so a unit test in `binding.rs` covers it.
+
+The corpus holds no naive `as_of` instant before 1970: on Windows, Python's
+`timestamp()` raises OSError for one, where the Linux daemon converts it
+(or, on 0001-01-01, refuses it: a unit test in `as_of.rs` covers that).
 """
 from __future__ import annotations
 
@@ -43,6 +47,8 @@ NUMBERS = [
     "1E2", "1e2", "0.1e1", "1e400", "-1e400", "1e-400", "1e19", "9.3e18",
     "-9.3e18", "9223372036854775807", "9223372036854775808",
     "123456789012345678901234567890", "1.0000000000000002", "4.5e15",
+    "1" * 4300, "1" * 4301, "-" + "1" * 4299, "-" + "1" * 4300,
+    "1" * 4300 + ".5", "1" * 4301 + ".5", "1" * 4300 + "e1", "[" + "1" * 4301 + "]",
 ]
 STRINGS = [
     "", " ", "x", "probe", "5", "5.0", " 7 ", "+7", "-7", "007", "0_7", "1_000",
@@ -69,12 +75,18 @@ STRINGS = [
     "2026-10-01T12:00:00 +00:00", "2026-10-1", "2026-W40-", "2026-W40-8",
     "2026-W40-0", "+2026-10-01", "2026-10-01T12:00:00+00", "2026-10-01T12:00:00-0000",
     "\U0001f600", "a\U0001f600b",
+    "1" * 4301, "-" + "1" * 4300, " " + "1" * 4301, "1" * 4301 + ".0", "0" * 4301 + "1",
+    "1" * 4300 + ".5", "+" + "1" * 4300, "1" * 4300, "-" + "1" * 4299 + "x",
+    "[-" + "1" * 4300 + "]", "[" + "1" * 4301 + "]", "[" + "1" * 400 + "]",
+    "0001-01-01T00:00:00+00:00", "9999-12-31T23:59:59+00:00", "0001-01-01T00:00:00+05:00",
 ]
 COMPOUND = [
     "true", "false", "null", "[]", "{}", "[1]", "[1.5]", '["a"]', '["a","b"]',
     "[null]", "[true]", '["1"]', "[[1]]", "[{}]", '[{"a":1}]', '{"a":1}',
     '["a","a","a","a","a","a","a","a"]', '["a","a","a","a","a","a","a","a","a"]',
     "[1,2,3]", '[1,"x",null]', "[1.0]", '["2"]', "[9223372036854775808]",
+    '{"b":1,"a":[1,2],"c":{"z":null,"y":1.5}}', '[{"b":1,"a":2},{"d":"x","c":true}]',
+    "1" + "0" * 400, "-1" + "0" * 400,
 ]
 MUTANTS = (
     "mcp-no-hint", "mcp-bind-no-preparse", "mcp-bind-text-preparse",
@@ -166,7 +178,11 @@ def cases_for(name, table):
 
 def python_bind(meta, text):
     from pseudolife_memory.mcp_server import _BindingRefusal
-    raw = pydantic_core.from_json(text)
+    try:
+        raw = pydantic_core.from_json(text)
+    except ValueError:
+        # The transport answers a parse error before any binding.
+        return {"parse_error": True}
     try:
         result = meta.validate_arguments(raw)
     except Exception as exc:  # noqa: BLE001 - recorded, compared as a difference

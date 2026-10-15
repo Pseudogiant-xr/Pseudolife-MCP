@@ -4,9 +4,13 @@
 //!
 //! `fromisoformat` follows CPython's C implementation
 //! (`Modules/_datetimemodule.c`, 3.11/3.12), which runs on UTF-8 bytes.
-//! A naive date-time converts through local time; on Linux, where the daemon
-//! runs, every representable one converts (Windows refuses naive instants
-//! before 1970 with OSError, which `_check_as_of` does not catch).
+//! `timestamp()` on a naive date-time converts through local time: CPython's
+//! `local_to_seconds` also converts the instant a day earlier, so a naive
+//! instant on 0001-01-01 fails in every time zone (measured on 3.12.13,
+//! Linux, UTC, New York and Tokyo). Near the end of 9999 the outcome depends
+//! on the zone's offset; this follows UTC, the container default (declared,
+//! MCP-BIND-AS-OF-PYTHON). Windows refuses naive instants before 1970 with
+//! OSError, which `_check_as_of` does not catch.
 
 use chrono::{NaiveDate, Weekday};
 use serde_json::Value;
@@ -17,9 +21,23 @@ pub const REFUSAL: &str = "as_of takes an ISO-8601 date or date-time (2026-10-01
 /// Whether `_parse_as_of` accepts the bound value (`str | float | None`).
 pub fn parses(value: &Value) -> bool {
     match value {
-        Value::String(s) => py_float(s).is_some() || fromisoformat(s),
+        Value::String(s) => {
+            py_float(s).is_some()
+                || parse(s).is_some_and(|p| {
+                    !(p.naive && (p.year, p.month, p.day) == (1, 1, 1))
+                        || crate::mutants::active("mcp-bind-asof-year-one")
+                })
+        }
         _ => true,
     }
+}
+
+/// What `timestamp()` needs from a parsed date-time.
+struct Parsed {
+    year: i32,
+    month: u32,
+    day: u32,
+    naive: bool,
 }
 
 /// Python's `float(str)`: surrounding whitespace, single underscores
@@ -97,52 +115,41 @@ fn separator(b: &[u8]) -> Option<usize> {
 }
 
 /// `parse_isoformat_date` plus the date constructor's range checks.
-fn date(b: &[u8], len: usize) -> bool {
-    let Some((year, mut p)) = digits(b, 0, 4) else {
-        return false;
-    };
+fn date(b: &[u8], len: usize) -> Option<NaiveDate> {
+    let (year, mut p) = digits(b, 0, 4)?;
     let sep = at(b, p) == b'-';
     if sep {
         p += 1;
     }
     if at(b, p) == b'W' {
-        let Some((week, q)) = digits(b, p + 1, 2) else {
-            return false;
-        };
+        let (week, q) = digits(b, p + 1, 2)?;
         p = q;
         let mut day = 1;
         if p < len {
             if sep {
                 if at(b, p) != b'-' {
-                    return false;
+                    return None;
                 }
                 p += 1;
             }
-            let Some((d, _)) = digits(b, p, 1) else {
-                return false;
-            };
-            day = d;
+            day = digits(b, p, 1)?.0;
         }
         if !(1..=7).contains(&day) {
-            return false;
+            return None;
         }
         let weekday = Weekday::try_from(day as u8 - 1).expect("weekday");
         return NaiveDate::from_isoywd_opt(year as i32, week, weekday)
-            .is_some_and(|d| (1..=9999).contains(&chrono::Datelike::year(&d)));
+            .filter(|d| (1..=9999).contains(&chrono::Datelike::year(d)));
     }
-    let Some((month, mut p)) = digits(b, p, 2) else {
-        return false;
-    };
+    let (month, mut p) = digits(b, p, 2)?;
     if sep {
         if at(b, p) != b'-' {
-            return false;
+            return None;
         }
         p += 1;
     }
-    let Some((day, _)) = digits(b, p, 2) else {
-        return false;
-    };
-    (1..=9999).contains(&year) && NaiveDate::from_ymd_opt(year as i32, month, day).is_some()
+    let (day, _) = digits(b, p, 2)?;
+    NaiveDate::from_ymd_opt(year as i32, month, day).filter(|_| (1..=9999).contains(&year))
 }
 
 /// `parse_hh_mm_ss_ff` over `[p, end)`: (status, hour, minute, second,
@@ -187,8 +194,9 @@ fn hh_mm_ss_ff(b: &[u8], mut p: usize, end: usize) -> Result<(u8, [u32; 4]), ()>
     Ok((u8::from(at(b, q) != 0), vals))
 }
 
-/// `parse_isoformat_time` plus the time and timezone constructors' checks.
-fn time(b: &[u8], start: usize) -> bool {
+/// `parse_isoformat_time` plus the time and timezone constructors' checks:
+/// None when refused, else whether the result is naive.
+fn time(b: &[u8], start: usize) -> Option<bool> {
     let end = b.len();
     let mut tz = start;
     loop {
@@ -200,46 +208,51 @@ fn time(b: &[u8], start: usize) -> bool {
             break;
         }
     }
-    let Ok((rv, [hour, minute, second, _])) = hh_mm_ss_ff(b, start, tz) else {
-        return false;
-    };
+    let (rv, [hour, minute, second, _]) = hh_mm_ss_ff(b, start, tz).ok()?;
     let clock = hour <= 23 && minute <= 59 && second <= 59;
     if tz == end {
-        return rv == 0 && clock;
+        return (rv == 0 && clock).then_some(true);
     }
     if at(b, tz) == b'Z' {
-        return at(b, tz + 1) == 0 && clock;
+        return (at(b, tz + 1) == 0 && clock).then_some(false);
     }
-    let Ok((rv, [h, m, s, us])) = hh_mm_ss_ff(b, tz + 1, end) else {
-        return false;
-    };
+    let (rv, [h, m, s, us]) = hh_mm_ss_ff(b, tz + 1, end).ok()?;
     if crate::mutants::active("mcp-bind-asof-offset-range") && (h > 23 || m > 59) {
-        return false;
+        return None;
     }
     // timezone(): strictly inside one day; the parts are not range-checked.
     let offset_us =
         (u64::from(h) * 3600 + u64::from(m) * 60 + u64::from(s)) * 1_000_000 + u64::from(us);
-    rv == 0 && clock && offset_us < 86_400_000_000
+    (rv == 0 && clock && offset_us < 86_400_000_000).then_some(false)
 }
 
-/// Whether `datetime.fromisoformat(value)` succeeds.
-pub fn fromisoformat(value: &str) -> bool {
+/// `datetime.fromisoformat(value)`, when it succeeds.
+fn parse(value: &str) -> Option<Parsed> {
     if value.chars().count() < 7 {
-        return false;
+        return None;
     }
     let b = value.as_bytes();
-    let Some(sep) = separator(b) else {
-        return false;
-    };
-    if !date(b, sep) {
-        return false;
-    }
-    if b.len() > sep {
+    let sep = separator(b)?;
+    let date = date(b, sep)?;
+    let naive = if b.len() > sep {
         // The separator is any one character, however many UTF-8 bytes.
         let width = value[sep..].chars().next().map_or(1, char::len_utf8);
-        return time(b, sep + width);
-    }
-    true
+        time(b, sep + width)?
+    } else {
+        true
+    };
+    use chrono::Datelike;
+    Some(Parsed {
+        year: date.year(),
+        month: date.month(),
+        day: date.day(),
+        naive,
+    })
+}
+
+#[cfg(test)]
+fn fromisoformat(value: &str) -> bool {
+    parse(value).is_some()
 }
 
 #[cfg(test)]
@@ -284,6 +297,22 @@ mod tests {
             "2026-10-01T12:30:45.",
         ] {
             assert!(!fromisoformat(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn naive_instants_on_the_first_day_fail_timestamp() {
+        // CPython 3.12.13 on Linux (UTC, New York, Tokyo): ValueError for
+        // naive 0001-01-01 at any time; 0001-01-02 and aware values convert.
+        for refused in ["0001-01-01", "0001-01-01T12:00", "0001-01-01T23:59:59.999"] {
+            assert!(!parses(&Value::String(refused.into())), "{refused}");
+        }
+        for accepted in [
+            "0001-01-02",
+            "0001-01-01T00:00:00+00:00",
+            "0001-01-01T12:00Z",
+        ] {
+            assert!(parses(&Value::String(accepted.into())), "{accepted}");
         }
     }
 

@@ -37,7 +37,7 @@ def test_every_required_baseline_binds_in_python():
 def test_corpus_varies_every_parameter_of_every_tool():
     tables = json.loads(table.TARGET.read_text(encoding="utf-8"))["tools"]
     for name, entry in tables.items():
-        texts = [json.loads(t) for t in sweep.cases_for(name, entry)]
+        texts = [json.loads(t, parse_int=str) for t in sweep.cases_for(name, entry)]
         for param in entry["params"]:
             assert sum(param["name"] in t for t in texts) > 50, (name, param["name"])
 
@@ -57,5 +57,7 @@ def test_every_binder_mutant_is_swept():
                                 path.read_text(encoding="utf-8")))
     # The smart-union strict pass is covered by a binding.rs unit test.
     swept = {m for m in sweep.MUTANTS if m.startswith("mcp-bind-")}
-    assert names - swept == {"mcp-bind-union-lax-first"}
+    # The year-one timestamp rule is Linux-only behaviour (Windows raises
+    # OSError for naive instants before 1970); an as_of.rs unit test covers it.
+    assert names - swept == {"mcp-bind-union-lax-first", "mcp-bind-asof-year-one"}
     assert swept <= names

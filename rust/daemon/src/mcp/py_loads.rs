@@ -18,6 +18,7 @@ const MAX_INT_DIGITS: usize = 4300;
 
 pub fn loads(text: &str) -> Option<Value> {
     let mut p = Parser {
+        text,
         s: text.as_bytes(),
         i: 0,
     };
@@ -28,7 +29,10 @@ pub fn loads(text: &str) -> Option<Value> {
 }
 
 struct Parser<'a> {
+    text: &'a str,
     s: &'a [u8],
+    /// Always on a character boundary of `text`: it only steps over ASCII
+    /// bytes or whole characters.
     i: usize,
 }
 
@@ -176,8 +180,10 @@ impl Parser<'_> {
         if !float && int_digits > MAX_INT_DIGITS {
             return None;
         }
-        let text = std::str::from_utf8(&self.s[start..self.i]).ok()?;
-        text.parse::<Number>().ok().map(Value::Number)
+        self.text[start..self.i]
+            .parse::<Number>()
+            .ok()
+            .map(Value::Number)
     }
 
     fn string(&mut self) -> Option<String> {
@@ -226,8 +232,7 @@ impl Parser<'_> {
                 // strict=True: control characters are refused.
                 0x00..=0x1f => return None,
                 _ => {
-                    let rest = std::str::from_utf8(&self.s[self.i..]).ok()?;
-                    let c = rest.chars().next()?;
+                    let c = self.text[self.i..].chars().next()?;
                     out.push(c);
                     self.i += c.len_utf8();
                 }
@@ -256,6 +261,14 @@ fn infinity(negative: bool) -> Option<Value> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn long_strings_parse_in_linear_time() {
+        let text = format!("[\"{}\"]", "\u{e9}".repeat(1 << 20));
+        let started = std::time::Instant::now();
+        assert!(loads(&text).is_some());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
 
     #[test]
     fn python_json_extensions() {

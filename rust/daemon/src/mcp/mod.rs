@@ -653,6 +653,14 @@ async fn post(
         .map_err(|error| error.to_string())
         .and_then(|text| crate::http::parse_body_json(text).map_err(|error| error.to_string()));
     let raw: Value = match parsed {
+        Ok(v) if validation::number_out_of_range(&v) => {
+            return rpc_http_error(
+                400,
+                PARSE_ERROR,
+                "Parse error: number out of range",
+                Some(sid),
+            );
+        }
         Ok(v) => v,
         Err(e) => {
             return rpc_http_error(400, PARSE_ERROR, &format!("Parse error: {e}"), Some(sid));
