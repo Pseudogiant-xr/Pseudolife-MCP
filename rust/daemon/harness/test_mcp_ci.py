@@ -11,7 +11,7 @@ def baseline():
     py = {"status": 413, "headers": {"mcp-session-id": None}, "body": {"raw": "Request body too large"}}
     rs = copy.deepcopy(py)
     rs["headers"]["connection"] = "close"
-    return {"summary": {"responses": 346, "cases": 18, "diffs": 5, "unserved_checked": list(UNSERVED)},
+    return {"summary": {"responses": 351, "cases": 18, "diffs": 5, "unserved_checked": list(UNSERVED)},
             "diffs": [f"body_limit[{i}]: python={json.dumps(py)}\n          rust  ={json.dumps(rs)}"
                       for i in (0, 2, 3, 4, 5)]}
 

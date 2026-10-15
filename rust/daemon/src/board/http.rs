@@ -125,10 +125,7 @@ pub async fn mcp_binding(app: &App, h: &HeaderMap) -> Option<Response> {
         };
         // Fail closed without a bearer, as `authenticated_principal` does.
         let caller = authenticated_principal(app, &headers)?;
-        let context = app
-            .board
-            .handle("context", Map::new(), &headers, &caller)
-            .await?;
+        let context = app.board.binding_context(&headers, &caller).await?;
         let field = |key: &str| context.get(key).and_then(Value::as_str);
         if (field("bank_id"), field("principal")) != (Some(bank.as_str()), Some(principal.as_str()))
             && !crate::mutants::active("mcp-binding-open")

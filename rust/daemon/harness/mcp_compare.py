@@ -597,6 +597,11 @@ def bound_identity(port):
         [("X-PL-Bank", bank), ("X-PL-Principal", "%63arol")],
         [("X-PL-Bank", bank), ("X-PL-Principal", "%ZZ")],
         [("X-PL-Bank", bank), ("X-PL-Principal", "%0A")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "%FF")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "a" * 257)],
+        # A repeated header: the last value is the one checked.
+        [("X-PL-Bank", bank), ("X-PL-Principal", "mallory"), ("X-PL-Principal", principal)],
+        [("X-PL-Bank", bank), ("X-PL-Principal", principal), ("X-PL-Principal", "mallory")],
     ]:
         out.append(norm(request(port, "POST", init_body(), JSON_HDRS + bearer + extra)))
     # A live session's later request is checked too, and a matching binding
@@ -606,7 +611,7 @@ def bound_identity(port):
     out.append(norm(s.call("tools/list", {})))
     s.base = [h for h in s.base if h[0] != "X-PL-Principal"] + [("X-PL-Principal", "mallory")]
     out.append(norm(s.call("tools/list", {})))
-    s.close()
+    out.append(norm(s.close()))
     out.append(norm(request(port, "POST", init_body(), JSON_HDRS + [
         ("Authorization", f"Bearer {TOK['carol']}"), ("X-PL-Bank", bank),
         ("X-PL-Principal", "carol")])))
@@ -622,7 +627,7 @@ CASE_RESPONSE_COUNTS = {
     'calls': 4, 'toolset': 53, 'stored': 30, 'list_changed_stream': 2,
     'stream_reconnect': 3, 'init_gate': 21, 'body_limit': 6,
     'messages': 13, 'concurrent': 8, 'transport': 21, 'paths': 7, 'tool_binding': 71,
-    'bound_identity': 14,
+    'bound_identity': 19,
     'rebinding': 24, 'open_lists': 6, 'config_lists': 10,
 }
 if "--tokenless" in sys.argv:
@@ -689,6 +694,14 @@ def sanity(data, diffs):
         # full), alice, bob (the later valid entry), carol (full)
         if got != [10, 38, 10, 24, 38]:
             diffs.append(f"sanity config_lists: tool counts {got}")
+    if "bound_identity" in data:
+        # The oracle took each path: no binding, refusals, matches (including
+        # the last of a repeated header) and an unadmitted principal.
+        got = [r["status"] for r in data["bound_identity"]]
+        want_bound = [200, 409, 409, 409, 200, 409, 409, 409, 409, 409, 409, 409, 200, 409,
+                      200, 200, 409, 409, 403]
+        if got != want_bound:
+            diffs.append(f"sanity bound_identity: statuses {got} != {want_bound}")
     if "rebinding" in data:
         statuses = sorted({r["status"] for r in data["rebinding"]})
         # 400: a POST's Content-Type is checked before Host; 404: an unknown
@@ -753,7 +766,7 @@ def recording_errors(data, cases=None):
                  for response in stubs.values()):
             errors.append('stub_tools: oracle call failed')
     total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
-    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 346
+    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 351
     if total != expected_total:
         errors.append(f'corpus: {total} responses, expected {expected_total}')
     if not errors:

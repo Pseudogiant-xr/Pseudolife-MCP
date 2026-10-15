@@ -98,7 +98,7 @@ This slice does not enable tokenless MCP or claim live rebinding parity.
 **MCP-BOUND-IDENTITY** is closed: an authenticated `/mcp` request carrying
 `X-PL-Bank` / `X-PL-Principal` is checked against the bearer's W2-F board
 context before the MCP layer (spec.md M18); the live `bound_identity` case
-compares 14 requests with Python and the `mcp-binding-open` mutant is caught.
+compares 19 requests with Python and the `mcp-binding-open` mutant is caught.
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
