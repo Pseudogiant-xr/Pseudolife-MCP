@@ -264,3 +264,57 @@ def test_sweep_reset_close_uses_native_linger_layout(monkeypatch, platform, layo
     connection.close()
     assert options == [(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack(layout, 1, 0))]
     assert closed == [True] and connection.sock is None
+
+
+@pytest.mark.parametrize('code', ['EADDRINUSE', 'ENOBUFS'])
+@pytest.mark.parametrize('failures', [0, 2, 4, 5])
+def test_sweep_retries_a_connect_refused_for_want_of_a_local_port(monkeypatch, failures, code):
+    """Hosted Windows run 38535960260 (2026-10-14) lost a whole sweep to one
+    connect() refused with WinError 10048. A refused connect sends nothing,
+    so a short retry cannot change what the sweep compares; each retry is
+    counted so the report shows it happening."""
+    import errno
+    import socket
+
+    monkeypatch.setattr(sweep, 'CONNECT_BACKOFF', (0, 0, 0, 0))
+    attempts = []
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        connection = sweep.SweepConnection(listener.getsockname()[1])
+        real = connection._create_connection
+
+        def create(*args, **kwargs):
+            attempts.append(True)
+            if len(attempts) <= failures:
+                raise OSError(getattr(errno, code), code)
+            return real(*args, **kwargs)
+
+        connection._create_connection = create
+        try:
+            if failures > len(sweep.CONNECT_BACKOFF):
+                with pytest.raises(OSError) as raised:
+                    connection.connect()
+                assert raised.value.errno == getattr(errno, code)
+                assert connection.opened == 0
+            else:
+                connection.connect()
+                assert connection.opened == 1
+            assert connection.connect_retries == min(failures, len(sweep.CONNECT_BACKOFF))
+            assert len(attempts) == min(failures + 1, len(sweep.CONNECT_BACKOFF) + 1)
+        finally:
+            connection.close()
+
+
+def test_sweep_does_not_retry_other_connect_failures(monkeypatch):
+    attempts = []
+    connection = sweep.SweepConnection(1)
+
+    def refused(*args, **kwargs):
+        attempts.append(True)
+        raise ConnectionRefusedError('refused')
+
+    connection._create_connection = refused
+    with pytest.raises(ConnectionRefusedError):
+        connection.connect()
+    assert len(attempts) == 1 and connection.connect_retries == 0

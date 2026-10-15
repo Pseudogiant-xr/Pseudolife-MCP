@@ -1621,15 +1621,15 @@ def test_the_mirror_is_optional_and_off_by_default(tmp_path):
 # its own thread, and the OS lock is released before the board is told.
 
 
-class _SlowDaemon(FakeDaemon):
-    """Every board call takes ``delay`` seconds."""
+class _GatedDaemon(FakeDaemon):
+    """Every board call waits until the test opens ``gate``."""
 
-    def __init__(self, delay, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.delay = delay
+        self.gate = threading.Event()
 
     def handler(self, request):
-        time.sleep(self.delay)
+        self.gate.wait(2 * START_TIMEOUT)  # outlasts the test's own wait
         return super().handler(request)
 
 
@@ -1644,11 +1644,21 @@ def _wait_for(predicate, timeout=START_TIMEOUT):
 
 def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick_board):
     peers = [peer(p * 32, f"runner-{p}", "suite=queued") for p in "abcd"]
-    daemon = _SlowDaemon(1.0, lease=[HELD("full-suite")], agents=[AGENTS(*peers)])
-    started = time.monotonic()
-    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w",
-                                   mirror=_mirror(tmp_path, daemon))
-    assert time.monotonic() - started < 0.9  # not one board call on the way in
+    daemon = _GatedDaemon(lease=[HELD("full-suite")], agents=[AGENTS(*peers)])
+    # The lock is taken while every board call is still blocked, so it
+    # waited on none. A 0.9 s bound against a 1.0 s board call measured the
+    # runner instead: a hosted Windows run took 1.2 s with no board call on
+    # the way in (run 38716346974, 2026-10-15).
+    taken = {}
+
+    def take():
+        try:
+            taken["lock"] = suite_lock.acquire(tmp_path, "fail", worktree="w",
+                                               mirror=_mirror(tmp_path, daemon))
+        except BaseException as exc:  # re-raised below, not blamed on the board
+            taken["error"] = exc
+
+    taker = threading.Thread(target=take, daemon=True)
     freed = {}
 
     class _Watch:
@@ -1664,8 +1674,22 @@ def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick
             freed.setdefault("at_release", suite_lock_is_free(tmp_path))  # the first call
             return self.inner.release(*args, **kwargs)
 
-    held_lock.mirror = _Watch(held_lock.mirror)
-    suite_lock.release(held_lock)
+    taker.start()
+    try:
+        taker.join(START_TIMEOUT)
+        taken_with_board_blocked = "lock" in taken
+        daemon.gate.set()
+        taker.join(START_TIMEOUT)
+        if "error" in taken:
+            raise taken["error"]
+        assert taken_with_board_blocked  # not one board call on the way in
+        held_lock = taken["lock"]
+        held_lock.mirror = _Watch(held_lock.mirror)
+    finally:
+        daemon.gate.set()
+        taker.join(START_TIMEOUT)
+        if "lock" in taken:
+            suite_lock.release(taken["lock"])
     assert freed["at_release"] is True  # the lock went first, then the board
 
 

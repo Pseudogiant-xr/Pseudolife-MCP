@@ -214,19 +214,35 @@ async fn board_bridge_cancelled_registry_verification_closes_owned_socket() {
     let runtime = runtime(&fixture, true);
     let mut options = options(&runtime, &home, "1");
     options.wake = true;
-    let (url, log, server) = host_url(false, Duration::from_millis(80)).await;
+    // Hold the host inside verification and cancel there. A 110 ms wall-clock
+    // budget against an 80 ms host delay cancelled during connect instead on
+    // a slow Windows runner (run 38705234204: failed at 0.138 s, before
+    // thread/loaded/list was sent).
+    let (verify_entered, verify_seen) = tokio::sync::oneshot::channel();
+    let (verify_release, verify_released) = tokio::sync::oneshot::channel();
+    let (url, log, server) = host_url_gated(
+        false,
+        Duration::ZERO,
+        None,
+        Some((verify_entered, verify_released)),
+    )
+    .await;
     options.delivery_url = Some(url);
     options.delivery_token = Some("fictional-host-token".into());
     let board = pseudolife_stdio::board::Board::attach_options(runtime, options).await;
-    assert!(
-        tokio::time::timeout(
-            Duration::from_millis(110),
-            board.prepare_call("memory_stats", None, &json!({"threadId":BANK}))
-        )
-        .await
-        .is_err()
-    );
+    let params = json!({"threadId":BANK});
+    tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::select! {
+            _ = board.prepare_call("memory_stats", None, &params) => {
+                panic!("preparation finished before the host saw verification")
+            }
+            seen = verify_seen => seen.unwrap(),
+        }
+    })
+    .await
+    .unwrap();
     board.close().await;
+    drop(verify_release);
     tokio::time::timeout(Duration::from_secs(2), server)
         .await
         .unwrap()

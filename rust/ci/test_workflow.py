@@ -904,3 +904,13 @@ def test_board_runner_checks_execute_on_both_platforms():
     require_command(commands(step["run"]), ("python", "-m", "pytest"),
                     ("rust/daemon/harness/board/test_norm.py",
                      "rust/daemon/harness/board/test_run.py"), PYTEST_FILTERS)
+
+
+def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
+    job = workflow()["jobs"]["rust"]
+    override = next(step for step in job["steps"] if step.get("name") == "Daemon override build configurations")
+    # Hosted windows 2026-10-13: a cold-cache run took 23.9 minutes; on
+    # 2026-10-15 three cold runs were cancelled at 25 inside this step. A
+    # cancelled run saves no cache, so the next run on that image is cold too.
+    assert job["timeout-minutes"] >= 45
+    assert 0 < override["timeout-minutes"] < job["timeout-minutes"]
