@@ -538,3 +538,23 @@ def test_inventory_rejects_failure_mask_on_invocation_line(job, name, suffix):
     step['run'] = '\n'.join(lines)
     with pytest.raises(AssertionError, match='driver command'):
         check(workflow)
+
+
+@pytest.mark.parametrize('keep_going', [True, False])
+def test_a_failed_selection_is_named_at_exit(monkeypatch, tmp_path, capsys, keep_going):
+    """Run 38699015278 ended h5-w1a with exit 1 and no reason: one diff
+    four minutes up the log, then twelve clean selections under
+    --keep-going. The runner names every failed selection as it exits."""
+    import run_coverage
+    monkeypatch.setattr(sys, 'argv', ['run_coverage.py', '--suite', 'h5-w1a', '--out-dir', str(tmp_path)]
+                        + (['--keep-going'] if keep_going else []))
+
+    def run(argv, **kw):
+        failed = argv[argv.index('--only') + 1] == 'dim-mismatch' and argv[2] == 'golden'
+        return SimpleNamespace(returncode=1 if failed else 0)
+
+    monkeypatch.setattr(run_coverage.subprocess, 'run', run)
+    assert run_coverage.main() == 1
+    out = capsys.readouterr().out.splitlines()
+    assert 'h5-w1a: FAILED dim-mismatch golden (exit 1)' in out
+    assert out[-1].startswith('h5-w1a: 1 of ') and out[-1].endswith(' selections failed; see h5-w1a-timings.json')
