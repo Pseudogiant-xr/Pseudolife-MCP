@@ -1436,7 +1436,7 @@ class _CheckinDaemon:
 
             def do_GET(self):
                 daemon.requests.append((self.path, self.headers.get("Authorization")))
-                served = (body if self.path == "/api/hook/coordination-start"
+                served = (body if self.path.split("?")[0] == "/api/hook/coordination-start"
                           and self.headers.get("Authorization") == "Bearer fixture-token"
                           else "")
                 self.send_response(200)
@@ -1485,6 +1485,96 @@ def test_start_hook_prints_the_checkin_the_daemon_serves(shell, source, checkin_
     env.pop("PSEUDOLIFE_AGENT_COORDINATION", None)
     assert _run_start_hook(shell, env, source) == CHECKIN + "\n"
     assert checkin_daemon.requests == [("/api/hook/coordination-start", "Bearer fixture-token")]
+
+
+def _plant_agent(digest_dir, key, content):
+    digest_dir.mkdir(parents=True, exist_ok=True)
+    path = digest_dir / f"{key}.agent"
+    path.write_bytes(content.encode("utf-8"))
+    return path
+
+
+AGENT_ID = "0123456789abcdef0123456789abcdef"
+
+
+def _start_env(tmp_path, daemon, root=None):
+    env, key = _digest_env(root or tmp_path)
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = daemon.url
+    env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-token"
+    env.pop("PSEUDOLIFE_AGENT_COORDINATION", None)
+    return env, key
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("content,sent", [
+    (AGENT_ID + "\n", True),
+    (AGENT_ID + "\r\n", True),
+    (AGENT_ID.upper() + "\n", False),
+    (AGENT_ID[:31] + "\n", False),
+    ("not-an-agent-id-not-an-agent-id!\n", False),
+    (None, False),
+], ids=["valid", "crlf", "upper", "short", "garbage", "absent"])
+def test_start_hook_names_the_sessions_board_address_only_from_a_valid_agent_file(
+        shell, content, sent, checkin_daemon, tmp_path):
+    """The daemon appends the maintainer's delegate's brief to the check-in
+    when ``agent=`` names a granted delegate (spec 2026-10-14). The hook
+    passes the address the shim wrote beside the session's digest, the same
+    32 lower-case hex the park gate reads, and nothing for anything else."""
+    env, key = _start_env(tmp_path, checkin_daemon)
+    if content is None:
+        (tmp_path / "digests").mkdir()
+    else:
+        _plant_agent(tmp_path / "digests", key, content)
+    assert _run_start_hook(shell, env) == CHECKIN + "\n"
+    path = "/api/hook/coordination-start" + (f"?agent={AGENT_ID}" if sent else "")
+    assert checkin_daemon.requests == [(path, "Bearer fixture-token")]
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_start_hook_ignores_a_symlinked_agent_file(shell, checkin_daemon, tmp_path):
+    env, key = _start_env(tmp_path, checkin_daemon)
+    target = _plant_agent(tmp_path / "elsewhere", "target", AGENT_ID + "\n")
+    (tmp_path / "digests").mkdir()
+    try:
+        os.symlink(target, tmp_path / "digests" / f"{key}.agent")
+    except OSError:
+        pytest.skip("this host cannot create symlinks")
+    assert _run_start_hook(shell, env) == CHECKIN + "\n"
+    assert checkin_daemon.requests == [("/api/hook/coordination-start", "Bearer fixture-token")]
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_start_hook_prints_the_brief_block_the_daemon_appends(shell, tmp_path):
+    """The brief is a separate block after the check-in; the hook prints the
+    whole body."""
+    daemon = _CheckinDaemon(CHECKIN + "\n\nYou are the maintainer's delegate for p.\n- one")
+    try:
+        env, key = _start_env(tmp_path, daemon)
+        _plant_agent(tmp_path / "digests", key, AGENT_ID + "\n")
+        assert _run_start_hook(shell, env) == (
+            CHECKIN + "\n\nYou are the maintainer's delegate for p.\n- one\n")
+    finally:
+        daemon.close()
+
+
+def test_start_hook_follows_the_claude_record_to_the_shims_agent_file(tmp_path):
+    """After /clear the shim keeps its launch key; the start hook reads the
+    address under the key its process record carries forward."""
+    daemon = _CheckinDaemon()
+    try:
+        env = _claude_env(tmp_path)
+        env["PSEUDOLIFE_MCP_DAEMON_URL"] = daemon.url
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-token"
+        env.pop("PSEUDOLIFE_AGENT_COORDINATION", None)
+        _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+        _plant_agent(tmp_path / "digests", _sha("launch-session"), AGENT_ID + "\n")
+        _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
+        _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+        _claude_hook("coordination-start.sh", env, "cleared-session", source="clear")
+    finally:
+        daemon.close()
+    assert [path for path, _ in daemon.requests] == [
+        f"/api/hook/coordination-start?agent={AGENT_ID}"] * 2
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
