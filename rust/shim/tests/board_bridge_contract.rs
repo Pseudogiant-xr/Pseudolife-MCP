@@ -230,9 +230,10 @@ async fn board_bridge_cancelled_registry_verification_closes_owned_socket() {
     options.delivery_url = Some(url);
     options.delivery_token = Some("fictional-host-token".into());
     let board = pseudolife_stdio::board::Board::attach_options(runtime, options).await;
+    let params = json!({"threadId":BANK});
     tokio::time::timeout(Duration::from_secs(10), async {
         tokio::select! {
-            _ = board.prepare_call("memory_stats", None, &json!({"threadId":BANK})) => {
+            _ = board.prepare_call("memory_stats", None, &params) => {
                 panic!("preparation finished while the host held verification")
             }
             seen = verify_seen => seen.unwrap(),
