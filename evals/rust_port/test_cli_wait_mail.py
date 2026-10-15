@@ -24,15 +24,19 @@ def test_public_wait_mail_deterministic_bytes_and_candidate_controls(tmp_path, n
     if not binary:
         pytest.skip("native binary must be selected explicitly")
     root = Path(os.environ.get("PSEUDOLIFE_WAIT_MAIL_ORACLE_ROOT", Path(__file__).resolve().parents[2]))
-    # Both selected production modules must still equal their immutable pins.
+    # Both selected production modules must still equal an immutable pin.
     # wait_mail_cli.py stays at the oracle the wait-mail evidence names. cli.py
-    # moved on 2026-10-15 (#755, 39e8d7ad) by one dispatch branch for
-    # delegate-watch, after the wait-mail branch, which no wait-mail argv reaches.
-    pins = {"pseudolife_memory/cli.py": "39e8d7ad548302e158ea4d8d2d87190aa8204ee2",
-            "pseudolife_memory/wait_mail_cli.py": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493"}
-    for relative, commit in pins.items():
-        pin = subprocess.check_output(["git", "show", commit + ":" + relative], cwd=root)
-        assert (root / relative).read_bytes().replace(b"\r\n", b"\n") == pin
+    # may also be at 39e8d7ad (#755, 2026-10-15), which only adds a
+    # delegate-watch dispatch branch after the wait-mail one, so no wait-mail
+    # argv reaches it. Both are accepted because a pull request's oracle is its
+    # merge base (oracle_selection.py), which is before #755 on older branches.
+    pins = {"pseudolife_memory/cli.py": ("eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+                                         "39e8d7ad548302e158ea4d8d2d87190aa8204ee2"),
+            "pseudolife_memory/wait_mail_cli.py": ("eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",)}
+    for relative, commits in pins.items():
+        allowed = [subprocess.check_output(["git", "show", commit + ":" + relative], cwd=root)
+                   for commit in commits]
+        assert (root / relative).read_bytes().replace(b"\r\n", b"\n") in allowed
     case = next(case for case in cases() if case["id"] == "wait-mail-" + name)
     commands = {"oracle": [sys.executable, "-m", "pseudolife_memory.cli"], "candidate": [binary]}
     home = tmp_path / "home"
