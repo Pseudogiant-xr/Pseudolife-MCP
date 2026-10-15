@@ -916,6 +916,9 @@ async fn dispatch(
         if !app.auth_configured() {
             return not_implemented(path);
         }
+        if let Some(refused) = crate::board::http::mcp_binding(app, h).await {
+            return refused;
+        }
         return crate::mcp::handle(app, &principal, path, method, h.clone(), raw_query, body).await;
     }
     // The MCP app's own router: `/mcp` is its only route.

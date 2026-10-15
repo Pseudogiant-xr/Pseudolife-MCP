@@ -558,15 +558,71 @@ def tool_binding(port):
     return out
 
 
+def _board_context(port, token):
+    """The bearer's own board context (bank id, principal) on this daemon."""
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=120)
+    try:
+        c.request("POST", "/api/coordination/context", body=b"{}",
+                  headers={"Content-Type": "application/json",
+                           "Authorization": f"Bearer {token}"})
+        r = c.getresponse()
+        body = r.read()
+    finally:
+        c.close()
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def bound_identity(port):
+    """X-PL-Bank / X-PL-Principal must name the bearer's own board context
+    before the MCP app sees the request (web/api.py). Each daemon is asked
+    with its own bank id, which differs between the two banks. The default
+    principal is on the board's default allow list; carol is not, and the
+    last calls show that refusal too."""
+    ctx = _board_context(port, TOK["default"])
+    bank = ctx.get("bank_id") if isinstance(ctx.get("bank_id"), str) else "no-bank"
+    principal = ctx.get("principal") if isinstance(ctx.get("principal"), str) else "default"
+    bearer = [("Authorization", f"Bearer {TOK['default']}")]
+    out = []
+    for extra in [
+        [], [("X-PL-Bank", bank)], [("X-PL-Principal", principal)],
+        [("X-PL-Bank", ""), ("X-PL-Principal", principal)],
+        [("X-PL-Bank", bank), ("X-PL-Principal", principal)],
+        [("X-PL-Bank", "0" * 64), ("X-PL-Principal", principal)],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "mallory")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "%63arol")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "%ZZ")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "%0A")],
+    ]:
+        out.append(norm(request(port, "POST", init_body(), JSON_HDRS + bearer + extra)))
+    # A live session's later request is checked too, and a matching binding
+    # still reaches the tools.
+    s = Session(port, TOK["default"], {"X-PL-Bank": bank, "X-PL-Principal": principal})
+    out.append(norm(s.init))
+    out.append(norm(s.call("tools/list", {})))
+    s.base = [h for h in s.base if h[0] != "X-PL-Principal"] + [("X-PL-Principal", "mallory")]
+    out.append(norm(s.call("tools/list", {})))
+    s.close()
+    out.append(norm(request(port, "POST", init_body(), JSON_HDRS + [
+        ("Authorization", f"Bearer {TOK['carol']}"), ("X-PL-Bank", bank),
+        ("X-PL-Principal", "carol")])))
+    return out
+
+
 CASES = [handshake, lists, protocol_versions, methods, calls, toolset, stored, list_changed_stream,
          stream_reconnect, init_gate, body_limit, messages, concurrent, transport, paths,
-         tool_binding]
+         tool_binding, bound_identity]
 BASE_CASES = tuple(CASES)
 CASE_RESPONSE_COUNTS = {
     'handshake': 4, 'lists': 18, 'protocol_versions': 10, 'methods': 24,
     'calls': 4, 'toolset': 53, 'stored': 30, 'list_changed_stream': 2,
     'stream_reconnect': 3, 'init_gate': 21, 'body_limit': 6,
     'messages': 13, 'concurrent': 8, 'transport': 21, 'paths': 7, 'tool_binding': 71,
+    'bound_identity': 14,
     'rebinding': 24, 'open_lists': 6, 'config_lists': 10,
 }
 if "--tokenless" in sys.argv:
@@ -697,7 +753,7 @@ def recording_errors(data, cases=None):
                  for response in stubs.values()):
             errors.append('stub_tools: oracle call failed')
     total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
-    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 332
+    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 346
     if total != expected_total:
         errors.append(f'corpus: {total} responses, expected {expected_total}')
     if not errors:

@@ -11,7 +11,7 @@ side must answer exactly `501 {"error": "not_implemented", "path": P}`.
 | Surface | Python behaviour | Owner |
 |---|---|---|
 | Every Console route in `harness/goldens/routes.json` other than `GET /api/search`, the coordination view of `GET /api/agents` and `POST /api/daemon-notice`, after all gates | the handler's answer | W2-D (reads), W2-E (writes), W2-F (board, maintainer) |
-| Tokenless MCP Host/Origin rebinding policy and bound-identity validation | SDK transport policy and durable board binding checks before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until these gates are accepted; authenticated bound-identity checks remain deferred as listed below |
+| Tokenless MCP Host/Origin rebinding policy | SDK transport policy before tool dispatch | **CUTOVER BLOCKER — W2-G**; tokenless MCP stays unmounted (501) until this gate is accepted. Authenticated bound-identity checks are served (spec.md M18) |
 | Credential-bearing extractor/recall redirect refusal | `utils/no_redirect.py`, extractor and recall transports | W3-H / W2-D; outbound transports are not implemented in this slice |
 | `/api/hook/session-start`, `memory-policy` (any caller) | briefing and memory-policy text | W2-D |
 | Authorized `memory-changes` and `session-end` after its gates | change note and episode close | W2-E |
@@ -77,8 +77,8 @@ tool's answers by value.
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset`. W2-D supplies expanded REST search, W2-E supplies the
 harness-gated store body, and W2-F supplies the REST board. Their presence
-does not register MCP tool bodies: projections and
-bound-identity enforcement remain the prerequisites listed above.
+does not register MCP tool bodies: their projections remain the
+prerequisites listed above. Bound identity is enforced on the mount (M18).
 
 **MCP-REFUSAL-CLEANUP:** MCP refusals use the shared counted reader with the
 MCP 4 MiB budget, not the REST 256 KiB budget. Fully drained in-budget bodies
@@ -95,13 +95,10 @@ statuses and bodies match, and all six body-limit probes complete.
 **MCP-TOKENLESS-GUARD:** the Host/Origin helper exists inside the transport,
 but the production tokenless mount still returns 501 before reaching it.
 This slice does not enable tokenless MCP or claim live rebinding parity.
-**MCP-BOUND-IDENTITY:** authenticated binding remains deferred: W2-F's
-board context service is present in this batch but is not wired into the MCP
-mount's durable bank/principal authorization. Python refuses mismatched `X-PL-Bank`/`X-PL-Principal`
-before MCP handling; Rust still serves `initialize`, `tools/list` and
-`memory_toolset` for those requests. Toolset changes use the resolved
-bearer/writer tier key; no bank tool body is enabled by this deferral. W2-F's
-context must be wired before its or other bank tool bodies are registered.
+**MCP-BOUND-IDENTITY** is closed: an authenticated `/mcp` request carrying
+`X-PL-Bank` / `X-PL-Principal` is checked against the bearer's W2-F board
+context before the MCP layer (spec.md M18); the live `bound_identity` case
+compares 14 requests with Python and the `mcp-binding-open` mutant is caught.
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
@@ -110,7 +107,6 @@ context must be wired before its or other bank tool bodies are registered.
 | MCP-SEALED-REQUEST-STATE | `tools/call`, `prompts/get` and `resources/read` unseal a non-null `requestState` before validation/dispatch; a valid server-minted token may resume a multi-round exchange | this slice never mints round-trip state and refuses every non-null token with -32602 `Invalid or expired requestState`, before readiness or tier changes; null remains absent | multi-round state issuance and authenticated unsealing are deferred with the unserved tool bodies; untrusted tokens cannot invoke a body |
 | MCP-REQUEST-CANCELLATION | `notifications/cancelled` cancels the matching in-flight response; a legacy response stream settles with -32800 | cancellation notifications receive 202 but are discarded; any matching request still in flight later emits its ordinary response. Currently `memory_toolset` blocked by a backpressured GET notification stream exposes this window | W2-G follow-up: add per-session request tracking and response cancellation separately from disconnect-surviving write bodies; no bank tool body is enabled here |
 | The 2026-07-28 stateless era (an `MCP-Protocol-Version` header outside the handshake versions, `_meta` envelopes, `subscriptions/listen`) | served | only the no-envelope refusal (400, -32602) | W2-G (follow-up); the shims and doctor use the handshake era, but README documents direct `--transport http` clients |
-| `X-PL-Bank` / `X-PL-Principal` binding on `/mcp` (`bound_identity`, `enforce_bound_identity` against the board context) | checked before forwarding; a mismatch is a coordination error | forwarded unchecked; `initialize`, `tools/list` and `memory_toolset` still answer | W2-F supplies the check, W2-G calls it |
 | A bearer revoked between the gate and dispatch | JSON-RPC -32004 `unauthorized` (or -32003 `principals_unavailable`) | never: the principal is resolved once, at the gate | free (no race window) |
 | Terminated session ids | kept for the process lifetime (404 "has been terminated") | the latest 10,000; older ones answer 404 "Session not found" | bounded memory |
 | `Last-Event-ID` on GET (replay) | the SDK's replay path with no event store | ignored | non-canonical |
