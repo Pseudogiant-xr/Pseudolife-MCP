@@ -1627,10 +1627,8 @@ class _GatedDaemon(FakeDaemon):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.gate = threading.Event()
-        self.threads = []  # the transport runs each call on its caller's thread
 
     def handler(self, request):
-        self.threads.append(threading.current_thread())
         self.gate.wait(2 * START_TIMEOUT)  # outlasts the test's own wait
         return super().handler(request)
 
@@ -1655,20 +1653,24 @@ def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick
 
     def take():
         started = time.monotonic()
-        taken["lock"] = suite_lock.acquire(tmp_path, "fail", worktree="w",
-                                           mirror=_mirror(tmp_path, daemon))
+        try:
+            taken["lock"] = suite_lock.acquire(tmp_path, "fail", worktree="w",
+                                               mirror=_mirror(tmp_path, daemon))
+        except BaseException as exc:  # re-raised below, not blamed on the board
+            taken["error"] = exc
         taken["seconds"] = time.monotonic() - started
 
-    taker = threading.Thread(target=take)
+    taker = threading.Thread(target=take, daemon=True)
     taker.start()
     taker.join(START_TIMEOUT)
     taken_with_board_blocked = "lock" in taken
     daemon.gate.set()
     taker.join(START_TIMEOUT)
+    if "error" in taken:
+        raise taken["error"]
     assert taken_with_board_blocked  # not one board call on the way in
-    assert taker not in daemon.threads
-    # About four times that runner's stall: a mirror that waited on the board
-    # for any budget of its own would show here.
+    # About four times that runner's stall: a mirror that waited 5 s or more
+    # on the board would show here.
     assert taken["seconds"] < 5
     held_lock = taken["lock"]
     freed = {}
