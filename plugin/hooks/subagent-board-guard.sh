@@ -16,10 +16,11 @@
 # mcp__<server>__memory_message (any server name: installs register
 # pseudolife-memory, the Desktop Code tab also pseudolife-desktop), and the
 # name is checked again here. For a subagent it denies memory_agents update,
-# claim and release and memory_message send and ack; memory_agents list (the
-# default action) and memory_message receive and history (read-only: no ack,
-# delivery or wake) pass, and so does every other tool. The parent's calls
-# always pass.
+# claim and release and memory_message send and ack, and receive with ack
+# true (it acknowledges what it returns); memory_agents list (the default
+# action) and memory_message receive without ack and history (read-only: no
+# ack, delivery or wake) pass, and so does every other tool. The parent's
+# calls always pass.
 #
 # It fails open: a payload it cannot read, or a coordination opt-out
 # (PSEUDOLIFE_AGENT_COORDINATION set to anything but a yes), allows the call,
@@ -56,6 +57,8 @@ SID_RE='[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
 TOOL_RE='[{,][[:space:]]*"tool_name"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
 ACTION_RE='[{,][[:space:]]*"action"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
 INPUT_RE='[{,][[:space:]]*"tool_input"[[:space:]]*:[[:space:]]*\{(.*)$'
+# A receive's ack, as a boolean or as the string a host may stringify it to.
+ACK_RE='[{,][[:space:]]*"ack"[[:space:]]*:[[:space:]]*("true"|true)'
 
 [[ $INPUT =~ $AGENT_RE ]] && [ -n "${BASH_REMATCH[1]}" ] || exit 0
 
@@ -93,7 +96,8 @@ ARGS="{${BASH_REMATCH[1]}"
 ACTION=""
 [[ $ARGS =~ $ACTION_RE ]] && ACTION=${BASH_REMATCH[1]}
 case "$NAME:$ACTION" in
-    memory_agents:|memory_agents:list|memory_message:receive|memory_message:history) exit 0 ;;
+    memory_message:receive) [[ $ARGS =~ $ACK_RE ]] || exit 0 ;;
+    memory_agents:|memory_agents:list|memory_message:history) exit 0 ;;
 esac
 
 # The reason is what the subagent reads ("PreToolUse:<tool> hook error:

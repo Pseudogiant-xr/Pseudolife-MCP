@@ -1973,7 +1973,8 @@ since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
 (`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
 puts in a subagent's hook input, and never in the parent's, and denies that
 subagent's `memory_agents` update, claim and release and `memory_message`
-send and ack, whatever the server's name. Its list, receive and history
+send and ack (and receive with `ack=true`, which acknowledges what it
+returns), whatever the server's name. Its list, receive and history
 pass, and so does every call the parent makes. The subagent reads the refusal as
 `PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
 it to ask the parent instead (probed on Claude Code 2.1.283: the child's
