@@ -11,7 +11,10 @@ payload itself, and `action` and `ack` only as keys of its `tool_input`
 object, in any key order. That parent call now reaches the daemon, which
 refuses the unknown argument by name. An `action` or `ack` nested deeper
 in an argument no longer counts as the call's, and a payload cut off
-mid-object is let through like any other it cannot read. Measured on
+mid-object is let through like any other it cannot read. A payload with
+more values than any board call can carry (the widest valid one takes 102
+of the walker's 512 steps) is let through to the daemon's unknown-argument
+refusal instead of running into the hook's 5 s timeout. Measured on
 Windows Git Bash the same day: an 8 KB subagent send takes 57 ms against
 43 ms before, a small call is unchanged at about 28 ms, and still no
 process is spawned. `hooks.json` is unchanged, so Codex users approve

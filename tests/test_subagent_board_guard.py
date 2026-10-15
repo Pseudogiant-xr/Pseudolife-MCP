@@ -179,6 +179,42 @@ def test_an_ack_inside_a_nested_object_is_not_the_calls_ack(tmp_path):
     assert _run(_env(tmp_path), _payload("memory_message", tool_input)) == ""
 
 
+def test_the_largest_valid_write_is_still_read(tmp_path):
+    """Every argument of every write at its widest: the step cap below must
+    sit well above it."""
+    tool_input = {"action": "update", "project": "p", "task": "t", "status": "s",
+                  "name": "n", "expect": 60, "children": [f"c{i}" for i in range(8)],
+                  "park_reason": "waiting_peer", "park_needs": "n", "park_clear_by": "anyone",
+                  "park_resume": "r", "park_expires": 1.5, "lease": None, "path": None,
+                  "worktree": None, "repository_id": None}
+    assert _denied(_run(_env(tmp_path), _payload("memory_agents", tool_input)))
+
+
+def test_a_payload_too_long_for_any_valid_call_is_let_through(tmp_path):
+    """Walking costs time per value, and 4,000 values took 5.9 s on Git
+    Bash (review, 2026-10-15), past hooks.json's 5 s. No board call has
+    that many (children holds at most 8, every other argument is a scalar),
+    and the daemon refuses unknown arguments by name, so the guard stops
+    counting and lets such a call through to that refusal."""
+    tool_input = {"action": "send", "to": "all", "request_id": "r1", "text": "x",
+                  "tags": ["x"] * 4000}
+    assert _run(_env(tmp_path), _payload("memory_message", tool_input)) == ""
+
+
+def test_raw_utf8_pretty_printed_crlf_input_is_read(tmp_path):
+    """Claude Code sends raw UTF-8; the walker's offsets must agree with
+    the regex engine's, whatever the layout. A string ending in a backslash
+    sits right before the action."""
+    tool_input = {"text": "é ✓ 漢字 " + chr(92), "to": "all", "request_id": "r1",
+                  "action": "send"}
+    payload = json.loads(_payload("memory_message", tool_input))
+    raw = json.dumps(payload, ensure_ascii=False, indent=2).replace("\n", "\r\n").encode()
+    result = subprocess.run([bash_exe(), str(HOOK)], input=raw, env=_env(tmp_path),
+                            capture_output=True, timeout=120)
+    assert result.returncode == 0 and result.stderr == b"", result
+    assert "memory_message(action=send)" in _denied(result.stdout.decode())
+
+
 @pytest.mark.parametrize("stdin", [
     "", "not json", "{", '{"agent_id":"a1"}',
     # No tool_input at all, or one Claude Code did not send as an object.

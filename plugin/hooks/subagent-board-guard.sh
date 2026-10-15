@@ -55,16 +55,29 @@ fi
 # (a message text), in an object nested in an argument, or as an argument
 # the model guessed (2026-10-15: a main session passed agent_id to
 # memory_agents and was refused as a subagent, which sent it chasing the
-# wrong cause; the daemon refuses that argument itself, by name). A payload
-# that is not one complete JSON object allows the call.
+# wrong cause; the daemon refuses that argument itself, by name). It checks
+# nesting and strings, not every rule of JSON (Claude Code sends valid
+# JSON): a payload that is not an object, or whose brackets or last string
+# do not close, allows the call.
+#
+# Each step copies what is left of the input, so the time grows with the
+# square of the number of values: 4,000 took 5.9 s on Git Bash (review,
+# 2026-10-15), past hooks.json's 5 s. The widest valid board call took 102
+# steps that day (children holds at most 8; every other argument is a
+# scalar), so past MAX_STEPS the call cannot be a valid one and goes
+# through to the daemon's unknown-argument refusal. At the cap, an 8 KB
+# text followed by 4,000 values ends in 0.8 s on Git Bash.
 [[ $INPUT == *'"agent_id"'* ]] || exit 0
 [[ $INPUT =~ ^[[:space:]]*\{ ]] || exit 0
 STR_RE='^"(([^"\\]|\\.)*)"'
 COLON_RE='^[[:space:]]*:[[:space:]]*'
 SKIP_RE='^[^]"{}[]+'
+MAX_STEPS=512
 AGENT="" SID="" TOOL="" ARGS="" ACTION="" ACK=""
-rest=$INPUT depth=0 args=0 key="" key_depth=-1 value="" whole=""
+rest=$INPUT depth=0 args=0 key="" key_depth=-1 value="" whole="" steps=0
 while [ -n "$rest" ]; do
+    steps=$((steps + 1))
+    [ "$steps" -le "$MAX_STEPS" ] || exit 0
     case ${rest:0:1} in
         '"')
             [[ $rest =~ $STR_RE ]] || exit 0
