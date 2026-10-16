@@ -425,15 +425,47 @@ def _legacy_directories(rt, layout) -> list[Path]:
     return [layout.root / n for n in names if rt._sequence_of(n) is None and (layout.root / n).is_dir()]
 
 
-def _installed_release(rt, layout, source: str):
+def _launcher_invocation(command: str, launcher, windows: bool | None = None) -> str:
+    """The launcher as a command to paste into the platform's shell:
+    ``command`` (``runtimes.launcher_command``'s answer) when that is the
+    bare name PATH resolves, else ``launcher``'s path quoted for the shell.
+    PowerShell needs its call operator before a quoted path ("Unexpected
+    token" otherwise) and single quotes to keep ``$`` literal; a POSIX shell
+    needs a path with metacharacters quoted."""
+    import shlex
+
+    windows = os.name == "nt" if windows is None else windows
+    if command == "pseudolife-mcp":
+        return command
+    path = str(launcher)
+    if not windows:
+        return shlex.quote(path)
+    # PowerShell reads the typographic single quotes as quotes too; doubling
+    # any of them inside a single-quoted string makes it literal.
+    return "& '" + re.sub("(['‘’‚‛])", r"\1\1", path) + "'"
+
+
+def _installed_release(rt, layout, source: str, notes: list[str] | None = None):
     """The current runtime when it was installed from ``source`` itself, a
-    pinned release (``pseudolife-mcp==0.16.0``) it reports as its version;
-    ``None`` for a checkout source, whose code changes under one version."""
+    pinned release (``pseudolife-mcp==0.16.0``) it reports as its version,
+    and its installed requirements satisfy that release's own declared
+    ranges; ``None`` for a checkout source, whose code changes under one
+    version. A runtime an older release's update built on an SDK line its
+    package refuses (0.18.2 on mcp 2.1.1, 2026-10-17) is not current, and
+    why goes to ``notes``. A probe that cannot answer leaves it current."""
     pinned = re.fullmatch(r"pseudolife-mcp==([0-9A-Za-z.+-]+)", source)
     current = rt.current_runtime(layout)
     if pinned is None or current is None or rt.from_checkout(current):
         return None
-    return current if current.source == source and current.version == pinned.group(1) else None
+    if current.source != source or current.version != pinned.group(1):
+        return None
+    mismatched = rt.requirement_mismatches(current, layout, run=run_cli)
+    if mismatched:
+        if notes is not None:
+            notes.append(f"runtime {current.name} ({current.version}) has {', '.join(mismatched)}, outside "
+                         f"what pseudolife-mcp {current.version} requires; installing it again")
+        return None
+    return current
 
 
 def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> dict:
@@ -527,7 +559,8 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
         return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
     lines: list[str] = []
-    installed = None if reinstall else _installed_release(rt, layout, source)
+    rebuilt: list[str] = []
+    installed = None if reinstall else _installed_release(rt, layout, source, rebuilt)
     try:
         if installed is not None:
             # What the install would have done in passing: a launcher that
@@ -540,14 +573,23 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         detail = (f"installing a new shim runtime from {source} failed at {exc.step} ({_failure_line(exc.output, 1)}); "
                   f"registrations were not touched and the runtime that was current stays current. "
                   f"Retry: {retry}")
-        return {"state": "failed", "detail": "; ".join([detail] + [r["detail"] for r in results])}
+        return {"state": "failed", "detail": "; ".join(rebuilt + [detail] + [r["detail"] for r in results])}
     if installed is not None:
         detail = [f"runtime {runtime.name} ({runtime.version}) is already installed from {source} behind "
                   f"{layout.launcher}; nothing to install (--reinstall to install it again)"]
     else:
-        detail = [f"runtime {runtime.name} ({runtime.version}"
-                  + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
-                  + f") installed from {source} behind {layout.launcher}"]
+        detail = rebuilt + [f"runtime {runtime.name} ({runtime.version}"
+                            + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
+                            + f") installed from {source} behind {layout.launcher}"]
+        # The dependencies just installed are this code's SHIM_REQUIREMENTS,
+        # not the release's own ranges: code older than the release leaves
+        # a mismatch that the launcher's newer code repairs.
+        still = (rt.requirement_mismatches(runtime, layout, run=run_cli)
+                 if re.fullmatch(r"pseudolife-mcp==[0-9A-Za-z.+-]+", source) else None)
+        if still:
+            detail.append(f"runtime {runtime.name} ({runtime.version}) still has {', '.join(still)}: the "
+                          f"pseudolife-mcp running this update installs an older dependency range; finish "
+                          f"with: {_launcher_invocation(rt.launcher_command(layout), layout.launcher)} update --clients-only")
     failed = False
     for registration, kind in managed:
         if kind == "launcher":
