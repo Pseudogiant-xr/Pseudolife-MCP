@@ -425,15 +425,27 @@ def _legacy_directories(rt, layout) -> list[Path]:
     return [layout.root / n for n in names if rt._sequence_of(n) is None and (layout.root / n).is_dir()]
 
 
-def _installed_release(rt, layout, source: str):
+def _installed_release(rt, layout, source: str, notes: list[str] | None = None):
     """The current runtime when it was installed from ``source`` itself, a
-    pinned release (``pseudolife-mcp==0.16.0``) it reports as its version;
-    ``None`` for a checkout source, whose code changes under one version."""
+    pinned release (``pseudolife-mcp==0.16.0``) it reports as its version,
+    and its installed requirements satisfy that release's own declared
+    ranges; ``None`` for a checkout source, whose code changes under one
+    version. A runtime an older release's update built on an SDK line its
+    package refuses (0.18.2 on mcp 2.1.1, 2026-10-17) is not current, and
+    why goes to ``notes``. A probe that cannot answer leaves it current."""
     pinned = re.fullmatch(r"pseudolife-mcp==([0-9A-Za-z.+-]+)", source)
     current = rt.current_runtime(layout)
     if pinned is None or current is None or rt.from_checkout(current):
         return None
-    return current if current.source == source and current.version == pinned.group(1) else None
+    if current.source != source or current.version != pinned.group(1):
+        return None
+    mismatched = rt.requirement_mismatches(current, layout, run=run_cli)
+    if mismatched:
+        if notes is not None:
+            notes.append(f"runtime {current.name} ({current.version}) has {', '.join(mismatched)}, outside "
+                         f"what pseudolife-mcp {current.version} requires; installing it again")
+        return None
+    return current
 
 
 def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> dict:
@@ -527,7 +539,8 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
         return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
     lines: list[str] = []
-    installed = None if reinstall else _installed_release(rt, layout, source)
+    rebuilt: list[str] = []
+    installed = None if reinstall else _installed_release(rt, layout, source, rebuilt)
     try:
         if installed is not None:
             # What the install would have done in passing: a launcher that
@@ -545,9 +558,9 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         detail = [f"runtime {runtime.name} ({runtime.version}) is already installed from {source} behind "
                   f"{layout.launcher}; nothing to install (--reinstall to install it again)"]
     else:
-        detail = [f"runtime {runtime.name} ({runtime.version}"
-                  + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
-                  + f") installed from {source} behind {layout.launcher}"]
+        detail = rebuilt + [f"runtime {runtime.name} ({runtime.version}"
+                            + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
+                            + f") installed from {source} behind {layout.launcher}"]
     failed = False
     for registration, kind in managed:
         if kind == "launcher":
