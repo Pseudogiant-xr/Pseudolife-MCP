@@ -451,25 +451,29 @@ def test_a_real_failure_among_cancelled_checks_is_still_reported(h):
         "PR #784 failing at bdab33d4: Parity / ubuntu-latest"]
 
 
-def test_a_rerun_cancelled_again_on_the_same_head_is_not_news_again(h):
-    # Codex review, 2026-10-16: cancelled -> pending -> cancelled on one head
-    # sent the cancelled line twice; the head was reported once already.
-    h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(0))]
-    h.main(max_age="60")
+def test_each_rerun_of_a_cancelled_head_reports_how_it_ended(h):
+    # A re-run is a new run, not more jobs of the cancelled one: a delegate
+    # that re-ran one job waits for its result. When that job passes and the
+    # rest stay cancelled the head never turns green, so staying quiet would
+    # leave it waiting (review, 2026-10-16). Like a failing re-run, the head
+    # is reported again; a full re-run that passes reports green.
+    h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(3))]
+    h.main(max_age="60")                                              # baseline: already cancelled
 
     def between(poll):
-        if poll == 1:
-            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(3))]
-        if poll == 3:                                                 # one job re-run
+        if poll == 1:                                                 # one job re-run
             h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(2))]
-        if poll == 5:                                                 # and cancelled again
-            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(3))]
+        if poll == 3:                                                 # it passes
+            h.world.prs = [pr(784, head=CANCELLED_HEAD,
+                              checks=_cancelling(2, last=run_(CANCELLED_JOBS[2])))]
+        if poll == 5:                                                 # the rest re-run
+            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=[
+                run_(name, status="QUEUED", conclusion="") for name in CANCELLED_JOBS])]
+        if poll == 7:
+            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=[run_(name) for name in CANCELLED_JOBS])]
     assert lines(h.main("--settle", "0", between=between)[1]) == [
-        "PR #784 cancelled at bdab33d4: " + ", ".join(sorted(CANCELLED_JOBS))]
-    # A new head is reported again.
-    h.world.prs = [pr(784, head="c" * 40, checks=_cancelling(3))]
-    assert lines(h.main("--settle", "0")[1]) == [
-        "PR #784 cancelled at cccccccc: " + ", ".join(sorted(CANCELLED_JOBS))]
+        "PR #784 cancelled at bdab33d4: Candidate / ubuntu-latest, Candidate / windows-latest",
+        "PR #784 green at bdab33d4, merge state clean"]
 
 
 def test_a_failed_rerun_after_a_cancelled_report_is_reported(h):

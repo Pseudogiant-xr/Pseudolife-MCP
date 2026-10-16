@@ -73,8 +73,9 @@ message per batch of events:
 
 - a pull request opened, merged or closed; its checks all green (with
   its merge state) or one failing on that head; newly conflicting; its
-  checks all finished with some cancelled, once per head (a cancelled
-  check is never a failure);
+  checks all finished with some cancelled, one line however many jobs
+  were cancelled (a cancelled check is never a failure; a re-run that
+  ends cancelled again is reported again, as a failing re-run is);
 - a master workflow (push or schedule) failing, or passing after a
   failure; cancelled runs are neither;
 - a full-suite lease going from held to free;
