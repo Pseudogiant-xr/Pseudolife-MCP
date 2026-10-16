@@ -6,37 +6,17 @@ import pytest
 
 from mcp_ci import MUTANTS, UNSERVED, check_baseline
 
-NOT_FOUND = {"status": 404, "headers": {"content-type": "application/json", "mcp-session-id": None},
-             "body": {"raw": '{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Session not found"}}'}}
-TERMINATED = {"status": 404, "headers": {"content-type": "application/json", "mcp-session-id": "<request>"},
-              "body": {"raw": '{"jsonrpc":"2.0","id":null,"error":{"code":-32600,'
-                              '"message":"Not Found: Session has been terminated"}}'}}
-PING = '{"jsonrpc":"2.0","id":2,"result":{}}'
-UNINITIALIZED = '{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"Invalid request parameters","data":""}}'
-
-
-def sse(text):
-    return {"status": 200,
-            "headers": {"content-type": "text/event-stream", "cache-control": "no-cache, no-transform",
-                        "connection": "keep-alive", "x-accel-buffering": "no", "mcp-session-id": "<request>"},
-            "body": {"sse": [text], "events": [f"event: message\r\ndata: {text}"]}}
-
-
 def line(name, py, rs):
     return f"{name}: python={json.dumps(py)}\n          rust  ={json.dumps(rs)}"
 
 
 def baseline():
-    """The shapes the strict corpus recorded on mcp 2.2.0 (CI run of #780, 2026-10-16)."""
+    """The shapes the strict corpus records on mcp 2.2.0: only MCP-REFUSAL-CLEANUP."""
     py = {"status": 413, "headers": {"mcp-session-id": None}, "body": {"raw": "Request body too large"}}
     rs = copy.deepcopy(py)
     rs["headers"]["connection"] = "close"
-    follow_ups = {6: PING, 7: UNINITIALIZED, 9: PING, 10: UNINITIALIZED, 13: PING,
-                  14: UNINITIALIZED, 16: PING, 18: PING, 20: PING}
-    diffs = [line(f"init_gate[{i}]", NOT_FOUND, sse(text)) for i, text in follow_ups.items()]
-    diffs += [line(f"body_limit[{i}]", py, rs) for i in (0, 2, 3, 4, 5)]
-    diffs += [line(f"transport[{i}]", NOT_FOUND, TERMINATED) for i in (12, 13)]
-    return {"summary": {"responses": 347, "cases": 18, "diffs": 16, "unserved_checked": list(UNSERVED)},
+    diffs = [line(f"body_limit[{i}]", py, rs) for i in (0, 2, 3, 4, 5)]
+    return {"summary": {"responses": 347, "cases": 18, "diffs": 5, "unserved_checked": list(UNSERVED)},
             "diffs": diffs}
 
 
@@ -46,21 +26,15 @@ def test_exact_declared_baseline_is_retained():
     check_baseline(report)
     assert report == original
     assert MUTANTS == ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-hint",
-                       "mcp-binding-open")
+                       "mcp-binding-open", "mcp-keep-failed-opening", "mcp-delete-keeps-session")
 
 
 # Each edit replaces text in the named diff: (diff name, old text, new text).
 EDITS = {
     "status": ("body_limit[0]", '"status": 413', '"status": 500'),
     "body": ("body_limit[0]", "Request body too large", "wrong refusal"),
-    "undeclared_index": ("init_gate[6]", "init_gate[6]", "init_gate[8]"),
-    "rust_drops_too": ("init_gate[6]", '"status": 200', '"status": 404'),
-    "python_keeps_id": ("init_gate[7]", '"mcp-session-id": null', '"mcp-session-id": "<request>"'),
-    "python_other_error": ("init_gate[9]", "Session not found", "Session expired"),
-    "rust_other_answer": ("init_gate[10]", "Invalid request parameters", "Session not initialized"),
-    "python_terminated": ("transport[12]", "Session not found", "Not Found: Session has been terminated"),
-    "rust_not_terminated": ("transport[13]", "Not Found: Session has been terminated", "Gone"),
-    "rust_no_id": ("transport[13]", '"mcp-session-id": "<request>"', '"mcp-session-id": null'),
+    "undeclared_index": ("body_limit[0]", "body_limit[0]", "body_limit[1]"),
+    "rust_keeps_connection": ("body_limit[2]", '"connection": "close"', '"connection": "keep-alive"'),
 }
 
 
@@ -84,7 +58,7 @@ def test_any_other_difference_or_incomplete_corpus_fails(change):
         check_baseline(report)
 
 
-@pytest.mark.parametrize("family", ["init_gate[", "body_limit[", "transport["])
+@pytest.mark.parametrize("family", ["body_limit["])
 def test_every_declared_family_is_required(family):
     report = baseline()
     report["diffs"] = [d for d in report["diffs"] if not d.startswith(family)]
