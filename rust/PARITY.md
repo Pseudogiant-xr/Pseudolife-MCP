@@ -270,11 +270,9 @@ controls cover numeric-string, text, numeric-value and nested object cases.
 Maintainer decision, 2026-10-12 (reaffirmed 2026-10-16): two graph-traversal
 surfaces are not ported. The evidence is the completed graph-assisted versus
 plain recall eval (`graph-recall-prep-20260930`, judged 2026-09-29/30, turn 2).
-Its preregistered primary verdict was inconclusive. On the needed-evidence
-proxy over 26 failure queries, plain search beat graph recall: the Qwen judge
-scored plain search 26/26, graph recall 15/26 and recall with edges disabled
-16/26 (graph minus plain -42.3 points, 95% CI -61.5 to -23.1); the Opus judge
-scored 21/26, 9/26 and 7/26. The 2026-09-04 ablation
+Its preregistered primary verdict was inconclusive; on the needed-evidence
+proxy over failure queries, plain search beat graph recall under both judges.
+The 2026-09-04 ablation
 (`graph-ablation-20260904.json`) adds the cost: both arms found every target
 (8/8 relational, 4/4 logged questions), while recall with the graph served 27
 times the text and took 74 times as long.
