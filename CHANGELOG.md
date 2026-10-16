@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-16 — Console writer chip reads as a model)
+- Label the Console top bar's writer chip ("writer codex") and explain on
+  hover that it is the daemon's default writer id, stamped on writes from
+  clients that send none of their own and set from the MCP client chosen at
+  install, not the dream or extractor model. The Observatory row now reads
+  "Default writer". The value and how it is derived are unchanged.
+
 ### Added (2026-10-11 — recovery dependency audits)
 - Add the read-only `re_evidence(action="dependencies")` operation. Exact
   project/build manifests track function, layout, corpus and tool hashes plus

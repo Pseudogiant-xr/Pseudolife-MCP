@@ -64,7 +64,7 @@
     return [
       { k: "Schema", v: health?.schema !== undefined ? `v${health.schema}` : null, mono: true },
       { k: "Storage", v: health?.storage ?? null, mono: false },
-      { k: "Writer", v: health?.writer_id ?? null, mono: true },
+      { k: "Default writer", v: health?.writer_id ?? null, mono: true },
       { k: "Persist errors", v: health?.persist_errors !== undefined ? fmtNum(health.persist_errors) : null, mono: true, warn: (health?.persist_errors ?? 0) > 0 },
       { k: "Preset", v: sys?.preset ?? null, mono: true },
       { k: "Interactions", v: sys?.interaction_count !== undefined ? fmtNum(sys.interaction_count) : null, mono: true },

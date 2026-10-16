@@ -2,12 +2,13 @@
   import Icon from "./Icon.svelte";
   import { matchNav } from "../lib/nav";
   import { navigate, refresh, store } from "../lib/state.svelte";
+  import { writerChip } from "../lib/writer";
 
   let { title, subtitle, full = false }: { title: string; subtitle: string; full?: boolean } = $props();
 
   let query = $state("");
   let miss = $state("");
-  const writer = $derived(store.overview.data?.health?.writer_id);
+  const writer = $derived(writerChip(store.overview.data?.health?.writer_id));
   // The fixture devserver serves canned data; say so on every view, so a demo
   // is never mistaken for a real bank.
   const fixtures = $derived(store.health.data?.fixtures === true || store.overview.data?.health?.fixtures === true);
@@ -57,7 +58,10 @@
     <span id="jump-miss" class="miss" role="status" aria-live="polite">{miss}</span>
   </div>
   {#if writer}
-    <span class="writer mono" title="Writer id of this daemon"><span class="dot assoc" aria-hidden="true"></span>{writer}</span>
+    <span class="writer" title={writer.title}
+      ><span class="dot assoc" aria-hidden="true"></span><span class="writer-label">{writer.label}</span
+      ><span class="mono writer-value">{writer.value}</span></span
+    >
   {/if}
   <button type="button" class="icon-btn" aria-label="Refresh" title="Refresh (r)" onclick={refresh}>
     <Icon name="refresh" size={15} />
@@ -150,6 +154,14 @@
   .writer .dot {
     width: 6px;
     height: 6px;
+  }
+  .writer-label {
+    color: var(--ink-4);
+  }
+  .writer-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   @media (max-width: 1180px) {
     .writer {
