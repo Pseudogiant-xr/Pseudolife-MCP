@@ -543,9 +543,28 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
     headers = [tuple(h) for h in op.get("headers", [])]
     if op.get("abandon"):
         mcp.abandon(op["name"], args, headers)
-        time.sleep(4)  # let a call that survives the disconnect finish
+        if op["name"] == "memory_store":
+            wait_landed(dsn, args.get("text", ""))
+        else:
+            time.sleep(4)  # let a call that survives the disconnect finish
         return {"isError": False, "value": "<abandoned>"}
     return mcp.call(op["name"], args, headers)
+
+
+def wait_landed(dsn: str, text: str, deadline_s: float = 30.0) -> None:
+    """Wait until an abandoned store's row exists, up to the deadline: a
+    store that survives its caller's disconnect lands whatever the embedder's
+    speed, and one that was cancelled never does (the comparison then shows
+    the missing row). A fixed sleep judged a slow debug build's 512-token
+    embedding as lost."""
+    import psycopg
+    stripped = text.strip()  # the stored text (service.py strips it)
+    end = time.monotonic() + deadline_s
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        while time.monotonic() < end:
+            if conn.execute("SELECT 1 FROM entries WHERE text = %s", (stripped,)).fetchone():
+                return
+            time.sleep(0.25)
 
 
 def prepare_template(scn: dict, tag: str, root: Path, owned: list[str]) -> str:
