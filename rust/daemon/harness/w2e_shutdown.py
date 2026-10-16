@@ -4,6 +4,11 @@ The same raw request and owned-process signal run against Python and Rust.
 The entry must be absent when shutdown is requested, present after exit,
 and present after restart; full database states use the existing W2-E
 comparator and tolerances. Signal exit codes are reported, not normalized.
+
+``--mutant NAME`` (a ``--features mutants`` build) runs the Rust arm with that
+deliberate break and passes only when the comparison then differs: the
+``store-cancellable`` control, whose store is not tracked for the shutdown
+drain, is observable only here (over MCP a disconnect never cancels a call).
 """
 from __future__ import annotations
 
@@ -23,6 +28,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rust-bin", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--mutant")
     args = parser.parse_args()
     args.rust_bin = args.rust_bin.resolve()
     root = h.run_root("w2e-shutdown")
@@ -43,6 +49,8 @@ def main() -> int:
             env = h.side_env(scenario, dsn)
             if side == "rust":
                 env = h.w1a.rust_env(env)
+                if args.mutant:
+                    env["PSEUDOLIFE_DAEMON_MUTANT"] = args.mutant
             env = h.daemons.base_env(home, env)
             port = h.daemons.free_port()
             daemon = (h.daemons.python_daemon(home, port, env) if side == "python"
@@ -98,7 +106,12 @@ run_daemon()
             del result["states"]
         result = {"arms": results, "differences": differences, "stats": stats}
         args.out.write_text(json.dumps(result, indent=1), encoding="utf-8")
-        print(json.dumps({"arms": results, "difference_count": len(differences), "stats": stats}))
+        print(json.dumps({"arms": results, "difference_count": len(differences), "stats": stats,
+                          "mutant": args.mutant}))
+        if args.mutant:
+            caught = bool(differences)
+            print(f"mutant {args.mutant}: {'caught' if caught else 'MISSED'}")
+            return int(not caught)
         return int(bool(differences))
     finally:
         for daemon in procs.values():

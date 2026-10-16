@@ -69,8 +69,10 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
 GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+# store-cancellable is w2e_shutdown.py's control: over MCP every call runs
+# detached from its connection, so only the shutdown drain can observe it.
 MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw",
-           "store-cancellable", "mcp-store-no-session"]
+           "mcp-store-no-session"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
