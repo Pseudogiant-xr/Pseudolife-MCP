@@ -201,3 +201,18 @@ def test_mcp_tools_runs_only_its_own_mutants(monkeypatch, tmp_path):
     monkeypatch.setattr(run, "run_scenario", scenario)
     run.main()
     assert calls == [None, *(m for m in run.MUTANTS if m in run.MCP_MUTANTS)]
+
+
+def test_a_mixed_selection_runs_both_mutant_groups(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["board.run", "mutants", "--rust-bin", "unused",
+                                      "--only", "identity", "mcp-tools"])
+    monkeypatch.setattr(run.daemons, "scratch_root", lambda: tmp_path)
+
+    def scenario(*args):
+        calls.append(run.os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"))
+        return {"steps": [{"diffs": []}], "state_diffs": [], "chain": []}
+
+    monkeypatch.setattr(run, "run_scenario", scenario)
+    run.main()
+    assert set(calls) - {None} == set(run.MUTANTS)

@@ -309,6 +309,11 @@ def start(kind: str, scn: S.Scenario, binary: Path, root: Path, dsn: str, tag: s
         d = daemons.python_daemon(home, port, env)
     else:
         env["PSEUDOLIFE_DAEMON_DEBUG_BOARD"] = "1"
+        # base_env scrubs these; the warmed-up scenarios need the model.
+        for key in ("ORT_DYLIB_PATH", "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_RERANK_DIR",
+                    "PSEUDOLIFE_DAEMON_ORT_THREADS"):
+            if os.environ.get(key):
+                env[key] = os.environ[key]
         if os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"):
             env["PSEUDOLIFE_DAEMON_MUTANT"] = os.environ["PSEUDOLIFE_DAEMON_MUTANT"]
         d = daemons.rust_daemon(binary, home, port, env)
@@ -467,11 +472,10 @@ def main() -> int:
                         "error": "unmutated_baseline_differs"}, indent=1, default=str), encoding="utf-8")
                 return 1
             only = set(args.only or [])
-            if only and "mcp-tools" in only and len(only) > 1:
-                print("mutants: mcp-tools runs alone (its mutants differ from the REST ones)")
-                return 2
             for m in MUTANTS:
-                if only and ((m in MCP_MUTANTS) != ("mcp-tools" in only)):
+                # Each group runs when any of its scenarios was selected.
+                wanted = ("mcp-tools" in only) if m in MCP_MUTANTS else bool(only - {"mcp-tools"})
+                if only and not wanted:
                     continue
                 os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = m
                 steps, diff_steps, state, chain = summarize(one_pass("live"))
