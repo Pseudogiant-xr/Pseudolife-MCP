@@ -79,7 +79,8 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "search-cortex-stripped-q": "default", "w2d-cortex-skip-slot-reads": "default",
            "mcp-search-no-dedup": "mcp-search", "mcp-search-no-correct-with": "mcp-search",
            "search-no-subtree": "mcp-search",
-           "search-no-transport-session": "mcp-transport-session"}
+           "search-no-transport-session": "mcp-transport-session",
+           "mcp-recent-oldest-first": "mcp-recent"}
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
 
 
@@ -157,11 +158,11 @@ def case(name, path, headers=(), declared=None):
     return {"name": name, "method": "GET", "path": path, "headers": list(headers), "declared": declared}
 
 
-def mcp_case(name, args, headers=()):
-    """A memory_search tools/call; "<seed-episode>" in a list becomes the
-    seeded session's episode id."""
-    return {"name": name, "mcp": args, "headers": list(headers), "declared": None,
-            "path": f"mcp memory_search {json.dumps(args)}"}
+def mcp_case(name, args, headers=(), tool="memory_search"):
+    """A tools/call (memory_search unless named); "<seed-episode>" in a list
+    becomes the seeded session's episode id."""
+    return {"name": name, "mcp": args, "tool": tool, "headers": list(headers), "declared": None,
+            "path": f"mcp {tool} {json.dumps(args)}"}
 
 
 def mcp_call(port: int, c: dict, episode: str | None, transport: list | None = None) -> dict:
@@ -173,7 +174,7 @@ def mcp_call(port: int, c: dict, episode: str | None, transport: list | None = N
     s = Session(port, TOKEN, dict(c["headers"]))
     if transport is not None:
         transport.append(s.sid)
-    r = s.tool("memory_search", args)
+    r = s.tool(c.get("tool", "memory_search"), args)
     s.close()
     try:
         res = json.loads(sse_data(r)[0])["result"]
@@ -409,10 +410,36 @@ class McpSearch(Scenario):
         ]
 
 
+class McpRecent(Scenario):
+    """memory_recent over MCP (spec MR1-MR3): newest (timestamp, seq) first,
+    the compact projection, verbose supersession keys, and the filters (OR
+    within, AND across; episodes exact, tags normalised)."""
+    name = "mcp-recent"
+    mcp_extra_seed = True
+    require = {"recent.responses": 10, "recent.replaced_by": 1, "recent.superseded_verbose": 1,
+               "recent.probe_present": 1, "recent.episode_hits": 1, "recent.child_excluded": 1}
+
+    def cases(self):
+        recent = lambda name, args: mcp_case(name, args, tool="memory_recent")  # noqa: E731
+        return [
+            recent("defaults", {}),
+            recent("n 1", {"n": 1}),
+            recent("everything, compact", {"n": 500}),
+            recent("everything, verbose", {"n": 500, "verbose": True}),
+            recent("source filter", {"n": 500, "sources": ["notes"]}),
+            recent("tag filter, normalised", {"n": 500, "tags": ["DEPLOY", " bug"]}),
+            recent("tags that normalise to nothing filter nothing", {"n": 3, "tags": ["  "]}),
+            recent("episode filter is exact", {"n": 500, "episodes": ["<seed-episode>"],
+                                               "verbose": True}),
+            recent("filters AND across", {"n": 500, "sources": ["conversation"], "tags": ["deploy"]}),
+            recent("empty lists are no filter", {"n": 4, "sources": [], "tags": [], "episodes": []}),
+        ]
+
+
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
                                   LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
                                   PointerExpired, ConfidenceRounding, McpSearch,
-                                  McpTransportSession)}
+                                  McpTransportSession, McpRecent)}
 
 
 # ---- comparison ----------------------------------------------------------------------
@@ -598,9 +625,28 @@ def coverage(responses: list[dict], state: dict) -> dict:
            "recency_boost": 0, "sessions": 0, "transport_sessions": 0, "episodes": 0, "low_confidence_true": 0,
            "low_confidence_false": 0, "disconnects": 0, "chronicle_over_limit": 0, "confidence_boundary": 0,
            "correct_with": {"contested": 0, "aged": 0}, "truncated": 0, "replaced_by": 0,
-           "episode_filter_child_hit": 0}
+           "episode_filter_child_hit": 0,
+           "recent": {"responses": 0, "replaced_by": 0, "superseded_verbose": 0, "probe_present": 0,
+                      "episode_hits": 0, "child_excluded": 0}}
     for r in responses:
         body = r.get("json") or {}
+        if isinstance(body, dict) and "count" in body and "query" not in body:
+            # A memory_recent answer.
+            rc = cov["recent"]
+            rc["responses"] += 1
+            for e in body.get("entries") or []:
+                rc["replaced_by"] += "replaced_by" in e
+                rc["superseded_verbose"] += "supersession_verified" in e
+            entries = body.get("entries") or []
+            probe = any((e.get("text") or "").startswith("Episode filter probe") for e in entries)
+            verbose = bool(entries) and all("episode_id" in e for e in entries)
+            episodes = {e.get("episode_id") for e in entries} if verbose else set()
+            if verbose and len(episodes) > 1:
+                rc["probe_present"] += probe  # the unfiltered listing holds the child entry
+            if verbose and len(episodes) == 1 and None not in episodes:
+                rc["episode_hits"] += 1  # the episode-filtered listing
+                rc["child_excluded"] += not probe
+            continue
         if not isinstance(body, dict):
             continue
         cov["with_entries"] += bool(body.get("entries"))

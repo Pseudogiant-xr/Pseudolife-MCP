@@ -40,7 +40,6 @@ tool's answers by value.
 | `memory_world_search` | W2-D | No resident world-cortex search service. |
 | `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
 | `memory_get` | W2-D | No entry lookup service with its access-count and trace effects. |
-| `memory_recent` | W2-D | No recent-entry service or MCP compaction. |
 | `memory_history` | W2-D | No canonical history service. |
 | `memory_stats` | W2-D | No complete statistics service or MCP projection. |
 | `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
@@ -72,7 +71,7 @@ tool's answers by value.
 
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset` and, since their body registrations, `memory_store`,
-`memory_search`, `memory_agents` and `memory_message`. The two board tools
+`memory_search`, `memory_recent`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 

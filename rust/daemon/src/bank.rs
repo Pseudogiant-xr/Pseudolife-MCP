@@ -12,7 +12,6 @@ pub const DIM: usize = 1024;
 #[derive(Default)]
 pub struct Entry {
     pub id: i64,
-    #[allow(dead_code)]
     pub seq: u64,
     #[cfg_attr(not(feature = "harness"), allow(dead_code))]
     pub cues: std::sync::OnceLock<(bool, bool)>,

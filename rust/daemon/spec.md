@@ -388,6 +388,22 @@ contender and a restating entry, with coverage requirements for each
 projection branch; the `mcp-search-no-dedup` and
 `mcp-search-no-correct-with` mutants must be caught.
 
+### memory_recent over MCP (2026-10-17)
+
+`read/mcp_reads.rs`, registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py:1320-1343`, `service.py:2171-2216`.
+
+| # | Exact item | Source |
+|---|---|---|
+| MR1 | Every resident entry that passes the filters: `sources` and `episodes` match exactly (an episode filter does not reach child episodes, unlike search); `tags` are normalised (stripped, lower-cased, deduplicated) and need a non-empty intersection. Each filter is OR within itself and the filters AND across; an empty list, or tags that normalise to nothing, is no filter. Superseded entries are listed. No side effects: no access counts, no telemetry. | `service.py:2171-2205` |
+| MR2 | Newest `(timestamp, seq)` first (`seq` is assigned in id order at hydration, then per store), at most `n`. Each entry is `_entry_to_dict` without `score`, then `_annotate_supersession` over the resident bank; the answer is `{count, entries}`. | `service.py:2205-2216` |
+| MR3 | Not `verbose`: each entry through `_compact_entry` with no text budget (never `truncated`); `count` is unchanged. `verbose`: the service's dicts. | `mcp_server.py:1343, 957-961` |
+
+`harness/w2d_search.py --only mcp-recent` compares 10 calls on the derived
+template, with coverage for the compact `replaced_by`, the verbose
+supersession keys and an exact episode filter that leaves the child
+episode's entry out; the `mcp-recent-oldest-first` mutant must be caught.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
