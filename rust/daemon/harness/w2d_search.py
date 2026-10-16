@@ -775,7 +775,9 @@ def main() -> int:
     ap.add_argument("--paragraphs", type=int, default=150)
     ap.add_argument("--reuse-template", action="store_true")
     args = ap.parse_args()
-    names = args.only or list(SCENARIOS)
+    # Live-only scenarios (a derived template) stay out of default replay.
+    names = args.only or [n for n, scn in SCENARIOS.items()
+                          if args.mode != "golden" or not getattr(scn, "mcp_extra_seed", False)]
     template = pg.name("pl_cf_w2d_template")
     if args.mode != "golden" and (not args.reuse_template or template not in pg.existing()):
         seed_template(template, args.paragraphs)
