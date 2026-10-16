@@ -456,12 +456,13 @@ class McpFactGet(Scenario):
     require = {"fact.records": 6, "fact.alias_hit": 1, "fact.set_removed": 1, "fact.empty_set": 1,
                "fact.contenders": 1, "fact.correct_with": 3, "fact.candidates_same": 1,
                "fact.candidates_similar": 1, "fact.entity_ref": 2, "fact.re_verify": 2,
-               "fact.source_entries": 1, "fact.misses": 2}
+               "fact.source_entries": 1, "fact.misses": 2, "fact.checks": 4}
 
     def cases(self):
-        def get(name, entity, attribute, **kw):
-            return mcp_case(name, {"entity": entity, "attribute": attribute, **kw},
-                            tool="memory_fact_get")
+        def get(name, entity, attribute, check=None, **kw):
+            # ``check``: a predicate the oracle's answer must satisfy (coverage).
+            return dict(mcp_case(name, {"entity": entity, "attribute": attribute, **kw},
+                                 tool="memory_fact_get"), check=check)
         return [
             get("scalar hit, lean", "staging database", "host"),
             get("scalar hit, verbose", "staging database", "host", verbose=True),
@@ -472,11 +473,18 @@ class McpFactGet(Scenario):
             get("stale fact", "build cache", "state"),
             get("alias retry reaches the canonical's fact", "builder", "cpu"),
             get("alias hit, verbose (source_entries, re_verify)", "builder", "cpu", verbose=True),
-            get("a shadowed alias is not retried", "builder", "firmware"),
+            get("a shadowed alias is not retried", "builder", "firmware",
+                check=lambda b: b.get("record") is None and not any(
+                    c.get("entity") == "printer" and c.get("attribute") == "firmware"
+                    for c in b.get("candidates") or [])),
             get("set slot with a removed member", "dev box", "users"),
-            get("set slot, verbose", "dev box", "users", verbose=True),
-            get("set slot under an alias", "builder", "users"),
-            get("fully emptied set reads as empty", "dev box", "groups"),
+            get("set slot, verbose", "dev box", "users", verbose=True,
+                check=lambda b: (b.get("record") or {}).get("re_verify") is True),
+            get("set slot under an alias", "builder", "users",
+                check=lambda b: (b.get("record") or {}).get("entity") == "dev-box"),
+            get("fully emptied set reads as empty", "dev box", "groups",
+                check=lambda b: (b.get("record") or {}).get("members") == []
+                and bool(b.get("candidates"))),
             get("empty slot: same-entity and similar candidates", "dev box", "kernel"),
             get("empty slot under an alias", "builder", "kernel"),
             get("unknown entity", "quantum marmalade", "flavour"),
@@ -521,6 +529,8 @@ def diff(a, b, path="", tol_keys=("score",)) -> list[str]:
             return [f"{path}: length python {len(a)} vs rust {len(b)}"]
         return [d for i, (x, y) in enumerate(zip(a, b)) for d in diff(x, y, f"{path}[{i}]", tol_keys)]
     if path.endswith(".age") and isinstance(a, str) and isinstance(b, str) and a != b:
+        if {a, b} == {"just now", "1 minute ago"}:
+            return []
         ma, mb = AGE_RE.fullmatch(a), AGE_RE.fullmatch(b)
         if ma and mb and ma.group(2) == mb.group(2) and abs(int(ma.group(1)) - int(mb.group(1))) <= 1:
             return []
@@ -550,7 +560,9 @@ def align_ties(py_list: list, rs_list: list, key: str = "id", *, ordered=False) 
         if j is None:
             continue
         span = [x.get("score", 0.0) for x in rs[i:j + 1]]
-        if max(span) - min(span) <= SCORE_TOL:
+        # A null score (a same-entity fact_get candidate) is an exact order,
+        # never a tie.
+        if all(isinstance(x, (int, float)) for x in span) and max(span) - min(span) <= SCORE_TOL:
             rs.insert(i, rs.pop(j))
             notes.append(f"tie swap at {i}: {want.get(key)}")
     return rs, notes
@@ -571,7 +583,7 @@ def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False) -> tuple
         a = dict(a, error="<free>")
         b = dict(b, error="<free>")
     if isinstance(a, dict) and isinstance(b, dict):
-        for k in ("entries", "cortex"):
+        for k in ("entries", "cortex", "candidates"):
             if isinstance(a.get(k), list) and isinstance(b.get(k), list):
                 key = "id" if k == "entries" else "value"
                 b = dict(b)
@@ -680,7 +692,8 @@ def coverage(responses: list[dict], state: dict) -> dict:
                       "episode_hits": 0, "child_excluded": 0, "nonempty": 0},
            "fact": {"records": 0, "alias_hit": 0, "set_removed": 0, "empty_set": 0, "contenders": 0,
                     "correct_with": 0, "candidates_same": 0, "candidates_similar": 0,
-                    "entity_ref": 0, "re_verify": 0, "source_entries": 0, "misses": 0}}
+                    "entity_ref": 0, "re_verify": 0, "source_entries": 0, "misses": 0,
+                    "checks": 0}}
     for r in responses:
         body = r.get("json") or {}
         if isinstance(body, dict) and "record" in body and "contenders" in body:
@@ -906,6 +919,9 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
                                                  ordered=c.get("tool") == "memory_recent")
     cov = coverage(py_seen, py_state)
+    cov["fact"]["checks"] = sum(
+        1 for c, r in zip(scn.cases(), py_seen)
+        if c.get("check") and c["check"](r.get("json") or {}))
     cov["recent"]["nonempty"] = sum(
         1 for c, r in zip(scn.cases(), py_seen)
         if c.get("nonempty") and ((r.get("json") or {}).get("entries") or []))

@@ -7,6 +7,9 @@ never on the command line, so it stays out of process listings)
        python w2d_seed.py --mcp-extra  (adds the memory_search scenario's facts
        to an already seeded bank: an aged volatile fact, a contender and an
        entry that restates a fact)
+       python w2d_seed.py --mcp-extra --fact-extra  (also memory_fact_get's:
+       an aliased entity with a shadowed alias, a set with a removed member,
+       an emptied set, a stale fact and trace rows)
 
 The corpus is paragraphs of this repository's public docs, plus crafted
 entries for every search channel: an assistant-sourced note, tagged notes,
