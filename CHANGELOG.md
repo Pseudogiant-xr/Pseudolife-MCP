@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-16 — extractor shims never start on an interpreter without torch)
+- `ops/shim_autostart.py` verifies the shim's interpreter the way
+  `ops/shim_python.py` does, by importing `pseudolife_memory.memory.dream`
+  from the checkout. With no `PSEUDOLIFE_<KIND>_SHIM_PYTHON` set it now picks
+  the first candidate that imports (the checkout's `.venv`, pipx's venv off
+  Windows, `~/.pseudolife-mcp/shim-venv`, `python3`/`python` on PATH, then the
+  interpreter running it) instead of whatever ran it. `show` prints a
+  `problem` line, and `run` / `restart` refuse, when the chosen or configured
+  interpreter cannot import, naming the fix (`python ops/shim_python.py
+  --repo <checkout>`, then `shim_autostart.py config <kind> --python <path>`).
+  Before, a global Python with no torch started a shim that died on its first
+  import, and `restart` said only that it was "not yet listening".
+
 ### Added (2026-10-11 — recovery dependency audits)
 - Add the read-only `re_evidence(action="dependencies")` operation. Exact
   project/build manifests track function, layout, corpus and tool hashes plus

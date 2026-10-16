@@ -18,7 +18,11 @@ overrides the file for that start.
 
 Settings, in rising precedence: the defaults below (the same values the
 installers name), the ``PSEUDOLIFE_<KIND>_SHIM_*`` keys in ``ops/.env``,
-then the flags. Standard library only; run from the checkout it sits in
+then the flags. With no interpreter set, the default is the first one
+``ops/shim_python.py`` would accept (one that imports what the shim
+imports); ``check`` probes the chosen one the same way, so ``run`` and
+``restart`` refuse one that would die on its first import. Standard
+library only; run from the checkout it sits in
 (``--repo`` names another one, for the tests).
 
 A registration from before the runner (the task or unit still carries
@@ -225,10 +229,61 @@ def write_config(repo: Path, kind: str, settings: dict) -> tuple[Path, list[str]
 # ── resolution ──────────────────────────────────────────────────────────────
 
 def default_python(repo: Path) -> str:
+    """The unverified fallback: what ``resolve`` names when no interpreter
+    imports what the shim imports, so that ``check`` reports it."""
     for candidate in (repo / ".venv" / "Scripts" / "python.exe", repo / ".venv" / "bin" / "python"):
         if candidate.is_file():
             return str(candidate)
     return sys.executable
+
+
+_SHIM_PYTHON = None
+
+
+def _shim_python():
+    """ops/shim_python.py, the installers' interpreter picker: its probe
+    and its candidate order are the ones this runner verifies with."""
+    global _SHIM_PYTHON
+    if _SHIM_PYTHON is None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("shim_python", Path(__file__).with_name("shim_python.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _SHIM_PYTHON = module
+    return _SHIM_PYTHON
+
+
+_PROBED: dict = {}
+
+
+def probe_interpreter(python: str, repo: Path) -> tuple[bool, str]:
+    """Whether ``python`` imports what the shims import from ``repo``
+    (shim_python.py's probe): ``(ok, reason)``, once per process."""
+    key = (str(python), str(repo))
+    if key not in _PROBED:
+        _PROBED[key] = _shim_python().probe(Path(python), repo)
+    return _PROBED[key]
+
+
+def interpreter_candidates(repo: Path) -> list[str]:
+    """shim_python.py's candidates in its order (the checkout's .venv,
+    pipx's venv off Windows, the shim venv it makes, python3/python on
+    PATH), then the interpreter running this. It never creates a venv here:
+    a logon start must not spend minutes in pip."""
+    helper = _shim_python()
+    found = [str(path) for path, _ in helper.candidates(repo, helper.default_venv_dir())]
+    return list(dict.fromkeys(found + [sys.executable]))
+
+
+def pick_python(repo: Path) -> str | None:
+    """The first candidate that imports what the shim imports, or None.
+    Without this the runner took whatever ran it: a global Python with no
+    torch, where the shim died on its first import (Windows, 2026-10-16)."""
+    for candidate in interpreter_candidates(repo):
+        if probe_interpreter(candidate, repo)[0]:
+            return candidate
+    return None
 
 
 def default_host() -> str:
@@ -265,7 +320,8 @@ def resolve(kind: str, repo: Path, overrides: dict | None = None, env_values: di
     settings = dict(spec["defaults"])
     settings.update(settings_from_env(kind, read_env(env_file(repo)) if env_values is None else env_values))
     settings.update({k: str(v) for k, v in (overrides or {}).items() if v not in (None, "")})
-    settings.setdefault("python", default_python(repo))
+    if "python" not in settings:
+        settings["python"] = pick_python(repo) or default_python(repo)
     settings.setdefault("host", default_host())
     if not Path(settings["python"]).is_file():
         settings["python"] = shutil.which(settings["python"]) or settings["python"]
@@ -302,6 +358,17 @@ def check(kind: str, repo: Path, settings: dict) -> list[str]:
         problems.append(f"prompt file not found: {settings['prompt_file']}")
     if not Path(settings["python"]).is_file() and not shutil.which(settings["python"]):
         problems.append(f"interpreter not found: {settings['python']}")
+    else:
+        # The shim imports the package and its dependencies (torch) before
+        # it binds: an interpreter without them dies there, which `restart`
+        # only reported as "not yet listening" (2026-10-16).
+        ok, why = probe_interpreter(settings["python"], repo)
+        if not ok:
+            module = _shim_python().PROBE_IMPORT
+            problems.append(
+                f"interpreter {settings['python']} cannot import {module} ({why}). "
+                f"Find or make one that can: python ops/shim_python.py --repo {repo} ; then record "
+                f"the path it prints: python ops/shim_autostart.py config {kind} --python <that path>")
     if settings.get("cli") and not Path(settings["cli"]).is_file() and not shutil.which(settings["cli"]):
         problems.append(f"CLI not found: {settings['cli']}")
     return problems
