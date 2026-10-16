@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-16 — passkey panel on a tokenless daemon)
+- Settings, Your passkeys (and the Board's roles band) now say "This daemon
+  has no bearer token" and name `PSEUDOLIFE_MCP_TOKEN` when the daemon runs
+  without one, instead of the generic "Passkey status could not be read …
+  HTTP 401". A tokenless daemon refuses `GET /api/maintainer` itself with
+  401 `authentication_required`, so the Console's purpose-written message
+  for that case was unreachable. Console-only; the daemon still refuses
+  every maintainer route without a token.
+
 ### Fixed (2026-10-16 — extractor shims never start on an interpreter without torch)
 - `ops/shim_autostart.py` verifies the shim's interpreter the way
   `ops/shim_python.py` does, by importing `pseudolife_memory.memory.dream`

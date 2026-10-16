@@ -232,6 +232,13 @@ export function inQuarantine(k: Passkey, nowMs: number): boolean {
 }
 
 function statusBlocked(status: MaintainerStatus | null, statusError: ApiError | null): Blocked | null {
+  // A tokenless daemon refuses the status read itself (401
+  // authentication_required; a missing or wrong token is "unauthorized"), so
+  // its reason arrives as an error, not as a status body.
+  if (statusError?.code === "authentication_required") {
+    status = { available: false, reason: statusError.code, passkeys: [] };
+    statusError = null;
+  }
   if (statusError) {
     if (statusError.status === 404) {
       return {

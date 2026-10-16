@@ -296,6 +296,17 @@ describe("readiness", () => {
     const r = ready(null, { statusError: new ApiError(404, "http_404", null) });
     expect(r.ok === false && r.title).toMatch(/no passkey support/);
   });
+
+  it("explains a tokenless daemon, which refuses the status read itself", () => {
+    // GET /api/maintainer on a daemon with no bearer token answers
+    // 401 authentication_required; a wrong or missing token is "unauthorized".
+    const err = new ApiError(401, "authentication_required", { error: "authentication_required" });
+    const r = ready(null, { statusError: err });
+    expect(r.ok === false && r.title).toBe("This daemon has no bearer token");
+    expect(r.ok === false && r.body).toMatch(/PSEUDOLIFE_MCP_TOKEN/);
+    const wrong = ready(null, { statusError: new ApiError(401, "unauthorized", null) });
+    expect(wrong.ok === false && wrong.title).toMatch(/could not be read/);
+  });
 });
 
 describe("errors in plain words", () => {
