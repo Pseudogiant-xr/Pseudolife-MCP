@@ -1513,19 +1513,6 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                         attempt.note_transport_failure(_transport_failure_kind(exc))
                         raise
                 http.send = observed_send
-            original_stream = getattr(http, "stream", None)
-            if original_stream is not None:
-                @contextlib.asynccontextmanager
-                async def observed_stream(*args, **kwargs):
-                    try:
-                        async with original_stream(*args, **kwargs) as response:
-                            yield response
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        attempt.note_transport_failure(_transport_failure_kind(exc))
-                        raise
-                http.stream = observed_stream
             async with streamable_http.streamable_http_client(
                 url + "/mcp", http_client=http,
             ) as (read, write):

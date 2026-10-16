@@ -367,7 +367,7 @@ for the MCP surface.
 
 ### SDK parameter validation
 
-`src/mcp/validation-schema.json` records the MCP and MCP-types 2.1.1
+`src/mcp/validation-schema.json` records the MCP and MCP-types 2.2.0
 parameter schemas, including the Pydantic versions used to generate them.
 Regenerate it with `python rust/daemon/harness/mcp_validation_schema.py`.
 The table contains all 13 handshake request methods, four client notification
