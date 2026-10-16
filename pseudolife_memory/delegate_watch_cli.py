@@ -13,7 +13,8 @@ message per batch of events.
 The events, each reported once (state persists in --state):
 - a pull request opened, merged or closed;
 - a pull request's checks all finished green (with its merge state), or a
-  check failed (on that head);
+  check failed (on that head), or they all finished with some cancelled
+  (once per head, never as a failure);
 - a pull request newly conflicting with its base;
 - the newest completed master run of a workflow (push or schedule) failing,
   or passing again after a failure (cancelled runs are neither);
@@ -80,7 +81,10 @@ MAX_TEXT_BYTES = 8192
 DEFAULT_LEASES = ("full-suite", "full-suite@box")
 PR_FIELDS = "number,title,headRefOid,mergeable,mergeStateStatus,isDraft,statusCheckRollup"
 RUN_FIELDS = "attempt,databaseId,workflowName,status,conclusion,headSha,event"
-FAILED_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+# CANCELLED is not a failure: a cancelled run is usually one the delegate
+# stopped itself, and each of its jobs concluding woke it again as "failing"
+# (2026-10-16, three wakes in 15 minutes for one head of PR #784).
+FAILED_CONCLUSIONS = {"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
 MASTER_FAILED = {"failure", "timed_out", "startup_failure"}
 TITLE = 70
 # gh paginates up to this; a pull request missing from the list is looked up
@@ -115,10 +119,12 @@ def run(cmd: list[str]) -> tuple[int, str, str]:
 # the Rust port's contract tests read the same file.
 
 def checks_state(rollup) -> tuple[str, list[str]]:
-    """``failing`` with the failed names, ``pending``, ``green``, or ``none``
+    """``failing`` with the failed names, ``pending``, ``cancelled`` with the
+    cancelled names once every check has finished, ``green``, or ``none``
     for a head with no checks. One failure is enough: waiting for the rest
-    would delay the decision it forces."""
-    failed, pending = [], False
+    would delay the decision it forces. A cancellation waits for the rest,
+    so a cancelled run is one state however many of its jobs conclude."""
+    failed, cancelled, pending = [], [], False
     for check in rollup or []:
         if check.get("__typename") == "StatusContext":
             state = (check.get("state") or "").upper()
@@ -131,15 +137,20 @@ def checks_state(rollup) -> tuple[str, list[str]]:
             pending = True
         elif (check.get("conclusion") or "").upper() in FAILED_CONCLUSIONS:
             failed.append(check.get("name") or check.get("workflowName") or "check")
+        elif (check.get("conclusion") or "").upper() == "CANCELLED":
+            cancelled.append(check.get("name") or check.get("workflowName") or "check")
     if failed:
         return "failing", sorted(set(failed))
     if pending:
         return "pending", []
+    if cancelled:
+        return "cancelled", sorted(set(cancelled))
     return ("green" if rollup else "none"), []
 
 
 def pr_snapshot(old, prs) -> dict:
-    """The open pull requests from ``gh pr list --json``, keyed by number."""
+    """The open pull requests from ``gh pr list --json``, keyed by number.
+    ``failed`` holds the names behind a ``failing`` or ``cancelled`` state."""
     snap = {}
     for p in prs:
         checks, failed = checks_state(p.get("statusCheckRollup"))
@@ -176,6 +187,8 @@ def pr_events(old: dict, new: dict, closed: dict) -> list[str]:
             out.append(f"PR #{number} failing at {p['head'][:8]}: {', '.join(p['failed'][:4])}")
         elif p["checks"] == "green" and not (same_head and before["checks"] == "green"):
             out.append(f"PR #{number} green at {p['head'][:8]}, merge state {p['merge_state']}")
+        elif p["checks"] == "cancelled" and not (same_head and before["checks"] == "cancelled"):
+            out.append(f"PR #{number} cancelled at {p['head'][:8]}: {', '.join(p['failed'][:4])}")
         if p["mergeable"] == "CONFLICTING" and before["mergeable"] != "CONFLICTING":
             out.append(f"PR #{number} conflicts with its base")
     for number in sorted(old.keys() - new.keys(), key=int):

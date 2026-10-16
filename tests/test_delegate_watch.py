@@ -402,6 +402,69 @@ def test_a_new_head_reports_its_result_again(h):
     assert lines(h.main("--settle", "0")[1]) == ["PR #5 green at bbbbbbbb, merge state clean"]
 
 
+CANCELLED_HEAD = "bdab33d4" + "0" * 32
+CANCELLED_JOBS = ("Candidate / ubuntu-latest", "Candidate / windows-latest", "Parity / ubuntu-latest")
+
+
+def _cancelling(done, last=None):
+    """The checks of a run the delegate cancelled: the first ``done`` jobs
+    have concluded CANCELLED, the rest still run. ``last`` replaces the last
+    job's check once it has concluded."""
+    checks = [run_(name, conclusion="CANCELLED") if i < done
+              else run_(name, status="IN_PROGRESS", conclusion="")
+              for i, name in enumerate(CANCELLED_JOBS)]
+    if last is not None:
+        checks[-1] = last
+    return checks
+
+
+def test_a_cancelled_run_is_reported_once_as_cancelled_not_failing(h):
+    # 2026-10-16: the delegate cancelled the CI of dependabot PRs #783 and
+    # #784 on purpose, and each job that then concluded CANCELLED woke it
+    # again with "PR #784 failing at bdab33d4: ...", three times in 15
+    # minutes for one head.
+    h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(0))]
+    h.main(max_age="60")                                              # baseline
+
+    def between(poll):
+        if poll in (1, 3, 5):
+            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling((poll + 1) // 2))]
+    code, texts, _ = h.main("--settle", "0", between=between, max_age="600")
+    assert code == 0
+    assert lines(texts) == ["PR #784 cancelled at bdab33d4: " + ", ".join(sorted(CANCELLED_JOBS))]
+    # Restarted with nothing new: no repeat.
+    assert h.main(max_age="120")[1] == []
+
+
+def test_a_real_failure_among_cancelled_checks_is_still_reported(h):
+    # The near-miss: cancellations are quiet, a FAILURE on the same head is not.
+    h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(0))]
+    h.main(max_age="60")
+
+    def between(poll):
+        if poll == 1:
+            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(2))]
+        if poll == 3:
+            h.world.prs = [pr(784, head=CANCELLED_HEAD,
+                              checks=_cancelling(2, last=run_(CANCELLED_JOBS[2], conclusion="FAILURE")))]
+    assert lines(h.main("--settle", "0", between=between)[1]) == [
+        "PR #784 failing at bdab33d4: Parity / ubuntu-latest"]
+
+
+def test_a_failed_rerun_after_a_cancelled_report_is_reported(h):
+    h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(3))]
+    h.main(max_age="60")                                              # baseline: already cancelled
+
+    def between(poll):
+        if poll == 1:                                                 # one job re-run
+            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(2))]
+        if poll == 3:
+            h.world.prs = [pr(784, head=CANCELLED_HEAD,
+                              checks=_cancelling(2, last=run_(CANCELLED_JOBS[2], conclusion="FAILURE")))]
+    assert lines(h.main("--settle", "0", between=between)[1]) == [
+        "PR #784 failing at bdab33d4: Parity / ubuntu-latest"]
+
+
 def test_master_runs_failing_and_recovering(h):
     h.world.runs = [{"databaseId": 1, "workflowName": "CI", "status": "completed", "conclusion": "success",
                      "headSha": "d" * 40, "event": "push", "attempt": 1}]

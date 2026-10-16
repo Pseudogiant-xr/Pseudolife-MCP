@@ -72,7 +72,9 @@ A detached process, one per session, that polls and sends one board
 message per batch of events:
 
 - a pull request opened, merged or closed; its checks all green (with
-  its merge state) or one failing on that head; newly conflicting;
+  its merge state) or one failing on that head; newly conflicting; its
+  checks all finished with some cancelled, once per head (a cancelled
+  check is never a failure);
 - a master workflow (push or schedule) failing, or passing after a
   failure; cancelled runs are neither;
 - a full-suite lease going from held to free;
