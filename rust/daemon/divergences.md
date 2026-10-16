@@ -51,7 +51,6 @@ tool's answers by value.
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_episode_summary` | W2-D | No episode summary service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
-| `memory_store` | W2-E | W2-E supplies the resident write store, surprise gate and contradiction service behind its harness route; MCP dispatch remains unwired. |
 | `memory_fact_set` | W2-E | No canonical fact mutation service or resident-store synchronization. |
 | `memory_set_add` | W2-E | No set-valued slot mutation service. |
 | `memory_set_remove` | W2-E | No set-valued slot removal service. |
@@ -75,7 +74,7 @@ tool's answers by value.
 | `memory_relation_define` | W3-H | Relation storage exists, but the public relation-definition service does not. |
 
 The integration batch retains W2-G's refusal stubs for every tool except
-`memory_toolset`. W2-D supplies expanded REST search, W2-E supplies the
+`memory_toolset` and, since its body registration, `memory_store`. W2-D supplies expanded REST search, W2-E supplies the
 harness-gated store body, and W2-F supplies the REST board. Their presence
 does not register MCP tool bodies: their projections remain the
 prerequisites listed above. Bound identity is enforced on the mount (M18).
@@ -256,7 +255,7 @@ close it, or why it stays.
 | Per-call `_ensure_init` passes: writer-session probe, rehydrate after a changed lease, correction / reinstatement / curation / lesson-synthesis recovery | run before every store | not run | writer-session probe and reconnect: W2-E; recovery passes belong to the curation and dream slices |
 | Unicode newer than 14.0 in the label, meta-filter and slot regexes | Python 3.11 tables (Unicode 14.0) | the `regex` crate's tables (Unicode 16.0) | identical for every code point assigned by Unicode 14.0 (full scan) |
 | Non-ASCII decimal digits in a generic session title | `\d` matches them | ASCII digits only | titles are `strftime` output or caller text |
-| MCP dispatch of the store body | FastMCP | argument binding and the error envelope are served (spec.md, "Tool argument binding"); the harness still reaches the body through a feature-gated route | W2-G (body registration) |
+| MCP dispatch of the store body | FastMCP | served on `/mcp` (spec.md W0.4); `w2e.py` compares both daemons' `tools/call` answers | closed; the feature-gated harness route is no longer used by any harness |
 | `entries.embedding`, `entries.surprise` | torch fp32 | ONNX Runtime fp32 | compared within measured tolerances (`harness/goldens/w2e-tolerance.json`); an admission decision or reason must never differ |
 
 ### W2-E first increment boundaries
