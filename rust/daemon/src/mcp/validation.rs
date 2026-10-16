@@ -16,6 +16,22 @@ pub fn request(method: &str, params: &Value, served: bool) -> bool {
     layer("requests", method, params) && (!served || layer("handlers", method, params))
 }
 
+/// The SDK transport parses bodies with `pydantic_core.from_json` (jiter),
+/// which refuses a number whose integer part, sign included, is longer than
+/// 4,300 characters ("number out of range"): a parse error before any
+/// validation. `serde_json` with arbitrary precision keeps such literals.
+pub fn number_out_of_range(value: &Value) -> bool {
+    match value {
+        Value::Number(n) => {
+            let text = n.to_string();
+            text.split(['.', 'e', 'E']).next().map_or(0, str::len) > 4300
+        }
+        Value::Array(items) => items.iter().any(number_out_of_range),
+        Value::Object(map) => map.values().any(number_out_of_range),
+        _ => false,
+    }
+}
+
 pub fn notification(method: &str, params: &Value) -> bool {
     layer("notifications", method, params)
 }
@@ -55,13 +71,18 @@ fn integer(value: &Value) -> bool {
     }
 }
 
-// Match the pinned SDK's clean_int_str order, including its permissive
-// leading-zero cleanup, then validate the resulting JSON integer spelling.
 fn integer_string(raw: &str) -> bool {
+    clean_int_string(raw).is_some()
+}
+
+/// The pinned SDK's clean_int_str order, including its permissive
+/// leading-zero cleanup, then the resulting JSON integer spelling: the
+/// integer's canonical digits (with `-` when negative), or None.
+pub(super) fn clean_int_string(raw: &str) -> Option<String> {
     let mut s = raw.trim();
     if let Some(rest) = s.strip_prefix('+') {
         if rest.starts_with('-') {
-            return false;
+            return None;
         }
         s = rest;
     }
@@ -69,7 +90,7 @@ fn integer_string(raw: &str) -> bool {
     if negative {
         s = &s[1..];
         if s.starts_with(['-', '+']) {
-            return false;
+            return None;
         }
     }
     match s.as_bytes().first() {
@@ -80,14 +101,14 @@ fn integer_string(raw: &str) -> bool {
                     b'0' | b'_' => continue,
                     b'1'..=b'9' | b'-' => start = index,
                     b'.' => start = index - 1,
-                    _ => return false,
+                    _ => return None,
                 }
                 break;
             }
             s = &s[start..];
         }
         Some(b'1'..=b'9' | b'-') => (),
-        _ => return false,
+        _ => return None,
     }
     if let Some((whole, fraction)) = s.split_once('.')
         && !fraction.is_empty()
@@ -106,13 +127,16 @@ fn integer_string(raw: &str) -> bool {
     }
     // The pinned integer parser's 4,300-byte limit includes a minus sign.
     let digits = cleaned.strip_prefix('-').unwrap_or(&cleaned);
-    cleaned.len() <= 4300
+    let valid = cleaned.len() <= 4300
         && !digits.is_empty()
         && (digits.len() == 1 || !digits.starts_with('0'))
-        && digits.bytes().all(|b| b.is_ascii_digit())
+        && digits.bytes().all(|b| b.is_ascii_digit());
+    let zero = digits == "0";
+    // Python's int has no negative zero.
+    valid.then(|| if zero { "0".to_string() } else { cleaned })
 }
 
-fn number(value: &Value) -> Option<f64> {
+pub(super) fn number(value: &Value) -> Option<f64> {
     match value {
         Value::Bool(v) => Some(u8::from(*v) as f64),
         // The SDK preserves overflow literals as infinity for float fields.
@@ -130,7 +154,7 @@ fn number(value: &Value) -> Option<f64> {
     }
 }
 
-fn boolean(value: &Value) -> bool {
+pub(super) fn boolean(value: &Value) -> bool {
     value.is_boolean()
         || value.as_f64().is_some_and(|n| n == 0.0 || n == 1.0)
         || value.as_str().is_some_and(|s| {

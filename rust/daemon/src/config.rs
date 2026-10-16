@@ -52,6 +52,7 @@ pub struct MemoryConfig {
     pub reranker_enabled: bool,
     pub reranker: RerankerConfig,
     pub cortex: CortexConfig,
+    pub mcp: McpConfig,
     pub traces_enabled: bool,
     /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
     /// whether the sweep thread starts and parses its interval.
@@ -107,6 +108,22 @@ impl Default for CortexConfig {
             guard_min_score: 0.2,
             read_tracking: true,
             pin_constraints: true,
+        }
+    }
+}
+
+/// `McpConfig` (utils/config.py:1158-1202): what an agent pays per call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct McpConfig {
+    pub compact_payloads: bool,
+    pub entry_text_chars: i64,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        McpConfig {
+            compact_payloads: true,
+            entry_text_chars: 600,
         }
     }
 }
@@ -405,6 +422,7 @@ impl Default for MemoryConfig {
             reranker_enabled: false,
             reranker: RerankerConfig::default(),
             cortex: CortexConfig::default(),
+            mcp: McpConfig::default(),
             traces_enabled: true,
             retrieval_log_enabled: true,
             retrieval_retention_days: 365.0,
@@ -1321,6 +1339,14 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 guard_min_score: want_float(c, "guard_min_score", p, d.guard_min_score)?,
                 read_tracking: want_bool(c, "read_tracking", p, d.read_tracking)?,
                 pin_constraints: want_bool(c, "pin_constraints", p, d.pin_constraints)?,
+            };
+        }
+        if let Some(c) = section(m, "mcp", "memory.")? {
+            let p = "memory.mcp";
+            let d = McpConfig::default();
+            memory.mcp = McpConfig {
+                compact_payloads: want_bool(c, "compact_payloads", p, d.compact_payloads)?,
+                entry_text_chars: want_int(c, "entry_text_chars", p, d.entry_text_chars)?,
             };
         }
         if let Some(d) = section(m, "dream", "memory.")? {

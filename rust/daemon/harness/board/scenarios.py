@@ -43,7 +43,8 @@ class Ctx:
 class Step:
     def __init__(self, name, kind="http", method="POST", path="", token="default", agent=None,
                  body=None, raw=None, extra=(), save=None, write=True, seconds=0.0, timeout=180.0,
-                 ctype="application/json"):
+                 ctype="application/json", mcp=None):
+        self.mcp = mcp
         self.name, self.kind, self.method, self.path = name, kind, method, path
         self.token, self.agent, self.body, self.raw, self.extra = token, agent, body, raw, extra
         self.save, self.write, self.seconds, self.timeout, self.ctype = save, write, seconds, timeout, ctype
@@ -79,6 +80,17 @@ def reg(title, who, token="default", **fields):
         if "agent_id" in resp and "credential" in resp:
             ctx.agents[who] = {"agent_id": resp["agent_id"], "credential": resp["credential"]}
     return act(title, "register", token=token, body=fields, save=save)
+
+
+def tool(title, name, args, token="default", agent=None, extra=(), save=None, write=True,
+         compare=True):
+    """An MCP tools/call; ``args`` may be a function of the context.
+    ``compare=False`` makes it setup only (its answer is not compared)."""
+    mcp = (lambda c: (name, args(c))) if callable(args) else (name, args)
+    step = Step(title, kind="mcp", token=token, agent=agent, extra=extra, save=save,
+                write=write, mcp=mcp)
+    step.compare = compare
+    return step
 
 
 def hook(name, method, path, token="default", write=True):
@@ -118,6 +130,9 @@ class Scenario:
     name = ""
     config_yaml: str | None = BASE_CONFIG
     env: dict[str, str] = TOKEN_ENV
+    # Both daemons warmed up (an initialized bank): needs the embedding
+    # model environment on the Rust side too.
+    needs_bank = False
 
     def steps(self) -> list[Step]:
         return []
@@ -605,6 +620,98 @@ class Mixed(Scenario):
         ]
 
 
+class McpTools(Scenario):
+    """memory_agents and memory_message over MCP (spec W2-F "Board tools
+    over MCP"): the board actions they become, their parameter shaping and
+    refusals, file-claim names and coordination awareness. Awareness reads
+    the initialized bank, so both daemons warm up first (``needs_bank``)."""
+    name = "mcp-tools"
+    needs_bank = True
+    # Three open sessions against a cap of two: ordering and truncation.
+    config_yaml = BASE_CONFIG + "  awareness_limit: 2\n"
+
+    def steps(self):
+        repo = "ab" * 32
+        to_b = lambda c: c.id("B")  # noqa: E731
+        return [
+            reg("register A", "A", token="alice", project="pl", task="porting"),
+            reg("register B", "B", token="bob", project="pl", task="reviewing"),
+            *[tool(f"open session {i}", "memory_store",
+                   {"text": f"Awareness probe session {i} touched the board tools."},
+                   token="alice", extra=[("X-PL-Session", f"sess-mcp-{i}")], write=False,
+                   compare=False)
+              for i in (1, 2, 3)],
+            tool("awareness: no agent header", "memory_agents", {}, token="alice", write=False),
+            tool("awareness: the caller's own session is not a peer", "memory_agents", {},
+                 token="alice", extra=[("X-PL-Session", "sess-mcp-3")], write=False),
+            tool("awareness: principal not allowed", "memory_agents", {}, token="carol", write=False),
+            tool("list with an agent", "memory_agents", {"project": "pl"}, token="alice", agent="A",
+                 write=False),
+            tool("update with a park", "memory_agents",
+                 {"action": "update", "status": "porting tools", "park_reason": "waiting_peer",
+                  "park_needs": "review", "park_clear_by": "anyone", "children": ["sub-1"],
+                  "name": "porter"}, token="alice", agent="A"),
+            tool("update: empty park_reason clears", "memory_agents",
+                 {"action": "update", "park_reason": ""}, token="alice", agent="A"),
+            tool("claim a coordinator lease", "memory_agents",
+                 {"action": "claim", "lease": "coordinator:pl", "status": "landing", "expect": 600},
+                 token="alice", agent="A"),
+            tool("reclaim renews", "memory_agents", {"action": "claim", "lease": "coordinator:pl"},
+                 token="alice", agent="A"),
+            tool("B queues for it", "memory_agents", {"action": "claim", "lease": "coordinator:pl"},
+                 token="bob", agent="B"),
+            tool("release it", "memory_agents", {"action": "release", "lease": "coordinator:pl"},
+                 token="alice", agent="A"),
+            tool("claim a file", "memory_agents",
+                 {"action": "claim", "repository_id": repo, "path": "rust/daemon/src/board/mcp.rs"},
+                 token="alice", agent="A"),
+            tool("release the file", "memory_agents",
+                 {"action": "release", "repository_id": repo, "path": "rust/daemon/src/board/mcp.rs"},
+                 token="alice", agent="A"),
+            tool("refuse: worktree", "memory_agents",
+                 {"action": "claim", "worktree": "/tmp/x", "path": "a"}, token="alice", agent="A"),
+            tool("refuse: file selector on list", "memory_agents", {"repository_id": repo, "path": "a"},
+                 token="alice", agent="A"),
+            tool("refuse: two selectors", "memory_agents",
+                 {"action": "claim", "lease": "claim:a", "repository_id": repo, "path": "a"},
+                 token="alice", agent="A"),
+            tool("refuse: bad repository id", "memory_agents",
+                 {"action": "claim", "repository_id": "AB", "path": "a"}, token="alice", agent="A"),
+            tool("refuse: non-canonical path", "memory_agents",
+                 {"action": "claim", "repository_id": repo, "path": "./a"}, token="alice", agent="A"),
+            tool("refuse: children on claim", "memory_agents",
+                 {"action": "claim", "lease": "claim:a", "children": ["x"]}, token="alice", agent="A"),
+            tool("refuse: status on list", "memory_agents", {"status": "x", "expect": 5},
+                 token="alice", agent="A"),
+            tool("refuse: project on claim", "memory_agents",
+                 {"action": "claim", "lease": "claim:a", "project": "pl"}, token="alice", agent="A"),
+            tool("refuse: claim without a lease", "memory_agents", {"action": "claim"},
+                 token="alice", agent="A"),
+            tool("refuse: lease on update", "memory_agents", {"action": "update", "lease": "claim:a"},
+                 token="alice", agent="A"),
+            tool("refuse: status on release", "memory_agents",
+                 {"action": "release", "lease": "claim:a", "status": "x"}, token="alice", agent="A"),
+            tool("send A to B", "memory_message",
+                 lambda c: {"action": "send", "to": to_b(c), "text": "review #771 please",
+                            "request_id": "req-1", "urgent": False}, token="alice", agent="A"),
+            tool("urgent send", "memory_message",
+                 lambda c: {"action": "send", "to": to_b(c), "text": "CI is red", "request_id": "req-2",
+                            "urgent": True}, token="alice", agent="A"),
+            tool("B receives", "memory_message", {"action": "receive", "limit": 1}, token="bob",
+                 agent="B"),
+            tool("B receives and acks", "memory_message", {"action": "receive", "ack": True},
+                 token="bob", agent="B"),
+            tool("A's history", "memory_message", {"action": "history"}, token="alice", agent="A",
+                 write=False),
+            tool("refuse: send without text", "memory_message",
+                 lambda c: {"action": "send", "to": to_b(c), "request_id": "req-3"}, token="alice",
+                 agent="A"),
+            tool("refuse: no instance headers", "memory_message", {"action": "receive"},
+                 token="alice"),
+            tool("refuse: ack without ids", "memory_message", {"action": "ack"}, token="bob", agent="B"),
+        ]
+
+
 MIXED = Mixed()
 SCENARIOS = {s.name: s for s in (Identity, Mail, Wake, Leases, Hooks, Prune, Tokenless, Disabled,
-                                  Console)}
+                                  Console, McpTools)}

@@ -102,6 +102,13 @@ fn main() {
         println!("{}", mutants::supports_loopback_bind_fixture());
         return;
     }
+    // The binding sweep (harness/mcp_binding_sweep.py) drives the MCP
+    // argument binder directly: one {"tool", "args"} JSON object per line.
+    #[cfg(any(feature = "harness", feature = "mutants"))]
+    if std::env::var_os("PSEUDOLIFE_MCP_BIND_PROBE").is_some() {
+        mcp::binding::probe();
+        return;
+    }
     // The embedding harness exercises the same loader and encoder without a bank.
     if std::env::var_os("PSEUDOLIFE_DAEMON_EMBED_PROBE").is_some() {
         match embed::probe() {

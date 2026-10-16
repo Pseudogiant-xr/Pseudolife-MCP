@@ -11,7 +11,7 @@ def baseline():
     py = {"status": 413, "headers": {"mcp-session-id": None}, "body": {"raw": "Request body too large"}}
     rs = copy.deepcopy(py)
     rs["headers"]["connection"] = "close"
-    return {"summary": {"responses": 261, "cases": 16, "diffs": 5, "unserved_checked": list(UNSERVED)},
+    return {"summary": {"responses": 347, "cases": 18, "diffs": 5, "unserved_checked": list(UNSERVED)},
             "diffs": [f"body_limit[{i}]: python={json.dumps(py)}\n          rust  ={json.dumps(rs)}"
                       for i in (0, 2, 3, 4, 5)]}
 
@@ -21,7 +21,8 @@ def test_exact_declared_baseline_is_retained():
     original = copy.deepcopy(report)
     check_baseline(report)
     assert report == original
-    assert MUTANTS == ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-hint")
+    assert MUTANTS == ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-hint",
+                       "mcp-binding-open")
 
 
 @pytest.mark.parametrize("change", ["missing", "extra", "status", "body", "duplicate", "incomplete"])

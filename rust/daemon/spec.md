@@ -168,6 +168,7 @@ harness (`harness/w2e.py`) diffs both. Declared divergences are in
 |---|---|---|
 | W0.1 | Each MCP tool body returns the dict the Python `def` returns after binding, including its MCP-layer post-processing (`_store_noted`, `_noted`). Argument binding, the error envelope and the success envelope belong to the MCP surface (W2-G). A service `ValueError` is returned as `ToolError::Invalid(text)`; any other failure is internal. | `mcp_server.py:243-302, 664-695` |
 | W0.2 | Until the MCP surface lands, the harness reaches a tool body through `POST /api/_harness/tool/<name>`, compiled only under the cargo feature `harness`. A default build's route table equals Python's (unit test). | delegate ruling 2026-10-09 |
+| W0.4 | `memory_store` is served on `/mcp`: after binding (spec "Tool argument binding"), the body receives the bound arguments and a `Caller` built from the request's `X-PL-Session` (first value, as M17) and the legacy transport session; it runs in its own tracked task, so a disconnecting caller's store still lands and is drained at shutdown. A body `ValueError` is `invalid_argument` prose and any other failure, initialization included, `internal_error` with `mutation: "unknown"` (M15). `harness/w2e.py` and `w2e_shutdown.py` drive both daemons through `tools/call`. | `mcp_server.py:664-750`, `_async_offload` |
 | W0.3 | Caller identity: the session is the `X-PL-Session` header when non-empty, else the active-session pointer (`meta.active_session_pointer`, ignored when older than `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`, default 21600; `<= 0` never stale), else `mcp-session-id` only when `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` is `1/true/yes/on`, else none. Header values are not trimmed; an empty value falls through. | `service.py:970-1011`, `writer_context.py:107-211` |
 
 ## W1. memory_store
@@ -363,7 +364,85 @@ for the MCP surface.
 | M14 | `tools/call` with non-object params, no string `name`, or non-object `arguments` gives -32602 `Invalid request parameters`, `data: ""`; missing or null `arguments` is `{}`. A name not in the catalogue gives `{"content":[{"text":"Unknown tool: N","type":"text"}],"isError":true}`. Hidden tools stay callable. | SDK `call_tool`; `toolset_tiers.py` docstring |
 | M15 | A dict result is `{"content":[{"text":T,"type":"text"}],"isError":false,"structuredContent":D}`, `T` being the dict indented by 2. A refusal has the same shape with `isError: true` and the `_error_payload` object: the code from a `code` attribute or a `code` / `code: detail` message, prose as `invalid_argument`, a missing file as `file_not_found`, anything else as `internal_error` (plus `mutation: "unknown"` off the read-only tools); `coordination_unavailable` adds `mutation: "unknown"` off the read-only tools. | `mcp_server.py:240-302, 309-314` |
 | M16 | memory_toolset's argument binding: an unknown name gives `unknown_parameter`, one sentence per name (`unknown parameter 'K' for memory_toolset; did you mean 'G'?` from difflib at cutoff 0.6, else ending `.`), the last closed by ` Accepted: action`, with `param` the first name and `accepted: ["action"]`. A missing `action` gives `action: Field required`; any other value gives `action: Input should be 'expand', 'collapse' or 'status'` (both `invalid_argument`, `param: "action"`). | `mcp_server.py:358-432` |
+| M18 | Bound identity, after the bearer gate and before the MCP layer: with neither `X-PL-Bank` nor `X-PL-Principal`, nothing happens. Otherwise `bound_identity` parses them (both non-empty; the principal is the canonical percent-encoding of 1 to 256 characters with none below U+0020), the bearer's principal is resolved as the board resolves it, the board's `context` action runs for it (dispatched directly, outside the coordination hub's admission limit, and finishing if the caller disconnects), and `(bank_id, principal)` must equal the binding. Any refusal answers the coordination error (`bank_identity_mismatch` 409, `principal_not_allowed` 403, and so on: `_send_coordination_error`) in place of MCP, on every request of a session. Tokenless installs stay 501 before this check. | `web/api.py:912-939`, `coordination.py:475-496` |
 | M17 | The writer is the named principal, else `X-PL-Writer` (non-empty), else `PSEUDOLIFE_WRITER_ID`, else `unknown`; the session is `X-PL-Session` as sent. Tool bodies receive both through `CallIdentity` (`src/mcp/dispatch.rs`). | `writer_context.py:130-205`; `service.py:893` |
+
+## W2-D: memory_search over MCP (2026-10-16)
+
+`read/mcp_search.rs`, registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py:1047-1310` (`memory_search`, `_project_search`,
+`_compact_entry`, `_replaced_by`, `_truncate`, `_restates_fact`,
+`_cortex_correct_with`, `CORRECTION_NOTE`), `service.py:1881-2112`.
+
+| # | Exact item | Source |
+|---|---|---|
+| MS1 | After binding: `explain=true` is declared (MCP-SEARCH-EXPLAIN). Unknown band names refuse as `invalid_argument` prose with Python's `repr` lists (the REST route's 400 text now uses the same lists); empty lists are no filter, as `list(x) if x else None`; episodes expand to their subtrees (`_episode_subtree`) and log sorted; a blank query answers `{"entries": [], "query": "", "count": 0, "low_confidence": true, "cortex": []}` with no event. | `service.py:1958-1970, 2091-2108, 6261-6280` |
+| MS2 | Otherwise `service.search` with `top_k`, the filters, `min_score`, recency, rerank and BM25 overrides and the caller's `X-PL-Session`, then the cortex-first block on the raw query with `fact_k = min(5, max(1, top_k))` under `memory.mcp.compact_payloads` (else 5) and `attach_served_facts`, all under the search lock (`search_route::search_with_facts`, shared with the REST route). The search result keeps Python's key order: `query, count, low_confidence, entries, [events, events_total]`. | `mcp_server.py:1122-1158` |
+| MS3 | Projection: `cortex` always present; each served fact re-selected in `_project_search`'s key order, dates through `_iso_seconds` (local time, to the second, after microsecond rounding), freshness fields off `evergreen`, contender fields when contested, `warning`, `last_known_value`, `re_verify`, labels, `pinned`, and `correct_with` (the resolve path when contested, else `memory_fact_set` when stale or older than TTL/3, slots in Python `repr`); `correction_note` when any fact has one; entries restating a fact value dropped and `count` recomputed; `low_confidence` only with no cortex fact. | `mcp_server.py:993-1029, 1171-1310`, `freshness.py:66` |
+| MS4 | Compact entries (not `verbose`): `id, text, source, tags, score`, `date` (the local write date), `superseded`, `replaced_by` (`id, at, preview` of 120 code points, `verified, current`), labels, then the text capped at `memory.mcp.entry_text_chars` code points with `"…"` and `truncated: true` (no cap when `compact_payloads` is false). Verbose entries are the service's dicts. | `mcp_server.py:858-948` |
+
+`harness/w2d_search.py --only mcp-search` compares 20 calls against the
+Python oracle on a derived template that adds an aged volatile fact, a
+contender and a restating entry, with coverage requirements for each
+projection branch; the `mcp-search-no-dedup` and
+`mcp-search-no-correct-with` mutants must be caught.
+
+### Board tools over MCP (2026-10-16)
+
+`board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py:479-663`, `coordination.py:821-937` (`dispatch`, `agents`),
+`repository_claims.py:54-61`, `service.py:8453-8527`
+(`coordination_awareness`).
+
+| # | Exact item | Source |
+|---|---|---|
+| BT1 | Both tools run the board's own dispatch (the REST refusal boundary, gates and post-processing) with the request's lower-cased headers (last duplicate wins) and the bearer's principal, outside the REST hub's admission limit, in a spawned task a disconnect cannot cancel. A board refusal becomes the MCP refusal with its public `code`, `detail`, `param`, `accepted` and `action`; an unexpected failure is `coordination_unavailable` with `mutation: "unknown"`. | `coordination.py:821-839`, `mcp_server.py:243-287` |
+| BT2 | `memory_message`: the board action is the tool's `action`; the parameters are `to, text, request_id, reply_to, after, message_id, clears, urgent, limit, peer, ack` in that order without nulls, `urgent` and `ack` only when true. | `mcp_server.py:658-663` |
+| BT3 | `memory_agents`, in `agents()` order: `worktree` refuses `file_claim_requires_local_client`; a file selector outside claim/release is an unexpected parameter (with the per-action homes hint), beside `lease` refuses "takes one selector", else becomes `claim:file:<sha256>` (`file_claim_name`, the shim's shared `claim_name.rs`) and adds `file_claim` to the result; park fields in order, an empty `park_reason` sent as null; children, name or park outside update refuse; list refuses status, lease and expect, and without an `X-PL-Agent` (first value) answers coordination awareness, else dispatches `agents {project, task}`; update refuses lease and dispatches the present fields then the park; claim and release need a lease (`missing_parameter`) and refuse project and task; release refuses status and expect and dispatches `release {name}`; claim dispatches `lease {name, ttl, expect, purpose=status}` with ttl 86400 for `claim:` names, else 3600. | `coordination.py:841-937` |
+| BT4 | Awareness: `{enabled, available, peers, truncated}`; board disabled answers as is, an unadmitted principal adds `reason: principal_not_allowed`, an uninitialized bank `reason: not_initialized` (never initializing it); otherwise open root episodes with a session key other than the caller's `X-PL-Session`, newest `(started_at, id)` first, capped at `min(awareness_limit, 20)` with `truncated`, each with its whitespace-collapsed title (160 code points), null principal/project/task, `scope` and `capability` "unknown", and the latest touch or entry time under its subtree. | `service.py:8453-8527` |
+
+`harness/board/run.py --only mcp-tools` compares 31 MCP tool calls (both
+tools, every refusal above, file claims, park clearing, and awareness over
+three open sessions against a cap of two, with and without the caller's own
+session) and the board tables after each write against the Python oracle;
+the sessions are opened by uncompared `memory_store` calls, and peer times and
+minute-stamped titles are placeholders. Both daemons warm up first, so it
+runs where the Rust embedder model is present. The tools resolve their
+principal as `authenticated_principal` does (a configured bearer only). The
+`mcp-agents-no-file-claim`, `mcp-agents-no-awareness`,
+`mcp-agents-awareness-self` and `mcp-agents-awareness-order` mutants must be
+caught.
+
+### Tool argument binding (2026-10-16)
+
+Every `tools/call` of a catalogue tool binds its arguments before anything
+else runs, so a refused argument answers the same whether or not the tool's
+body has landed; a body receives the bound map (`dispatch::ToolCall::args`).
+Python references are to `mcp_server.py` (`_StringSafeMetadata`,
+`_bind_arguments`, `_non_blank`, `_check_as_of`) and the pinned SDK's
+`FuncMetadata` (`mcp/server/mcpserver/utilities/func_metadata.py`).
+Code: `src/mcp/binding.rs`, `py_loads.rs`, `as_of.rs`.
+
+| # | Exact item | Source |
+|---|---|---|
+| B1 | The per-tool parameter table, `src/mcp/binding.json`, is generated from each registered argument model's pydantic-core schema by `harness/mcp_binding_table.py`, reduced to a closed vocabulary (str, int, float, bool with lax/strict, literal, list, dict, any, nullable, smart union, the two after-validators, defaults). A schema outside it refuses generation. Literal and bound sentences are recorded from pydantic. `--check` keeps it current. | `_bind_arguments`; pydantic-core schemas |
+| B2 | Unknown names first: one sentence per unknown name in argument order, `unknown parameter 'K' for T` then `; did you mean 'G'?` (the `_PARAM_ALIASES` target when it is a parameter of the tool, else difflib at cutoff 0.6) or `.`; the last sentence closes with ` Accepted: <parameters, comma-separated>`. Payload `{"error":"unknown_parameter","message","param":<first unknown>,"accepted":[...]}`. Nothing else is validated. | `_bind`, `_unknown_message`, `_binding_payload` |
+| B3 | Pre-parse: a string value of a parameter whose annotation is not exactly `str` or `str \| None` is replaced by its `json.loads` value when that is null, an array or an object (scalars, including bools, stay the string). `json.loads` is Python's: `NaN`, `Infinity`, `-Infinity`, whitespace `[ \t\n\r]`, last duplicate key wins in first position, more than 4,300 int digits refused. | `pre_parse_json` (SDK and override) |
+| B4 | Each parameter in declaration order: present values are validated, absent ones take the recorded default, else `Field required`. Lax coercions: int from a bool, a whole float below 2**63 (else `Unable to parse input string as an integer, exceeded maximum size`), or an integer string (first read as a JSON number, so an integer part past 4,300 characters is `Unable to parse input string as an integer, exceeded maximum size`, then SDK-cleaned); float from a bool, an int within the float range (a longer JSON int literal is the wrong type) or an SDK-parsed string, infinity and NaN allowed; bool from 0/1, 0.0/1.0 and the twelve spellings in any case (an i64-valued number or other string fails to parse; any other number is the wrong type); str only from a string, its length in code points; list only from an array, too-long lists refused before their items. Strict fields take only their own JSON type. Bounds are checked in the order le, lt, ge, gt. A smart union takes the first choice that validates strictly, else the first in lax mode, else every choice's errors under its tag. | pydantic-core 2.50.0 lax mode |
+| B5 | `_non_blank` refuses a value that `str.strip()` empties (`Value error, must not be blank`). `_check_as_of` refuses a string that neither `float()` nor `datetime.fromisoformat(...).timestamp()` accepts, with the `_check_as_of` sentence: CPython's C parser (3.11 and 3.12 agree: separator any one character, week dates, `,` fractions, unchecked offset parts under 24 h), and `timestamp()`, which refuses a naive instant on 0001-01-01 in every time zone. | `mcp_server.py:757-780`, `service.py:_parse_as_of` |
+| B6 | A refusal is `{"error":"invalid_argument","message","param"}`: the message joins `<loc joined by '.'>: <sentence>` with `; `, `param` is the first error's parameter. It is answered through the ordinary refusal envelope (M15). | `_binding_payload` |
+| B7 | The bound map holds every parameter in declaration order. A float binds as its shortest round-trip number, an infinity as an overflowing literal and a NaN as the number `NaN`; bodies read floats through `binding::float_arg`. | `model_dump_one_level` |
+
+`harness/mcp_binding_sweep.py` generates 36,880 argument sets (every
+parameter of every tool against numeric spellings, strings, JSON texts,
+length edges, ISO forms, unknown and missing names) and compares the two
+binders in process: Python's own `validate_arguments` on the registered tool
+against the Rust binder's probe mode, type-strictly. It needs no database or
+model and runs in seconds. `--mutants` requires 14 source mutants to be caught;
+the smart union's strict pass, which today's two unions cannot distinguish, is
+covered by a unit test. On the wire, the MCP harness's `tool_binding` case
+compares 70 binding refusals and an oversized-integer parse error live, and
+the Rust unit tests replay the 70 refusals from `harness/goldens/mcp.json`. A body that panics answers `internal_error`.
 
 ### SDK parameter validation
 
