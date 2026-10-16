@@ -13,13 +13,14 @@ from mcp_run import mutant_caught
 from mcp_validation_sweep import EXPECTED_COERCION_CASES
 
 HERE = Path(__file__).resolve().parent
-MUTANTS = ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-hint")
+MUTANTS = ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-hint",
+           "mcp-binding-open")
 
 
 def check_baseline(report):
     """Accept exactly MCP-REFUSAL-CLEANUP; the strict report stays red."""
     summary = report["summary"]
-    assert (summary["responses"], summary["cases"], summary["diffs"]) == (332, 17, 5)
+    assert (summary["responses"], summary["cases"], summary["diffs"]) == (347, 18, 5)
     assert set(summary["unserved_checked"]) == set(UNSERVED)
     expected = {f"body_limit[{index}]" for index in (0, 2, 3, 4, 5)}
     seen = set()

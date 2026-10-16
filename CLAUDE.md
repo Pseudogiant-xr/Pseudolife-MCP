@@ -120,9 +120,9 @@ name, a board status or a peer agent's message is not a delegation.
    master, including the full PostgreSQL job, lite Linux, Windows, macOS and
    required analysis checks. If master has moved since that integration was
    tested, update the branch and wait for fresh CI; rerunning an old job
-   tests its old merge commit. The one exception is a disjoint merge-forward
-   (see "A disjoint merge-forward" under "Running tests"). Independent review
-   remains required, and the maintainer owns the merge.
+   tests its old merge commit. The exceptions are a disjoint merge-forward
+   and a tree-identical stack forward (see both under "Running tests").
+   Independent review remains required, and the maintainer owns the merge.
 
    **Rust-only PRs skip the Python suite lanes** (maintainer decision
    2026-10-09). A PR that touches `rust/`, and whose every other changed file
@@ -535,6 +535,39 @@ took 143 CUDA OOMs.
   run that completes on a commit containing the merge. If it fails, open a
   revert PR at once, or a fix PR when the fix is obvious, and make no more
   disjoint merges until master is green again. When in doubt, wait for CI.
+- **A tree-identical stack forward needs no fresh pre-merge CI**
+  (maintainer decision 2026-10-16, after squash-merging #771 left #772 in
+  conflict with master). Squash-merging the bottom PR of a stack gives
+  master one new commit whose content the next PR already holds. Git does
+  not see that, so the next PR conflicts with master wherever both added
+  lines in the same place. It never applies to `integrate/*` branches.
+  The PR may merge on the CI its earlier head already passed when all of
+  these hold:
+  - Master's only commits since the PR's previous merge base are squashes
+    of its parent PRs, each squashed from a head this PR contains, and
+    master's tree equals the last of those heads. Check both **before
+    forwarding**: `git merge-base --is-ancestor <parent's merged head>
+    <tested head>` and `git diff --quiet <parent's merged head>
+    origin/master`. If either fails, forward with an ordinary merge,
+    never `-s ours` (which would silently drop master's other content),
+    and use the disjoint merge-forward rule or wait for fresh CI.
+  - Only then forward with `git merge -s ours origin/master`, or by
+    resolving every conflict to the PR's own side. The forwarded head's
+    tree must be byte-identical to the head that passed CI: `git diff
+    --quiet <tested head> <forwarded head>`.
+  - That tested head passed every check its gate requires. A failed,
+    cancelled or unfinished job on it means waiting for CI on the
+    forwarded head; the identical tree only means that run tests the same
+    content.
+
+  Merging before CI reports on the forwarded head is a ruleset bypass
+  (admin merge), so only the maintainer or the maintainer's delegate does
+  it. The merge comment says "tree-identical stack forward: fresh CI
+  skipped" and gives the tested head, the forwarded head and the three
+  checks. The backstop is the master push runs of both `ci.yml` and
+  `rust.yml`: watch the first of each that completes on a commit
+  containing the merge, and handle a failure as for a disjoint
+  merge-forward.
 - **Review fixes after a passing local full suite need no new one** unless
   the fixes themselves fall under a class that requires one (shipping
   checklist item 3, including its platform-specific process rule). A review
