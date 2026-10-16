@@ -146,7 +146,10 @@
     border: 1px solid var(--hairline);
     font-size: 12px;
     color: var(--ink-2);
-    max-width: 200px;
+    /* Room for the longest listed model id ("claude-sonnet-5-5") beside the
+       label; the subtitle ellipsizes first, so the model name stays whole. */
+    flex: none;
+    max-width: 280px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
