@@ -5,6 +5,9 @@
   group has no check runs yet, so "PR #781 green at 941539fb, merge state
   blocked" went out while that head's Rust shim run had not started. Before
   reporting a head green or cancelled, the watcher now lists the head's
-  workflow runs (`gh run list --commit`) and keeps it pending while any run
-  has not completed. The lookup is made only for a head about to be
-  reported, so a quiet poll costs no extra `gh` calls.
+  workflow runs (`gh run list --commit`) and keeps it pending while the
+  newest run of any workflow has not completed. A run that then ends failed,
+  timed out, failing to start, or cancelled without creating a check makes
+  the head failing or cancelled, naming the workflow, instead of green. The
+  lookup is made only for a head about to be reported green or cancelled,
+  then once a poll while it is held.

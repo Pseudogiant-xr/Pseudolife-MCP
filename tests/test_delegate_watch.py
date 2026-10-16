@@ -233,9 +233,10 @@ def test_fixture_checks_state(case):
     assert [state, failed] == case["expected"]
 
 
-@pytest.mark.parametrize("case", FIXTURE["unfinished_runs"], ids=lambda c: c["name"])
-def test_fixture_unfinished_runs(case):
-    assert watch.unfinished_runs(case["runs"]) == case["expected"]
+@pytest.mark.parametrize("case", FIXTURE["runs_state"], ids=lambda c: c["name"])
+def test_fixture_runs_state(case):
+    state, names = watch.runs_state(case["runs"])
+    assert [state, names] == case["expected"]
 
 
 @pytest.mark.parametrize("case", FIXTURE["pr_snapshot"], ids=lambda c: c["name"])
@@ -529,6 +530,28 @@ def test_a_head_is_not_green_while_a_workflow_run_has_not_started_its_checks(h):
     assert code == 0
     assert lines(texts) == ["PR #781 green at 941539fb, merge state clean"]
     assert h.board.events()[0]["t"] >= 6 * 60                       # not before the Rust shim run passed
+
+
+@pytest.mark.parametrize("conclusion, line", [
+    ("cancelled", "PR #781 cancelled at 941539fb: Rust shim"),
+    ("startup_failure", "PR #781 failing at 941539fb: Rust shim"),
+])
+def test_a_held_run_that_ends_without_checks_is_not_green(h, conclusion, line):
+    # The near-miss (review, 2026-10-16): the queued run is cancelled, or
+    # fails to start, before creating a check run, so the rollup still reads
+    # green; the workflow that gates the pull request never passed.
+    head = "941539fb" + "0" * 32
+    h.world.prs = [pr(781, head=head, checks=[run_("scope", status="IN_PROGRESS", conclusion="")])]
+    h.world.head_runs = {head: [_head_run(2, "Rust shim", status="pending"), _head_run(1, "CI", status="in_progress")]}
+    h.main(max_age="60")
+
+    def between(poll):
+        if poll == 1:
+            h.world.prs = [pr(781, head=head, checks=[run_("scope"), run_("guards")])]
+            h.world.head_runs = {head: [_head_run(2, "Rust shim", status="pending"), _head_run(1, "CI")]}
+        if poll == 3:
+            h.world.head_runs = {head: [_head_run(2, "Rust shim", conclusion=conclusion), _head_run(1, "CI")]}
+    assert lines(h.main("--settle", "0", between=between)[1]) == [line]
 
 
 def test_a_cancelled_head_waits_for_a_workflow_run_that_has_not_started(h):

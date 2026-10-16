@@ -16,7 +16,8 @@ The events, each reported once (state persists in --state):
   check failed (on that head), or they all finished with some cancelled
   (never as a failure, and once per finish, however many jobs it took);
   green and cancelled also wait for every workflow run on the head to
-  complete, since a queued run has no checks yet;
+  complete, since a queued run has no checks yet, and a run that ended
+  failed or cancelled before creating any check makes the head so;
 - a pull request newly conflicting with its base;
 - the newest completed master run of a workflow (push or schedule) failing,
   or passing again after a failure (cancelled runs are neither);
@@ -150,14 +151,35 @@ def checks_state(rollup) -> tuple[str, list[str]]:
     return ("green" if rollup else "none"), []
 
 
-def unfinished_runs(runs) -> list[str]:
-    """The workflows with a run on a head that has not completed, from
-    ``gh run list --commit``. A run waiting in its queue or concurrency
-    group has no check runs yet, so the rollup alone reads green while it
-    is still to come: "PR #781 green" went out on 2026-10-16 with its Rust
-    shim run pending."""
-    return sorted({r.get("workflowName") or "workflow" for r in runs or []
-                   if (r.get("status") or "").lower() != "completed"})
+def runs_state(runs) -> tuple[str, list[str]]:
+    """The workflow runs on a head, from ``gh run list --commit``, as
+    ``checks_state`` reads a rollup: ``pending`` with the workflows not yet
+    completed, else ``failing`` or ``cancelled`` with the workflows whose
+    newest run ended so, else ``green``, or ``none`` with no runs. A run
+    waiting in its queue or concurrency group has no check runs yet, so the
+    rollup alone read green: "PR #781 green" went out on 2026-10-16 with its
+    Rust shim run pending. A run cancelled, or failing to start, before it
+    created any check run never shows in the rollup at all (review,
+    2026-10-16). Only the newest run of each workflow counts (re-runs keep
+    the run's id)."""
+    newest: dict[str, dict] = {}
+    for r in runs or []:
+        name = r.get("workflowName") or "workflow"
+        if name not in newest or (r.get("databaseId") or 0) > (newest[name].get("databaseId") or 0):
+            newest[name] = r
+    by_state: dict[str, list[str]] = {"pending": [], "failing": [], "cancelled": []}
+    for name, r in newest.items():
+        conclusion = (r.get("conclusion") or "").upper()
+        if (r.get("status") or "").lower() != "completed":
+            by_state["pending"].append(name)
+        elif conclusion in FAILED_CONCLUSIONS:
+            by_state["failing"].append(name)
+        elif conclusion == "CANCELLED":
+            by_state["cancelled"].append(name)
+    for state in ("pending", "failing", "cancelled"):
+        if by_state[state]:
+            return state, sorted(by_state[state])
+    return ("green" if newest else "none"), []
 
 
 def pr_snapshot(old, prs) -> dict:
@@ -320,9 +342,14 @@ class Watcher:
             before = (old or {}).get(number)
             if p["checks"] in {"green", "cancelled"} and not (
                     before and before["head"] == p["head"] and before["checks"] == p["checks"]):
-                if unfinished_runs(self.gh("run", "list", "--commit", p["head"], "--limit", "100",
-                                           "--json", RUN_FIELDS)):
+                runs, names = runs_state(self.gh("run", "list", "--commit", p["head"], "--limit", "100",
+                                                 "--json", RUN_FIELDS))
+                # The runs can only hold or worsen what the rollup says:
+                # pending, then failing, then cancelled over green.
+                if runs == "pending":
                     p["checks"], p["failed"] = "pending", []
+                elif runs == "failing" or (runs == "cancelled" and p["checks"] == "green"):
+                    p["checks"], p["failed"] = runs, names
         return snap
 
     def master(self, old):
