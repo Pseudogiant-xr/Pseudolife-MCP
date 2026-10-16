@@ -446,23 +446,33 @@ def test_a_rebuild_that_keeps_the_mismatch_says_so_and_names_the_fix(cli):
     cli.requirements_probe = (0, json.dumps({"mismatched": [MCP_21]}))
     again = uc.update_shim("pseudolife-mcp==0.18.2")
     assert again["state"] == "installed:0.18.2", again
-    command = uc._launcher_invocation(uc.runtimes_module().launcher_command(layout))
+    command = uc._launcher_invocation(uc.runtimes_module().launcher_command(layout), layout.launcher)
     assert (f"runtime 000002 (0.18.2) still has {MCP_21}: the pseudolife-mcp running this update "
             f"installs an older dependency range; finish with: {command} update --clients-only"
             ) in again["detail"]
 
 
-@pytest.mark.parametrize("command,windows,expected", [
-    ('"C:\\Users\\<user>\\App Data\\pseudolife-mcp.exe"', True,
-     '& "C:\\Users\\<user>\\App Data\\pseudolife-mcp.exe"'),
-    ("C:\\Users\\<user>\\bin\\pseudolife-mcp.exe", True, "C:\\Users\\<user>\\bin\\pseudolife-mcp.exe"),
-    ("pseudolife-mcp", True, "pseudolife-mcp"),
-    ('"/home/a b/.local/bin/pseudolife-mcp"', False, '"/home/a b/.local/bin/pseudolife-mcp"'),
+WIN_SPACED = "C:\\Users\\<user>\\App Data\\pseudolife-mcp.exe"
+WIN_ODD = "C:\\Users\\<user>\\it's $HOME\\pseudolife-mcp.exe"
+
+
+@pytest.mark.parametrize("command,launcher,windows,expected", [
+    # PATH reaches the launcher: the bare name, on either platform.
+    ("pseudolife-mcp", WIN_SPACED, True, "pseudolife-mcp"),
+    ("pseudolife-mcp", "/opt/x/pseudolife-mcp", False, "pseudolife-mcp"),
+    # PowerShell: the call operator, and single quotes so `$` stays literal.
+    (f'"{WIN_SPACED}"', WIN_SPACED, True, f"& '{WIN_SPACED}'"),
+    (WIN_ODD, WIN_ODD, True, "& 'C:\\Users\\<user>\\it''s $HOME\\pseudolife-mcp.exe'"),
+    # POSIX: quoted when the path holds shell metacharacters, bare otherwise.
+    ("/opt/shim(release)/pseudolife-mcp", "/opt/shim(release)/pseudolife-mcp", False,
+     "'/opt/shim(release)/pseudolife-mcp'"),
+    ("/opt/shim/pseudolife-mcp", "/opt/shim/pseudolife-mcp", False, "/opt/shim/pseudolife-mcp"),
 ])
-def test_the_named_fix_pastes_into_the_platform_shell(command, windows, expected):
+def test_the_named_fix_pastes_into_the_platform_shell(command, launcher, windows, expected):
     """PowerShell refuses a quoted path followed by arguments ("Unexpected
-    token") unless it is called with ``&``; POSIX shells take it as is."""
-    assert uc._launcher_invocation(command, windows) == expected
+    token") without ``&`` and expands ``$`` inside double quotes; a POSIX
+    shell stops at an unquoted ``(``. The named fix must paste and run."""
+    assert uc._launcher_invocation(command, launcher, windows) == expected
 
 
 def test_a_fresh_release_install_on_a_refused_sdk_says_so(cli):

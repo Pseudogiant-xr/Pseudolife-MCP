@@ -425,12 +425,20 @@ def _legacy_directories(rt, layout) -> list[Path]:
     return [layout.root / n for n in names if rt._sequence_of(n) is None and (layout.root / n).is_dir()]
 
 
-def _launcher_invocation(command: str, windows: bool | None = None) -> str:
-    """``runtimes.launcher_command``'s answer as a command to paste: on
-    Windows a quoted path needs PowerShell's call operator, without which
-    PowerShell stops at "Unexpected token"."""
+def _launcher_invocation(command: str, launcher, windows: bool | None = None) -> str:
+    """The launcher as a command to paste into the platform's shell:
+    ``command`` (``runtimes.launcher_command``'s answer) when that is the
+    bare name PATH resolves, else ``launcher``'s path quoted for the shell.
+    PowerShell needs its call operator before a quoted path ("Unexpected
+    token" otherwise) and single quotes to keep ``$`` literal; a POSIX shell
+    needs a path with metacharacters quoted."""
+    import shlex
+
     windows = os.name == "nt" if windows is None else windows
-    return f"& {command}" if windows and command.startswith('"') else command
+    if command == "pseudolife-mcp":
+        return command
+    path = str(launcher)
+    return "& '" + path.replace("'", "''") + "'" if windows else shlex.quote(path)
 
 
 def _installed_release(rt, layout, source: str, notes: list[str] | None = None):
@@ -577,7 +585,7 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         if still:
             detail.append(f"runtime {runtime.name} ({runtime.version}) still has {', '.join(still)}: the "
                           f"pseudolife-mcp running this update installs an older dependency range; finish "
-                          f"with: {_launcher_invocation(rt.launcher_command(layout))} update --clients-only")
+                          f"with: {_launcher_invocation(rt.launcher_command(layout), layout.launcher)} update --clients-only")
     failed = False
     for registration, kind in managed:
         if kind == "launcher":
