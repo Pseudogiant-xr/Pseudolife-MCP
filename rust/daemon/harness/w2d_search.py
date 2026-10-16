@@ -416,7 +416,7 @@ class McpRecent(Scenario):
     within, AND across; episodes exact, tags normalised)."""
     name = "mcp-recent"
     mcp_extra_seed = True
-    require = {"recent.responses": 10, "recent.replaced_by": 1, "recent.superseded_verbose": 1,
+    require = {"recent.responses": 11, "recent.replaced_by": 1, "recent.superseded_verbose": 1,
                "recent.probe_present": 1, "recent.episode_hits": 1, "recent.child_excluded": 1}
 
     def cases(self):
@@ -433,6 +433,7 @@ class McpRecent(Scenario):
                                                "verbose": True}),
             recent("filters AND across", {"n": 500, "sources": ["conversation"], "tags": ["deploy"]}),
             recent("empty lists are no filter", {"n": 4, "sources": [], "tags": [], "episodes": []}),
+            recent("n past the 64-bit range takes everything", {"n": 2 ** 64}),
         ]
 
 
@@ -509,7 +510,9 @@ def align_ties(py_list: list, rs_list: list, key: str = "id", *, ordered=False) 
     return rs, notes
 
 
-def compare(py: dict, rs: dict, *, timeline_fired=False) -> tuple[list[str], list[str]]:
+def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False) -> tuple[list[str], list[str]]:
+    """``ordered``: the answer's entries are in an exact order with no scores
+    (memory_recent), so no tie alignment applies."""
     diffs, notes = [], []
     if py["status"] != rs["status"]:
         diffs.append(f"status: python {py['status']} vs rust {rs['status']}")
@@ -526,7 +529,8 @@ def compare(py: dict, rs: dict, *, timeline_fired=False) -> tuple[list[str], lis
             if isinstance(a.get(k), list) and isinstance(b.get(k), list):
                 key = "id" if k == "entries" else "value"
                 b = dict(b)
-                b[k], n = align_ties(a[k], b[k], key, ordered=timeline_fired and k == "entries")
+                b[k], n = align_ties(a[k], b[k], key,
+                                     ordered=(timeline_fired or ordered) and k == "entries")
                 notes += [f"{k}: {x}" for x in n]
     diffs += diff(a, b)
     return diffs, notes
@@ -825,12 +829,13 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     else:
         py_state = states["python"]
     ordered_queries = timeline_queries(py_state)
-    for row, pair in zip(rows, response_pairs):
+    for row, pair, c in zip(rows, response_pairs, scn.cases()):
         if pair is not None:
             py_r, rs_r = pair
             body = py_r.get("json")
             ordered = isinstance(body, dict) and body.get("query") in ordered_queries
-            row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered)
+            row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
+                                                 ordered=c.get("tool") == "memory_recent")
     cov = coverage(py_seen, py_state)
     cov_fail = unmet(cov, scn.require)
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"])

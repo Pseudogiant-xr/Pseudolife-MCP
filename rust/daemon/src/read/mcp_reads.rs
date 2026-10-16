@@ -16,13 +16,14 @@ fn mcp_memory_recent<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
     Box::pin(async move {
         let a = call.args;
         let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(false);
-        let n = a
-            .get("n")
-            .and_then(Value::as_i64)
-            .unwrap_or(10)
-            .max(0)
-            .try_into()
-            .unwrap_or(usize::MAX);
+        // The binder admits any integer >= 1; Python slices with it as is,
+        // so one past u64 (or usize) takes everything.
+        let n = match a.get("n") {
+            Some(v) => v
+                .as_u64()
+                .map_or(usize::MAX, |n| usize::try_from(n).unwrap_or(usize::MAX)),
+            None => 10,
+        };
         let filters = Filters {
             sources: strings(a.get("sources")),
             episodes: strings(a.get("episodes")),
