@@ -21,3 +21,5 @@ pseudolife_memory/web/static/** -text
 # The updater's packaged Compose fallback must match the checkout byte for byte.
 ops/docker-compose*.yml text eol=lf
 pseudolife_memory/compose/docker-compose*.yml text eol=lf
+# Episode correspondence receipts are generated evidence.
+docs/evidence/rust-stream-c-episode-20261009.json linguist-generated=true

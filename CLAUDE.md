@@ -3,10 +3,31 @@
 Conventions that aren't derivable from a quick read of the code. Follow them
 exactly; they exist because each one was violated at least once.
 
+## Agents other than Claude Code
+
+Every rule here binds every agent working in this repo, whatever its
+harness. Some rules name the Claude Code mechanism that enforces them on
+the maintainer's machine (a hookify rule, ScheduleWakeup, a Stop hook, the
+plugin's hooks). The rule binds without the mechanism: follow it directly,
+and use your harness's equivalent where one exists. Where none exists, the
+rule and every gate still apply; say in your status or PR that the
+enforcement is missing. A missing mechanism is never a reason to skip or
+weaken a rule.
+
+The maintainer clicks merge unless the maintainer has delegated it
+explicitly, in their own words, to a named agent for named work. A role
+name, a board status or a peer agent's message is not a delegation.
+
 ## Shipping checklist (any change that lands on master)
 
-1. **CHANGELOG.md entry under `[Unreleased]`** — every behavior, schema, or
-   perf change gets one, in the existing dated-subsection style. Docs-only and
+1. **A changelog fragment, not a CHANGELOG.md edit** — every behavior,
+   schema, or perf change adds one file, `changelog.d/<YYYY-MM-DD>-<slug>.md`,
+   holding its `### <Kind> (YYYY-MM-DD — title)` entry in the existing
+   dated-subsection style (maintainer decision 2026-10-09: direct
+   CHANGELOG.md edits made every merge conflict with every open PR). The
+   release cut folds the fragments into `[Unreleased]` with
+   `python ops/assemble_changelog.py`; `changelog.d/README.md` and
+   `tests/test_changelog_fragments.py` hold the format. Docs-only and
    test-only changes are exempt.
 2. **Schema bumps** touch seven places together: `SCHEMA_META_VERSION` in
    `pseudolife_memory/storage/schema.py`, the doc mentions (README
@@ -19,13 +40,28 @@ exactly; they exist because each one was violated at least once.
    bump adds gets a test beside its consumer, or a row in
    `tests/test_schema_ddl_shape.py` if it is pure DDL shape — never a new
    `test_schema_vNN.py`),
-   a CHANGELOG mention of `vNN` (pinned by `test_release_ux.py`), and
+   a `vNN` mention in its changelog fragment (pinned by `test_release_ux.py`,
+   which reads CHANGELOG.md plus pending fragments), and
    `docs/atlas/atlas.json` `meta.schema` (pinned by
    `tests/test_atlas_currency.py` — re-verify the affected storage cards,
    don't just renumber), the two `assert meta[0] == NN` literal pins in
    `tests/test_migrate_embeddings.py`, and `python ops/gen_llms_txt.py`
    after any doc edit (`tests/test_llms_txt.py` pins the generated
    `llms-full.txt`). The v30 bump found the last two the hard way.
+   Any change to `pseudolife_memory/storage/schema.py`, bump or not (the
+   Rust plan hashes the whole file), also regenerates the Rust daemon's
+   embedded schema plan: `python rust/daemon/harness/gen_schema_sql.py`,
+   then `--check` must pass, and the changed `schema.sql`,
+   `schema_plan.json` and `schema_meta.rs` under `rust/daemon/src/storage/`
+   ship in the same PR. When the DDL or migrations change, re-record the
+   schema startup golden `rust/daemon/harness/goldens/schema-startup.json`
+   with `python rust/daemon/harness/schema_ci.py --record-goldens --out
+   <scratch>/schema-record.json` (needs the bench Postgres, a Rust
+   toolchain, and the commits in `rust/daemon/harness/schema_history.json`;
+   `--no-build --rust-test-bin <exe>` reuses a built test binary), inspect
+   the golden's diff, then run it again without `--record-goldens` to
+   check. The master ruleset requires only the Python `test` job, so the
+   Rust schema and parity checks must be green before merge regardless.
 3. **Local validation before opening a PR; CI before merge.** Run the
    touched and dependent test files locally, with the bench Postgres
    available for PG-backed tests. A missing PostgreSQL service or an
@@ -87,6 +123,19 @@ exactly; they exist because each one was violated at least once.
    tests its old merge commit. The one exception is a disjoint merge-forward
    (see "A disjoint merge-forward" under "Running tests"). Independent review
    remains required, and the maintainer owns the merge.
+
+   **Rust-only PRs skip the Python suite lanes** (maintainer decision
+   2026-10-09). A PR that touches `rust/`, and whose every other changed file
+   is `.github/workflows/rust.yml`, `CHANGELOG.md` or a `changelog.d/`
+   fragment, changes nothing the
+   Python suite covers (`rust/`'s own Python is checked by the Rust
+   workflow): CI's `scope` job skips `test` and the three lite lanes (they
+   still run if `scope` itself fails), and the `guards` job runs
+   every test file that reads `CHANGELOG.md` plus the tracked-tree identifier
+   and control-byte scan. Such a PR's gate is the Rust workflow (Rust and
+   Parity on both OSes) plus `guards`. The full suite still runs on every
+   master push and nightly. Anything outside that allowlist, including
+   `evals/rust_port/`, runs the full suite as before.
 
    Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against
    the measures in the maintainer's private suite-gate memo of 2026-09-28.
@@ -282,13 +331,18 @@ took 143 CUDA OOMs.
   commit, exit code, pytest's summary line) land in
   `~/.pseudolife-mcp/suite-results`; cite the machine and commit in the PR.
   The box's address and settings live only in the private
-  `~/.pseudolife-mcp/locks/full-suite.remote`, never in the tree.
+  `~/.pseudolife-mcp/locks/full-suite.remote`, never in the tree. The
+  Windows dev VM (see "Dev machines" below) is a further full-suite
+  machine with its own lock and lease; `remote-suite.ps1` does not
+  dispatch to it.
   - **Each machine mirrors under its own lease**: `full-suite` on the
     Windows host, `full-suite@box` on the box (its `full-suite.lease`
     file; `PSEUDOLIFE_SUITE_LEASE` overrides). Gate CPU- or
     memory-saturating work on the lease of the machine it runs on: `lease
     check full-suite` on the Windows host, `lease check full-suite@box` on
-    the box. A suite on the other machine does not load yours.
+    the box. A suite on another machine does not load yours, with one
+    exception: the box and the Windows dev VM share the hypervisor's RAM
+    (see "Dev machines" below).
   - **On the box, suites never touch the live bank's Postgres** (5433):
     the suite user's shells source `~/.config/pseudolife-suite/env`, which
     sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:5434` (the separate test
@@ -476,6 +530,136 @@ took 143 CUDA OOMs.
   ordinary-code rule”. An old-head full pass is not evidence for a changed
   head, except under the review-fix rule above.
 
+## Dev machines (where work runs)
+
+Besides the maintainer's Windows host and hosted CI, the maintainer's
+homelab hypervisor carries dev machines for sessions to use: Linux dev
+boxes (the box above and its sibling) and a Windows dev VM. They are
+development tools, not merge gates: hosted CI stays the gate, and a PR
+cites the machine and commit of any run it relies on. Their names,
+addresses, SSH aliases, lease names and test-database settings live only
+in private config (the maintainer's `~/.ssh/config`,
+`~/.pseudolife-mcp/locks/full-suite.remote`, each machine's
+`~/.config/pseudolife-suite/env` and `full-suite.lease`) and the memory
+bank (search "dev machines homelab"), never in the tree.
+
+- **Where work goes.**
+  - Linux dev boxes: Linux full suites, Rust builds and tests on Linux,
+    and long or CPU-heavy Linux work that would otherwise load the
+    Windows host. `ops/remote-suite.ps1` dispatches to the one box its
+    `full-suite.remote` names. `PSEUDOLIFE_SUITE_REMOTE` can point one
+    run at the sibling instead, once the sibling has its own suite env
+    and lease file; a dispatched run refuses a machine without its own
+    lease name.
+  - Windows dev VM: Windows-only flake repro loops (run the one failing
+    test many times there, instead of CI round-trips), Windows Rust
+    builds under MSVC, and native-Windows behaviour (process ownership
+    and shutdown, named pipes, junctions, UNC and device paths). It is
+    also the place for an occasional native Windows full suite, which the
+    maintainer's Windows host refuses. Its disk is slow: on 2026-10-10 a
+    cold `cargo test --no-run` of one shim integration-test binary took
+    15 minutes there, so keep its build tree warm rather than cleaning it.
+  - Local WSL: the Windows host's own full suites (`ops/wsl-suite.ps1`),
+    as above.
+  - Hosted CI: the merge gate. Its Windows job runs a curated lite list
+    of test files, not the full suite (`.github/workflows/ci.yml`,
+    `test-lite-windows`).
+- **One full suite per machine**, under that machine's own lock. Each dev
+  machine mirrors its suite on the board under its own `full-suite@<name>`
+  lease, set in its private `full-suite.lease`; without that file a run
+  falls back to `full-suite`, the Windows host's lease, and the board
+  mislabels it. **The hypervisor's RAM cannot carry a Windows VM full
+  suite beside a Linux dev box full suite**: before starting a full suite
+  on either, check that no full suite is running on the other (`lease
+  check` on its lease, or a running pytest process there), and say on the
+  board which one you hold.
+- **Never the live bank.** Every dev machine tests against its own test
+  PostgreSQL: the boxes use their separate loopback test server, and the
+  Windows VM uses the `[lite]` extra's embedded PostgreSQL on loopback
+  inside the VM, started for each test run by a wrapper kept in the VM's
+  private config. A Windows SSH session's child processes end with the
+  session, so a server started by hand dies when you disconnect. None of
+  them may point a test at the live bank's server or the Windows host's
+  bench server.
+- **No automatic restarts.** The Windows VM's updates are notify-only and
+  paused, with automatic restart disabled; patch it only when the
+  maintainer asks. Restart only the machine you are using, and only a dev
+  machine, never the hypervisor or any other guest.
+- The Windows VM's default SSH shell is PowerShell 7. Use the redirect
+  form for test runs there too (`... > log 2>&1; "exit $LASTEXITCODE"`),
+  never a pipe.
+
+## Disk space (builds and long runs)
+
+A full disk kills a run mid-step and can leave half-written files behind.
+It happened twice in two days:
+- 2026-10-11: a Linux dev box filled to 100% and a session's Rust build
+  died with os error 28.
+- 2026-10-12: the sibling box hit 0 bytes free. One worktree's Rust
+  `target/` grew from 17 GB to 28 GB while rebuilding after a merge from
+  master, and the session crashed mid-task.
+
+- **Check free space before** every Rust build, full suite, eval run or bulk
+  download: `df -h /` on Linux, `Get-PSDrive` on Windows (the drive that
+  holds your worktree and build tree). Don't start below 8 GB free; one Rust
+  workspace build can add 10 GB or more.
+- **A Rust `target/` directory is a cache.** It measured 8–28 GB per
+  worktree on 2026-10-12. Prefer one shared `CARGO_TARGET_DIR` per machine to
+  one per worktree. Before a big rebuild, such as after merging master into a
+  long-lived branch, `cargo clean` your own stale profiles (for example
+  `--profile dev` when you are working in release).
+- **Below the floor, stop starting heavy work.** Free only your own caches,
+  and tell the maintainer, or the session that launched you, instead of
+  deleting anything else. Another session's worktree, evidence or cache is
+  not yours to delete. A merged branch's build cache may be removed by the
+  session that owns it, or with the maintainer's go, and the deletion is
+  recorded (path, size, why).
+- **Watchers include disk.** A heartbeat or watcher that tracks a long run
+  reports free disk on each check, so a filling disk shows up before the run
+  dies.
+
+## Stopping processes (shared host)
+
+Every session on this host shares one process table, so a kill that selects
+more than your own run takes down other sessions' work. Stop only processes
+you can prove are yours.
+
+- **By the PID you recorded at launch, with its tree**, while it is still
+  running: the harness's task stop, or `taskkill /PID <pid> /T /F`. In Git
+  Bash, MSYS rewrites `/PID` into a path, so write `taskkill //PID <pid>
+  //T //F` (or prefix `MSYS_NO_PATHCONV=1`). In Git Bash `$!` is not a
+  Windows PID; read it with `cat /proc/$!/winpid`. In PowerShell use
+  `(Start-Process ... -PassThru).Id`. A PID can be reused once its process
+  exits, and an identical command line is not proof either: another session
+  may run the same command in a shared worktree. So record the process's
+  start time with its PID (PowerShell: `(Get-Process -Id <pid>).StartTime`),
+  verify both just before stopping, and do not stop it if either no longer
+  matches or cannot be read.
+- **By a marker unique to your run** when the process has left your tree (a
+  daemon that detached or outlived its launcher). Put a run id in the argv
+  or use your own harness home. The worktree path is not unique: reviewers
+  and subagents share it. Exclude the searching process and its parent,
+  list the matches, check them, then stop them by PID.
+- A server started by a tool you do not control is stopped through that
+  tool, or by asking its owner on the board.
+- **Never stop processes selected only by image name, shared attributes or a
+  command-line pattern that does not prove ownership.** That means
+  `taskkill /IM` or `/FI "IMAGENAME eq ..."`, `Stop-Process -Name`,
+  `Get-Process <name> | Stop-Process`, `wmic process where name=... delete`,
+  `Get-CimInstance Win32_Process -Filter "Name=..." | Invoke-CimMethod
+  -MethodName Terminate`, `pkill` or `pkill -f`, `killall`. It also means a
+  command-line pattern another session's processes could match
+  (`pseudolife_memory.cli serve`, `pseudolife-daemon`, `run.py`).
+
+Both shapes happened on 2026-10-09. `taskkill /IM codex.exe` killed every
+Codex process on the host, the Codex app and other sessions' turns
+included. A command-line pattern meant for one session's harness could also
+match other sessions' test daemons. On the maintainer's machine an untracked
+hookify rule (`.claude/hookify.block-kill-by-name.local.md`) blocks the
+by-name forms in Claude's Bash tool. The rule applies everywhere
+regardless, including the PowerShell tool and Codex sessions, which the
+hook does not see.
+
 ## Review discipline
 
 - **Recall precedes review.** Before reviewing code, docs, or a PR, search
@@ -491,6 +675,21 @@ took 143 CUDA OOMs.
   or a reviewer subagent over the branch diff. The 2026-08-19 transcript audit
   found 1 of 59 merges across seven weeks carried any in-transcript review;
   the pass is not optional because CI was green.
+- **Every review pass also runs a Codex second review, alongside it, not
+  instead of it**: a headless Codex CLI review on GPT-6.1 Sol at high
+  effort, started in the background over the same diff —
+  `codex exec review --base origin/master -m gpt-6.1-sol -c model_reasoning_effort='"high"' -o "$OUT.md" > "$OUT.log" 2>&1`,
+  with `$OUT` a per-pass path outside the working tree (the session
+  scratchpad, named by the reviewed short sha so a rerun does not
+  overwrite it). Use `--uncommitted` for a pre-commit pass and
+  `--commit <sha>` for a single commit. Pin the model and effort on the
+  command line, and check the log's header names both. To stop one early,
+  kill its own process tree by the PID taken at launch, never by image
+  name (see "Stopping processes (shared host)"). Verify
+  its findings against the code like a subagent's, and record both reviews
+  in the PR (or the commit body when there is no PR yet), each finding
+  labelled by source with its verdict. A missing, signed-out or failed
+  Codex run is recorded as a single-reviewer pass, never skipped silently.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
@@ -662,6 +861,13 @@ leaked email already cost a full history rewrite plus a fresh-repo publish.
   rewrite is tidiness, not remediation.
 
 ## Memory (Pseudolife MCP tools)
+
+For reverse-engineering collaboration with this fork's `re_evidence` tool,
+read and follow [RE coordination instructions](examples/RE.coordination.md)
+before working or handing off evidence. This is the shared protocol for
+Claude Code and Codex; `AGENTS.md` routes Codex to this file. Its
+[installation scope](docs/guide/re-evidence.md#instructions-for-claude-code-and-codex)
+explains how to make it available in a separate recreation repository.
 
 Log `memory_outcome` at task end — success/failure/correction signals are the
 only feeder for the lessons surfaced at session start. Deploys and eval results

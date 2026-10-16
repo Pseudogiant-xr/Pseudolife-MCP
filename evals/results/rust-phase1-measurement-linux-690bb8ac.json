@@ -1,0 +1,3458 @@
+{
+  "bank_size": 0,
+  "candidate_executable": {
+    "basename": "pseudolife-stdio",
+    "bytes": 16742560,
+    "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+  },
+  "candidate_source": {
+    "files_sha256": {
+      "rust/Cargo.lock": "0253eed162fe04fda9009c8c45d351af1a5c14436500b4826abfaf7c0f5fd7e4",
+      "rust/Cargo.toml": "1755bfe3674de32ddaa1425ed791df61c1cd47ef42abb1f21c41e678853db8d3",
+      "rust/rust-toolchain.toml": "d3c8887dfc80164497209239779196b11a208a9c2a6394f2fa5a5f4c60980096",
+      "rust/shim/Cargo.toml": "8d82c774f869e42e0adf83f18e8c7ba6696726d98c924b547f13d8dc45847871",
+      "rust/shim/src/board.rs": "1c99f1d4bf05e3f60a47ce7d440ff07414f2788b11f19f4143ed5a21601c62df",
+      "rust/shim/src/board/adapter.rs": "7abe57e8ea9fdc4df45e940ce54ec00d9d619b51a18b0e2fb9980f96760c9c75",
+      "rust/shim/src/board/claims.rs": "5f27cc20df4980d1ded4698c5ab8a20b6c2e77e0420c6e1460cd1f256661ab6f",
+      "rust/shim/src/board/delivery.rs": "9607cc730219593fa71a82f66b3f9dd505bfa80963819472c88e9c4beb0d0f25",
+      "rust/shim/src/board/doorbell.rs": "f5c3043b801e57fc1f81b10c480c22bfeda99d3808cd6cc4f1ff55a031e7e715",
+      "rust/shim/src/board/doorbell_posix.rs": "0b872ee862201bd7b446b2aaa89a33a152f6ef4fe3c53f9fd57c7ec49e07e8ff",
+      "rust/shim/src/board/doorbell_windows.rs": "6fbf93661993d4df40aca0a6c852296d61c153ccef41c79525264c63149ee2da",
+      "rust/shim/src/board/identity.rs": "cc8a3f8b1b5d3e7debe7c26ecafecc0b2fffec608dad0192e0bb95788500deb1",
+      "rust/shim/src/board/liveness.rs": "aee765e9c561d96adc81b5f3d5d8bafb41e505140b73b33af9196bbba14989df",
+      "rust/shim/src/board/notice.rs": "2bd0a89e796327aecdd823c1b45c7505656ae41cc8657dc6715f7ba617da6939",
+      "rust/shim/src/board/policy.rs": "49c468b766bdc621dba514b882cf04484a77fca5d1af1a1990a480d26045b080",
+      "rust/shim/src/board/state.rs": "672995d844394ba82ef35e5f5afd037984b28a6f5191388de45587cfb8745ac1",
+      "rust/shim/src/board/unicode14.rs": "4dc9872ea59caf6a66f957da160b2e81a19366062760b5ef2ad33b2c1a4fa60f",
+      "rust/shim/src/cache.rs": "30e0f2235d785dd494df447d9be0cf39776c8faceb07331897970d63551ebde9",
+      "rust/shim/src/credentials.rs": "0b6a8a66b30d903e074148777e5036833a7cee3a27e6b28d73f7dbc781842227",
+      "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
+      "rust/shim/src/errors.rs": "fbc3d61cd678051ab68ea1a3d7f9a91b4df392e5019d143ad05f8e9a7a48290c",
+      "rust/shim/src/lib.rs": "b8e399e2ab43723ded775a075c1014befe76280365c3391521498575e71b8581",
+      "rust/shim/src/lifecycle.rs": "e67c8c636e0daeb9c8136377ab777ffc742ea10d5afbfd61d0af4efa862cee7f",
+      "rust/shim/src/main.rs": "348b07b3833b3560d78e359810a58e495ee73e81f7470484fcd143d449e13e4e",
+      "rust/shim/src/owned_transport.rs": "6723acb67817f2901774ff5ffd3ff401e96ab1fe50f1d063a985d50c7c23520e",
+      "rust/shim/src/raw_http.rs": "eaa04a61425a2bf0609e9151e36d1a0c630063d6462f5270931b46bc1af0b1a8",
+      "rust/shim/src/recovery.rs": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201",
+      "rust/shim/src/subscriptions.rs": "bd3b8522e1266a15316598a2a2ccbb965dbe1e7fa9ed556140a22c877f0e97a9",
+      "rust/shim/src/upstream.rs": "44c78d8044fde7fb8c4fe39f928063748f87271a1c4d6f50bbfa7622879db16d",
+      "rust/shim/src/wire_compatibility.rs": "e51c066fded5c2f6e4a9f3d1412fd9725ac1d26aff51ad10009e4d7fc6f0a283",
+      "rust/shim/src/wire_ids.rs": "6dc3fc3d3d0168e11d9b6419f051bb712f519be12b29ee85e1b874476f3bbcd0",
+      "rust/shim/src/wire_json.rs": "5dce53bca886fb8e8be9855a3eca6a7807cbf6fce9e1659932dfd09c08171648",
+      "rust/shim/tests/auth_credentials.rs": "9539228b6382cd7350fa947b198331eaeda659b5c6f5ea6dc5c7ff6bca9fe60a",
+      "rust/shim/tests/auth_fixture.rs": "3bde3d302ab7286401150748b4576e530328791b156bd2b3635e5903914d505b",
+      "rust/shim/tests/auth_lifecycle_cache.rs": "a9debf544fecf02ab3f3edc76da7956b4c5a92084011e9f0b21d20cb0f5c3a92",
+      "rust/shim/tests/auth_lifecycle_http.rs": "18703a4c987ad5b99c45b65539f61ccd828e123b6c70d40703a1ea4a84f78cff",
+      "rust/shim/tests/auth_lifecycle_runtime.rs": "ca89531e32f6c4d4c54ec9a62ebe513da4eb7faa5660ab588d3c20239c9054e1",
+      "rust/shim/tests/auth_lifecycle_updates.rs": "19415254eff1522649bca8ec0fa186059cd761e7d3a2e5f118a526f28b89aff7",
+      "rust/shim/tests/auth_lifecycle_url.rs": "cbe5f7bd1d0fc8d407c17e725736aec57bac827e99438eca5ff855bbf7f40a39",
+      "rust/shim/tests/auth_windows_private_state/mod.rs": "5014db9df33f6c7c2996d3134131affced1f175522f3b2dc5833d887ad9119f2",
+      "rust/shim/tests/auth_windows_security.rs": "875e6a669a67edc4dd552ea4776f5c075650cbe30de3fc3d5c5197ee87f11d21",
+      "rust/shim/tests/board_bridge_contract.rs": "0c753d08c88f7dbc4cc4b4a400bfce59200ded622aae2ea63e4bdac57e35d2c2",
+      "rust/shim/tests/board_capture.rs": "90d9c57911517c3215e9db7329c9ffc6cd6dadb97ced4837299e99935e85ec42",
+      "rust/shim/tests/board_channel_contract.rs": "49daa81482f53405240c2dfe81a216b5fc2ca42828c12d1210c4aabb29e6a6e3",
+      "rust/shim/tests/board_claims.rs": "476dfde25de4d7bdbc26579bb773476309a428ccb76cc82dc50507c06b7dc802",
+      "rust/shim/tests/board_delivery.rs": "fb359ca72d67b5fd1d3091f90b58183ec4a25159ccfac514855be6e312cb6d45",
+      "rust/shim/tests/board_doorbell.rs": "12f27b23e107ef44655c41a7ef7fdfddfab39a2055fd59043f3c4eabb5bea975",
+      "rust/shim/tests/board_doorbell_completion.rs": "d5a74b80a54689d58dc8bed231b4fc5c7359467bae97069a203ec0a2ecf78ce8",
+      "rust/shim/tests/board_fixture.rs": "a1f52ddb7989c350c7208df7b27bc7446ec851d45505a1d312347932771621e6",
+      "rust/shim/tests/board_identity.rs": "7df5a6b044efecc7e4e1d2903031b89822add9cba7f21b6ce6e763d8e20bba62",
+      "rust/shim/tests/board_network.rs": "144a80776a01dcd05509f24a63ee43741109afd601aa9cfec270afa3e20f99ac",
+      "rust/shim/tests/board_policy.rs": "f3e5ed4dc459d48d05fb7da17775ae5fc37c94a896a6c2fe42b1a4dd94de72ad",
+      "rust/shim/tests/board_renewal.rs": "d987669fbef9c3994182cd1646a53555b455dd9de7eb05f570147c1de931029a",
+      "rust/shim/tests/board_repository.rs": "9bb186d1740769384ceb54cb8bd935e25e772b76e939ff84201f3536dc96563c",
+      "rust/shim/tests/board_retry_contract.rs": "097fc5175ccf680c324af5b9bd3a14bd9885b9d390f949f9101ce7555f366aa3",
+      "rust/shim/tests/board_ring_contract.rs": "5b9fbc0a90c882c1b07a1025ab6a14f20a322b62e7e748f6289a9538cd92108c",
+      "rust/shim/tests/board_state.rs": "cee68ee6996df9b3b989ecc7fff375b24e0961304ccfdf4a0feef987edaca7e6",
+      "rust/shim/tests/claims_recovery_contract.rs": "cd8748d726de48a95ad79ea7b7ddef6816f7e335b054ab5697c7f0d27630e8cc",
+      "rust/shim/tests/common/mod.rs": "a5e44d18bbffc1e8ab67a3ebe652b8d28f88a501a7c91af82b8562a10707462c",
+      "rust/shim/tests/nonboard_contract.rs": "54c7fbc732b124892a806a3a46e7ae186edd3f9cca07930a81d3de92c3158318",
+      "rust/shim/tests/nonboard_final_assertions.rs": "bb267c38f3dfad889a8ac7b6b06e5cef6033f2a4782e9409ef066ea5812a9051",
+      "rust/shim/tests/nonboard_rotation.rs": "98c6607b1bafe20d3aeaedf475c15b3f436485ff4574b4c65f22be7daf9610c7",
+      "rust/shim/tests/nonboard_spawn_policy.rs": "ca12019a3e32106751205069ef4d59ccfff41c86dbbb170d473161fb0d6fd3f8",
+      "rust/shim/tests/nonboard_startup.rs": "5ca755dfc15944267d464b4a31ad1259371c20c2021ccb2a2841990a45b0167e",
+      "rust/shim/tests/shim_contract.rs": "1be701ae5cc8a8a8dbc6877a166e6d6a1c55586ba50eb575d6cfd8c3f15d2c84",
+      "rust/shim/tests/shim_transport_recovery_contract.rs": "dedcb3892c5ae8e7c6424dbc17881eb5b604a7013097ae1b08f9d5845d1579cb",
+      "rust/shim/tests/shim_wire_contract.rs": "d0b736102dea9d4ebec63d248918871d76ef69b323cacaac8135193cb019e110",
+      "rust/shim/tests/stdio_concurrent_contract.rs": "16faa583a47ad5c8b67e294e1a0d85cfa272aea223862ecc9f07c73e07d39791",
+      "rust/shim/tests/stdio_eof_contract.rs": "af605059e3a7739754bad195e81010a0c887e7ef3db96e5ec115159d63ccf308"
+    },
+    "source_binding": "clean native Git checkout; executable hash, not a build attestation",
+    "source_dirty": false,
+    "source_head": "690bb8acd855250c29145d623a039ddcd4dee6cb",
+    "source_tree": "9116cc4c98e79e947322fe2772476e255b73f033"
+  },
+  "historical_method": {
+    "artifact": "rust-rewrite-baseline-shim-20261003-r5.json",
+    "boundary": "before owned CLI spawn through initialize return and initialized notification",
+    "bytes_binding": "canonical Git blob; checkout line-ending filters do not apply",
+    "git_blob_oid": "a7ddf073f0e8102cecdc2947bffc0b2f546151cd",
+    "retained_metric": "startup_ms",
+    "sha256": "3d29fcba85601c4647208da7448e85245861af16671ec22a33c9393c43fac581",
+    "source_commit": "f709abb54f7912ae9cd767998d0926ca33df4bcd"
+  },
+  "limitations": [
+    "Fresh public CLI; warm OS filesystem cache; empty loopback HTTP fixture; no PG, models or daemon spawn.",
+    "Coordination and Codex doorbell disabled; no live-bank access; private state removed after each cell.",
+    "first_frame_ms ends at reader observation of the first complete stdout line, before JSON parsing.",
+    "peak_rss_bytes is a sampled lower bound on simultaneous process-tree RSS, including descendants.",
+    "Peak RSS has a separate untimed fresh process, sampled after ownership setup until EOF/exit; short peaks can be missed.",
+    "executable_bytes is the selected launcher file only; Python runtime/dependency size is excluded.",
+    "r5 contains initialize-return timing and idle RSS, not first-frame timing or peak RSS; those metrics have no historical match.",
+    "Noise floors are descriptive repeat-block ranges, not confidence intervals; external desktop activity uncontrolled.",
+    "Final status records the caller's frozen-binary signal; executable/source identities are checked throughout."
+  ],
+  "metrics": {
+    "python": {
+      "executable_bytes": {
+        "distribution": {
+          "max": 21662864,
+          "median": 21662864.0,
+          "min": 21662864,
+          "n": 30,
+          "p50": 21662864,
+          "p95": 21662864
+        },
+        "median_control": {
+          "available": true,
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "noise_floor_abs": 0.0,
+          "repeat_medians": [
+            21662864.0,
+            21662864.0,
+            21662864.0
+          ]
+        },
+        "p50": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 0,
+          "repeat_values": [
+            21662864,
+            21662864,
+            21662864
+          ],
+          "value": 21662864
+        },
+        "p95": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 0,
+          "repeat_values": [
+            21662864,
+            21662864,
+            21662864
+          ],
+          "value": 21662864
+        }
+      },
+      "first_frame_ms": {
+        "distribution": {
+          "max": 696.7504779750016,
+          "median": 668.8116479926975,
+          "min": 557.5973869999871,
+          "n": 30,
+          "p50": 668.4369119757321,
+          "p95": 695.7094160025008
+        },
+        "median_control": {
+          "available": true,
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "noise_floor_abs": 11.780523011111654,
+          "repeat_medians": [
+            661.6157584940083,
+            668.4057869861135,
+            673.39628150512
+          ]
+        },
+        "p50": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 12.770655011991039,
+          "repeat_values": [
+            660.0343780010007,
+            668.374661996495,
+            672.8050330129918
+          ],
+          "value": 668.4369119757321
+        },
+        "p95": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 16.678553976817057,
+          "repeat_values": [
+            696.7504779750016,
+            695.7094160025008,
+            680.0719239981845
+          ],
+          "value": 695.7094160025008
+        }
+      },
+      "peak_rss_bytes": {
+        "distribution": {
+          "max": 74227712,
+          "median": 73904128.0,
+          "min": 73695232,
+          "n": 30,
+          "p50": 73904128,
+          "p95": 74223616
+        },
+        "median_control": {
+          "available": true,
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "noise_floor_abs": 241664.0,
+          "repeat_medians": [
+            73904128.0,
+            73779200.0,
+            74020864.0
+          ]
+        },
+        "p50": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 221184,
+          "repeat_values": [
+            73904128,
+            73777152,
+            73998336
+          ],
+          "value": 73904128
+        },
+        "p95": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 172032,
+          "repeat_values": [
+            74227712,
+            74055680,
+            74137600
+          ],
+          "value": 74223616
+        }
+      },
+      "startup_ms": {
+        "distribution": {
+          "max": 696.8545760028064,
+          "median": 668.90121299366,
+          "min": 557.681614998728,
+          "n": 30,
+          "p50": 668.5253029863816,
+          "p95": 695.7706999965012
+        },
+        "median_control": {
+          "available": true,
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "noise_floor_abs": 11.779170017689466,
+          "repeat_medians": [
+            661.7042249854421,
+            668.4902599954512,
+            673.4833950031316
+          ]
+        },
+        "p50": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 12.774462025845423,
+          "repeat_values": [
+            660.120044980431,
+            668.4552170045208,
+            672.8945070062764
+          ],
+          "value": 668.5253029863816
+        },
+        "p95": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 16.701533022569492,
+          "repeat_values": [
+            696.8545760028064,
+            695.7706999965012,
+            680.1530429802369
+          ],
+          "value": 695.7706999965012
+        }
+      }
+    },
+    "rust": {
+      "executable_bytes": {
+        "distribution": {
+          "max": 16742560,
+          "median": 16742560.0,
+          "min": 16742560,
+          "n": 30,
+          "p50": 16742560,
+          "p95": 16742560
+        },
+        "median_control": {
+          "available": true,
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "noise_floor_abs": 0.0,
+          "repeat_medians": [
+            16742560.0,
+            16742560.0,
+            16742560.0
+          ]
+        },
+        "p50": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 0,
+          "repeat_values": [
+            16742560,
+            16742560,
+            16742560
+          ],
+          "value": 16742560
+        },
+        "p95": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 0,
+          "repeat_values": [
+            16742560,
+            16742560,
+            16742560
+          ],
+          "value": 16742560
+        }
+      },
+      "first_frame_ms": {
+        "distribution": {
+          "max": 6.841330992756411,
+          "median": 5.913599496125244,
+          "min": 5.383754993090406,
+          "n": 30,
+          "p50": 5.887967010494322,
+          "p95": 6.547803990542889
+        },
+        "median_control": {
+          "available": true,
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "noise_floor_abs": 0.13035199663136154,
+          "repeat_medians": [
+            5.8329129969934,
+            5.963264993624762,
+            5.913133005378768
+          ]
+        },
+        "p50": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 0.1322799944318831,
+          "repeat_values": [
+            5.8069519873242825,
+            5.939231981756166,
+            5.879434000235051
+          ],
+          "value": 5.887967010494322
+        },
+        "p95": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 0.45604901970364153,
+          "repeat_values": [
+            6.841330992756411,
+            6.547803990542889,
+            6.38528197305277
+          ],
+          "value": 6.547803990542889
+        }
+      },
+      "peak_rss_bytes": {
+        "distribution": {
+          "max": 11907072,
+          "median": 11653120.0,
+          "min": 11440128,
+          "n": 30,
+          "p50": 11649024,
+          "p95": 11845632
+        },
+        "median_control": {
+          "available": true,
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "noise_floor_abs": 194560.0,
+          "repeat_medians": [
+            11585536.0,
+            11780096.0,
+            11653120.0
+          ]
+        },
+        "p50": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 196608,
+          "repeat_values": [
+            11534336,
+            11730944,
+            11649024
+          ],
+          "value": 11649024
+        },
+        "p95": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 65536,
+          "repeat_values": [
+            11845632,
+            11907072,
+            11841536
+          ],
+          "value": 11845632
+        }
+      },
+      "startup_ms": {
+        "distribution": {
+          "max": 6.921666994458064,
+          "median": 5.9991065063513815,
+          "min": 5.467311013489962,
+          "n": 30,
+          "p50": 5.970104015432298,
+          "p95": 6.629729992710054
+        },
+        "median_control": {
+          "available": true,
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "noise_floor_abs": 0.1335775014013052,
+          "repeat_medians": [
+            5.913325498113409,
+            6.046902999514714,
+            5.99518499802798
+          ]
+        },
+        "p50": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 0.13723000301979482,
+          "repeat_values": [
+            5.89087899425067,
+            6.028108997270465,
+            5.961582995951176
+          ],
+          "value": 5.970104015432298
+        },
+        "p95": {
+          "method": "max minus min of identical-input repeat block quantiles",
+          "noise_floor_abs": 0.4574730119202286,
+          "repeat_values": [
+            6.921666994458064,
+            6.629729992710054,
+            6.464193982537836
+          ],
+          "value": 6.629729992710054
+        }
+      }
+    }
+  },
+  "provenance": {
+    "host": {
+      "architecture": "x86_64",
+      "label": "local-cpu-01",
+      "logical_cpus": 8,
+      "os": "Linux",
+      "os_release": "6.6.114.1-microsoft-standard-WSL2",
+      "physical_cpus": 4,
+      "ram_bytes": 42060558336
+    },
+    "instrument_sha256": {
+      "evals/rust_baseline/__init__.py": "c1722478e4cc576b1f5623673c4730bbbe128bdb1bd5f1ac172cdea7ac65e674",
+      "evals/rust_baseline/ci.py": "e9ce796dff12d128903f9c0678facef60ff70d15f6fe7abe06dc53a5e2a4de03",
+      "evals/rust_baseline/common.py": "0c2a74901cc935bbf03eec5d84b5de5b52d97d92696e388cf017c4ccf074a02c",
+      "evals/rust_baseline/daemon.py": "6968c2315da3bcd9fbcd4780c82faf11aef9b993ec5b0961a596727c53071e4d",
+      "evals/rust_baseline/daemon_child.py": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+      "evals/rust_baseline/scaling.py": "4df2f32c0e17b07a9ef2477d9037571cc7fffa204e64bfe3f60e30b830390bd7",
+      "evals/rust_baseline/scaling_child.py": "481c77113ef0b6f02d6c5681baa9acb85236d52ee552a296676f2dfc3ddb1517",
+      "evals/rust_baseline/shim.py": "bdd028df521705cfbfdab32dfbcc28962680351bc449c8a89f6036e281725407",
+      "evals/rust_baseline/shim_measurement.py": "fe30eb00ace41c35cd0a550836aaab2a762d26e3e30054f1aa779a5abbdd1e16",
+      "evals/rust_baseline/test_baseline.py": "865c10f02599a28123c9fbc88ed60cf20a9b3fe5597889e9f373b40af16871fa",
+      "evals/rust_baseline/test_review_fixes.py": "2990a91b17906e241f2366e5604fcf175be43567acdcd2bcc3a72c3281445cb5",
+      "evals/rust_baseline/test_scaling.py": "36124408bc76d8d101031c633d5264166ca84241c43926db8e02d12f6f17fdd2",
+      "evals/rust_baseline/test_shim_measurement.py": "22ec172af201c6123eac68cacb237795ece860d4fd07eec286d6fb2bbabbf76b",
+      "evals/rust_baseline/transport.py": "345a47a45ce510ee0a9e75b6282e2f46773ae8b32a979108c3483a1de8fec826"
+    },
+    "measured_at_utc": "2026-10-04T21:23:44Z",
+    "parent_runtime": {
+      "dependencies": {
+        "httpx": "0.28.1",
+        "mcp": "2.1.1",
+        "psutil": "7.2.2",
+        "psycopg": "3.3.6",
+        "sentence-transformers": "6.1.0",
+        "torch": "2.14.1+cpu"
+      },
+      "python": "3.11.15"
+    },
+    "process_helper_sha256": {
+      "processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5"
+    },
+    "runtime_provenance_sha256": {
+      "provenance.py": "8ea7c835a1cc6c4efb966dd4b858861434d0a1ea91c113947a4effd0eec7d212"
+    },
+    "source_dirty": false,
+    "source_head": "690bb8acd855250c29145d623a039ddcd4dee6cb",
+    "source_schema": 54
+  },
+  "python_executable": {
+    "basename": "python3.11",
+    "bytes": 21662864,
+    "sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a"
+  },
+  "python_oracle": {
+    "oracle_head": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
+    "production_source_matches_pin": true
+  },
+  "repeat_resource_checks": [
+    {
+      "checked_at_utc": "2026-10-04T21:22:49Z",
+      "cli_board_available": false,
+      "lead_board_checked_free_at_utc": null,
+      "local_lease_check_exit": 0,
+      "local_lock_free": true,
+      "offline_resource_checked_at_utc": "2026-10-04T21:22:49Z",
+      "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance",
+      "offline_resource_clearance_used": true
+    },
+    {
+      "checked_at_utc": "2026-10-04T21:23:07Z",
+      "cli_board_available": false,
+      "lead_board_checked_free_at_utc": null,
+      "local_lease_check_exit": 0,
+      "local_lock_free": true,
+      "offline_resource_checked_at_utc": "2026-10-04T21:22:49Z",
+      "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance",
+      "offline_resource_clearance_used": true
+    },
+    {
+      "checked_at_utc": "2026-10-04T21:23:25Z",
+      "cli_board_available": false,
+      "lead_board_checked_free_at_utc": null,
+      "local_lease_check_exit": 0,
+      "local_lock_free": true,
+      "offline_resource_checked_at_utc": "2026-10-04T21:22:49Z",
+      "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance",
+      "offline_resource_clearance_used": true
+    }
+  ],
+  "repeats": 3,
+  "resource_check": {
+    "checked_at_utc": "2026-10-04T21:22:49Z",
+    "cli_board_available": false,
+    "lead_board_checked_free_at_utc": null,
+    "local_lease_check_exit": 0,
+    "local_lock_free": true,
+    "offline_resource_checked_at_utc": "2026-10-04T21:22:49Z",
+    "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance",
+    "offline_resource_clearance_used": true
+  },
+  "runs": {
+    "python": [
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 672.2997229953762,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73670656
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73797632,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 0,
+        "startup_ms": 672.400640003616
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 667.4818649771623,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73891840
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73904128,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 141,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 1,
+        "startup_ms": 667.5703410001006
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 654.7670340223704,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73789440
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74223616,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 2,
+        "startup_ms": 654.8481399950106
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 678.7649830221198,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73662464
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73695232,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 140,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 3,
+        "startup_ms": 678.8479690148961
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 657.5076369917952,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73711616
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73879552,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 142,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 4,
+        "startup_ms": 657.5894120032899
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 658.5211130150128,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73576448
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74006528,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 140,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 5,
+        "startup_ms": 658.607760007726
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 663.1971389870159,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73576448
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73707520,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 6,
+        "startup_ms": 663.2884049904533
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 653.7689119868446,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73723904
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74121216,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 138,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 7,
+        "startup_ms": 653.8608389964793
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 660.0343780010007,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73723904
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74227712,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 140,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 8,
+        "startup_ms": 660.120044980431
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 696.7504779750016,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73814016
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73904128,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 9,
+        "startup_ms": 696.8545760028064
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 675.0198350055143,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73629696
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73744384,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 0,
+        "startup_ms": 675.113990000682
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 665.5245919828303,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73678848
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73781248,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 137,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 1,
+        "startup_ms": 665.6072190089617
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 557.5973869999871,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73891840
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73961472,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 140,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 2,
+        "startup_ms": 557.681614998728
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 668.374661996495,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73760768
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74055680,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 138,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 3,
+        "startup_ms": 668.4552170045208
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 668.4369119757321,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73674752
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73711616,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 4,
+        "startup_ms": 668.5253029863816
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 687.3713450040668,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73846784
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73777152,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 140,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 5,
+        "startup_ms": 687.4824609840289
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 678.8692740083206,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73994240
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74047488,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 6,
+        "startup_ms": 678.9754540077411
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 657.2142090008128,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73814016
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73961472,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 140,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 7,
+        "startup_ms": 657.2996879986022
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 695.7094160025008,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73687040
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73711616,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 141,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 8,
+        "startup_ms": 695.7706999965012
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 647.3860219994094,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73850880
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73719808,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 141,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 9,
+        "startup_ms": 647.4717569944914
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 673.9875299972482,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73801728
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74043392,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 140,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 0,
+        "startup_ms": 674.0722829999868
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 672.8050330129918,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73895936
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73711616,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 1,
+        "startup_ms": 672.8945070062764
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 672.617556003388,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73900032
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73805824,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 141,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 2,
+        "startup_ms": 672.7032279886771
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 676.8764909938909,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73846784
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73879552,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 141,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 3,
+        "startup_ms": 676.9587379822042
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 635.1348519965541,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73732096
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74113024,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 140,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 4,
+        "startup_ms": 635.2268409973476
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 680.0719239981845,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73834496
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74137600,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 140,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 5,
+        "startup_ms": 680.1530429802369
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 660.5340399837587,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73752576
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74121216,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 143,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 6,
+        "startup_ms": 660.6391999812331
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 669.186384009663,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73584640
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73998336,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 138,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 7,
+        "startup_ms": 669.2771230009384
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 678.5810709989164,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73617408
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 73883648,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 8,
+        "startup_ms": 678.6744660057593
+      },
+      {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.1",
+            "pseudolife-mcp": "0.16.1",
+            "psycopg": "3.3.6",
+            "sentence-transformers": "6.1.0",
+            "torch": "2.14.1+cpu"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python3.11",
+          "executable_sha256": "572cfa2a8597e2f431c785613539b1d219fa99eecf5ffb5765731a2ebc3e692a",
+          "package_runtime_version": "0.16.1",
+          "python": "3.11.15",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+          "source_origin_matches_selected_root": true
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 21662864,
+        "first_frame_ms": 676.908279012423,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 73814016
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 74047488,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 139,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 9,
+        "startup_ms": 676.9955640193075
+      }
+    ],
+    "rust": [
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.776072997832671,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 12013568
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11698176,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 0,
+        "startup_ms": 5.863275000592694
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.963693023659289,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 12029952
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11845632,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 1,
+        "startup_ms": 6.067321024602279
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.841330992756411,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11911168
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11505664,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 2,
+        "startup_ms": 6.921666994458064
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.740960012190044,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 12025856
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11456512,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 3,
+        "startup_ms": 5.818742007249966
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.13750601769425,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11771904
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11509760,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 4,
+        "startup_ms": 6.218376016477123
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.407451011706144,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11857920
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11534336,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 5,
+        "startup_ms": 5.483624991029501
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.8069519873242825,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11763712
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11509760,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 6,
+        "startup_ms": 5.89087899425067
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.39737700112164,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11706368
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11649024,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 7,
+        "startup_ms": 6.4760129898786545
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.858874006662518,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11771904
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11636736,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 8,
+        "startup_ms": 5.935772001976147
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.383754993090406,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11898880
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11661312,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 0,
+        "sample": 9,
+        "startup_ms": 5.467311013489962
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.195729016326368,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11845632
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11907072,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 0,
+        "startup_ms": 6.271649996051565
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.547222011955455,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11763712
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11730944,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 1,
+        "startup_ms": 5.627658014418557
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.939231981756166,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11898880
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11845632,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 2,
+        "startup_ms": 6.028108997270465
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.887967010494322,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 12042240
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11440128,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 3,
+        "startup_ms": 5.970104015432298
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.36621899320744,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11956224
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11829248,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 4,
+        "startup_ms": 6.4494899997953326
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.547803990542889,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 12099584
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11522048,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 5,
+        "startup_ms": 6.629729992710054
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.987298005493358,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 12034048
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11718656,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 6,
+        "startup_ms": 6.065697001758963
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.588038009591401,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11776000
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11829248,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 7,
+        "startup_ms": 5.672844999935478
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.087874004151672,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11829248
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11624448,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 8,
+        "startup_ms": 6.17449200944975
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.733318976126611,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11739136
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11829248,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 1,
+        "sample": 9,
+        "startup_ms": 5.823429994052276
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.366468005580828,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11821056
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11714560,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 0,
+        "startup_ms": 6.432516995118931
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.879434000235051,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 12013568
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11706368,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 1,
+        "startup_ms": 5.961582995951176
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.946832010522485,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11776000
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11706368,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 2,
+        "startup_ms": 6.028787000104785
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.8364900178276,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11776000
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11509760,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 3,
+        "startup_ms": 5.929800012381747
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.191862979903817,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 12013568
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11841536,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 4,
+        "startup_ms": 6.278575980104506
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.779561004601419,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11907072
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11640832,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 5,
+        "startup_ms": 5.859308002982289
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.272461992921308,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11763712
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11513856,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 6,
+        "startup_ms": 6.352033989969641
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.534077994525433,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11927552
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11657216,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 2,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 7,
+        "startup_ms": 5.611323984339833
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 6.38528197305277,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11784192
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11517952,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 8,
+        "startup_ms": 6.464193982537836
+      },
+      {
+        "actual_child_runtime": {
+          "basename": "pseudolife-stdio",
+          "bytes": 16742560,
+          "sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+        },
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "executable_bytes": 16742560,
+        "first_frame_ms": 5.72498599649407,
+        "fixture_auth_match": true,
+        "idle_process_tree": {
+          "processes": 1,
+          "rss_bytes": 11866112
+        },
+        "peak_cleanup": {
+          "cleanup_confirmed": true,
+          "exit_code": 0,
+          "forced": false,
+          "process_stopped": true,
+          "stderr_present": false,
+          "subtree_stopped": true
+        },
+        "peak_protocol": "2025-11-25",
+        "peak_rss_bytes": 11649024,
+        "peak_rss_poll_interval_s": 0.005,
+        "peak_rss_samples": 3,
+        "protocol": "2025-11-25",
+        "repeat": 2,
+        "sample": 9,
+        "startup_ms": 5.8177519822493196
+      }
+    ]
+  },
+  "samples_per_repeat": 10,
+  "schema": 2,
+  "status": "quiet-fixture-pair-final"
+}

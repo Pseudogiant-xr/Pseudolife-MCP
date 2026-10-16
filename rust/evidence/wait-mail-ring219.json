@@ -1,0 +1,2863 @@
+{
+  "kind": "historical wait-mail evidence-only receipt",
+  "acceptance": "deferred",
+  "evidence_head": "33f554026621c4863b853c17bb8a4f69b8940d74",
+  "evidence_tree": "9d26a008f3df272659973ad2a1cb94091376afdc",
+  "evidence_base": "a3399cca1dcd072bc1910d6f75cb6109c74740b7",
+  "prior_head": "57c720ef8072ef6360d2a3b5b21cbc3b2cdfbcb7",
+  "carrier_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+  "carrier_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+  "oracle_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+  "prepared_oracle": {
+    "head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+    "tree": "2665f39b7ac9a933695c540d09a40badac177815",
+    "schema_AST_only": 55,
+    "wait_mail_module_pin": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+    "both_wait_mail_modules_match": true
+  },
+  "references": [
+    {
+      "artifact": "wait-mail-ring219-runtime-result.json",
+      "bytes": 42052,
+      "sha256": "cf21d2cb13861a93e70ea77cc297bb0cee8f4495990dbf8044c3f3fc4bb49206"
+    },
+    {
+      "artifact": "wait-mail-ec697-evidence-carrier-inventory.json",
+      "bytes": 22406,
+      "sha256": "86ea1180c598632af0846065adcbe931bc54185f9e3f815ec57fa2fbac9a2434"
+    },
+    {
+      "artifact": "wait-mail-ec697-carrier-preparation.json",
+      "bytes": 10732,
+      "sha256": "33fb1293fed0c3dda04e1a1dd5003ff9c65b905f138fd9fad1b0528c9a4a425f"
+    },
+    {
+      "artifact": "wait-mail-ring219-source-repair.json",
+      "bytes": 11052,
+      "sha256": "907e5d2a5879421aa521820740d6dcb3bf12eacede5307cc5e7deb987426aab4"
+    },
+    {
+      "artifact": "wait-mail-ring219-linux-binding.json",
+      "bytes": 203769,
+      "sha256": "c75a27ec4ffbf166cdfd20e84b7505e9dc4b8460eec6e6fdc0e0dbba263bb7b9"
+    },
+    {
+      "artifact": "wait-mail-ring219-windows-proof.py",
+      "bytes": 2094,
+      "sha256": "42550e078983ae2a02a13e9d5144d0ae83c5bf429dd51541eb985eb80b49033f"
+    }
+  ],
+  "source_pins": [
+    {
+      "path": "tests/test_wait_mail_cli.py",
+      "blob": "e7997f65db41db59ff0cc877baf9e298061048d8",
+      "canonical_sha256": "f9942ec5548497f243174b59dd984487b6eea8aa883081d0c4bb3a8a49851a1d"
+    },
+    {
+      "path": "evals/rust_port/cli_wait_mail.py",
+      "blob": "f2c3400fc47b8d9fce3b76bde81c2f68a2f7ba93",
+      "canonical_sha256": "fe12c08edc1b5487e0775fbc462a74c872596eec85bab025bb815da20c265e99"
+    },
+    {
+      "path": "evals/rust_port/test_wait_mail_phase2d_native.py",
+      "blob": "ff822564c538d964b4643ddb06bd919821cc551e",
+      "canonical_sha256": "9fef45cfa6e1a030f2e2315a3d13bafb47f705bfc72cd4edbfe50d314786c10d"
+    },
+    {
+      "path": "evals/rust_port/test_wait_mail_reduction_native.py",
+      "blob": "b9960c236e20518dfcfda1878bbcf536b3bc6c1a",
+      "canonical_sha256": "c9faeca87c92759512e5bf4aba52ef6d8a268846efa47c446581220084970afc"
+    },
+    {
+      "path": "evals/rust_port/wait_mail_candidate_contract.py",
+      "blob": "ef9a90168dcfd5017eb58a040a1dd87a10d638a8",
+      "canonical_sha256": "5a5f252cac36c39b53b072fb487491776ea3c75c4ff76dda35a6ff4d6232efe0"
+    },
+    {
+      "path": "evals/rust_port/wait_mail_candidate_expectations.json",
+      "blob": "618c65c9a0eee2015368b093b8af5a87fe4170a7",
+      "canonical_sha256": "0c5635f7419403d1d24866a652a6da1c3495c74a472fcb4c12e77a65a879c3b3"
+    },
+    {
+      "path": "evals/rust_port/cli_process.py",
+      "blob": "2205bbafd125c84f2a424519a02461583abcf7ef",
+      "canonical_sha256": "0f67e1b83384847e495011a3c6914cb61146ef65a50b424927748a568caa10f0"
+    },
+    {
+      "path": "evals/rust_port/provenance.py",
+      "blob": "041896a7d25a38d139375d7e245bdcefb46fabb2",
+      "canonical_sha256": "7328191c87a18dc8409f2cd072751374a662a5c34e086d133d5307d8b87b463c"
+    }
+  ],
+  "images": {
+    "Windows": {
+      "head": "57c720ef8072ef6360d2a3b5b21cbc3b2cdfbcb7",
+      "tree": "b2d60b22463f7d1c211f63722f9dc72c57055c39",
+      "sha256": "06ccf5900b0890e5ebfb87cdefcfdce6928dcf3850e34e5cbb4ef653e973ec99",
+      "bytes": 27900416,
+      "recipe": "+1.94.0 build --locked --offline -j2 -p pseudolife-stdio; incremental0",
+      "built_utc": "2026-10-08T13:37:04.62934+11:00",
+      "inputs_sha256": "1016842e3228a3f0d20f8896cb62cf18249bf7b06c65488a5ae1989cace4b2cd",
+      "physical_rehash_this_packet": true,
+      "receipt_status": "historical build; not a new carrier build"
+    },
+    "Linux": {
+      "head": "57c720ef8072ef6360d2a3b5b21cbc3b2cdfbcb7",
+      "tree": "b2d60b22463f7d1c211f63722f9dc72c57055c39",
+      "sha256": "863356360224242e05031f6d9f67eacf17c096351114655e7635115ef851a8e2",
+      "bytes": 173641520,
+      "recipe": "+1.94.0 build --locked --offline -j2 -p pseudolife-stdio; incremental0",
+      "built_utc": "2026-10-08T13:16:54.777191+11:00",
+      "inputs_sha256": "1a26a8f2f11870bbfea4c9b3543b231480c82be7922e9ca024ebf70e99b4064d",
+      "physical_rehash_this_packet": false,
+      "receipt_status": "historical build; not a new carrier build"
+    }
+  },
+  "compile_input_comparison": {
+    "Windows79": {
+      "count": 79,
+      "canonical_equal_to_carrier": true,
+      "manifest": {
+        "artifact": "wait-mail-ring219-linux-binding.json",
+        "bytes": 203769,
+        "sha256": "c75a27ec4ffbf166cdfd20e84b7505e9dc4b8460eec6e6fdc0e0dbba263bb7b9"
+      },
+      "rows": [
+        {
+          "path": "rust/shim/src/argv.rs",
+          "sha256": "0273c36c6b105f38ec77692a9835868bf9695dd31920cdda3b98926f9dfbf5bb"
+        },
+        {
+          "path": "rust/shim/src/board/adapter.rs",
+          "sha256": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc"
+        },
+        {
+          "path": "rust/shim/src/board/claims.rs",
+          "sha256": "5f27cc20df4980d1ded4698c5ab8a20b6c2e77e0420c6e1460cd1f256661ab6f"
+        },
+        {
+          "path": "rust/shim/src/board/delivery.rs",
+          "sha256": "9607cc730219593fa71a82f66b3f9dd505bfa80963819472c88e9c4beb0d0f25"
+        },
+        {
+          "path": "rust/shim/src/board/doorbell.rs",
+          "sha256": "eef3c4766d3c03778eee3e7d63779b22f737e943f61c140f0c60291fdefe3747"
+        },
+        {
+          "path": "rust/shim/src/board/doorbell_windows.rs",
+          "sha256": "c1516b80d4ee895778edb9e10cb7f536b882c595dc0f756afae25fcc1927b9b3"
+        },
+        {
+          "path": "rust/shim/src/board/identity.rs",
+          "sha256": "cc8a3f8b1b5d3e7debe7c26ecafecc0b2fffec608dad0192e0bb95788500deb1"
+        },
+        {
+          "path": "rust/shim/src/board/liveness.rs",
+          "sha256": "7f167b55aa3dd68377d6df05bf24374677cc31f3506c27087bbb3abca61a5b8a"
+        },
+        {
+          "path": "rust/shim/src/board/notice.rs",
+          "sha256": "720ade355e99fb0cb9270db5d805b9adf62f9308281a811e693a06ce7c4fd930"
+        },
+        {
+          "path": "rust/shim/src/board/policy.rs",
+          "sha256": "49c468b766bdc621dba514b882cf04484a77fca5d1af1a1990a480d26045b080"
+        },
+        {
+          "path": "rust/shim/src/board/state.rs",
+          "sha256": "742bbbd556787edd080b18d774f94e0c1e570752dbd07eec64425df23f5327fc"
+        },
+        {
+          "path": "rust/shim/src/board/unicode14.rs",
+          "sha256": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb"
+        },
+        {
+          "path": "rust/shim/src/board.rs",
+          "sha256": "48988db7e35af679c569e79480c096b51ef9fc9a502c1dc9a96abd997c909056"
+        },
+        {
+          "path": "rust/shim/src/cache.rs",
+          "sha256": "30e0f2235d785dd494df447d9be0cf39776c8faceb07331897970d63551ebde9"
+        },
+        {
+          "path": "rust/shim/src/cli/briefing_help.txt",
+          "sha256": "443e8b51f02b3a1ac9c381d3653ceb9a6a6e5142398fe992c29edd3b523ee638"
+        },
+        {
+          "path": "rust/shim/src/cli/briefing_hook.rs",
+          "sha256": "319b94e1e1f2997dbbc1ed5a3440d2c7a49d6786e20b5f56bec979b4035d2f47"
+        },
+        {
+          "path": "rust/shim/src/cli/doorbell_files.rs",
+          "sha256": "a9b1fd8249271dc32d7e13e0316031e43ada21ca237c9544bcc0d7ec4146e87d"
+        },
+        {
+          "path": "rust/shim/src/cli/doorbell_json.rs",
+          "sha256": "3cca54d1f6f3f81b1b079b39efb83c575f73ea05c9251c2928c883cd01724062"
+        },
+        {
+          "path": "rust/shim/src/cli/doorbell_seen.rs",
+          "sha256": "8b438e01e9a4fb426944ac15c428d185221f1306bc6ec3b1c79a97966a9778e0"
+        },
+        {
+          "path": "rust/shim/src/cli/episode.rs",
+          "sha256": "99c45adfe959ed68a38f96e95502acdd2ca94d8912dcea16a700c73101695de8"
+        },
+        {
+          "path": "rust/shim/src/cli/episode_input.rs",
+          "sha256": "77def92a2ec55e376a2c9b9730b9e4730e276b98bf3db606db7ceadb94bbb57c"
+        },
+        {
+          "path": "rust/shim/src/cli/hook_json.rs",
+          "sha256": "a9d2d9288093ab02bde7de5565d5715a9de3502d019a8314e9b8fead6c078b54"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/args.rs",
+          "sha256": "934f34c26c1dd6033f6d0177538f7569a3503faf6db4110591e333aad762eac1"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/break_help.txt",
+          "sha256": "91061e2163b2ae009990a3007553b849ae2e2cc9306a8027695302e535b671e5"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/break_usage.txt",
+          "sha256": "51c6d7ec574a72ba5a48db3c6ff5f5a3b90ee285b18c14b1a649b902bcd5853f"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/check_help.txt",
+          "sha256": "970c0c7067eb0593bc5dd53a2d9a58d630aa65292e31db179b979ec181f90b7d"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/check_usage.txt",
+          "sha256": "05ede560bdfaf08006996dd4ce9c5ac4d51041a60c4accd410c19a146a6a549c"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/delegate_help.txt",
+          "sha256": "0f94d6a88b21a2295c8ec12195d8e6e051392e461abe900e3c0522bd1b3fe297"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/delegate_usage.txt",
+          "sha256": "7a7712f716f9b498cb1741edcb266abd0257a609c22d3aa55d755c097bbedc87"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/hold_help.txt",
+          "sha256": "8dfcbda629438e0119bd90de243fb143610821972783041729fdbb8c9b5e0a55"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/hold_usage.txt",
+          "sha256": "213572e7144a226ea190d50e15d5a5ba855e181269452e70d05480043b485cbc"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/list_help.txt",
+          "sha256": "6ade157c15b8e494741955459a452c4ce5de80aefa56702e6126eafdfd00b30d"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/list_usage.txt",
+          "sha256": "3ff9c9624e996a5c6e70e8b02636cc642a8723045e75c34351654c91d40a1720"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/run_help.txt",
+          "sha256": "a53102608e925996dce9812c1181a6c08c68980791b2505b975f4280f259856f"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/run_usage.txt",
+          "sha256": "01270b268a86dfe46dcc309a1a92867f6232a3d391caf01105443caf94306d38"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/top_help.txt",
+          "sha256": "e884965d433ddd282aca72059d4c344a4c5eaaa86d9351e2ece91b18473c1780"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/top_usage.txt",
+          "sha256": "04ba689b5f6143e80d61b7444252d99faf0e39594e0852bfcdac1a83268ed33c"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/board.rs",
+          "sha256": "5c3a25359cdff98807beda9a61283e7d94977052be1e2a35bcdc71b42ba5aa40"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/hold.rs",
+          "sha256": "410cd2a2188669150df0fad9ed397e772f70330817485afc3e167e3ca9598f0c"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/json.rs",
+          "sha256": "9cb570f0d8d1a30d4fda81cdfc01900b50176b586f5c363c6a9ca231cae65fd7"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/lock.rs",
+          "sha256": "3401a53b7e7fc83fcf074e822024e53cc83bae95c9db0243a480d3fa67b1c34d"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/mod.rs",
+          "sha256": "c8bf23b61d1275dc4698b9ee725a6d183a120cd955a8cc56309f437d080620a2"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/operator/mod.rs",
+          "sha256": "53537114395b6d9dfb8aa88e2d379400426d6d5aa1c8e515b31ef8fd16d6f570"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/operator/secrets.rs",
+          "sha256": "a1e140a49c5a5be78334c7603c8f7536e4a1ce5ff0e61199caae1b3703c733d8"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/operator/store/delegate.rs",
+          "sha256": "01588818d5c07865ee207c15cc63408272e594d906f000123201975ead236f92"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/operator/store.rs",
+          "sha256": "a7fd77c33869efaef85b30a9420dd8583a54cf4094bbc61826410da1396afaf7"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/run.rs",
+          "sha256": "7452d697b14067a6355c4667e50bf758a0a07483b7b8653b51c7153193d78433"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/view.rs",
+          "sha256": "1cc6e5ae43ee2aeb367fdbc7bae28ef567e28aef42eeb54b3456d7fbba5d7ce6"
+        },
+        {
+          "path": "rust/shim/src/cli/version.rs",
+          "sha256": "98c171058c0150d5a6e724352d388796bd99803bc8617723932a32103fea2284"
+        },
+        {
+          "path": "rust/shim/src/cli/wait_mail.rs",
+          "sha256": "7ae1d0820a6edfd32da84e16c769e5e1ef2706922fb283818790ef185bfa994a"
+        },
+        {
+          "path": "rust/shim/src/cli/wait_mail_args.rs",
+          "sha256": "be8c6934c07de37d356ac6edb2d8ec6b9251435365c705a657c5f591c98680fc"
+        },
+        {
+          "path": "rust/shim/src/cli/wait_mail_help.txt",
+          "sha256": "d6ee2b145e55e105a7885b653fcc88f56eabacf1c4626fd8675cd17258b8c60e"
+        },
+        {
+          "path": "rust/shim/src/cli.rs",
+          "sha256": "1c52468eb2c79c06a9591d802b4850e12dd898e6657ef6d9949a2dc6a3b1896c"
+        },
+        {
+          "path": "rust/shim/src/cli_help.txt",
+          "sha256": "759a7ecda00a610211478fa811804ee5bba9092f55ebf7478bed54c041c9230a"
+        },
+        {
+          "path": "rust/shim/src/credentials.rs",
+          "sha256": "412febda61793cad085c63d26f56763b4916e59363f788769195303c1396c136"
+        },
+        {
+          "path": "rust/shim/src/daemon_url.rs",
+          "sha256": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e"
+        },
+        {
+          "path": "rust/shim/src/errors.rs",
+          "sha256": "fbc3d61cd678051ab68ea1a3d7f9a91b4df392e5019d143ad05f8e9a7a48290c"
+        },
+        {
+          "path": "rust/shim/src/lib.rs",
+          "sha256": "0a6308a3075dc72f35be31d96904cfad73a9c10b515b8387691208550f561b5f"
+        },
+        {
+          "path": "rust/shim/src/lifecycle.rs",
+          "sha256": "bad9de05be6531c976f2a335cb666e5363437516c272bdd788479015253eaca9"
+        },
+        {
+          "path": "rust/shim/src/lifecycle_executable.rs",
+          "sha256": "da0f66066d4e12bd383ce4b505c0882425a8897a2ca6c548a2b6e7b3246f6995"
+        },
+        {
+          "path": "rust/shim/src/main.rs",
+          "sha256": "d2ae0830b541cf5ebb3d27e5b891ac56b787cebe9df8c3fb0062bb6df7e2cd6e"
+        },
+        {
+          "path": "rust/shim/src/maintainer_sent.rs",
+          "sha256": "26a539f852d669eb93f1a99d4f96f757ea74c548fde1d3830e2dba6dbe661af3"
+        },
+        {
+          "path": "rust/shim/src/owned_transport.rs",
+          "sha256": "6723acb67817f2901774ff5ffd3ff401e96ab1fe50f1d063a985d50c7c23520e"
+        },
+        {
+          "path": "rust/shim/src/pg/dsn.rs",
+          "sha256": "136cdf8466bb0250ee1396091ef4896e0237d6088bbadb7b36984ecf2f671452"
+        },
+        {
+          "path": "rust/shim/src/pg/mod.rs",
+          "sha256": "d2b4f0bc63085218263442fd654f173c8a0d261b96aa316cf10fdf55774604bc"
+        },
+        {
+          "path": "rust/shim/src/pg/resolution.rs",
+          "sha256": "91eafb10b9521ddc6554a2f941140f6bf26daddbe479367ac7ec8a79f38d6841"
+        },
+        {
+          "path": "rust/shim/src/pg/tls.rs",
+          "sha256": "3276fea0f0673b49dc75032d5cc202c78299702f693f0a02b2de39ba6ddbdf37"
+        },
+        {
+          "path": "rust/shim/src/pg/transport.rs",
+          "sha256": "d8e8130f874383e0466e6b52a56a37388963dcbf68079938638c5a933dc8a087"
+        },
+        {
+          "path": "rust/shim/src/raw_http.rs",
+          "sha256": "eaa04a61425a2bf0609e9151e36d1a0c630063d6462f5270931b46bc1af0b1a8"
+        },
+        {
+          "path": "rust/shim/src/recovery.rs",
+          "sha256": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201"
+        },
+        {
+          "path": "rust/shim/src/sent_config.rs",
+          "sha256": "00a4d30595b1de95be15b0cf3e514a514fd9c06b8b96b2c57d49539f3869ca08"
+        },
+        {
+          "path": "rust/shim/src/sent_json.rs",
+          "sha256": "83ca7dad88697835815de2f8fb850c1b2ac719db3be2cdaf9bc053e414c6a228"
+        },
+        {
+          "path": "rust/shim/src/sent_jsonb.rs",
+          "sha256": "d9265b4adb2842160310fd5410bd8c9224933bf09acce6ff48143d21022cc46e"
+        },
+        {
+          "path": "rust/shim/src/sent_serve.rs",
+          "sha256": "2535369ef676171afda5169b0a237545ed81fb0f4b3458305570581f418197f0"
+        },
+        {
+          "path": "rust/shim/src/subscriptions.rs",
+          "sha256": "bd3b8522e1266a15316598a2a2ccbb965dbe1e7fa9ed556140a22c877f0e97a9"
+        },
+        {
+          "path": "rust/shim/src/upstream.rs",
+          "sha256": "44c78d8044fde7fb8c4fe39f928063748f87271a1c4d6f50bbfa7622879db16d"
+        },
+        {
+          "path": "rust/shim/src/wire_compatibility.rs",
+          "sha256": "e51c066fded5c2f6e4a9f3d1412fd9725ac1d26aff51ad10009e4d7fc6f0a283"
+        },
+        {
+          "path": "rust/shim/src/wire_ids.rs",
+          "sha256": "6dc3fc3d3d0168e11d9b6419f051bb712f519be12b29ee85e1b874476f3bbcd0"
+        },
+        {
+          "path": "rust/shim/src/wire_json.rs",
+          "sha256": "5dce53bca886fb8e8be9855a3eca6a7807cbf6fce9e1659932dfd09c08171648"
+        }
+      ]
+    },
+    "Linux82": {
+      "count": 82,
+      "canonical_equal_to_carrier": true,
+      "manifest": {
+        "artifact": "wait-mail-ring219-linux-binding.json",
+        "bytes": 203769,
+        "sha256": "c75a27ec4ffbf166cdfd20e84b7505e9dc4b8460eec6e6fdc0e0dbba263bb7b9"
+      },
+      "rows": [
+        {
+          "path": "rust/shim/src/argv.rs",
+          "physical_old_sha256": "6127ddc8365488e330f1ec990cfd87eeeaf273da79841b2533b693118a622f79",
+          "canonical_sha256": "0273c36c6b105f38ec77692a9835868bf9695dd31920cdda3b98926f9dfbf5bb"
+        },
+        {
+          "path": "rust/shim/src/board/adapter.rs",
+          "physical_old_sha256": "81a3c0fcc0936992a280467df0c9e16437b6063d0e43ec04a9b6047192e3a4e9",
+          "canonical_sha256": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc"
+        },
+        {
+          "path": "rust/shim/src/board/claims.rs",
+          "physical_old_sha256": "f4761b5987afa049e4e4f6934bd5212e469310ca09311f57cd0514c2320e515e",
+          "canonical_sha256": "5f27cc20df4980d1ded4698c5ab8a20b6c2e77e0420c6e1460cd1f256661ab6f"
+        },
+        {
+          "path": "rust/shim/src/board/delivery.rs",
+          "physical_old_sha256": "fda16ae9adf849f6fc03bf762e720bb6723066d84c768385f4d640a7f5bebd0b",
+          "canonical_sha256": "9607cc730219593fa71a82f66b3f9dd505bfa80963819472c88e9c4beb0d0f25"
+        },
+        {
+          "path": "rust/shim/src/board/doorbell.rs",
+          "physical_old_sha256": "95ed4afd89d055c449b53ef1c37a321e424aeb4d20d15fafe51d14d93d4dcc7a",
+          "canonical_sha256": "eef3c4766d3c03778eee3e7d63779b22f737e943f61c140f0c60291fdefe3747"
+        },
+        {
+          "path": "rust/shim/src/board/doorbell_linux_cleanup.rs",
+          "physical_old_sha256": "50941d3bfdc9a7c08b74d6c9ee68c54a1c7a7a0ad94e1a89ab249b5861159701",
+          "canonical_sha256": "7c96f3d79a50a0ad31eb820bb2bf7776b6da59f145d656f0be5cebef27bc3351"
+        },
+        {
+          "path": "rust/shim/src/board/doorbell_posix.rs",
+          "physical_old_sha256": "e1dbe15cfb8bc83480c4e23521020e18330067bb51ec951ffef0d579063ab702",
+          "canonical_sha256": "690504d199014803a065c0d0eb8362d486b6bb6aa09cd2cb738353affab2881e"
+        },
+        {
+          "path": "rust/shim/src/board/identity.rs",
+          "physical_old_sha256": "4c9bab4f26a97445c2cfabc4797e237775e7d63275f1bcd60b094f2a3e487cd4",
+          "canonical_sha256": "cc8a3f8b1b5d3e7debe7c26ecafecc0b2fffec608dad0192e0bb95788500deb1"
+        },
+        {
+          "path": "rust/shim/src/board/liveness.rs",
+          "physical_old_sha256": "d88e71e473d342a1af81d73c4abda9056cba307fcd83c9f9df622aba6bd4c60d",
+          "canonical_sha256": "7f167b55aa3dd68377d6df05bf24374677cc31f3506c27087bbb3abca61a5b8a"
+        },
+        {
+          "path": "rust/shim/src/board/notice.rs",
+          "physical_old_sha256": "b0832b18adab8b4aa727dd42cbeb778db3e57113f8512907fa6786786d1fe728",
+          "canonical_sha256": "720ade355e99fb0cb9270db5d805b9adf62f9308281a811e693a06ce7c4fd930"
+        },
+        {
+          "path": "rust/shim/src/board/policy.rs",
+          "physical_old_sha256": "96dbfdbb734d0985f36795db2432ff611eb4fc1b098e762934c355c12c95e353",
+          "canonical_sha256": "49c468b766bdc621dba514b882cf04484a77fca5d1af1a1990a480d26045b080"
+        },
+        {
+          "path": "rust/shim/src/board/state.rs",
+          "physical_old_sha256": "c15c87377b4611ea396d3cbc6e7c661d37dfaf427344079db45e4f0229d396bd",
+          "canonical_sha256": "742bbbd556787edd080b18d774f94e0c1e570752dbd07eec64425df23f5327fc"
+        },
+        {
+          "path": "rust/shim/src/board/unicode14.rs",
+          "physical_old_sha256": "7915f25b441cc637159674ff0b1645c931f1b0fdd25f1bd9f6aa850b4295dc94",
+          "canonical_sha256": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb"
+        },
+        {
+          "path": "rust/shim/src/board.rs",
+          "physical_old_sha256": "f53e8c3a74d07183ac27da2e6ae11d83f9d43cd186d1444ee85a30f55116453b",
+          "canonical_sha256": "48988db7e35af679c569e79480c096b51ef9fc9a502c1dc9a96abd997c909056"
+        },
+        {
+          "path": "rust/shim/src/cache.rs",
+          "physical_old_sha256": "7da56abddda077d7a5ea28743d13ea5205a16e817794b0d8d6a892f34ab68cc5",
+          "canonical_sha256": "30e0f2235d785dd494df447d9be0cf39776c8faceb07331897970d63551ebde9"
+        },
+        {
+          "path": "rust/shim/src/cli/briefing_help.txt",
+          "physical_old_sha256": "e50fcd748a49e422ba04b8ab8362ad268b658b0d8f771bad8bcbc7b560f142c4",
+          "canonical_sha256": "443e8b51f02b3a1ac9c381d3653ceb9a6a6e5142398fe992c29edd3b523ee638"
+        },
+        {
+          "path": "rust/shim/src/cli/briefing_hook.rs",
+          "physical_old_sha256": "15889decaa829c2d7ee39a5d75725856a198562d58f77b4a2a98935bbacdfb0a",
+          "canonical_sha256": "319b94e1e1f2997dbbc1ed5a3440d2c7a49d6786e20b5f56bec979b4035d2f47"
+        },
+        {
+          "path": "rust/shim/src/cli/doorbell_files.rs",
+          "physical_old_sha256": "f5fd136ae037c576986c4f9ba7b825f13504f4503e5b357c7b07e57a05c0aa31",
+          "canonical_sha256": "a9b1fd8249271dc32d7e13e0316031e43ada21ca237c9544bcc0d7ec4146e87d"
+        },
+        {
+          "path": "rust/shim/src/cli/doorbell_json.rs",
+          "physical_old_sha256": "1cf6c351be5696ad42e7e1d42d3249bf9d567dba32bcb064d35035a5e92650d7",
+          "canonical_sha256": "3cca54d1f6f3f81b1b079b39efb83c575f73ea05c9251c2928c883cd01724062"
+        },
+        {
+          "path": "rust/shim/src/cli/doorbell_seen.rs",
+          "physical_old_sha256": "1d3fa31da3fa4fa428ea37d495c1a64d1fff1b5aac56fb53039c18a9de6acecf",
+          "canonical_sha256": "8b438e01e9a4fb426944ac15c428d185221f1306bc6ec3b1c79a97966a9778e0"
+        },
+        {
+          "path": "rust/shim/src/cli/episode.rs",
+          "physical_old_sha256": "dc414f975e0c1ce7ddc1809cc76c2d26c36c951216dd06dca6d968f8a6e634ab",
+          "canonical_sha256": "99c45adfe959ed68a38f96e95502acdd2ca94d8912dcea16a700c73101695de8"
+        },
+        {
+          "path": "rust/shim/src/cli/episode_input.rs",
+          "physical_old_sha256": "8141c73e50fe572414ace054c1164fae0e6a11603eaf8294a4674d7dfe508951",
+          "canonical_sha256": "77def92a2ec55e376a2c9b9730b9e4730e276b98bf3db606db7ceadb94bbb57c"
+        },
+        {
+          "path": "rust/shim/src/cli/hook_json.rs",
+          "physical_old_sha256": "54d47d4bd5620a8d310a9c1afd4ac754cdf48766f4fa14f14a0f916e3d740073",
+          "canonical_sha256": "a9d2d9288093ab02bde7de5565d5715a9de3502d019a8314e9b8fead6c078b54"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/args.rs",
+          "physical_old_sha256": "81320272185bb7f148c6d42c4e41aa2e2056043486a06cd51bc60e667431f8ec",
+          "canonical_sha256": "934f34c26c1dd6033f6d0177538f7569a3503faf6db4110591e333aad762eac1"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/break_help.txt",
+          "physical_old_sha256": "91061e2163b2ae009990a3007553b849ae2e2cc9306a8027695302e535b671e5",
+          "canonical_sha256": "91061e2163b2ae009990a3007553b849ae2e2cc9306a8027695302e535b671e5"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/break_usage.txt",
+          "physical_old_sha256": "51c6d7ec574a72ba5a48db3c6ff5f5a3b90ee285b18c14b1a649b902bcd5853f",
+          "canonical_sha256": "51c6d7ec574a72ba5a48db3c6ff5f5a3b90ee285b18c14b1a649b902bcd5853f"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/check_help.txt",
+          "physical_old_sha256": "970c0c7067eb0593bc5dd53a2d9a58d630aa65292e31db179b979ec181f90b7d",
+          "canonical_sha256": "970c0c7067eb0593bc5dd53a2d9a58d630aa65292e31db179b979ec181f90b7d"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/check_usage.txt",
+          "physical_old_sha256": "05ede560bdfaf08006996dd4ce9c5ac4d51041a60c4accd410c19a146a6a549c",
+          "canonical_sha256": "05ede560bdfaf08006996dd4ce9c5ac4d51041a60c4accd410c19a146a6a549c"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/delegate_help.txt",
+          "physical_old_sha256": "0f94d6a88b21a2295c8ec12195d8e6e051392e461abe900e3c0522bd1b3fe297",
+          "canonical_sha256": "0f94d6a88b21a2295c8ec12195d8e6e051392e461abe900e3c0522bd1b3fe297"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/delegate_usage.txt",
+          "physical_old_sha256": "7a7712f716f9b498cb1741edcb266abd0257a609c22d3aa55d755c097bbedc87",
+          "canonical_sha256": "7a7712f716f9b498cb1741edcb266abd0257a609c22d3aa55d755c097bbedc87"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/hold_help.txt",
+          "physical_old_sha256": "8dfcbda629438e0119bd90de243fb143610821972783041729fdbb8c9b5e0a55",
+          "canonical_sha256": "8dfcbda629438e0119bd90de243fb143610821972783041729fdbb8c9b5e0a55"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/hold_usage.txt",
+          "physical_old_sha256": "213572e7144a226ea190d50e15d5a5ba855e181269452e70d05480043b485cbc",
+          "canonical_sha256": "213572e7144a226ea190d50e15d5a5ba855e181269452e70d05480043b485cbc"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/list_help.txt",
+          "physical_old_sha256": "6ade157c15b8e494741955459a452c4ce5de80aefa56702e6126eafdfd00b30d",
+          "canonical_sha256": "6ade157c15b8e494741955459a452c4ce5de80aefa56702e6126eafdfd00b30d"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/list_usage.txt",
+          "physical_old_sha256": "3ff9c9624e996a5c6e70e8b02636cc642a8723045e75c34351654c91d40a1720",
+          "canonical_sha256": "3ff9c9624e996a5c6e70e8b02636cc642a8723045e75c34351654c91d40a1720"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/run_help.txt",
+          "physical_old_sha256": "a53102608e925996dce9812c1181a6c08c68980791b2505b975f4280f259856f",
+          "canonical_sha256": "a53102608e925996dce9812c1181a6c08c68980791b2505b975f4280f259856f"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/run_usage.txt",
+          "physical_old_sha256": "01270b268a86dfe46dcc309a1a92867f6232a3d391caf01105443caf94306d38",
+          "canonical_sha256": "01270b268a86dfe46dcc309a1a92867f6232a3d391caf01105443caf94306d38"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/top_help.txt",
+          "physical_old_sha256": "e884965d433ddd282aca72059d4c344a4c5eaaa86d9351e2ece91b18473c1780",
+          "canonical_sha256": "e884965d433ddd282aca72059d4c344a4c5eaaa86d9351e2ece91b18473c1780"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/assets/top_usage.txt",
+          "physical_old_sha256": "04ba689b5f6143e80d61b7444252d99faf0e39594e0852bfcdac1a83268ed33c",
+          "canonical_sha256": "04ba689b5f6143e80d61b7444252d99faf0e39594e0852bfcdac1a83268ed33c"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/board.rs",
+          "physical_old_sha256": "a88f6ef2861e454027941e5d94ee87ae7eee3e996156e696c0dcfd5fa3c60ef3",
+          "canonical_sha256": "5c3a25359cdff98807beda9a61283e7d94977052be1e2a35bcdc71b42ba5aa40"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/hold.rs",
+          "physical_old_sha256": "22ba63128075eb2c9dc044478c05de3f4fa325573f9962c7ec60b32aea9f27d5",
+          "canonical_sha256": "410cd2a2188669150df0fad9ed397e772f70330817485afc3e167e3ca9598f0c"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/json.rs",
+          "physical_old_sha256": "09b3e45d2853244f0e7689162497a6f40cbe23289c18925a21eabe3cb3160392",
+          "canonical_sha256": "9cb570f0d8d1a30d4fda81cdfc01900b50176b586f5c363c6a9ca231cae65fd7"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/lock.rs",
+          "physical_old_sha256": "d84906cdf28785117ddc32c2b4051538da662d3b33ad2838d1130f260850e734",
+          "canonical_sha256": "3401a53b7e7fc83fcf074e822024e53cc83bae95c9db0243a480d3fa67b1c34d"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/mod.rs",
+          "physical_old_sha256": "1003bf668c6fce3197bae0fd1e74f58ab245ba4361125e7abb6d94eeba47730d",
+          "canonical_sha256": "c8bf23b61d1275dc4698b9ee725a6d183a120cd955a8cc56309f437d080620a2"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/operator/mod.rs",
+          "physical_old_sha256": "f89a14eb3feb832dfc543381095eb870107be0ba4f2d2e5e4923fc4881df537f",
+          "canonical_sha256": "53537114395b6d9dfb8aa88e2d379400426d6d5aa1c8e515b31ef8fd16d6f570"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/operator/secrets.rs",
+          "physical_old_sha256": "088c6efb5877f035988e9bb6af8a4a1eb069976dde6e1623b7d327ecbe014056",
+          "canonical_sha256": "a1e140a49c5a5be78334c7603c8f7536e4a1ce5ff0e61199caae1b3703c733d8"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/operator/store/delegate.rs",
+          "physical_old_sha256": "e2d810e170c7918847a4f4fa24266506e49148c64469a80df07442c23d7d0247",
+          "canonical_sha256": "01588818d5c07865ee207c15cc63408272e594d906f000123201975ead236f92"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/operator/store.rs",
+          "physical_old_sha256": "7c4171726bf5d1fefa8baa54632c75cff9fe09d39bddb79628d8cc602333864f",
+          "canonical_sha256": "a7fd77c33869efaef85b30a9420dd8583a54cf4094bbc61826410da1396afaf7"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/run.rs",
+          "physical_old_sha256": "bb2f8c980ea40201df18e9b19f766b313d35a44565bfe34049bfc02ee81b7ac4",
+          "canonical_sha256": "7452d697b14067a6355c4667e50bf758a0a07483b7b8653b51c7153193d78433"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/sigint.rs",
+          "physical_old_sha256": "9a8e72760c38357129c16d0ac8845fba2034ea554cb8452e6f2f2df8684e42fc",
+          "canonical_sha256": "ff7d18768305ff0560a508ad5956f06f4875403efe7c161710277633d41e9430"
+        },
+        {
+          "path": "rust/shim/src/cli/lease/view.rs",
+          "physical_old_sha256": "dfbc056f045f32356f3250045cab1175ba2270b56933939678e7ac002f1441d8",
+          "canonical_sha256": "1cc6e5ae43ee2aeb367fdbc7bae28ef567e28aef42eeb54b3456d7fbba5d7ce6"
+        },
+        {
+          "path": "rust/shim/src/cli/version.rs",
+          "physical_old_sha256": "8ced298a4140799facbd15c9837c17eb5f48a7b552e5afe2d597dd1e8acff894",
+          "canonical_sha256": "98c171058c0150d5a6e724352d388796bd99803bc8617723932a32103fea2284"
+        },
+        {
+          "path": "rust/shim/src/cli/wait_mail.rs",
+          "physical_old_sha256": "f0184e7ed24e5252ff71db75fd8fe3759a84d96d8e7284d20f6e1a840e743bab",
+          "canonical_sha256": "7ae1d0820a6edfd32da84e16c769e5e1ef2706922fb283818790ef185bfa994a"
+        },
+        {
+          "path": "rust/shim/src/cli/wait_mail_args.rs",
+          "physical_old_sha256": "e2fd7536f97e488330c968338807ab541717380d2d086fc226f644c467225ddb",
+          "canonical_sha256": "be8c6934c07de37d356ac6edb2d8ec6b9251435365c705a657c5f591c98680fc"
+        },
+        {
+          "path": "rust/shim/src/cli/wait_mail_help.txt",
+          "physical_old_sha256": "d6ee2b145e55e105a7885b653fcc88f56eabacf1c4626fd8675cd17258b8c60e",
+          "canonical_sha256": "d6ee2b145e55e105a7885b653fcc88f56eabacf1c4626fd8675cd17258b8c60e"
+        },
+        {
+          "path": "rust/shim/src/cli.rs",
+          "physical_old_sha256": "0635f36084f540a28055d3760a977c3c6ce490cf39748f480b5644bed5d3bf41",
+          "canonical_sha256": "1c52468eb2c79c06a9591d802b4850e12dd898e6657ef6d9949a2dc6a3b1896c"
+        },
+        {
+          "path": "rust/shim/src/cli_help.txt",
+          "physical_old_sha256": "759a7ecda00a610211478fa811804ee5bba9092f55ebf7478bed54c041c9230a",
+          "canonical_sha256": "759a7ecda00a610211478fa811804ee5bba9092f55ebf7478bed54c041c9230a"
+        },
+        {
+          "path": "rust/shim/src/credentials/unix_accounts.rs",
+          "physical_old_sha256": "41c1b2d9fb84d2df0fc31cbd20eb6b2f50f7467a38cef9610c712fd743003a9a",
+          "canonical_sha256": "d30f56e73eb66cb4dad5989bab84e4ccb33692b0433262f50caca02dcf58a0be"
+        },
+        {
+          "path": "rust/shim/src/credentials.rs",
+          "physical_old_sha256": "d336fe3439e43b829a7578fd69f3e74e083d5444a7e24fa2b763ef3f729c91fa",
+          "canonical_sha256": "412febda61793cad085c63d26f56763b4916e59363f788769195303c1396c136"
+        },
+        {
+          "path": "rust/shim/src/daemon_url.rs",
+          "physical_old_sha256": "41697fb2407ecf7a36b00ff0dd204df4b87b58cff8c365c3c99a08c5b26267a9",
+          "canonical_sha256": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e"
+        },
+        {
+          "path": "rust/shim/src/errors.rs",
+          "physical_old_sha256": "f28fa5d4f68b08357f7837fee778a0cd20ee3a442e069db07a0ed1024492c876",
+          "canonical_sha256": "fbc3d61cd678051ab68ea1a3d7f9a91b4df392e5019d143ad05f8e9a7a48290c"
+        },
+        {
+          "path": "rust/shim/src/lib.rs",
+          "physical_old_sha256": "c6193559e832491517a1ebf4d7fa1602ee491bc04ba34102ac7af7b1e9e5478e",
+          "canonical_sha256": "0a6308a3075dc72f35be31d96904cfad73a9c10b515b8387691208550f561b5f"
+        },
+        {
+          "path": "rust/shim/src/lifecycle.rs",
+          "physical_old_sha256": "b02b86a50a4789c9e138e80e34b2bb4cd96da82f1a711af0ba5ea83926d9a478",
+          "canonical_sha256": "bad9de05be6531c976f2a335cb666e5363437516c272bdd788479015253eaca9"
+        },
+        {
+          "path": "rust/shim/src/lifecycle_executable.rs",
+          "physical_old_sha256": "51fcba9905e02d37501d8afec61658df6a09b34042813a7aa87c6573e870ce20",
+          "canonical_sha256": "da0f66066d4e12bd383ce4b505c0882425a8897a2ca6c548a2b6e7b3246f6995"
+        },
+        {
+          "path": "rust/shim/src/main.rs",
+          "physical_old_sha256": "c7cfc5494316a92d2b9b182b989cd2a05c42500acbfa39738a8488fde03763be",
+          "canonical_sha256": "d2ae0830b541cf5ebb3d27e5b891ac56b787cebe9df8c3fb0062bb6df7e2cd6e"
+        },
+        {
+          "path": "rust/shim/src/maintainer_sent.rs",
+          "physical_old_sha256": "fd04ef74c4403e0559a49171e8a772e03708763d3485ab7296ecdeae3af936cb",
+          "canonical_sha256": "26a539f852d669eb93f1a99d4f96f757ea74c548fde1d3830e2dba6dbe661af3"
+        },
+        {
+          "path": "rust/shim/src/owned_transport.rs",
+          "physical_old_sha256": "bbdcf13daa7df3cd9901880c75170a7648018e0c2b3f7377218ae1a82ae04eff",
+          "canonical_sha256": "6723acb67817f2901774ff5ffd3ff401e96ab1fe50f1d063a985d50c7c23520e"
+        },
+        {
+          "path": "rust/shim/src/pg/dsn.rs",
+          "physical_old_sha256": "2107c0536e4066281b682e53879b04d0c23746667c47daf499a169a15c6ef8b8",
+          "canonical_sha256": "136cdf8466bb0250ee1396091ef4896e0237d6088bbadb7b36984ecf2f671452"
+        },
+        {
+          "path": "rust/shim/src/pg/mod.rs",
+          "physical_old_sha256": "7896499dc0e47b1bd9d7ba547bbd09aebdc661a711eb397ff81303f6c6baad09",
+          "canonical_sha256": "d2b4f0bc63085218263442fd654f173c8a0d261b96aa316cf10fdf55774604bc"
+        },
+        {
+          "path": "rust/shim/src/pg/resolution.rs",
+          "physical_old_sha256": "6df6d3b836cacc6f9360fc6fc725cbdf34001fcee978810add991dfc53442654",
+          "canonical_sha256": "91eafb10b9521ddc6554a2f941140f6bf26daddbe479367ac7ec8a79f38d6841"
+        },
+        {
+          "path": "rust/shim/src/pg/tls.rs",
+          "physical_old_sha256": "10cfebb3023ef319bec0fa39508b5fc632a06325bbcea76b463561541379df56",
+          "canonical_sha256": "3276fea0f0673b49dc75032d5cc202c78299702f693f0a02b2de39ba6ddbdf37"
+        },
+        {
+          "path": "rust/shim/src/pg/transport.rs",
+          "physical_old_sha256": "5a6a760512aa00be774582f21e08b0a801b1211f6bdc1e60f533f2d997ced42b",
+          "canonical_sha256": "d8e8130f874383e0466e6b52a56a37388963dcbf68079938638c5a933dc8a087"
+        },
+        {
+          "path": "rust/shim/src/raw_http.rs",
+          "physical_old_sha256": "538a16bbf18b4054b72ad0cdfafbc87a53c986dd6522bef221c2e47f81615fbc",
+          "canonical_sha256": "eaa04a61425a2bf0609e9151e36d1a0c630063d6462f5270931b46bc1af0b1a8"
+        },
+        {
+          "path": "rust/shim/src/recovery.rs",
+          "physical_old_sha256": "d07ecad01b4511956f4dbe38f5c9c4b0f63f8c6b1b4651e317ee6b9bb22392a4",
+          "canonical_sha256": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201"
+        },
+        {
+          "path": "rust/shim/src/sent_config.rs",
+          "physical_old_sha256": "d42bb489a1789114c92288ba9384869d9aedd93cfd4e8b8b67504ba0418780e6",
+          "canonical_sha256": "00a4d30595b1de95be15b0cf3e514a514fd9c06b8b96b2c57d49539f3869ca08"
+        },
+        {
+          "path": "rust/shim/src/sent_json.rs",
+          "physical_old_sha256": "6577a78ec041dc2a773cb308f4749baf0419e83dc58453e494c0a902861efa61",
+          "canonical_sha256": "83ca7dad88697835815de2f8fb850c1b2ac719db3be2cdaf9bc053e414c6a228"
+        },
+        {
+          "path": "rust/shim/src/sent_jsonb.rs",
+          "physical_old_sha256": "c98de11fc19a112c78ecd7a41fc969f1c046901c7680906bb73930a5247391f1",
+          "canonical_sha256": "d9265b4adb2842160310fd5410bd8c9224933bf09acce6ff48143d21022cc46e"
+        },
+        {
+          "path": "rust/shim/src/sent_serve.rs",
+          "physical_old_sha256": "643538f043b7cfccf4706b027ac7962f6da701ec3c99555780aee52aba0edd1a",
+          "canonical_sha256": "2535369ef676171afda5169b0a237545ed81fb0f4b3458305570581f418197f0"
+        },
+        {
+          "path": "rust/shim/src/subscriptions.rs",
+          "physical_old_sha256": "0c11720ec35209f368276cf1cd403f3f6762c1e3596d7bab83209325c436b7c2",
+          "canonical_sha256": "bd3b8522e1266a15316598a2a2ccbb965dbe1e7fa9ed556140a22c877f0e97a9"
+        },
+        {
+          "path": "rust/shim/src/upstream.rs",
+          "physical_old_sha256": "80f50ad51949d8fbb1324d63b72a7029e425b6066444e9c4f9129c060c122667",
+          "canonical_sha256": "44c78d8044fde7fb8c4fe39f928063748f87271a1c4d6f50bbfa7622879db16d"
+        },
+        {
+          "path": "rust/shim/src/wire_compatibility.rs",
+          "physical_old_sha256": "d2c4010640e7be9f9a652cc846f23d9e68a4c4a06f01f258911f16e83d2cb5d3",
+          "canonical_sha256": "e51c066fded5c2f6e4a9f3d1412fd9725ac1d26aff51ad10009e4d7fc6f0a283"
+        },
+        {
+          "path": "rust/shim/src/wire_ids.rs",
+          "physical_old_sha256": "45de17ad635dbccbfe72add35f1e484370a9074ac558d5cb7965d380e54aa578",
+          "canonical_sha256": "6dc3fc3d3d0168e11d9b6419f051bb712f519be12b29ee85e1b874476f3bbcd0"
+        },
+        {
+          "path": "rust/shim/src/wire_json.rs",
+          "physical_old_sha256": "f867f07a3ecb9015da626e907ebb568bcd8109a40f4992e07bb05431f4dceb29",
+          "canonical_sha256": "5dce53bca886fb8e8be9855a3eca6a7807cbf6fce9e1659932dfd09c08171648"
+        }
+      ]
+    }
+  },
+  "original_tests": {
+    "path": "tests/test_wait_mail_cli.py",
+    "blob": "e7997f65db41db59ff0cc877baf9e298061048d8",
+    "canonical_sha256": "f9942ec5548497f243174b59dd984487b6eea8aa883081d0c4bb3a8a49851a1d",
+    "test_functions_AST_only": 41,
+    "executed_this_packet": 0
+  },
+  "candidate_contract_rows": 19,
+  "long_ring_expected_exit": 3,
+  "completed_pairs": [
+    {
+      "platform": "Windows",
+      "case": "wait-mail-long-ring-watermark",
+      "head": "33f554026621c4863b853c17bb8a4f69b8940d74",
+      "receipt": {
+        "artifact": "first-long-ring-wait-mail-long-ring-watermark.json",
+        "bytes": 21962,
+        "sha256": "89d9a96c1122b0f822da3165a29c7c08d8cf3f812495fcbfab885c23a52cc077"
+      },
+      "passed": true,
+      "exits": {
+        "oracle": 3,
+        "candidate": 3
+      },
+      "rejecting_controls": 4,
+      "child_git_environment_leaks": 0,
+      "identity": {
+        "oracle": {
+          "executable_basename": "python.exe",
+          "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+          "executable_bytes": 274712,
+          "arguments": [
+            "-m",
+            "pseudolife_memory.cli"
+          ],
+          "public_cli_module": true
+        },
+        "candidate": {
+          "executable_basename": "pseudolife-stdio.exe",
+          "executable_sha256": "06ccf5900b0890e5ebfb87cdefcfdce6928dcf3850e34e5cbb4ef653e973ec99",
+          "executable_bytes": 27900416,
+          "arguments": null,
+          "public_cli_module": false
+        }
+      },
+      "policy_instances": [],
+      "new_execution": false,
+      "contract_observations": {
+        "observed_arms": {
+          "oracle": {
+            "request": {
+              "id": "wait-mail-long-ring-watermark",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlcgo="
+              }
+            },
+            "response": {
+              "exit_code": 3,
+              "stdout_b64": "",
+              "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4NCg==",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                }
+              }
+            }
+          },
+          "candidate": {
+            "request": {
+              "id": "wait-mail-long-ring-watermark",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlcgo="
+              }
+            },
+            "response": {
+              "exit_code": 3,
+              "stdout_b64": "",
+              "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4NCg==",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                }
+              }
+            }
+          }
+        },
+        "comparator": {
+          "passed": true,
+          "differences": [],
+          "raw_oracle_differences": [],
+          "policy_instances": [],
+          "candidate_contract_substitution": "wait-mail-writer-records"
+        },
+        "absent_original_comparator_fields": [],
+        "candidate_expected_response": {
+          "exit_code": 3,
+          "stdout_b64": "",
+          "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4NCg==",
+          "post_files": {
+            ".pseudolife-mcp/token": {
+              "representation": "withheld synthetic fixture token bytes",
+              "bytes": 26,
+              "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+            },
+            ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+              "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+            },
+            ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+              "content_b64": "MAo="
+            },
+            ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+              "content_b64": "MTIKcGVlcgo="
+            }
+          }
+        },
+        "candidate_output_controls": [
+          {
+            "case": "wait-mail-long-ring-watermark",
+            "mode": "wait-mail",
+            "field": "exit_code",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/exit_code",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-long-ring-watermark",
+            "mode": "wait-mail",
+            "field": "stdout_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stdout_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-long-ring-watermark",
+            "mode": "wait-mail",
+            "field": "stderr_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stderr_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-long-ring-watermark",
+            "mode": "wait-mail",
+            "field": "post_files_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/post_files_b64/.pseudolife-mcp~1token",
+                "reason": "value"
+              }
+            ]
+          }
+        ]
+      },
+      "acceptance_disposition": {
+        "status": "RED/blocking",
+        "historical_comparator_pass": true,
+        "observed_exits": {
+          "oracle": 3,
+          "candidate": 3
+        },
+        "reason": "Oracle-conformant no-ring timeout is retained; it does not discharge the outstanding accepted-master provenance and hosted long-ring proof gate.",
+        "outstanding_requirements": [
+          "accepted-master provenance refresh with actual retained observations",
+          "hosted long-ring transport proof after its source feature merge and authorized dispatch"
+        ]
+      }
+    },
+    {
+      "platform": "Windows",
+      "case": "wait-mail-bad-ring-reason",
+      "head": "33f554026621c4863b853c17bb8a4f69b8940d74",
+      "receipt": {
+        "artifact": "remaining-relevant-pairs-wait-mail-bad-ring-reason.json",
+        "bytes": 21432,
+        "sha256": "ff3e703c77e7a254198aba0000665399f0782129b91e7a3d81830b340845cdcd"
+      },
+      "passed": true,
+      "exits": {
+        "oracle": 3,
+        "candidate": 3
+      },
+      "rejecting_controls": 4,
+      "child_git_environment_leaks": 0,
+      "identity": {
+        "oracle": {
+          "executable_basename": "python.exe",
+          "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+          "executable_bytes": 274712,
+          "arguments": [
+            "-m",
+            "pseudolife_memory.cli"
+          ],
+          "public_cli_module": true
+        },
+        "candidate": {
+          "executable_basename": "pseudolife-stdio.exe",
+          "executable_sha256": "06ccf5900b0890e5ebfb87cdefcfdce6928dcf3850e34e5cbb4ef653e973ec99",
+          "executable_bytes": 27900416,
+          "arguments": null,
+          "public_cli_module": false
+        }
+      },
+      "policy_instances": [],
+      "new_execution": false,
+      "contract_observations": {
+        "observed_arms": {
+          "oracle": {
+            "request": {
+              "id": "wait-mail-bad-ring-reason",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlcgo="
+              }
+            },
+            "response": {
+              "exit_code": 3,
+              "stdout_b64": "",
+              "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4NCg==",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                }
+              }
+            }
+          },
+          "candidate": {
+            "request": {
+              "id": "wait-mail-bad-ring-reason",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlcgo="
+              }
+            },
+            "response": {
+              "exit_code": 3,
+              "stdout_b64": "",
+              "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4NCg==",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                }
+              }
+            }
+          }
+        },
+        "comparator": {
+          "passed": true,
+          "differences": [],
+          "policy_instances": []
+        },
+        "absent_original_comparator_fields": [
+          "raw_oracle_differences",
+          "candidate_contract_substitution"
+        ],
+        "candidate_expected_response": null,
+        "candidate_output_controls": [
+          {
+            "case": "wait-mail-bad-ring-reason",
+            "mode": "wait-mail",
+            "field": "exit_code",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/exit_code",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-bad-ring-reason",
+            "mode": "wait-mail",
+            "field": "stdout_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stdout_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-bad-ring-reason",
+            "mode": "wait-mail",
+            "field": "stderr_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stderr_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-bad-ring-reason",
+            "mode": "wait-mail",
+            "field": "post_files_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/post_files_b64/.pseudolife-mcp~1token",
+                "reason": "value"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "platform": "Windows",
+      "case": "wait-mail-unicode-delivery",
+      "head": "33f554026621c4863b853c17bb8a4f69b8940d74",
+      "receipt": {
+        "artifact": "remaining-relevant-pairs-wait-mail-unicode-delivery.json",
+        "bytes": 22969,
+        "sha256": "fdf61dd4d1304e8544e7dc33c446939775ff82bca7077d798fff41cc9693ef78"
+      },
+      "passed": true,
+      "exits": {
+        "oracle": 0,
+        "candidate": 0
+      },
+      "rejecting_controls": 4,
+      "child_git_environment_leaks": 0,
+      "identity": {
+        "oracle": {
+          "executable_basename": "python.exe",
+          "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+          "executable_bytes": 274712,
+          "arguments": [
+            "-m",
+            "pseudolife_memory.cli"
+          ],
+          "public_cli_module": true
+        },
+        "candidate": {
+          "executable_basename": "pseudolife-stdio.exe",
+          "executable_sha256": "06ccf5900b0890e5ebfb87cdefcfdce6928dcf3850e34e5cbb4ef653e973ec99",
+          "executable_bytes": 27900416,
+          "arguments": null,
+          "public_cli_module": false
+        }
+      },
+      "policy_instances": [
+        {
+          "case": "wait-mail-unicode-delivery",
+          "arm": "oracle",
+          "policy": "nondeterministic-bytes-semantic",
+          "fields": [
+            "stderr delivery HH:MM:SS",
+            "ledger column 1"
+          ],
+          "wall_window": [
+            1791434149.0081196,
+            1791434149.1670856
+          ],
+          "raw_clock": "15:35:49",
+          "raw_epoch": 1791434149
+        },
+        {
+          "case": "wait-mail-unicode-delivery",
+          "arm": "candidate",
+          "policy": "nondeterministic-bytes-semantic",
+          "fields": [
+            "stderr delivery HH:MM:SS",
+            "ledger column 1"
+          ],
+          "wall_window": [
+            1791434149.2683587,
+            1791434149.299962
+          ],
+          "raw_clock": "15:35:49",
+          "raw_epoch": 1791434149
+        }
+      ],
+      "new_execution": false,
+      "contract_observations": {
+        "observed_arms": {
+          "oracle": {
+            "request": {
+              "id": "wait-mail-unicode-delivery",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+              }
+            },
+            "response": {
+              "exit_code": 0,
+              "stdout_b64": "cGVlciDigJQgY2Fmw6kg8J+noAo=",
+              "stderr_b64": "d2FpdC1tYWlsOiB0aGUgZGFlbW9uIHJhbmcgZm9yIGFkZHJlc3NlZCBtYWlsIGF0IDE1OjM1OjQ5IChydW5nIGFueW9uZSwgd2F0ZXJtYXJrIDEyLCAwIHMgYWZ0ZXIgYXJtaW5nKToNCg==",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MTIK"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+                },
+                ".pseudolife-mcp/digests/ledger.log": {
+                  "content_b64": "MTc5MTQzNDE0OQl3YWl0CWFhYWFhYWFhCTEyCTE0CXJ1bmcgYW55b25lDQo="
+                }
+              }
+            }
+          },
+          "candidate": {
+            "request": {
+              "id": "wait-mail-unicode-delivery",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+              }
+            },
+            "response": {
+              "exit_code": 0,
+              "stdout_b64": "cGVlciDigJQgY2Fmw6kg8J+noAo=",
+              "stderr_b64": "d2FpdC1tYWlsOiB0aGUgZGFlbW9uIHJhbmcgZm9yIGFkZHJlc3NlZCBtYWlsIGF0IDE1OjM1OjQ5IChydW5nIGFueW9uZSwgd2F0ZXJtYXJrIDEyLCAwIHMgYWZ0ZXIgYXJtaW5nKToNCg==",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MTIK"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+                },
+                ".pseudolife-mcp/digests/ledger.log": {
+                  "content_b64": "MTc5MTQzNDE0OQl3YWl0CWFhYWFhYWFhCTEyCTE0CXJ1bmcgYW55b25lDQo="
+                }
+              }
+            }
+          }
+        },
+        "comparator": {
+          "passed": true,
+          "differences": [],
+          "policy_instances": [
+            {
+              "case": "wait-mail-unicode-delivery",
+              "arm": "oracle",
+              "policy": "nondeterministic-bytes-semantic",
+              "fields": [
+                "stderr delivery HH:MM:SS",
+                "ledger column 1"
+              ],
+              "wall_window": [
+                1791434149.0081196,
+                1791434149.1670856
+              ],
+              "raw_clock": "15:35:49",
+              "raw_epoch": 1791434149
+            },
+            {
+              "case": "wait-mail-unicode-delivery",
+              "arm": "candidate",
+              "policy": "nondeterministic-bytes-semantic",
+              "fields": [
+                "stderr delivery HH:MM:SS",
+                "ledger column 1"
+              ],
+              "wall_window": [
+                1791434149.2683587,
+                1791434149.299962
+              ],
+              "raw_clock": "15:35:49",
+              "raw_epoch": 1791434149
+            }
+          ]
+        },
+        "absent_original_comparator_fields": [
+          "raw_oracle_differences",
+          "candidate_contract_substitution"
+        ],
+        "candidate_expected_response": null,
+        "candidate_output_controls": [
+          {
+            "case": "wait-mail-unicode-delivery",
+            "mode": "wait-mail",
+            "field": "exit_code",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/exit_code",
+                "reason": "value"
+              },
+              {
+                "path": "/post_files_b64/.pseudolife-mcp~1digests~1ledger.log",
+                "reason": "value"
+              },
+              {
+                "path": "/stderr_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-unicode-delivery",
+            "mode": "wait-mail",
+            "field": "stdout_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stdout_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-unicode-delivery",
+            "mode": "wait-mail",
+            "field": "stderr_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stderr_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-unicode-delivery",
+            "mode": "wait-mail",
+            "field": "post_files_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/post_files_b64/.pseudolife-mcp~1token",
+                "reason": "value"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "platform": "Linux",
+      "case": "wait-mail-long-ring-watermark",
+      "head": "33f554026621c4863b853c17bb8a4f69b8940d74",
+      "receipt": {
+        "artifact": "first-long-ring-wait-mail-long-ring-watermark.json",
+        "bytes": 19415,
+        "sha256": "b0078cce8f5724cbd72c158821005fafe7867642a1f31c76d7781c2375eedf1d"
+      },
+      "passed": true,
+      "exits": {
+        "oracle": 3,
+        "candidate": 3
+      },
+      "rejecting_controls": 4,
+      "child_git_environment_leaks": 0,
+      "identity": {
+        "oracle": {
+          "executable_basename": "python3.11",
+          "executable_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+          "executable_bytes": 21750104,
+          "arguments": [
+            "-m",
+            "pseudolife_memory.cli"
+          ],
+          "public_cli_module": true
+        },
+        "candidate": {
+          "executable_basename": "pseudolife-stdio",
+          "executable_sha256": "863356360224242e05031f6d9f67eacf17c096351114655e7635115ef851a8e2",
+          "executable_bytes": 173641520,
+          "arguments": null,
+          "public_cli_module": false
+        }
+      },
+      "policy_instances": [],
+      "new_execution": false,
+      "contract_observations": {
+        "observed_arms": {
+          "oracle": {
+            "request": {
+              "id": "wait-mail-long-ring-watermark",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlcgo="
+              }
+            },
+            "response": {
+              "exit_code": 3,
+              "stdout_b64": "",
+              "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4K",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                }
+              }
+            }
+          },
+          "candidate": {
+            "request": {
+              "id": "wait-mail-long-ring-watermark",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlcgo="
+              }
+            },
+            "response": {
+              "exit_code": 3,
+              "stdout_b64": "",
+              "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4K",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                }
+              }
+            }
+          }
+        },
+        "comparator": {
+          "passed": true,
+          "differences": [],
+          "raw_oracle_differences": [],
+          "policy_instances": [],
+          "candidate_contract_substitution": "wait-mail-writer-records"
+        },
+        "absent_original_comparator_fields": [],
+        "candidate_expected_response": {
+          "exit_code": 3,
+          "stdout_b64": "",
+          "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4K",
+          "post_files": {
+            ".pseudolife-mcp/token": {
+              "representation": "withheld synthetic fixture token bytes",
+              "bytes": 26,
+              "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+            },
+            ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+              "content_b64": "MTIzNDU2Nzg5MDEyMwpydW5nIGFueW9uZQo="
+            },
+            ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+              "content_b64": "MAo="
+            },
+            ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+              "content_b64": "MTIKcGVlcgo="
+            }
+          }
+        },
+        "candidate_output_controls": [
+          {
+            "case": "wait-mail-long-ring-watermark",
+            "mode": "wait-mail",
+            "field": "exit_code",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/exit_code",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-long-ring-watermark",
+            "mode": "wait-mail",
+            "field": "stdout_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stdout_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-long-ring-watermark",
+            "mode": "wait-mail",
+            "field": "stderr_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stderr_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-long-ring-watermark",
+            "mode": "wait-mail",
+            "field": "post_files_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/post_files_b64/.pseudolife-mcp~1token",
+                "reason": "value"
+              }
+            ]
+          }
+        ]
+      },
+      "acceptance_disposition": {
+        "status": "RED/blocking",
+        "historical_comparator_pass": true,
+        "observed_exits": {
+          "oracle": 3,
+          "candidate": 3
+        },
+        "reason": "Oracle-conformant no-ring timeout is retained; it does not discharge the outstanding accepted-master provenance and hosted long-ring proof gate.",
+        "outstanding_requirements": [
+          "accepted-master provenance refresh with actual retained observations",
+          "hosted long-ring transport proof after its source feature merge and authorized dispatch"
+        ]
+      }
+    },
+    {
+      "platform": "Linux",
+      "case": "wait-mail-bad-ring-reason",
+      "head": "33f554026621c4863b853c17bb8a4f69b8940d74",
+      "receipt": {
+        "artifact": "remaining-relevant-pairs-wait-mail-bad-ring-reason.json",
+        "bytes": 19238,
+        "sha256": "101920edbf2d1a7527d2becd35e0c89164528e2f3b532072bcbe0f5937176a4c"
+      },
+      "passed": true,
+      "exits": {
+        "oracle": 3,
+        "candidate": 3
+      },
+      "rejecting_controls": 4,
+      "child_git_environment_leaks": 0,
+      "identity": {
+        "oracle": {
+          "executable_basename": "python3.11",
+          "executable_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+          "executable_bytes": 21750104,
+          "arguments": [
+            "-m",
+            "pseudolife_memory.cli"
+          ],
+          "public_cli_module": true
+        },
+        "candidate": {
+          "executable_basename": "pseudolife-stdio",
+          "executable_sha256": "863356360224242e05031f6d9f67eacf17c096351114655e7635115ef851a8e2",
+          "executable_bytes": 173641520,
+          "arguments": null,
+          "public_cli_module": false
+        }
+      },
+      "policy_instances": [],
+      "new_execution": false,
+      "contract_observations": {
+        "observed_arms": {
+          "oracle": {
+            "request": {
+              "id": "wait-mail-bad-ring-reason",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlcgo="
+              }
+            },
+            "response": {
+              "exit_code": 3,
+              "stdout_b64": "",
+              "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4K",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                }
+              }
+            }
+          },
+          "candidate": {
+            "request": {
+              "id": "wait-mail-bad-ring-reason",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlcgo="
+              }
+            },
+            "response": {
+              "exit_code": 3,
+              "stdout_b64": "",
+              "stderr_b64": "d2FpdC1tYWlsOiBubyByaW5nIGluIDAuMDI1IHMgKHBsYWluIG1haWwgZG9lcyBub3QgZW5kIHRoZSB3YWl0KTsgcmUtYXJtIHRvIGtlZXAgd2FpdGluZy4K",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTIKcnVuZyBhbnlvbmUhCg=="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlcgo="
+                }
+              }
+            }
+          }
+        },
+        "comparator": {
+          "passed": true,
+          "differences": [],
+          "policy_instances": []
+        },
+        "absent_original_comparator_fields": [
+          "raw_oracle_differences",
+          "candidate_contract_substitution"
+        ],
+        "candidate_expected_response": null,
+        "candidate_output_controls": [
+          {
+            "case": "wait-mail-bad-ring-reason",
+            "mode": "wait-mail",
+            "field": "exit_code",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/exit_code",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-bad-ring-reason",
+            "mode": "wait-mail",
+            "field": "stdout_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stdout_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-bad-ring-reason",
+            "mode": "wait-mail",
+            "field": "stderr_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stderr_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-bad-ring-reason",
+            "mode": "wait-mail",
+            "field": "post_files_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/post_files_b64/.pseudolife-mcp~1token",
+                "reason": "value"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "platform": "Linux",
+      "case": "wait-mail-unicode-delivery",
+      "head": "33f554026621c4863b853c17bb8a4f69b8940d74",
+      "receipt": {
+        "artifact": "remaining-relevant-pairs-wait-mail-unicode-delivery.json",
+        "bytes": 20736,
+        "sha256": "02a09b6272f69479429c34e0bcfe3729e5e7b59cab4edaad15e2d50e1b53a31b"
+      },
+      "passed": true,
+      "exits": {
+        "oracle": 0,
+        "candidate": 0
+      },
+      "rejecting_controls": 4,
+      "child_git_environment_leaks": 0,
+      "identity": {
+        "oracle": {
+          "executable_basename": "python3.11",
+          "executable_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+          "executable_bytes": 21750104,
+          "arguments": [
+            "-m",
+            "pseudolife_memory.cli"
+          ],
+          "public_cli_module": true
+        },
+        "candidate": {
+          "executable_basename": "pseudolife-stdio",
+          "executable_sha256": "863356360224242e05031f6d9f67eacf17c096351114655e7635115ef851a8e2",
+          "executable_bytes": 173641520,
+          "arguments": null,
+          "public_cli_module": false
+        }
+      },
+      "policy_instances": [
+        {
+          "case": "wait-mail-unicode-delivery",
+          "arm": "oracle",
+          "policy": "nondeterministic-bytes-semantic",
+          "fields": [
+            "stderr delivery HH:MM:SS",
+            "ledger column 1"
+          ],
+          "wall_window": [
+            1791433968.4260366,
+            1791433968.4820178
+          ],
+          "raw_clock": "04:32:48",
+          "raw_epoch": 1791433968
+        },
+        {
+          "case": "wait-mail-unicode-delivery",
+          "arm": "candidate",
+          "policy": "nondeterministic-bytes-semantic",
+          "fields": [
+            "stderr delivery HH:MM:SS",
+            "ledger column 1"
+          ],
+          "wall_window": [
+            1791433969.1700168,
+            1791433969.1744766
+          ],
+          "raw_clock": "04:32:49",
+          "raw_epoch": 1791433969
+        }
+      ],
+      "new_execution": false,
+      "contract_observations": {
+        "observed_arms": {
+          "oracle": {
+            "request": {
+              "id": "wait-mail-unicode-delivery",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+              }
+            },
+            "response": {
+              "exit_code": 0,
+              "stdout_b64": "cGVlciDigJQgY2Fmw6kg8J+noAo=",
+              "stderr_b64": "d2FpdC1tYWlsOiB0aGUgZGFlbW9uIHJhbmcgZm9yIGFkZHJlc3NlZCBtYWlsIGF0IDA0OjMyOjQ4IChydW5nIGFueW9uZSwgd2F0ZXJtYXJrIDEyLCAwIHMgYWZ0ZXIgYXJtaW5nKToK",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MTIK"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+                },
+                ".pseudolife-mcp/digests/ledger.log": {
+                  "content_b64": "MTc5MTQzMzk2OAl3YWl0CWFhYWFhYWFhCTEyCTE0CXJ1bmcgYW55b25lCg=="
+                }
+              }
+            }
+          },
+          "candidate": {
+            "request": {
+              "id": "wait-mail-unicode-delivery",
+              "mode": "wait-mail",
+              "argv": [
+                "wait-mail",
+                "--digest",
+                "{home}/.pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt",
+                "--timeout",
+                "0.025",
+                "--interval",
+                "0.01"
+              ],
+              "stdin_b64": "c3RkaW4gaXMgbmV2ZXIgcmVhZAo=",
+              "normalizations": [],
+              "environment_deltas": {},
+              "fixture_files": {
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MAo="
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+                }
+              }
+            },
+            "pre_files": {
+              ".pseudolife-mcp/token": {
+                "representation": "withheld synthetic fixture token bytes",
+                "bytes": 26,
+                "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                "content_b64": "MAo="
+              },
+              ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+              }
+            },
+            "response": {
+              "exit_code": 0,
+              "stdout_b64": "cGVlciDigJQgY2Fmw6kg8J+noAo=",
+              "stderr_b64": "d2FpdC1tYWlsOiB0aGUgZGFlbW9uIHJhbmcgZm9yIGFkZHJlc3NlZCBtYWlsIGF0IDA0OjMyOjQ5IChydW5nIGFueW9uZSwgd2F0ZXJtYXJrIDEyLCAwIHMgYWZ0ZXIgYXJtaW5nKToK",
+              "post_files": {
+                ".pseudolife-mcp/token": {
+                  "representation": "withheld synthetic fixture token bytes",
+                  "bytes": 26,
+                  "sha256": "5c971d4e97144143bb9b409466b27647b47e2da4eb7971fc6fbc6eb2b96ced63"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ring": {
+                  "content_b64": "MTMKcnVuZyBhbnlvbmUK"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.seen": {
+                  "content_b64": "MTIK"
+                },
+                ".pseudolife-mcp/digests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt": {
+                  "content_b64": "MTIKcGVlciDigJQgY2Fmw6kg8J+noAo="
+                },
+                ".pseudolife-mcp/digests/ledger.log": {
+                  "content_b64": "MTc5MTQzMzk2OQl3YWl0CWFhYWFhYWFhCTEyCTE0CXJ1bmcgYW55b25lCg=="
+                }
+              }
+            }
+          }
+        },
+        "comparator": {
+          "passed": true,
+          "differences": [],
+          "policy_instances": [
+            {
+              "case": "wait-mail-unicode-delivery",
+              "arm": "oracle",
+              "policy": "nondeterministic-bytes-semantic",
+              "fields": [
+                "stderr delivery HH:MM:SS",
+                "ledger column 1"
+              ],
+              "wall_window": [
+                1791433968.4260366,
+                1791433968.4820178
+              ],
+              "raw_clock": "04:32:48",
+              "raw_epoch": 1791433968
+            },
+            {
+              "case": "wait-mail-unicode-delivery",
+              "arm": "candidate",
+              "policy": "nondeterministic-bytes-semantic",
+              "fields": [
+                "stderr delivery HH:MM:SS",
+                "ledger column 1"
+              ],
+              "wall_window": [
+                1791433969.1700168,
+                1791433969.1744766
+              ],
+              "raw_clock": "04:32:49",
+              "raw_epoch": 1791433969
+            }
+          ]
+        },
+        "absent_original_comparator_fields": [
+          "raw_oracle_differences",
+          "candidate_contract_substitution"
+        ],
+        "candidate_expected_response": null,
+        "candidate_output_controls": [
+          {
+            "case": "wait-mail-unicode-delivery",
+            "mode": "wait-mail",
+            "field": "exit_code",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/exit_code",
+                "reason": "value"
+              },
+              {
+                "path": "/post_files_b64/.pseudolife-mcp~1digests~1ledger.log",
+                "reason": "value"
+              },
+              {
+                "path": "/stderr_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-unicode-delivery",
+            "mode": "wait-mail",
+            "field": "stdout_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stdout_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-unicode-delivery",
+            "mode": "wait-mail",
+            "field": "stderr_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/stderr_b64",
+                "reason": "value"
+              }
+            ]
+          },
+          {
+            "case": "wait-mail-unicode-delivery",
+            "mode": "wait-mail",
+            "field": "post_files_b64",
+            "mutation_arm": "candidate",
+            "rejected": true,
+            "differences": [
+              {
+                "path": "/post_files_b64/.pseudolife-mcp~1token",
+                "reason": "value"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "stages": [
+    {
+      "platform": "Windows",
+      "attempt": "completed",
+      "stage": "first-long-ring",
+      "exit": 0,
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 22,
+        "sha256": "de268ad48effed03691d1797dd9cf4ce109d951cb8413bd786ab659c53c9c61d"
+      }
+    },
+    {
+      "platform": "Windows",
+      "attempt": "completed",
+      "stage": "native-reduction",
+      "exit": 0,
+      "tests": 38,
+      "passed": 38,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 60,
+        "sha256": "88dd778e0cf0c05149bbd3c0df08461d9c9b638b97adb2e21df17588b632d148"
+      }
+    },
+    {
+      "platform": "Windows",
+      "attempt": "completed",
+      "stage": "candidate-contract",
+      "exit": 0,
+      "tests": 41,
+      "passed": 41,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 63,
+        "sha256": "7d775db69a3f423374f391fa8d0e22f7ef426f153c37f1ef796c0186996d3512"
+      }
+    },
+    {
+      "platform": "Windows",
+      "attempt": "completed",
+      "stage": "seven-file-workflow",
+      "exit": 0,
+      "tests": 119,
+      "passed": 119,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 143,
+        "sha256": "0417849b6430d34b832fd5b16e2e906e8220dcb7d4c4ac9de0587c4e69f48535"
+      }
+    },
+    {
+      "platform": "Windows",
+      "attempt": "completed",
+      "stage": "remaining-relevant-pairs",
+      "exit": 0,
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 23,
+        "sha256": "440fa67960851e38e38032633d38dfe69143b265e6fac26118bc96c3cd716a96"
+      }
+    },
+    {
+      "platform": "Linux",
+      "attempt": "initial",
+      "stage": "first-long-ring",
+      "exit": 0,
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 20,
+        "sha256": "e6e143f1941cef95235334bcdaedf24f742d5b76df97ef8a4196abd5c0ddfc49"
+      }
+    },
+    {
+      "platform": "Linux",
+      "attempt": "initial",
+      "stage": "native-reduction",
+      "exit": 0,
+      "tests": 38,
+      "passed": 38,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 59,
+        "sha256": "57c971a7d9cb66327cbc0bdec702142d0b4779e56259dbf70e6fcef617b7ba7f"
+      }
+    },
+    {
+      "platform": "Linux",
+      "attempt": "initial",
+      "stage": "candidate-contract",
+      "exit": 0,
+      "tests": 41,
+      "passed": 41,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 61,
+        "sha256": "fb235ed80bb706a17326dd6704d098811bea5febe1e7519c14c7492aca233474"
+      }
+    },
+    {
+      "platform": "Linux",
+      "attempt": "initial",
+      "stage": "seven-file-workflow",
+      "exit": 1,
+      "tests": 119,
+      "passed": 93,
+      "failed": 26,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 168487,
+        "sha256": "60905246f5847879f40cb7dc441c799409147ad4df5b4cfd12a9ba50c1f7ff46"
+      }
+    },
+    {
+      "platform": "Linux",
+      "attempt": "recovery",
+      "stage": "first-public-help-Git-pin",
+      "exit": 0,
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 20,
+        "sha256": "392cba1e6ab90f774f781b20dd58ec8bec215704aac67e7a7034a2fb9a64f24f"
+      }
+    },
+    {
+      "platform": "Linux",
+      "attempt": "recovery",
+      "stage": "seven-file-workflow-Git-pin",
+      "exit": 0,
+      "tests": 119,
+      "passed": 119,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 151,
+        "sha256": "117f1a65b25cdfbcd0d9dea5dc546e5848c07f8da4f5d1b0b4ae7beaf32894b3"
+      }
+    },
+    {
+      "platform": "Linux",
+      "attempt": "recovery",
+      "stage": "remaining-relevant-pairs",
+      "exit": 0,
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": {
+        "artifact": "pytest.log",
+        "bytes": 21,
+        "sha256": "77dfef2c2127bd0a1a116a821dca5be17666f8ce691660c99813f49f7bc9c69a"
+      }
+    }
+  ],
+  "raw_indexes": {
+    "Windows": {
+      "artifact": "wait-mail-ring219-windows-raw-index.json",
+      "bytes": 4492,
+      "sha256": "96d8f8ed1e7d49bd446912dc73f44694d818f652f6520d7120444bec935aa67f"
+    },
+    "Linux": {
+      "artifact": "wait-mail-ring219-linux-raw-index.json",
+      "bytes": 8739,
+      "sha256": "15a5f23829dda53142bf29a5eb4fd21841da174894080d935974c20aa22f888d"
+    }
+  },
+  "overlap": "38 focused reduction and 41 focused contract tests are subsets of each OS 119-test seven-file group; counts are not additive",
+  "preserved_RED": {
+    "old_hosted_ci": {
+      "head": "57c720ef8072ef6360d2a3b5b21cbc3b2cdfbcb7",
+      "run": 37721852227,
+      "each_os": {
+        "failed": 5,
+        "passed": 112
+      },
+      "receipts": [
+        {
+          "artifact": "wait-mail-ring627-ci-job-113133447805.log",
+          "bytes": 160710,
+          "sha256": "a16551f03e75d1fc93e4de29c0d8e41e27c07f6e72da475afbfc0a60969a2d57"
+        },
+        {
+          "artifact": "wait-mail-ring627-ci-job-113133447853.log",
+          "bytes": 160011,
+          "sha256": "bba15573f39aaa314a3a4cda9a33285d57207f309edde50adeb2ca75867c28bf"
+        }
+      ],
+      "disposition": "retained failure; never replaced by later local results"
+    },
+    "linux_initial_workflow": {
+      "failed": 26,
+      "passed": 93,
+      "exit": 1,
+      "receipt": {
+        "artifact": "wait-mail-ring219-linux-seven-first-RED.log",
+        "bytes": 168487,
+        "sha256": "60905246f5847879f40cb7dc441c799409147ad4df5b4cfd12a9ba50c1f7ff46"
+      },
+      "diagnostic_class": "source guard failed before CLI launch because archived oracle lacked Git metadata",
+      "recovery": "read-only existing exact oracle Git objects supplied to parent guard; oracle bytes unchanged",
+      "repeated_passes": 93,
+      "additional_unique_coverage": 0
+    },
+    "preparation_archive": {
+      "receipt": {
+        "artifact": "wait-mail-ring219-source.tar",
+        "bytes": 610682880,
+        "sha256": "8b1fb560fdf66e29b88d4b657d4342b51a403ffc1ee4a86b8f3891c420eeebcb"
+      },
+      "outcome": "canonical compile-input assertion failed on converted archive text; scoped canonical Git capture later retained separately"
+    },
+    "root_observation_delay": {
+      "Windows": "root reported read04:37Z, beyond120s; separately retained",
+      "Linux": "root independently noted its Windows first-output observation exceeded120s; worker actual read was timely, not erased"
+    },
+    "long_ring_acceptance": {
+      "status": "RED/blocking",
+      "scope": "acceptance/provenance/hosted-proof gate, separate from historical passing comparator and pytest observations",
+      "pairs": [
+        {
+          "platform": "Windows",
+          "receipt": {
+            "artifact": "first-long-ring-wait-mail-long-ring-watermark.json",
+            "bytes": 21962,
+            "sha256": "89d9a96c1122b0f822da3165a29c7c08d8cf3f812495fcbfab885c23a52cc077"
+          },
+          "historical_comparator_pass": true,
+          "exits": {
+            "oracle": 3,
+            "candidate": 3
+          },
+          "disposition": {
+            "status": "RED/blocking",
+            "historical_comparator_pass": true,
+            "observed_exits": {
+              "oracle": 3,
+              "candidate": 3
+            },
+            "reason": "Oracle-conformant no-ring timeout is retained; it does not discharge the outstanding accepted-master provenance and hosted long-ring proof gate.",
+            "outstanding_requirements": [
+              "accepted-master provenance refresh with actual retained observations",
+              "hosted long-ring transport proof after its source feature merge and authorized dispatch"
+            ]
+          }
+        },
+        {
+          "platform": "Linux",
+          "receipt": {
+            "artifact": "first-long-ring-wait-mail-long-ring-watermark.json",
+            "bytes": 19415,
+            "sha256": "b0078cce8f5724cbd72c158821005fafe7867642a1f31c76d7781c2375eedf1d"
+          },
+          "historical_comparator_pass": true,
+          "exits": {
+            "oracle": 3,
+            "candidate": 3
+          },
+          "disposition": {
+            "status": "RED/blocking",
+            "historical_comparator_pass": true,
+            "observed_exits": {
+              "oracle": 3,
+              "candidate": 3
+            },
+            "reason": "Oracle-conformant no-ring timeout is retained; it does not discharge the outstanding accepted-master provenance and hosted long-ring proof gate.",
+            "outstanding_requirements": [
+              "accepted-master provenance refresh with actual retained observations",
+              "hosted long-ring transport proof after its source feature merge and authorized dispatch"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "unresolved_named_gaps": [
+    "full-flushed-body-interruption-before-marker",
+    "windows-exact-stat-refusal-site",
+    "ordinary-full-response-with-producer-ledger-clocks",
+    "runtime-platform-producer-capability"
+  ],
+  "limits": [
+    "No new capture, test, application import or build was executed.",
+    "Six retained whole-CLI pairs do not establish the full matrix or original-test coverage.",
+    "All retained runtime results belong to 33f; matching compile inputs do not relabel them as ec697 execution.",
+    "The Linux image was not physically rehashed in this packet.",
+    "No hosted transport long-ring receipt or accepted final307 repin is supplied.",
+    "Raw private logs are represented by hashes and remain outside this repository."
+  ],
+  "semantic_by_default": [
+    "New stderr wording differences preserve diagnostic class and exit code; pinned diagnostic lines remain contract checks.",
+    "Timing within bounds, identities/entropy and clock fields are semantic; existing named policies and raw REDs retain their historical attribution."
+  ],
+  "new_runtime": false,
+  "promoted_parity_rows": [],
+  "projection_provenance": {
+    "source": "six existing hash-verified retained pair receipts; no replay or new capture",
+    "streams": "Base64 bytes copied exactly, including platform line endings and historical clock values; no clock or stream normalization added.",
+    "shared_files": "Relative fixture paths and non-token file bytes copied exactly. Token-file content is withheld as byte-count/SHA256 descriptors; all pre/post transitions remain represented.",
+    "request": "Existing templated {home} argv, stdin, fixture bytes, empty environment deltas and empty normalizations retained; execution paths and arm environment/configuration are omitted.",
+    "controls": "Exact case/mode/field/mutation-arm/rejected/differences records copied for all 24 controls; post-file controls retain their original token-file difference path without token bytes.",
+    "comparison": "Original verdicts, differences, named policy instances and candidate expectation projection are retained; no acceptance promotion."
+  }
+}

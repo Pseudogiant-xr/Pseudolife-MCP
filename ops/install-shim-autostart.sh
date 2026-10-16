@@ -10,8 +10,9 @@
 # (PSEUDOLIFE_CLAUDE_SHIM_*) at every start; the flags here are written into
 # that file. Changing a value later is an edit plus
 # `python ops/shim_autostart.py restart claude`.
-#   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5,
-#   claude-haiku-4-5, claude-fable-5 (the list ops/install.sh offers; any other
+#   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5-5,
+#   claude-sonnet-5, claude-haiku-5-5, claude-haiku-4-5, claude-fable-5-1,
+#   claude-fable-5 (the list ops/install.sh offers; any other
 #   claude-* id passes to the shim unchanged)
 #
 # The shim wraps the Max-plan `claude` CLI as an OpenAI-compatible endpoint on

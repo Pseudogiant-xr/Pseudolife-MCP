@@ -1,8 +1,9 @@
 // App-wide reactive state: route, theme, token modal, refresh tick and the
-// shared daemon resources (health, overview, board) that several views read.
+// shared daemon resources (health, overview, board, dream) that several views read.
 
 import { untrack } from "svelte";
 import { api, ApiError, setUnauthorizedHandler } from "./api/client";
+import { configApi, type DreamerStatus } from "./api/config";
 import { settleConfirm, toast } from "./overlay.svelte";
 import { settlePick } from "./reviewRunner.svelte";
 import type { BoardSnapshot, Health, Overview } from "./api/types";
@@ -142,6 +143,7 @@ export const store = $state({
   health: resource<Health>(),
   overview: resource<Overview>(),
   board: resource<BoardSnapshot>(),
+  dream: resource<DreamerStatus>(),
 });
 
 function asApiError(e: unknown): ApiError {
@@ -185,5 +187,7 @@ async function run<T>(r: Resource<T>, fetcher: () => Promise<T>): Promise<void> 
 
 export const loadHealth = () => load(store.health, api.health);
 export const loadOverview = () => load(store.overview, api.overview);
+/** The dreamer's model, for the top bar's chip. */
+export const loadDream = () => load(store.dream, configApi.dreamStatus);
 /** GET only: refreshing the board never sends, receives or acks mail. */
 export const loadBoard = () => load(store.board, () => api.board(50));

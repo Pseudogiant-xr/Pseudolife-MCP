@@ -1,0 +1,360 @@
+{
+  "normalizers": [],
+  "source": "live Python compact_store and update_notice",
+  "compaction": [
+    {
+      "rows": [
+        [
+          "e",
+          "a",
+          "current",
+          1.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "contested",
+          1.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "superseded",
+          10.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "retired",
+          10.0,
+          2.0
+        ],
+        [
+          "e",
+          "a",
+          "removed",
+          10.0,
+          2.0
+        ],
+        [
+          "e",
+          "a",
+          "superseded",
+          20.0,
+          0.0
+        ],
+        [
+          "other",
+          "a",
+          "removed",
+          null,
+          0.0
+        ]
+      ],
+      "keep": 2,
+      "min_age_days": 0.0,
+      "now": 15.0,
+      "victims": [
+        2,
+        3
+      ],
+      "dirty_slots": [
+        [
+          "e",
+          "a"
+        ]
+      ]
+    },
+    {
+      "rows": [
+        [
+          "e",
+          "a",
+          "current",
+          1.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "contested",
+          1.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "superseded",
+          10.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "retired",
+          10.0,
+          2.0
+        ],
+        [
+          "e",
+          "a",
+          "removed",
+          10.0,
+          2.0
+        ],
+        [
+          "e",
+          "a",
+          "superseded",
+          20.0,
+          0.0
+        ],
+        [
+          "other",
+          "a",
+          "removed",
+          null,
+          0.0
+        ]
+      ],
+      "keep": 0,
+      "min_age_days": 0.0,
+      "now": 10.0,
+      "victims": [
+        6
+      ],
+      "dirty_slots": [
+        [
+          "other",
+          "a"
+        ]
+      ]
+    },
+    {
+      "rows": [
+        [
+          "e",
+          "a",
+          "current",
+          1.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "contested",
+          1.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "superseded",
+          10.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "retired",
+          10.0,
+          2.0
+        ],
+        [
+          "e",
+          "a",
+          "removed",
+          10.0,
+          2.0
+        ],
+        [
+          "e",
+          "a",
+          "superseded",
+          20.0,
+          0.0
+        ],
+        [
+          "other",
+          "a",
+          "removed",
+          null,
+          0.0
+        ]
+      ],
+      "keep": -1,
+      "min_age_days": -1.0,
+      "now": 15.0,
+      "victims": [
+        2,
+        3,
+        4,
+        6
+      ],
+      "dirty_slots": [
+        [
+          "e",
+          "a"
+        ],
+        [
+          "other",
+          "a"
+        ]
+      ]
+    },
+    {
+      "rows": [
+        [
+          "e",
+          "a",
+          "current",
+          1.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "contested",
+          1.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "superseded",
+          10.0,
+          1.0
+        ],
+        [
+          "e",
+          "a",
+          "retired",
+          10.0,
+          2.0
+        ],
+        [
+          "e",
+          "a",
+          "removed",
+          10.0,
+          2.0
+        ],
+        [
+          "e",
+          "a",
+          "superseded",
+          20.0,
+          0.0
+        ],
+        [
+          "other",
+          "a",
+          "removed",
+          null,
+          0.0
+        ]
+      ],
+      "keep": 3,
+      "min_age_days": 30.0,
+      "now": 8640000.0,
+      "victims": [
+        2
+      ],
+      "dirty_slots": [
+        [
+          "e",
+          "a"
+        ]
+      ]
+    }
+  ],
+  "notices": [
+    {
+      "daemon": "0.15.0",
+      "latest": "0.16.0",
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": "Pseudolife-MCP: release 0.16.0 is available (daemon 0.15.0) \u2014 run pseudolife-mcp update, then start a new session."
+    },
+    {
+      "daemon": "0.15.0",
+      "latest": "0.16.0",
+      "plugin": "0.14.0",
+      "command": "pseudolife-mcp",
+      "expected": "Pseudolife-MCP: release 0.16.0 is available (daemon 0.15.0, plugin 0.14.0) \u2014 run pseudolife-mcp update, then start a new session."
+    },
+    {
+      "daemon": "0.15.0",
+      "latest": "0.16.0",
+      "plugin": "0.15.0",
+      "command": "pseudolife-mcp",
+      "expected": "Pseudolife-MCP: release 0.16.0 is available (daemon 0.15.0) \u2014 run pseudolife-mcp update, then start a new session."
+    },
+    {
+      "daemon": "0.15.0",
+      "latest": "0.15.0",
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": ""
+    },
+    {
+      "daemon": "0.16.0",
+      "latest": "0.15.0",
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": ""
+    },
+    {
+      "daemon": "0.15.0",
+      "latest": null,
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": ""
+    },
+    {
+      "daemon": "0.15.0",
+      "latest": "0.16.0\nEXTRA",
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": ""
+    },
+    {
+      "daemon": "0.15.0",
+      "latest": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": ""
+    },
+    {
+      "daemon": "1.0",
+      "latest": "1.0.0",
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": "Pseudolife-MCP: release 1.0.0 is available (daemon 1.0) \u2014 run pseudolife-mcp update, then start a new session."
+    },
+    {
+      "daemon": "1.2.0",
+      "latest": "1.2.0rc1",
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": ""
+    },
+    {
+      "daemon": "0009",
+      "latest": "00010",
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": "Pseudolife-MCP: release 00010 is available (daemon 0009) \u2014 run pseudolife-mcp update, then start a new session."
+    },
+    {
+      "daemon": "9",
+      "latest": "99999999999999999999999999999999",
+      "plugin": null,
+      "command": "pseudolife-mcp",
+      "expected": "Pseudolife-MCP: release 99999999999999999999999999999999 is available (daemon 9) \u2014 run pseudolife-mcp update, then start a new session."
+    }
+  ]
+}

@@ -6,7 +6,7 @@ import sys
 import pytest
 
 from evals.rust_port.full_bank import Normalizer, normalize_payload
-from evals.rust_port.harness import Policy, compare, execute, main, replay
+from evals.rust_port.harness import capture_platform, Policy, compare, execute, main, replay
 
 
 def cli_case(code):
@@ -27,13 +27,13 @@ def test_real_crash_is_boundary_error_and_cannot_be_its_own_oracle(tmp_path):
     records = execute([cli_case(crash_code())], **cli_options(tmp_path))
     assert records[0]["response"] == {"boundary_error": "AbnormalTermination"}
     with pytest.raises(ValueError, match="oracle transcript"):
-        replay({"records": records}, **cli_options(tmp_path))
+        replay({"capture_platform": capture_platform(), "records": records}, **cli_options(tmp_path))
 
 
 def test_real_candidate_crash_fails_even_when_exit_value_is_ignored(tmp_path):
     case = cli_case(crash_code())
     case["policy"] = {"ignored_values": ["/exit_code"]}
-    transcript = {"records": [{**case, "response": {
+    transcript = {"capture_platform": capture_platform(), "records": [{**case, "response": {
         "exit_code": 0, "stdout_b64": "", "stderr_b64": ""}}]}
     result = replay(transcript, **cli_options(tmp_path))
     assert not result["passed"]
@@ -56,7 +56,7 @@ def test_record_command_returns_failure_and_retains_crash_evidence(tmp_path, mon
 @pytest.mark.parametrize("status", [-9, -1073741819, 0xC0000005, 0x40000015,
                                     256, True, 1.0, None])
 def test_raw_abnormal_or_malformed_oracle_exit_cannot_be_admitted(tmp_path, status):
-    transcript = {"records": [{**cli_case("raise SystemExit(0)"), "response": {
+    transcript = {"capture_platform": capture_platform(), "records": [{**cli_case("raise SystemExit(0)"), "response": {
         "exit_code": status, "stdout_b64": "", "stderr_b64": ""}}]}
     with pytest.raises(ValueError, match="oracle transcript"):
         replay(transcript, **cli_options(tmp_path))
@@ -68,7 +68,7 @@ def test_supported_cli_error_codes_keep_stdout_stderr_and_replay(tmp_path, statu
     records = execute([case], **cli_options(tmp_path))
     assert records[0]["response"]["exit_code"] == status
     assert records[0]["response"]["stdout_b64"] and records[0]["response"]["stderr_b64"]
-    assert replay({"records": records}, **cli_options(tmp_path))["passed"]
+    assert replay({"capture_platform": capture_platform(), "records": records}, **cli_options(tmp_path))["passed"]
 
 
 @pytest.mark.parametrize("expected,actual", [(10.0, 10), (10, 10.0)])

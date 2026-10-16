@@ -1,0 +1,15 @@
+usage: pseudolife-mcp lease break [-h] NAME
+
+Operator only: free the lease NAME on the board, whatever its holder says, and
+grant it to the next waiter. It opens the bank directly, the way board-audit
+and export find it (PSEUDOLIFE_MCP_DATABASE_URL, else the lite tier's data
+dir, else inside the pseudolife-mcp-daemon container when it runs here), never
+through an agent's credential, and the audit log records the break with the
+operator as its actor. It frees the board's record only: a process still
+holding the local lock keeps it until it exits.
+
+positional arguments:
+  NAME        the lease to free
+
+options:
+  -h, --help  show this help message and exit

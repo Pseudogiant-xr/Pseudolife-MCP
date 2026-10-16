@@ -1,0 +1,57 @@
+# Opt-in preparation image. Build from the repository root; no release uses it.
+# Network access is confined to the build; the runtime contains the fp32 model.
+FROM rust:1.94-bookworm AS builder
+WORKDIR /build
+COPY rust /build/rust
+RUN --mount=type=cache,id=w3j-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=w3j-cargo-target,target=/build/rust/target,sharing=locked \
+    cargo build --manifest-path rust/Cargo.toml --locked --release --bin pseudolife-daemon -j 3 \
+    && cp rust/target/release/pseudolife-daemon /pseudolife-daemon
+
+FROM python:3.12-slim-bookworm AS runtime-inputs
+COPY rust/daemon/provision_container_model.py /provision_container_model.py
+RUN python /provision_container_model.py /opt/models/qwen3
+# The CPU wheel is used only as a source of its native library, never torch/CUDA.
+RUN pip install --no-cache-dir --no-deps onnxruntime==1.27.0 \
+    && mkdir /opt/ort \
+    && cp /usr/local/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so* /opt/ort/ \
+    && cp /usr/local/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime_providers_shared.so /opt/ort/
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get -y upgrade \
+    && apt-get install -y --no-install-recommends ca-certificates curl libgomp1 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+USER root
+WORKDIR /app
+COPY --from=builder /pseudolife-daemon /usr/local/bin/pseudolife-daemon
+COPY --from=runtime-inputs /opt/models /opt/models
+COPY --from=runtime-inputs /opt/ort /opt/ort
+COPY plugin/hooks /app/plugin/hooks
+ENV CUDA_VISIBLE_DEVICES=-1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    PSEUDOLIFE_MCP_HOST=0.0.0.0 \
+    PSEUDOLIFE_MCP_PORT=8765 \
+    PSEUDOLIFE_MCP_DATA_DIR=/data \
+    PSEUDOLIFE_DAEMON_ONNX_DIR=/opt/models/qwen3 \
+    PSEUDOLIFE_DAEMON_ORT_THREADS=3 \
+    ORT_DYLIB_PATH=/opt/ort/libonnxruntime.so.1.27.0 \
+    PSEUDOLIFE_PLUGIN_DIR=/app/plugin
+RUN mkdir /data
+VOLUME ["/data"]
+ARG GIT_SHA=unknown
+ARG GIT_DIRTY=unknown
+ARG BUILD_TIME=unknown
+ARG BUILD_SOURCE=checkout
+LABEL org.opencontainers.image.revision=$GIT_SHA \
+      org.opencontainers.image.created=$BUILD_TIME \
+      pseudolife.build.dirty=$GIT_DIRTY \
+      pseudolife.build.source=$BUILD_SOURCE
+ENV PSEUDOLIFE_BUILD_GIT_SHA=$GIT_SHA \
+    PSEUDOLIFE_BUILD_DIRTY=$GIT_DIRTY \
+    PSEUDOLIFE_BUILD_TIME=$BUILD_TIME \
+    PSEUDOLIFE_BUILD_SOURCE=$BUILD_SOURCE
+EXPOSE 8765
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
+    CMD curl --fail --silent --max-time 3 http://127.0.0.1:8765/health > /dev/null || exit 1
+CMD ["pseudolife-daemon"]

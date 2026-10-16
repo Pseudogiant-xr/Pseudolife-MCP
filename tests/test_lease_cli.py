@@ -276,6 +276,17 @@ def lease_env(tmp_path, monkeypatch):
     return tmp_path / "locks"
 
 
+@pytest.fixture
+def lease_without_token(lease_env, monkeypatch):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
+
+
+@pytest.fixture
+def default_suite_lease_env(lease_env, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(lease_env))
+    monkeypatch.delenv("PSEUDOLIFE_SUITE_LEASE", raising=False)
+
+
 def _command(tmp_path, *, exit_code=0, sleep=0.0, ready=None, wait_for=None):
     """A child that records when it ran and what PSEUDOLIFE_LEASES_HELD it
     saw, then exits with ``exit_code``. With ``ready`` it first creates that
@@ -556,8 +567,7 @@ def test_an_unusable_board_falls_back_to_the_local_lock(
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
-def test_without_a_token_the_board_is_never_contacted(lease_env, tmp_path, monkeypatch, capsys):
-    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
+def test_without_a_token_the_board_is_never_contacted(lease_env, tmp_path, lease_without_token, capsys):
     daemon = FakeDaemon()
     command, marker = _command(tmp_path)
     assert _run(["run", "gpu", "--", *command], daemon) == 0
@@ -1070,8 +1080,7 @@ def test_a_deprecated_action_is_never_advertised_and_always_named(lease_env, cap
 
 # --- lease list -----------------------------------------------------------------
 
-def test_list_without_a_board_reports_local_locks(lease_env, monkeypatch, capsys):
-    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
+def test_list_without_a_board_reports_local_locks(lease_env, lease_without_token, capsys):
     gpu = _hold(lease_env, "gpu")
     free = os_lock.OsLock(lease_env / os_lock.lock_file_name("free"))
     assert free.acquire()
@@ -1183,8 +1192,7 @@ def test_the_console_dispatches_lease(lease_env, tmp_path, monkeypatch):
 # instead of sampling process CPU: exit 0 when free, 1 when the OS lock or the
 # board says held, with the holder and its expected end on stdout.
 
-def test_check_says_free_and_exits_0_without_a_board(lease_env, monkeypatch, capsys):
-    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
+def test_check_says_free_and_exits_0_without_a_board(lease_env, lease_without_token, capsys):
     daemon = FakeDaemon()
     assert _run(["check", "gpu"], daemon) == 0
     assert "lease gpu: free" in capsys.readouterr().out
@@ -1230,13 +1238,11 @@ def test_check_of_the_full_suite_probes_the_suite_lock_and_names_its_holder(
 
 
 def test_check_of_another_machines_suite_lease_ignores_this_machines_lock(
-        lease_env, monkeypatch, capsys):
+        lease_env, default_suite_lease_env, capsys):
     # Each machine mirrors its suite under its own name (full-suite, or
     # full-suite@<host> from full-suite.lease). This machine's held suite
     # lock speaks only for this machine's name; another machine's lease is
     # the board's to report.
-    monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(lease_env))
-    monkeypatch.delenv("PSEUDOLIFE_SUITE_LEASE", raising=False)
     lease_env.mkdir(parents=True, exist_ok=True)
     suite = os_lock.OsLock(lease_env / "full-suite.lock")
     assert suite.acquire()
@@ -1255,11 +1261,9 @@ def test_check_of_another_machines_suite_lease_ignores_this_machines_lock(
     assert "this machine's suite lease is full-suite" in other
 
 
-def test_check_reads_an_invalid_lease_file_as_the_default_name(lease_env, monkeypatch):
+def test_check_reads_an_invalid_lease_file_as_the_default_name(lease_env, default_suite_lease_env):
     # The suite itself refuses such a file; check falls back rather than
     # mapping a name the suite would never mirror under.
-    monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(lease_env))
-    monkeypatch.delenv("PSEUDOLIFE_SUITE_LEASE", raising=False)
     lease_env.mkdir(parents=True, exist_ok=True)
     for bad in ("full-suite@", "full-suite@a b", "full-suite@" + "x" * 41):
         (lease_env / "full-suite.lease").write_text(bad, encoding="utf-8")
@@ -1439,8 +1443,8 @@ def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monk
             assert headers["x-pl-agent"] == AGENT
 
 
-def test_hold_without_a_board_holds_the_lock_alone(lease_env, sleeper, monkeypatch, capsys):
-    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
+def test_hold_without_a_board_holds_the_lock_alone(
+        lease_env, sleeper, monkeypatch, lease_without_token, capsys):
     daemon = FakeDaemon()
     child = sleeper()
     wait = lease_cli._wait_for_pid

@@ -2,13 +2,13 @@
   import Icon from "./Icon.svelte";
   import { matchNav } from "../lib/nav";
   import { navigate, refresh, store } from "../lib/state.svelte";
-  import { writerChip } from "../lib/writer";
+  import { dreamChip } from "../lib/dreamChip";
 
   let { title, subtitle, full = false }: { title: string; subtitle: string; full?: boolean } = $props();
 
   let query = $state("");
   let miss = $state("");
-  const writer = $derived(writerChip(store.overview.data?.health?.writer_id));
+  const model = $derived(dreamChip(store.dream.data));
   // The fixture devserver serves canned data; say so on every view, so a demo
   // is never mistaken for a real bank.
   const fixtures = $derived(store.health.data?.fixtures === true || store.overview.data?.health?.fixtures === true);
@@ -57,10 +57,10 @@
     />
     <span id="jump-miss" class="miss" role="status" aria-live="polite">{miss}</span>
   </div>
-  {#if writer}
-    <span class="writer" title={writer.title}
-      ><span class="dot assoc" aria-hidden="true"></span><span class="writer-label">{writer.label}</span
-      ><span class="mono writer-value">{writer.value}</span></span
+  {#if model}
+    <span class="model" title={model.title}
+      ><span class="dot assoc" aria-hidden="true"></span><span class="model-label">{model.label}</span
+      ><span class="mono model-value">{model.value}</span></span
     >
   {/if}
   <button type="button" class="icon-btn" aria-label="Refresh" title="Refresh (r)" onclick={refresh}>
@@ -135,7 +135,7 @@
     color: var(--warn);
     white-space: nowrap;
   }
-  .writer {
+  .model {
     display: inline-flex;
     align-items: center;
     gap: 7px;
@@ -151,20 +151,20 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .writer .dot {
+  .model .dot {
     width: 6px;
     height: 6px;
   }
-  .writer-label {
+  .model-label {
     color: var(--ink-4);
   }
-  .writer-value {
+  .model-value {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   @media (max-width: 1180px) {
-    .writer {
+    .model {
       display: none;
     }
   }

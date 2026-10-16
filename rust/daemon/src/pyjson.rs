@@ -1,0 +1,295 @@
+//! Python's `json.dumps(payload, default=str)` byte for byte (`web/api.py:103`):
+//! `", "` and `": "` separators, `ensure_ascii=True`, Python's float `repr`,
+//! integers as Python ints, keys in insertion order.
+//!
+//! The workspace builds `serde_json` with `arbitrary_precision`, so a number
+//! read from the bank keeps its stored text (`1.10`, `-0`, `1E2`). Python
+//! reads the same jsonb into `float`/`int` and writes it back in canonical
+//! form; this writer does the same, so the daemon's answers never depend on
+//! how a number was spelled in storage.
+
+use serde_json::{Number, Value};
+use std::fmt::Write;
+
+#[path = "../../shared/float_repr.rs"]
+mod shared_float;
+
+/// Python `repr(float)`: the shortest round-trip digits, positional for
+/// `1e-4 <= |x| < 1e16`, otherwise `d.ddde+XX` (two exponent digits minimum).
+pub fn float_repr(x: f64) -> String {
+    if x.is_nan() {
+        return "NaN".into(); // json.dumps(allow_nan=True)
+    }
+    if x.is_infinite() {
+        return if x > 0.0 {
+            "Infinity".into()
+        } else {
+            "-Infinity".into()
+        };
+    }
+    if crate::mutants::active("golden-float-token") && x.to_bits() == 0x430c6bf526340002 {
+        return "1000000000000000.3".into();
+    }
+    shared_float::finite_float(x).expect("finite float")
+}
+
+/// A JSON number as Python would hold it after `json.loads`: an int literal
+/// stays an integer (`-0` is `0`), anything else is a float.
+fn number_text(n: &Number) -> String {
+    let raw = n.to_string();
+    if !raw.contains(['.', 'e', 'E']) {
+        let (neg, digits) = match raw.strip_prefix('-') {
+            Some(d) => (true, d),
+            None => (false, raw.as_str()),
+        };
+        let digits = digits.trim_start_matches('0');
+        return match (neg, digits.is_empty()) {
+            (_, true) => "0".into(),
+            (true, false) => format!("-{digits}"),
+            (false, false) => digits.to_string(),
+        };
+    }
+    float_repr(raw.parse::<f64>().unwrap_or(f64::NAN))
+}
+
+fn string(out: &mut String, s: &str) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            // json.encoder ESCAPE_ASCII: everything outside ' '..'~', DEL included.
+            c if (c as u32) < 0x20
+                || ((c as u32) > 0x7e
+                    && !(c == '\u{7f}' && crate::mutants::active("del-unescaped"))) =>
+            {
+                let mut buf = [0u16; 2];
+                for unit in c.encode_utf16(&mut buf) {
+                    let _ = write!(out, "\\u{unit:04x}");
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+fn write_value(out: &mut String, v: &Value) {
+    match v {
+        Value::Null => out.push_str("null"),
+        Value::Bool(true) => out.push_str("true"),
+        Value::Bool(false) => out.push_str("false"),
+        Value::Number(n) => out.push_str(&number_text(n)),
+        Value::String(s) => string(out, s),
+        Value::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                write_value(out, item);
+            }
+            out.push(']');
+        }
+        Value::Object(map) => {
+            out.push('{');
+            for (i, (k, item)) in map.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                string(out, k);
+                out.push_str(": ");
+                write_value(out, item);
+            }
+            out.push('}');
+        }
+    }
+}
+
+/// `json.dumps(v)`.
+pub fn dumps(v: &Value) -> String {
+    let mut out = String::new();
+    write_value(&mut out, v);
+    out
+}
+
+/// Python `str(x)` for a value loaded from JSON (`f"{value}"` in slot
+/// tokens): ints and floats as Python prints them, `True`/`False`/`None`,
+/// strings bare, lists and dicts as their repr.
+pub fn py_str(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => py_repr(other),
+    }
+}
+
+fn py_repr(v: &Value) -> String {
+    match v {
+        Value::Null => "None".into(),
+        Value::Bool(true) => "True".into(),
+        Value::Bool(false) => "False".into(),
+        Value::Number(n) => number_text(n),
+        Value::String(s) => crate::storage::py_repr(s),
+        Value::Array(items) => {
+            let inner: Vec<String> = items.iter().map(py_repr).collect();
+            format!("[{}]", inner.join(", "))
+        }
+        Value::Object(map) => {
+            let inner: Vec<String> = map
+                .iter()
+                .map(|(k, v)| format!("{}: {}", crate::storage::py_repr(k), py_repr(v)))
+                .collect();
+            format!("{{{}}}", inner.join(", "))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn float_repr_matches_full_cpython_table() {
+        let table = include_str!("../../shim/tests/cli_audit_float_repr.tsv");
+        let mut checked = 0;
+        let mut mismatches = Vec::new();
+        for line in table.lines().filter(|line| !line.starts_with('#')) {
+            let (bits, expected) = line.split_once('\t').expect("bits TAB repr");
+            let value = f64::from_bits(u64::from_str_radix(bits, 16).expect("hex bits"));
+            let actual = float_repr(value);
+            if actual != expected {
+                mismatches.push(format!("{bits}: expected {expected}, got {actual}"));
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 5358);
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+    }
+
+    #[test]
+    fn json_float_shortest_ties() {
+        for (bits, expected) in [
+            (0xc308130f222a4572, "-847044394961070.2"),
+            (0x42d526daef896bc8, "93026504287663.12"),
+            (0x430c6bf526340002, "1000000000000000.2"),
+        ] {
+            let value = json!({"timestamp": f64::from_bits(bits)});
+            assert_eq!(dumps(&value), format!("{{\"timestamp\": {expected}}}"));
+            assert_eq!(py_str(&value["timestamp"]), expected);
+        }
+    }
+
+    #[test]
+    fn float_repr_matches_python() {
+        // repr() in CPython 3.11, probed 2026-10-09.
+        for (x, want) in [
+            (1.1, "1.1"),
+            (1.0, "1.0"),
+            (-0.0, "-0.0"),
+            (0.0, "0.0"),
+            (1e16, "1e+16"),
+            (1.5e16, "1.5e+16"),
+            (1e15, "1000000000000000.0"),
+            (0.0001, "0.0001"),
+            (0.00001, "1e-05"),
+            (1.23e-7, "1.23e-07"),
+            (1791516389.4399626, "1791516389.4399626"),
+            (100.0, "100.0"),
+            (1e100, "1e+100"),
+            (0.1 + 0.2, "0.30000000000000004"),
+        ] {
+            assert_eq!(float_repr(x), want, "{x}");
+        }
+    }
+
+    #[test]
+    fn stored_number_spellings_come_out_as_python_writes_them() {
+        let v: Value =
+            serde_json::from_str(r#"[1.10, -0, -0.0, 1E2, 12345678901234567890, 0.5e1, 7]"#)
+                .unwrap();
+        assert_eq!(
+            dumps(&v),
+            "[1.1, 0, -0.0, 100.0, 12345678901234567890, 5.0, 7]"
+        );
+    }
+
+    #[test]
+    fn ascii_escapes_and_separators_match_json_dumps() {
+        let v = json!({"q": "caf\u{e9} \u{1F600} \"x\"\n", "n": null, "b": [true, false]});
+        assert_eq!(
+            dumps(&v),
+            // json.dumps in CPython 3.11, probed 2026-10-09.
+            "{\"q\": \"caf\\u00e9 \\ud83d\\ude00 \\\"x\\\"\\n\", \"n\": null, \"b\": [true, false]}"
+        );
+    }
+
+    #[test]
+    fn del_is_escaped_like_json_dumps() {
+        // json.dumps("a\x7fb") in CPython 3.11: "a\u007fb".
+        assert_eq!(dumps(&json!("a\u{7f}b")), "\"a\\u007fb\"");
+    }
+
+    #[test]
+    fn py_str_matches_python_formatting() {
+        let v: Value =
+            serde_json::from_str(r#"[1.10, true, null, "it's", ["a"], {"k": 1}]"#).unwrap();
+        let got: Vec<String> = v.as_array().unwrap().iter().map(py_str).collect();
+        assert_eq!(
+            got,
+            vec!["1.1", "True", "None", "it's", "['a']", "{'k': 1}"]
+        );
+    }
+
+    #[test]
+    fn all_json_control_escapes_match_python() {
+        // web/api.py:103 uses json.dumps(default=str, ensure_ascii=True).
+        let value = json!({"key\n": "\0\u{1f} \u{7e}\u{7f}\u{80}\r\t\u{08}\u{0c}\\\""});
+        assert_eq!(
+            dumps(&value),
+            "{\"key\\n\": \"\\u0000\\u001f ~\\u007f\\u0080\\r\\t\\b\\f\\\\\\\"\"}"
+        );
+        assert_eq!(dumps(&json!([[], {}, "", false])), "[[], {}, \"\", false]");
+    }
+
+    #[test]
+    fn python_repr_preserves_nested_values_and_key_order() {
+        // cms.py:187-205 formats slot values with Python str().
+        let value = json!({"first": [false,null,"it's"], "second": {"quoted\"": "plain"}});
+        assert_eq!(
+            py_str(&value),
+            "{'first': [False, None, \"it's\"], 'second': {'quoted\"': 'plain'}}"
+        );
+        assert_eq!(py_str(&json!(false)), "False");
+        assert_eq!(py_str(&json!("it's\n")), "it's\n");
+        assert_eq!(py_str(&json!([])), "[]");
+        assert_eq!(py_str(&json!({})), "{}");
+    }
+
+    #[test]
+    fn float_json_allows_nonfinite_values_but_audit_codec_refuses_them() {
+        // web/api.py:103 uses json.dumps' default allow_nan=True;
+        // rust/shim/src/cli/board_audit/codec.rs:15 refuses nonfinite audit numbers.
+        for (value, expected) in [
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+        ] {
+            assert_eq!(float_repr(value), expected);
+            assert!(shared_float::finite_float(value).is_err());
+        }
+        for (input, expected) in [
+            ("1e999", "Infinity"),
+            ("-1e999", "-Infinity"),
+            ("1e-999", "0.0"),
+        ] {
+            let value: Value = serde_json::from_str(input).unwrap();
+            assert_eq!(dumps(&value), expected);
+        }
+    }
+}

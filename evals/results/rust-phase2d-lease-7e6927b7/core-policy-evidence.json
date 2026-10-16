@@ -1,0 +1,458 @@
+{
+  "schema": 1,
+  "executed_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+  "executed_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+  "scope": "Functional only; hosted acceptance and independent final review pending.",
+  "platforms": {
+    "windows": {
+      "raw_receipt_sha256": "90d872fe7ec0250bc5843a0714b2ab1d340f3af1d011aaabbf31dd50fea2e41d",
+      "raw_receipt_bytes": 144862,
+      "python": "3.11.9",
+      "image_sha256": "567c6bb5b61e2997028aaedf014f47e08e781bb0ebe952e55e0b8b131b21479f",
+      "producing_private_orchestration_sha256": "f6807934725e3341eda05214dcff5c6701abe174bdf658312ef5b6556af998a9",
+      "successful_child_source": "tests/test_lease_cli.py::_command",
+      "successful_child_source_sha256": "3c9ace1011d0183d97b148ccbb3d30556b364c40815217f721db6e394fd270f9",
+      "successful_child_AST_sha256": "545dbb916fd50f1e35ebd493c4b6e9e9b20674facc616c578b0c8625d23917e6",
+      "successful_child_checker": "evals.rust_port.lease_policy_preparation.successful_child_clock",
+      "successful_child_status": "matched",
+      "raw_home_comparison_exact": false,
+      "semantic_policy_matched": true,
+      "actual_clocks_and_windows": {
+        "oracle": {
+          "decimal_timestamp": "1791327452.9674578",
+          "invocation_window": [
+            1791327452.330998,
+            1791327453.0027845
+          ],
+          "raw_response_sha256": "ad6ae6d8c55c1db3adb78f2a5c2643a1a8b614e61473cea54eaaa9e542322fb2",
+          "raw_ran_json_sha256": "94f8c9781875b191e1ec91d103021d6df104ec53d41724cfe2c9b8a5e752d848"
+        },
+        "candidate": {
+          "decimal_timestamp": "1791327453.3377407",
+          "invocation_window": [
+            1791327453.1891787,
+            1791327453.3749924
+          ],
+          "raw_response_sha256": "573f8327e21537aeb11a8a141eff5270958d807de6a21263a89aff4ac9e6a2a6",
+          "raw_ran_json_sha256": "54677534aa7e97b7a90f892ec0dce228c1b46a89ceab048677aa45b69e4e46ca"
+        },
+        "oracle_repeat": {
+          "decimal_timestamp": "1791327454.2836146",
+          "invocation_window": [
+            1791327453.5646899,
+            1791327454.318697
+          ],
+          "raw_response_sha256": "1498a8653ca31e834b9a2c5e80ccd35f0fb32ae2f3a49f0a6f2239e2efa39541",
+          "raw_ran_json_sha256": "d0b540894a5862f194049dde70c3ad7c1b3db1a8bcbe5b2346af57173ca871f3"
+        }
+      },
+      "oracle_clocks_distinct": true,
+      "successful_child_controls": [
+        {
+          "label": "wrong-clock",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "wrong-own-window",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "unrelated-exit_code",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "unrelated-stdout_b64",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "unrelated-stderr_b64",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "unrelated-post_files_b64",
+          "verdict": "failed",
+          "rejected": true
+        }
+      ],
+      "nonzero_existing_case": "lease-run-held-env-appended",
+      "nonzero_exact": true,
+      "deferred_actions": {
+        "hold": {
+          "required_exit": 1,
+          "required_diagnostic": "deferred in this candidate"
+        },
+        "break": {
+          "required_exit": 1,
+          "required_diagnostic": "deferred in this candidate"
+        },
+        "delegate": {
+          "required_exit": 1,
+          "required_diagnostic": "deferred in this candidate"
+        },
+        "designate": {
+          "required_exit": 1,
+          "required_diagnostic": "deferred in this candidate"
+        }
+      },
+      "actual_instrument_files_sha256": {
+        "memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+        "memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+        "__init__.py": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+        "acceptance.py": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+        "broken_stdio.py": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+        "candidate.py": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+        "cli_argv.py": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+        "cli_argv_corpus.json": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+        "cli_corpus.py": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+        "cli_dispatch.py": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+        "cli_process.py": "d576ba623f81d0c11780de62eaa63c4cde9dab755568766fbb88b27e48e12a27",
+        "cli_public.py": "89ab9a9cda42728301884a25439d2eaf1c47ee3ccd6078baf0df3f38cad2078f",
+        "cli_version.py": "c7cc915ad309c613922b1b3e03aacbf8988e96b661644bb66c3ea4062cfd5afb",
+        "collection_guard.py": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+        "controls.py": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+        "fixtures.py": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+        "full_bank.py": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+        "full_seed.json": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+        "harness.py": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+        "lease_corpus.py": "6884940a1b79dd63ee5089ad0e416da99f3b7d6b760c8c9577d42c5f2e68979a",
+        "lease_headers.py": "387af1ebf31edf4dacb0759a89a8170165c39a2533909d61f8c791d3ef63e97c",
+        "lease_help.py": "e1db7b124fc8a1bb824b08d050bc2df3fb729b12fe2c1f9c1103fab597018e44",
+        "lease_policy_preparation.py": "3cd864d4bbf0e49e14c5ea6bc4bbd363402eacb050f735f5aca02991b7b83e48",
+        "onnx_cpu_compare.py": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+        "oracle.py": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+        "oracle_tests.json": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+        "phase1.py": "79ff6e64424c91b52229c956670989e7d153bc8c266cc0da91c725ef0ac801e3",
+        "phase1_ci.py": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+        "phase1_inventory.py": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+        "phase1_oracle.py": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+        "phase1_receipts.py": "fabca26955b889ddd362ca90ead363e7a9c4471d18d1949e5a00e8328bc4ee58",
+        "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+        "provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+        "pytest_plugin.py": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+        "registration_policy.py": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+        "seed.json": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+        "selfcheck.py": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+        "stdio.py": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+        "stdio_capture.py": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+        "stdio_concurrent_orders.json": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+        "stdio_corpus.py": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+        "stdio_daemon.py": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+        "stdio_eof.py": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+        "stdio_eof_orders.json": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+        "stdio_faults.py": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+        "stdio_fixture.py": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+        "stdio_judge.py": "969ebddbd7d90e56a023a34697943bc2892318775858747caabbd7521d35f311",
+        "stdio_minimal_daemon.py": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+        "stdio_process_controls.py": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+        "stdio_scenario_fixture.py": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+        "stdio_scenarios.py": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+        "stdio_startup_contract.f709.json": "b7dea0a3ab4d600476ac5be83d8f825d032dc6e581f11493d6896888d2946a9c",
+        "stdio_startup_contract.json": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+        "test_baseline_cleanup_grace.py": "00a26bfb34f9ad3b03029d06c7153c6e7f46842e865061aa49711ba2f3df733c",
+        "test_boundary_regressions.py": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+        "test_candidate.py": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+        "test_capture_provenance.py": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+        "test_cli_argv.py": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+        "test_cli_dispatch_lane.py": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+        "test_cli_environment.py": "5292da8e7706e0a80510601d6764ad6dd575a739da9e46aae2e84eec14cd922c",
+        "test_cli_invocation.py": "ac1f458fac1d5dc4f274c25d5142a6da909b586c9aa8f8eac65d449edac01946",
+        "test_cli_lease_integration.py": "0e3ec8bc6bd47f3701f2d8df6881f770dcffa2d2afbfbf5024aa0dbd821a33fd",
+        "test_cli_parent_helpers.py": "be571364c4d26d6f882dee46352571b32ce62efe6130711b08191baa75733a5a",
+        "test_cli_process.py": "bb5c5c3e4d73cc568c1483521ae2693fcbed910120930c771b9d080161187670",
+        "test_cli_public_summary.py": "6fb79374915b52dee7b86df663d87595742f185b1e14dc5d88b76d927dbb0460",
+        "test_cli_receipt_provenance.py": "d70f690039b6fb139aa1ac05d63a911be3f609cc640dc9966f282261012244aa",
+        "test_cli_relocated_admission.py": "a2ed340c8333a4d1aab3bd3209e28d848400f802e5b65475d3321c01abd74d39",
+        "test_cli_version.py": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+        "test_cli_version_missing_console.py": "73cc5322ef1eb8297f787090dac9dd7f82c3d9a8722958949c725c21c140b813",
+        "test_collection_guard.py": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+        "test_full_bank.py": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+        "test_harness.py": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+        "test_instrument_routing.py": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+        "test_lease_corpus.py": "ee3e6508faa5a724161b3dfc3524010ca6d7e9321087c97ec3f4d92db5400314",
+        "test_lease_headers.py": "58adf21a681d546efa1fd60b3cf5e190bdf86ecb893198399e39d248ec5bf609",
+        "test_lease_help.py": "7fc427cf91cf1db36a0464fb235d85d183ce323196dc7bd378f732fe5540f292",
+        "test_lease_policy_preparation.py": "f887fe99275a3e9b18161b42d1210c60ea681bff8d0ba082ad595b0a49eaf7a7",
+        "test_oracle_boundary.py": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+        "test_phase0b.py": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+        "test_phase1_completeness.py": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+        "test_phase1_full_suite.py": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+        "test_phase1_inventory.py": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+        "test_phase1_inventory_regeneration.py": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+        "test_phase1_oracle.py": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+        "test_phase1_receipts.py": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+        "test_phase1_routing.py": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+        "test_phase2c_version_identity.py": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+        "test_processes.py": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+        "test_provenance.py": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+        "test_python_selection.py": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+        "test_readiness_wait_normalization.py": "c802e72402129a5dc614438658c343498ad611fd97e444369c98342a2d9f0ed4",
+        "test_registration_policy.py": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+        "test_runtime_provenance.py": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+        "test_stderr_retention.py": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+        "test_stdio_boundary_retention.py": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+        "test_stdio_judge.py": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+        "test_stdio_process_controls.py": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+        "test_stdio_scenarios.py": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+        "test_wire.py": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+        "unicode14_reason.py": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+        "url_reference.py": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+        "which_comparison.py": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+        "wire.py": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f"
+      }
+    },
+    "linux": {
+      "raw_receipt_sha256": "a94d0a93d135bf0f798ea1cbe7dfadfdca16a7470ddc157d7cdfed027b389def",
+      "raw_receipt_bytes": 137433,
+      "python": "3.11.15",
+      "image_sha256": "87366bc2303fea0799cdb0e528b4f4e83008e6789358a17f79fb4718b05db1b9",
+      "producing_private_orchestration_sha256": "f6807934725e3341eda05214dcff5c6701abe174bdf658312ef5b6556af998a9",
+      "successful_child_source": "tests/test_lease_cli.py::_command",
+      "successful_child_source_sha256": "3308a15213ae04d0d9b439759667c6aff8ea0f4c24ad4e6bde06c097e85dcc06",
+      "successful_child_AST_sha256": "545dbb916fd50f1e35ebd493c4b6e9e9b20674facc616c578b0c8625d23917e6",
+      "successful_child_checker": "evals.rust_port.lease_policy_preparation.successful_child_clock",
+      "successful_child_status": "matched",
+      "raw_home_comparison_exact": false,
+      "semantic_policy_matched": true,
+      "actual_clocks_and_windows": {
+        "oracle": {
+          "decimal_timestamp": "1791327563.8578346",
+          "invocation_window": [
+            1791327563.2609553,
+            1791327563.9447222
+          ],
+          "raw_response_sha256": "8067a1ea89d9e16f77aa332f09a161177245a5a3e55ee526fbf55bfeac43ceba",
+          "raw_ran_json_sha256": "6e9aca81f32a875429a3c6e169d9956a69a52b38ca80e154a3f1f9a54217b778"
+        },
+        "candidate": {
+          "decimal_timestamp": "1791327566.2906299",
+          "invocation_window": [
+            1791327563.9546263,
+            1791327567.382211
+          ],
+          "raw_response_sha256": "e81f6acc823a188b2c307a74a45d3a0a4466244a4c177d620ca83276a10a1309",
+          "raw_ran_json_sha256": "e3db71664e861f957b9be7704bbf8390c85adf80b4879d3a8179b6423b10c6f8"
+        },
+        "oracle_repeat": {
+          "decimal_timestamp": "1791327567.9806101",
+          "invocation_window": [
+            1791327567.3876328,
+            1791327568.0650342
+          ],
+          "raw_response_sha256": "24aed09438c86d8072a8cc4edfa21bf8ecb6d3cd949a7864eb04dc609c543995",
+          "raw_ran_json_sha256": "71e5167990d35a458bfea68c2d51c41aa64f979d2b15e5440b34a1cb19fd67f5"
+        }
+      },
+      "oracle_clocks_distinct": true,
+      "successful_child_controls": [
+        {
+          "label": "wrong-clock",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "wrong-own-window",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "unrelated-exit_code",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "unrelated-stdout_b64",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "unrelated-stderr_b64",
+          "verdict": "failed",
+          "rejected": true
+        },
+        {
+          "label": "unrelated-post_files_b64",
+          "verdict": "failed",
+          "rejected": true
+        }
+      ],
+      "nonzero_existing_case": "lease-run-held-env-appended",
+      "nonzero_exact": true,
+      "deferred_actions": {
+        "hold": {
+          "required_exit": 1,
+          "required_diagnostic": "deferred in this candidate"
+        },
+        "break": {
+          "required_exit": 1,
+          "required_diagnostic": "deferred in this candidate"
+        },
+        "delegate": {
+          "required_exit": 1,
+          "required_diagnostic": "deferred in this candidate"
+        },
+        "designate": {
+          "required_exit": 1,
+          "required_diagnostic": "deferred in this candidate"
+        }
+      },
+      "actual_instrument_files_sha256": {
+        "memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+        "memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+        "__init__.py": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+        "acceptance.py": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+        "broken_stdio.py": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+        "candidate.py": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+        "cli_argv.py": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+        "cli_argv_corpus.json": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+        "cli_corpus.py": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+        "cli_dispatch.py": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+        "cli_process.py": "d576ba623f81d0c11780de62eaa63c4cde9dab755568766fbb88b27e48e12a27",
+        "cli_public.py": "89ab9a9cda42728301884a25439d2eaf1c47ee3ccd6078baf0df3f38cad2078f",
+        "cli_version.py": "c7cc915ad309c613922b1b3e03aacbf8988e96b661644bb66c3ea4062cfd5afb",
+        "collection_guard.py": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+        "controls.py": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+        "fixtures.py": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+        "full_bank.py": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+        "full_seed.json": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+        "harness.py": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+        "lease_corpus.py": "6884940a1b79dd63ee5089ad0e416da99f3b7d6b760c8c9577d42c5f2e68979a",
+        "lease_headers.py": "387af1ebf31edf4dacb0759a89a8170165c39a2533909d61f8c791d3ef63e97c",
+        "lease_help.py": "e1db7b124fc8a1bb824b08d050bc2df3fb729b12fe2c1f9c1103fab597018e44",
+        "lease_policy_preparation.py": "3cd864d4bbf0e49e14c5ea6bc4bbd363402eacb050f735f5aca02991b7b83e48",
+        "onnx_cpu_compare.py": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+        "oracle.py": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+        "oracle_tests.json": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+        "phase1.py": "79ff6e64424c91b52229c956670989e7d153bc8c266cc0da91c725ef0ac801e3",
+        "phase1_ci.py": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+        "phase1_inventory.py": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+        "phase1_oracle.py": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+        "phase1_receipts.py": "fabca26955b889ddd362ca90ead363e7a9c4471d18d1949e5a00e8328bc4ee58",
+        "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+        "provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+        "pytest_plugin.py": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+        "registration_policy.py": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+        "seed.json": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+        "selfcheck.py": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+        "stdio.py": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+        "stdio_capture.py": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+        "stdio_concurrent_orders.json": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+        "stdio_corpus.py": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+        "stdio_daemon.py": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+        "stdio_eof.py": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+        "stdio_eof_orders.json": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+        "stdio_faults.py": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+        "stdio_fixture.py": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+        "stdio_judge.py": "969ebddbd7d90e56a023a34697943bc2892318775858747caabbd7521d35f311",
+        "stdio_minimal_daemon.py": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+        "stdio_process_controls.py": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+        "stdio_scenario_fixture.py": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+        "stdio_scenarios.py": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+        "stdio_startup_contract.f709.json": "b7dea0a3ab4d600476ac5be83d8f825d032dc6e581f11493d6896888d2946a9c",
+        "stdio_startup_contract.json": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+        "test_baseline_cleanup_grace.py": "00a26bfb34f9ad3b03029d06c7153c6e7f46842e865061aa49711ba2f3df733c",
+        "test_boundary_regressions.py": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+        "test_candidate.py": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+        "test_capture_provenance.py": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+        "test_cli_argv.py": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+        "test_cli_dispatch_lane.py": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+        "test_cli_environment.py": "5292da8e7706e0a80510601d6764ad6dd575a739da9e46aae2e84eec14cd922c",
+        "test_cli_invocation.py": "ac1f458fac1d5dc4f274c25d5142a6da909b586c9aa8f8eac65d449edac01946",
+        "test_cli_lease_integration.py": "0e3ec8bc6bd47f3701f2d8df6881f770dcffa2d2afbfbf5024aa0dbd821a33fd",
+        "test_cli_parent_helpers.py": "be571364c4d26d6f882dee46352571b32ce62efe6130711b08191baa75733a5a",
+        "test_cli_process.py": "bb5c5c3e4d73cc568c1483521ae2693fcbed910120930c771b9d080161187670",
+        "test_cli_public_summary.py": "6fb79374915b52dee7b86df663d87595742f185b1e14dc5d88b76d927dbb0460",
+        "test_cli_receipt_provenance.py": "d70f690039b6fb139aa1ac05d63a911be3f609cc640dc9966f282261012244aa",
+        "test_cli_relocated_admission.py": "a2ed340c8333a4d1aab3bd3209e28d848400f802e5b65475d3321c01abd74d39",
+        "test_cli_version.py": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+        "test_cli_version_missing_console.py": "73cc5322ef1eb8297f787090dac9dd7f82c3d9a8722958949c725c21c140b813",
+        "test_collection_guard.py": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+        "test_full_bank.py": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+        "test_harness.py": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+        "test_instrument_routing.py": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+        "test_lease_corpus.py": "ee3e6508faa5a724161b3dfc3524010ca6d7e9321087c97ec3f4d92db5400314",
+        "test_lease_headers.py": "58adf21a681d546efa1fd60b3cf5e190bdf86ecb893198399e39d248ec5bf609",
+        "test_lease_help.py": "7fc427cf91cf1db36a0464fb235d85d183ce323196dc7bd378f732fe5540f292",
+        "test_lease_policy_preparation.py": "f887fe99275a3e9b18161b42d1210c60ea681bff8d0ba082ad595b0a49eaf7a7",
+        "test_oracle_boundary.py": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+        "test_phase0b.py": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+        "test_phase1_completeness.py": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+        "test_phase1_full_suite.py": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+        "test_phase1_inventory.py": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+        "test_phase1_inventory_regeneration.py": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+        "test_phase1_oracle.py": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+        "test_phase1_receipts.py": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+        "test_phase1_routing.py": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+        "test_phase2c_version_identity.py": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+        "test_processes.py": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+        "test_provenance.py": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+        "test_python_selection.py": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+        "test_readiness_wait_normalization.py": "c802e72402129a5dc614438658c343498ad611fd97e444369c98342a2d9f0ed4",
+        "test_registration_policy.py": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+        "test_runtime_provenance.py": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+        "test_stderr_retention.py": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+        "test_stdio_boundary_retention.py": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+        "test_stdio_judge.py": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+        "test_stdio_process_controls.py": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+        "test_stdio_scenarios.py": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+        "test_wire.py": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+        "unicode14_reason.py": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+        "url_reference.py": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+        "which_comparison.py": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+        "wire.py": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f"
+      }
+    }
+  },
+  "windows_interrupt": {
+    "raw_receipt_sha256": "30e2c63c8b776e53fba115d5634e123415f4bae10e5820ffadacc5c1bff8dcbe",
+    "raw_receipt_bytes": 64109,
+    "producing_private_orchestration_sha256": "48cae8e834f71f675aca5fc0504c2b8de5410092a4ac191007823545e9735189",
+    "raw_stream_comparison": {
+      "exit_code": true,
+      "stdout_b64": true,
+      "stderr_b64": true
+    },
+    "post_home_bytes_exact": true,
+    "producing_helpers_sha256": {
+      "phase2d-lease-windows-ctrlc-capture-v3.py": "7527847a27bf0277a70131f577bdc65783da981993e0fa42465a8fd7ca4e6399",
+      "phase2d-lease-windows-ctrlc-console-helper-v3.py": "913f43e19db89310a6257027b250dbc019f71a29d07e0e831d6c6024701f9192",
+      "phase2d-lease-windows-ctrlc-resistant-child-v2.py": "c7c3990c34c4d5fe0d91d50f61fae1bdbad1f871ea0ddb121b6338b5fdaf8ea2"
+    },
+    "arms": {
+      "candidate": {
+        "exit_code": 130,
+        "ctrl_event": 0,
+        "process_group_id": 0,
+        "generate_console_ctrl_event_succeeded": true,
+        "child_absent_before_helper_cleanup": true,
+        "target_absent_before_helper_cleanup": true,
+        "helper_cleanup_killed_pids": [],
+        "owned_pids_absent_after_helper_cleanup": true,
+        "local_lock_reacquired": true,
+        "board_released": true,
+        "interrupt_contract_passed": true,
+        "held_environment_exact": true,
+        "first_output_within_two_minutes": true
+      },
+      "oracle": {
+        "exit_code": 130,
+        "ctrl_event": 0,
+        "process_group_id": 0,
+        "generate_console_ctrl_event_succeeded": true,
+        "child_absent_before_helper_cleanup": true,
+        "target_absent_before_helper_cleanup": true,
+        "helper_cleanup_killed_pids": [],
+        "owned_pids_absent_after_helper_cleanup": true,
+        "local_lock_reacquired": true,
+        "board_released": true,
+        "interrupt_contract_passed": true,
+        "held_environment_exact": true,
+        "first_output_within_two_minutes": true
+      }
+    }
+  }
+}

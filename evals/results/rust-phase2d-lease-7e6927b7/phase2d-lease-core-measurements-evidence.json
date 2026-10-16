@@ -1,0 +1,3603 @@
+{
+  "schema": 1,
+  "status": "passed-bounded-functional-and-check-list-measurements",
+  "candidate_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+  "candidate_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+  "scope": "CLI-LEASE-core(check/list/run) functional evidence; only bare TOKEN_FILE check/list timed.",
+  "images": {
+    "windows": {
+      "executed_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+      "executed_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+      "image_sha256": "567c6bb5b61e2997028aaedf014f47e08e781bb0ebe952e55e0b8b131b21479f",
+      "profile": "debug",
+      "build_command": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "-p",
+        "pseudolife-stdio",
+        "--bin",
+        "pseudolife-stdio"
+      ],
+      "build_exit": 0,
+      "source_archive_sha256": "47c9d5ae028967f7266e98cf37f388c8d37c513021af72cc04a43128acf7d627",
+      "source_method": "git archive exact HEAD rust; raw archive bytes and canonical committed Git blobs independently hashed",
+      "source_files_sha256": {
+        "rust/.config/nextest.toml": "840d8762b67ac759f574c07f1379381fb223b00a06b5a504934456bc4e2c47f7",
+        "rust/.gitattributes": "ed075dd7ce12c8371364a4274a22213ac00cd962f6e13fb22b64309918f2db9c",
+        "rust/.gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+        "rust/Cargo.lock": "ff3a8d2e38a7656f0037f55461f0d283752c21a47e4a7cc5e4150be4c45accbd",
+        "rust/Cargo.toml": "2e4898b58c4fad496e3a897f53f25df0f038a3d0f5d93f9917639b7104188aab",
+        "rust/PARITY.md": "71180e9ff879ae172278b09dd3cb3a9646cc09268399860b10a9074c46083e1d",
+        "rust/PHASE3-READ-PATH.md": "5af481302b618cab63ffb43a90ac22253c69ca81295f47db8192f51ee662f46d",
+        "rust/PORT-STATE.md": "8daf741149757a9faf2ca2d3e0ad6f65fcb75e0e73a8e40185809a20fd9204b7",
+        "rust/PORTING.md": "4d65a6f15a1acae7a4e5a8160d46860efa7ea21e91936a8456d285a9075b547d",
+        "rust/README.md": "e5f8d23619312274fbaf9a2d462745d75b3f3def0557bf3fd37e15a71fd321a3",
+        "rust/contract-inventory.json": "27555edf13a3f8c27cae2c68fa0cf6e5d11f5695fe3ecb28563a6cb97f1d09cc",
+        "rust/contract_inventory.py": "d3b573ee3d884485b3885946d8176b899198d887af3eabd38528350b1ccea526",
+        "rust/lease-policy-cases.json": "61a82c89d239e5172bdc9e53c244f459f74918f4d628e0425ef874da754d25cb",
+        "rust/phase0b-oracle-tests.json": "edbeb91ca912f5570644c21a435edf585628169dc7f0a5b49a3fbbfbba6cafaf",
+        "rust/phase1-contract-inventory.json": "0cafedce5b5c0511cb0d4ea6153903f9a37b9f8430b1b4f08fb12862fb00ae9e",
+        "rust/phase1-test-buckets.json": "1553213cc5d7796f407b0a6d1099bfd6073afdb2b26f71fd6c382fa425fa1b57",
+        "rust/phase2b-fixes-evidence.json": "10f8d2390a32d0dc1215a86abe28972436b36344eb9a3b5a8ac6253b30460b4f",
+        "rust/phase2b-retention-first-ci.json": "95e7bb1c4b56823efcb81aae721e72b2c748860c73fda4038493ccd27b040ed0",
+        "rust/rust-toolchain.toml": "d3c8887dfc80164497209239779196b11a208a9c2a6394f2fa5a5f4c60980096",
+        "rust/shim/Cargo.toml": "8d0266fb407493806d6bf1721c8963c77884de139e38fffa355589c4614dd221",
+        "rust/shim/src/argv.rs": "0273c36c6b105f38ec77692a9835868bf9695dd31920cdda3b98926f9dfbf5bb",
+        "rust/shim/src/board.rs": "48988db7e35af679c569e79480c096b51ef9fc9a502c1dc9a96abd997c909056",
+        "rust/shim/src/board/adapter.rs": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc",
+        "rust/shim/src/board/claims.rs": "5f27cc20df4980d1ded4698c5ab8a20b6c2e77e0420c6e1460cd1f256661ab6f",
+        "rust/shim/src/board/delivery.rs": "9607cc730219593fa71a82f66b3f9dd505bfa80963819472c88e9c4beb0d0f25",
+        "rust/shim/src/board/doorbell.rs": "eef3c4766d3c03778eee3e7d63779b22f737e943f61c140f0c60291fdefe3747",
+        "rust/shim/src/board/doorbell_linux_cleanup.rs": "7c96f3d79a50a0ad31eb820bb2bf7776b6da59f145d656f0be5cebef27bc3351",
+        "rust/shim/src/board/doorbell_linux_cleanup_deadline_tests.rs": "08504d30c5aeb612c0d9d5d773776c89d87ee92bee8808444c8391678921d2d7",
+        "rust/shim/src/board/doorbell_linux_cleanup_tests.rs": "c74f061b2596d3b95febbd6b62d86df1b907841ed720d09e5147b3e475a5a6d0",
+        "rust/shim/src/board/doorbell_linux_cleanup_wait_deadline_tests.rs": "02a552eaa31129294a1055be800d0fa9e0291e1d7d77614f92dd2e9cb2a7d39d",
+        "rust/shim/src/board/doorbell_posix.rs": "690504d199014803a065c0d0eb8362d486b6bb6aa09cd2cb738353affab2881e",
+        "rust/shim/src/board/doorbell_windows.rs": "5461284ad306ce698c54ca64eced743094d89ca873da0dcfa42958a596a2c554",
+        "rust/shim/src/board/identity.rs": "cc8a3f8b1b5d3e7debe7c26ecafecc0b2fffec608dad0192e0bb95788500deb1",
+        "rust/shim/src/board/liveness.rs": "7f167b55aa3dd68377d6df05bf24374677cc31f3506c27087bbb3abca61a5b8a",
+        "rust/shim/src/board/notice.rs": "720ade355e99fb0cb9270db5d805b9adf62f9308281a811e693a06ce7c4fd930",
+        "rust/shim/src/board/policy.rs": "49c468b766bdc621dba514b882cf04484a77fca5d1af1a1990a480d26045b080",
+        "rust/shim/src/board/state.rs": "742bbbd556787edd080b18d774f94e0c1e570752dbd07eec64425df23f5327fc",
+        "rust/shim/src/board/unicode14.rs": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb",
+        "rust/shim/src/cache.rs": "30e0f2235d785dd494df447d9be0cf39776c8faceb07331897970d63551ebde9",
+        "rust/shim/src/cli.rs": "113feca2948fe9fa1baef284ab54f83b127d5c80d45af1f9cdb8a8b598ab9077",
+        "rust/shim/src/cli/lease/args.rs": "97c5175872d43cd3829dd6b18a4fe451058fbd782d6e5fa7949b718b8bc9a089",
+        "rust/shim/src/cli/lease/assets/check_help.txt": "970c0c7067eb0593bc5dd53a2d9a58d630aa65292e31db179b979ec181f90b7d",
+        "rust/shim/src/cli/lease/assets/check_usage.txt": "05ede560bdfaf08006996dd4ce9c5ac4d51041a60c4accd410c19a146a6a549c",
+        "rust/shim/src/cli/lease/assets/list_help.txt": "6ade157c15b8e494741955459a452c4ce5de80aefa56702e6126eafdfd00b30d",
+        "rust/shim/src/cli/lease/assets/list_usage.txt": "3ff9c9624e996a5c6e70e8b02636cc642a8723045e75c34351654c91d40a1720",
+        "rust/shim/src/cli/lease/assets/run_help.txt": "a53102608e925996dce9812c1181a6c08c68980791b2505b975f4280f259856f",
+        "rust/shim/src/cli/lease/assets/run_usage.txt": "01270b268a86dfe46dcc309a1a92867f6232a3d391caf01105443caf94306d38",
+        "rust/shim/src/cli/lease/assets/top_help.txt": "e884965d433ddd282aca72059d4c344a4c5eaaa86d9351e2ece91b18473c1780",
+        "rust/shim/src/cli/lease/assets/top_usage.txt": "04ba689b5f6143e80d61b7444252d99faf0e39594e0852bfcdac1a83268ed33c",
+        "rust/shim/src/cli/lease/board.rs": "700ba23bebe666ff674f1e270ba9a70100ac65e3b67cddb9aab9c3256ae747ef",
+        "rust/shim/src/cli/lease/json.rs": "03ae9c5a3527a2e14bfbab2a081eaeb7f1092d6d7db35ad4f5d2a2ef1a587733",
+        "rust/shim/src/cli/lease/lock.rs": "343b95456be950699dc090f76fa16d50201a35b752fe48f96de1ddda1c9ab3db",
+        "rust/shim/src/cli/lease/mod.rs": "57e116db34f22088f2469a2bcab10acd440bbd2c1db19879ed9c12309c30378e",
+        "rust/shim/src/cli/lease/run.rs": "3ca70d2230bec5c0ddc22cefb31935e5f80ac490fc3cd375d87847efe043fbdc",
+        "rust/shim/src/cli/lease/view.rs": "00f3c9abb619a364a827708332ba53397d921b632f6c23e8f96be615b90c84a6",
+        "rust/shim/src/cli/version.rs": "98c171058c0150d5a6e724352d388796bd99803bc8617723932a32103fea2284",
+        "rust/shim/src/cli_help.txt": "759a7ecda00a610211478fa811804ee5bba9092f55ebf7478bed54c041c9230a",
+        "rust/shim/src/credentials.rs": "13006458f751017c95cdf7da7c4ad828aba9d733839284b36163c654c5341c5a",
+        "rust/shim/src/credentials/unix_accounts.rs": "330c00474ad422702c28fb9b641802c8183a2c0eeb73dce3e2b1f83119f5a45d",
+        "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
+        "rust/shim/src/errors.rs": "fbc3d61cd678051ab68ea1a3d7f9a91b4df392e5019d143ad05f8e9a7a48290c",
+        "rust/shim/src/lib.rs": "795e26c6f2b3f24a5dcc5c27194bc9e7241748cb0cd46f0484b70e9814feba47",
+        "rust/shim/src/lifecycle.rs": "bad9de05be6531c976f2a335cb666e5363437516c272bdd788479015253eaca9",
+        "rust/shim/src/lifecycle_executable.rs": "da0f66066d4e12bd383ce4b505c0882425a8897a2ca6c548a2b6e7b3246f6995",
+        "rust/shim/src/main.rs": "073637ff1df4af0c55068f8d9d9a759ffdbad427cba03bd349326765f9ccf4c6",
+        "rust/shim/src/owned_transport.rs": "6723acb67817f2901774ff5ffd3ff401e96ab1fe50f1d063a985d50c7c23520e",
+        "rust/shim/src/raw_http.rs": "eaa04a61425a2bf0609e9151e36d1a0c630063d6462f5270931b46bc1af0b1a8",
+        "rust/shim/src/recovery.rs": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201",
+        "rust/shim/src/subscriptions.rs": "bd3b8522e1266a15316598a2a2ccbb965dbe1e7fa9ed556140a22c877f0e97a9",
+        "rust/shim/src/upstream.rs": "44c78d8044fde7fb8c4fe39f928063748f87271a1c4d6f50bbfa7622879db16d",
+        "rust/shim/src/wire_compatibility.rs": "e51c066fded5c2f6e4a9f3d1412fd9725ac1d26aff51ad10009e4d7fc6f0a283",
+        "rust/shim/src/wire_ids.rs": "6dc3fc3d3d0168e11d9b6419f051bb712f519be12b29ee85e1b874476f3bbcd0",
+        "rust/shim/src/wire_json.rs": "5dce53bca886fb8e8be9855a3eca6a7807cbf6fce9e1659932dfd09c08171648",
+        "rust/shim/tests/auth_credentials.rs": "9539228b6382cd7350fa947b198331eaeda659b5c6f5ea6dc5c7ff6bca9fe60a",
+        "rust/shim/tests/auth_fixture.rs": "3bde3d302ab7286401150748b4576e530328791b156bd2b3635e5903914d505b",
+        "rust/shim/tests/auth_lifecycle_cache.rs": "a9debf544fecf02ab3f3edc76da7956b4c5a92084011e9f0b21d20cb0f5c3a92",
+        "rust/shim/tests/auth_lifecycle_http.rs": "37241ee11929115d98fd7f19eb128be27829315b5c719294cd49315ba5f5ad33",
+        "rust/shim/tests/auth_lifecycle_runtime.rs": "0d3e465ae4f001e9db64f6b690b803ee5bae15d5ab0163eea665a62fae3618e9",
+        "rust/shim/tests/auth_lifecycle_updates.rs": "19415254eff1522649bca8ec0fa186059cd761e7d3a2e5f118a526f28b89aff7",
+        "rust/shim/tests/auth_lifecycle_url.rs": "cbe5f7bd1d0fc8d407c17e725736aec57bac827e99438eca5ff855bbf7f40a39",
+        "rust/shim/tests/auth_windows_private_state/mod.rs": "220475cdd0721f91cee759ec35f3ef2ad336cf6c24724203fda3416de2aa0637",
+        "rust/shim/tests/auth_windows_security.rs": "875e6a669a67edc4dd552ea4776f5c075650cbe30de3fc3d5c5197ee87f11d21",
+        "rust/shim/tests/board_bridge_contract.rs": "1b8da2fa4955494caace8208465f6b1b16835856c61dbc6fefb677625c05f269",
+        "rust/shim/tests/board_capture.rs": "90d9c57911517c3215e9db7329c9ffc6cd6dadb97ced4837299e99935e85ec42",
+        "rust/shim/tests/board_channel_contract.rs": "49daa81482f53405240c2dfe81a216b5fc2ca42828c12d1210c4aabb29e6a6e3",
+        "rust/shim/tests/board_claims.rs": "476dfde25de4d7bdbc26579bb773476309a428ccb76cc82dc50507c06b7dc802",
+        "rust/shim/tests/board_delivery.rs": "9fbd20b0e9ce20ebc3cc0197f7d7c47b4bd06f87ed9a4f0c2a88c9a6235e0850",
+        "rust/shim/tests/board_doorbell.rs": "12f27b23e107ef44655c41a7ef7fdfddfab39a2055fd59043f3c4eabb5bea975",
+        "rust/shim/tests/board_doorbell_completion.rs": "21d089470d8bdf637e137a0e0a0a7a0107ef4c7e468b8d18b85bca250b9071ed",
+        "rust/shim/tests/board_fixture.rs": "09799bdb63b4081da3b2e2e460fc1328829e9bdb9c716055417298ad7bc9e654",
+        "rust/shim/tests/board_identity.rs": "7df5a6b044efecc7e4e1d2903031b89822add9cba7f21b6ce6e763d8e20bba62",
+        "rust/shim/tests/board_network.rs": "144a80776a01dcd05509f24a63ee43741109afd601aa9cfec270afa3e20f99ac",
+        "rust/shim/tests/board_policy.rs": "f3e5ed4dc459d48d05fb7da17775ae5fc37c94a896a6c2fe42b1a4dd94de72ad",
+        "rust/shim/tests/board_renewal.rs": "d987669fbef9c3994182cd1646a53555b455dd9de7eb05f570147c1de931029a",
+        "rust/shim/tests/board_repository.rs": "9bb186d1740769384ceb54cb8bd935e25e772b76e939ff84201f3536dc96563c",
+        "rust/shim/tests/board_retry_contract.rs": "8212305540e6ffdcbf31f11ec9e0ccef6ad90f80e21eea2f6c7d89604c7c1be2",
+        "rust/shim/tests/board_ring_contract.rs": "a9cc778efd61c1512567c66b1233d99b12b5517585fdf8b7d93926694f651051",
+        "rust/shim/tests/board_state.rs": "5942785239526430ec301a7546bfd920af6858499a3f2687939b96e4bce6f30d",
+        "rust/shim/tests/board_without_delivery.rs": "b35b84383ada05fed92977c5244c73a3c117565b2ee43a1320a10546ad1bb567",
+        "rust/shim/tests/claims_recovery_contract.rs": "cd8748d726de48a95ad79ea7b7ddef6816f7e335b054ab5697c7f0d27630e8cc",
+        "rust/shim/tests/cli_dispatch_contract.rs": "5017a4c0469f67df2c3453cdeb44ff5fe00138597d6dcc675083402e87ea8159",
+        "rust/shim/tests/cli_invalid_argv.rs": "c208655a2dcc522475ef34f839bac45ae135d1f1458cd8cc6c4d5cce45fd1762",
+        "rust/shim/tests/cli_version_contract.rs": "918d2397df136bb34d1bcee83f0420afa1da5d1ae5bde14914c494d70f976e61",
+        "rust/shim/tests/common/mod.rs": "4ffbc03310e098e2e84db6cedb2d3cd264d0a6d06847597bd880bdf4412abf8a",
+        "rust/shim/tests/fixtures/doorbell_windows_errno.json": "dff231d2a1d184c5c8b757531a131c80a5431fc8e1d63d7a5582d2b41d1a35f2",
+        "rust/shim/tests/fixtures/lease_iso_clock_cpython311.json": "a078556a7cd01cc3c1771fe799a7cce0265c1e7d7319a58c63193877bd651009",
+        "rust/shim/tests/fixtures/lease_timestamp_clock_cpython311.json": "2ad30b9a3e15bfe1c03f75ff8b55fa780f960f87798415969faa427cc38116f7",
+        "rust/shim/tests/lease_board.rs": "d503b53b1a3b47df1dd7ae7b7f193433949c5beacf91c0c9de2edb79255350ef",
+        "rust/shim/tests/lease_cli.rs": "f59c67cf6b4b2b13fbe3165f4193216eab27fec2e8d22468dca1eaed6082b818",
+        "rust/shim/tests/lifecycle_executable.rs": "58a83b3ea36f8e2d03ba877d74d98991bb5ef9d89f814ddfda6c9b56f0e9c4f0",
+        "rust/shim/tests/nonboard_contract.rs": "54c7fbc732b124892a806a3a46e7ae186edd3f9cca07930a81d3de92c3158318",
+        "rust/shim/tests/nonboard_final_assertions.rs": "6587ab4e046cc075a963ddd0b71c9b64c8aa2b152d4f0bd9ab6c5f6338d7ba0e",
+        "rust/shim/tests/nonboard_rotation.rs": "98c6607b1bafe20d3aeaedf475c15b3f436485ff4574b4c65f22be7daf9610c7",
+        "rust/shim/tests/nonboard_spawn_policy.rs": "ca12019a3e32106751205069ef4d59ccfff41c86dbbb170d473161fb0d6fd3f8",
+        "rust/shim/tests/nonboard_startup.rs": "9ddcd69a640eb6be85db483ce6fe50b077e6343b231d2496aed0b3af8345e2cc",
+        "rust/shim/tests/shim_contract.rs": "1be701ae5cc8a8a8dbc6877a166e6d6a1c55586ba50eb575d6cfd8c3f15d2c84",
+        "rust/shim/tests/shim_transport_recovery_contract.rs": "dedcb3892c5ae8e7c6424dbc17881eb5b604a7013097ae1b08f9d5845d1579cb",
+        "rust/shim/tests/shim_wire_contract.rs": "d0b736102dea9d4ebec63d248918871d76ef69b323cacaac8135193cb019e110",
+        "rust/shim/tests/stdio_concurrent_contract.rs": "16faa583a47ad5c8b67e294e1a0d85cfa272aea223862ecc9f07c73e07d39791",
+        "rust/shim/tests/stdio_eof_contract.rs": "af605059e3a7739754bad195e81010a0c887e7ef3db96e5ec115159d63ccf308",
+        "rust/shim/tests/unix_accounts_lookup/mod.rs": "deaf6284799502079813783efeb0873794880d0aa040aaddc99a3901bf78e0f2",
+        "rust/test-buckets.json": "a9e19c8484ec17bd7709c8bba150655935ddf0dc325c2dfc45d9e78998b5d6ae",
+        "rust/test_contract_inventory.py": "53449299a24d0f5d38afa54a5ca7e18b65c513a6703e56c2cea3564eeb7791fe"
+      },
+      "build_command_path_substitution": "Only ephemeral archive path is replaced by $SOURCE_ARCHIVE for public portability; original path and producing command remain in private build packet."
+    },
+    "linux": {
+      "executed_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+      "executed_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+      "image_sha256": "87366bc2303fea0799cdb0e528b4f4e83008e6789358a17f79fb4718b05db1b9",
+      "profile": "debug",
+      "build_command": [
+        "nice",
+        "-n10",
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--manifest-path",
+        "$SOURCE_ARCHIVE/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-j2",
+        "-p",
+        "pseudolife-stdio",
+        "--bin",
+        "pseudolife-stdio"
+      ],
+      "build_exit": 0,
+      "source_archive_sha256": "47c9d5ae028967f7266e98cf37f388c8d37c513021af72cc04a43128acf7d627",
+      "source_method": "git archive exact HEAD rust; raw archive bytes and canonical committed Git blobs independently hashed",
+      "source_files_sha256": {
+        "rust/.config/nextest.toml": "840d8762b67ac759f574c07f1379381fb223b00a06b5a504934456bc4e2c47f7",
+        "rust/.gitattributes": "ed075dd7ce12c8371364a4274a22213ac00cd962f6e13fb22b64309918f2db9c",
+        "rust/.gitignore": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368",
+        "rust/Cargo.lock": "ff3a8d2e38a7656f0037f55461f0d283752c21a47e4a7cc5e4150be4c45accbd",
+        "rust/Cargo.toml": "2e4898b58c4fad496e3a897f53f25df0f038a3d0f5d93f9917639b7104188aab",
+        "rust/PARITY.md": "71180e9ff879ae172278b09dd3cb3a9646cc09268399860b10a9074c46083e1d",
+        "rust/PHASE3-READ-PATH.md": "5af481302b618cab63ffb43a90ac22253c69ca81295f47db8192f51ee662f46d",
+        "rust/PORT-STATE.md": "8daf741149757a9faf2ca2d3e0ad6f65fcb75e0e73a8e40185809a20fd9204b7",
+        "rust/PORTING.md": "4d65a6f15a1acae7a4e5a8160d46860efa7ea21e91936a8456d285a9075b547d",
+        "rust/README.md": "e5f8d23619312274fbaf9a2d462745d75b3f3def0557bf3fd37e15a71fd321a3",
+        "rust/contract-inventory.json": "27555edf13a3f8c27cae2c68fa0cf6e5d11f5695fe3ecb28563a6cb97f1d09cc",
+        "rust/contract_inventory.py": "d3b573ee3d884485b3885946d8176b899198d887af3eabd38528350b1ccea526",
+        "rust/lease-policy-cases.json": "61a82c89d239e5172bdc9e53c244f459f74918f4d628e0425ef874da754d25cb",
+        "rust/phase0b-oracle-tests.json": "edbeb91ca912f5570644c21a435edf585628169dc7f0a5b49a3fbbfbba6cafaf",
+        "rust/phase1-contract-inventory.json": "0cafedce5b5c0511cb0d4ea6153903f9a37b9f8430b1b4f08fb12862fb00ae9e",
+        "rust/phase1-test-buckets.json": "1553213cc5d7796f407b0a6d1099bfd6073afdb2b26f71fd6c382fa425fa1b57",
+        "rust/phase2b-fixes-evidence.json": "10f8d2390a32d0dc1215a86abe28972436b36344eb9a3b5a8ac6253b30460b4f",
+        "rust/phase2b-retention-first-ci.json": "95e7bb1c4b56823efcb81aae721e72b2c748860c73fda4038493ccd27b040ed0",
+        "rust/rust-toolchain.toml": "d3c8887dfc80164497209239779196b11a208a9c2a6394f2fa5a5f4c60980096",
+        "rust/shim/Cargo.toml": "8d0266fb407493806d6bf1721c8963c77884de139e38fffa355589c4614dd221",
+        "rust/shim/src/argv.rs": "0273c36c6b105f38ec77692a9835868bf9695dd31920cdda3b98926f9dfbf5bb",
+        "rust/shim/src/board.rs": "48988db7e35af679c569e79480c096b51ef9fc9a502c1dc9a96abd997c909056",
+        "rust/shim/src/board/adapter.rs": "e033c719f4f32ee2a3513923481e5ef9c75617a143981ca2c814e4b6e2c4fffc",
+        "rust/shim/src/board/claims.rs": "5f27cc20df4980d1ded4698c5ab8a20b6c2e77e0420c6e1460cd1f256661ab6f",
+        "rust/shim/src/board/delivery.rs": "9607cc730219593fa71a82f66b3f9dd505bfa80963819472c88e9c4beb0d0f25",
+        "rust/shim/src/board/doorbell.rs": "eef3c4766d3c03778eee3e7d63779b22f737e943f61c140f0c60291fdefe3747",
+        "rust/shim/src/board/doorbell_linux_cleanup.rs": "7c96f3d79a50a0ad31eb820bb2bf7776b6da59f145d656f0be5cebef27bc3351",
+        "rust/shim/src/board/doorbell_linux_cleanup_deadline_tests.rs": "08504d30c5aeb612c0d9d5d773776c89d87ee92bee8808444c8391678921d2d7",
+        "rust/shim/src/board/doorbell_linux_cleanup_tests.rs": "c74f061b2596d3b95febbd6b62d86df1b907841ed720d09e5147b3e475a5a6d0",
+        "rust/shim/src/board/doorbell_linux_cleanup_wait_deadline_tests.rs": "02a552eaa31129294a1055be800d0fa9e0291e1d7d77614f92dd2e9cb2a7d39d",
+        "rust/shim/src/board/doorbell_posix.rs": "690504d199014803a065c0d0eb8362d486b6bb6aa09cd2cb738353affab2881e",
+        "rust/shim/src/board/doorbell_windows.rs": "5461284ad306ce698c54ca64eced743094d89ca873da0dcfa42958a596a2c554",
+        "rust/shim/src/board/identity.rs": "cc8a3f8b1b5d3e7debe7c26ecafecc0b2fffec608dad0192e0bb95788500deb1",
+        "rust/shim/src/board/liveness.rs": "7f167b55aa3dd68377d6df05bf24374677cc31f3506c27087bbb3abca61a5b8a",
+        "rust/shim/src/board/notice.rs": "720ade355e99fb0cb9270db5d805b9adf62f9308281a811e693a06ce7c4fd930",
+        "rust/shim/src/board/policy.rs": "49c468b766bdc621dba514b882cf04484a77fca5d1af1a1990a480d26045b080",
+        "rust/shim/src/board/state.rs": "742bbbd556787edd080b18d774f94e0c1e570752dbd07eec64425df23f5327fc",
+        "rust/shim/src/board/unicode14.rs": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb",
+        "rust/shim/src/cache.rs": "30e0f2235d785dd494df447d9be0cf39776c8faceb07331897970d63551ebde9",
+        "rust/shim/src/cli.rs": "113feca2948fe9fa1baef284ab54f83b127d5c80d45af1f9cdb8a8b598ab9077",
+        "rust/shim/src/cli/lease/args.rs": "97c5175872d43cd3829dd6b18a4fe451058fbd782d6e5fa7949b718b8bc9a089",
+        "rust/shim/src/cli/lease/assets/check_help.txt": "970c0c7067eb0593bc5dd53a2d9a58d630aa65292e31db179b979ec181f90b7d",
+        "rust/shim/src/cli/lease/assets/check_usage.txt": "05ede560bdfaf08006996dd4ce9c5ac4d51041a60c4accd410c19a146a6a549c",
+        "rust/shim/src/cli/lease/assets/list_help.txt": "6ade157c15b8e494741955459a452c4ce5de80aefa56702e6126eafdfd00b30d",
+        "rust/shim/src/cli/lease/assets/list_usage.txt": "3ff9c9624e996a5c6e70e8b02636cc642a8723045e75c34351654c91d40a1720",
+        "rust/shim/src/cli/lease/assets/run_help.txt": "a53102608e925996dce9812c1181a6c08c68980791b2505b975f4280f259856f",
+        "rust/shim/src/cli/lease/assets/run_usage.txt": "01270b268a86dfe46dcc309a1a92867f6232a3d391caf01105443caf94306d38",
+        "rust/shim/src/cli/lease/assets/top_help.txt": "e884965d433ddd282aca72059d4c344a4c5eaaa86d9351e2ece91b18473c1780",
+        "rust/shim/src/cli/lease/assets/top_usage.txt": "04ba689b5f6143e80d61b7444252d99faf0e39594e0852bfcdac1a83268ed33c",
+        "rust/shim/src/cli/lease/board.rs": "700ba23bebe666ff674f1e270ba9a70100ac65e3b67cddb9aab9c3256ae747ef",
+        "rust/shim/src/cli/lease/json.rs": "03ae9c5a3527a2e14bfbab2a081eaeb7f1092d6d7db35ad4f5d2a2ef1a587733",
+        "rust/shim/src/cli/lease/lock.rs": "343b95456be950699dc090f76fa16d50201a35b752fe48f96de1ddda1c9ab3db",
+        "rust/shim/src/cli/lease/mod.rs": "57e116db34f22088f2469a2bcab10acd440bbd2c1db19879ed9c12309c30378e",
+        "rust/shim/src/cli/lease/run.rs": "3ca70d2230bec5c0ddc22cefb31935e5f80ac490fc3cd375d87847efe043fbdc",
+        "rust/shim/src/cli/lease/view.rs": "00f3c9abb619a364a827708332ba53397d921b632f6c23e8f96be615b90c84a6",
+        "rust/shim/src/cli/version.rs": "98c171058c0150d5a6e724352d388796bd99803bc8617723932a32103fea2284",
+        "rust/shim/src/cli_help.txt": "759a7ecda00a610211478fa811804ee5bba9092f55ebf7478bed54c041c9230a",
+        "rust/shim/src/credentials.rs": "13006458f751017c95cdf7da7c4ad828aba9d733839284b36163c654c5341c5a",
+        "rust/shim/src/credentials/unix_accounts.rs": "330c00474ad422702c28fb9b641802c8183a2c0eeb73dce3e2b1f83119f5a45d",
+        "rust/shim/src/daemon_url.rs": "5aabc9e4811af93f9292d84e2abc7c182884ea201284b7bbc2f722ff94d3817e",
+        "rust/shim/src/errors.rs": "fbc3d61cd678051ab68ea1a3d7f9a91b4df392e5019d143ad05f8e9a7a48290c",
+        "rust/shim/src/lib.rs": "795e26c6f2b3f24a5dcc5c27194bc9e7241748cb0cd46f0484b70e9814feba47",
+        "rust/shim/src/lifecycle.rs": "bad9de05be6531c976f2a335cb666e5363437516c272bdd788479015253eaca9",
+        "rust/shim/src/lifecycle_executable.rs": "da0f66066d4e12bd383ce4b505c0882425a8897a2ca6c548a2b6e7b3246f6995",
+        "rust/shim/src/main.rs": "073637ff1df4af0c55068f8d9d9a759ffdbad427cba03bd349326765f9ccf4c6",
+        "rust/shim/src/owned_transport.rs": "6723acb67817f2901774ff5ffd3ff401e96ab1fe50f1d063a985d50c7c23520e",
+        "rust/shim/src/raw_http.rs": "eaa04a61425a2bf0609e9151e36d1a0c630063d6462f5270931b46bc1af0b1a8",
+        "rust/shim/src/recovery.rs": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201",
+        "rust/shim/src/subscriptions.rs": "bd3b8522e1266a15316598a2a2ccbb965dbe1e7fa9ed556140a22c877f0e97a9",
+        "rust/shim/src/upstream.rs": "44c78d8044fde7fb8c4fe39f928063748f87271a1c4d6f50bbfa7622879db16d",
+        "rust/shim/src/wire_compatibility.rs": "e51c066fded5c2f6e4a9f3d1412fd9725ac1d26aff51ad10009e4d7fc6f0a283",
+        "rust/shim/src/wire_ids.rs": "6dc3fc3d3d0168e11d9b6419f051bb712f519be12b29ee85e1b874476f3bbcd0",
+        "rust/shim/src/wire_json.rs": "5dce53bca886fb8e8be9855a3eca6a7807cbf6fce9e1659932dfd09c08171648",
+        "rust/shim/tests/auth_credentials.rs": "9539228b6382cd7350fa947b198331eaeda659b5c6f5ea6dc5c7ff6bca9fe60a",
+        "rust/shim/tests/auth_fixture.rs": "3bde3d302ab7286401150748b4576e530328791b156bd2b3635e5903914d505b",
+        "rust/shim/tests/auth_lifecycle_cache.rs": "a9debf544fecf02ab3f3edc76da7956b4c5a92084011e9f0b21d20cb0f5c3a92",
+        "rust/shim/tests/auth_lifecycle_http.rs": "37241ee11929115d98fd7f19eb128be27829315b5c719294cd49315ba5f5ad33",
+        "rust/shim/tests/auth_lifecycle_runtime.rs": "0d3e465ae4f001e9db64f6b690b803ee5bae15d5ab0163eea665a62fae3618e9",
+        "rust/shim/tests/auth_lifecycle_updates.rs": "19415254eff1522649bca8ec0fa186059cd761e7d3a2e5f118a526f28b89aff7",
+        "rust/shim/tests/auth_lifecycle_url.rs": "cbe5f7bd1d0fc8d407c17e725736aec57bac827e99438eca5ff855bbf7f40a39",
+        "rust/shim/tests/auth_windows_private_state/mod.rs": "220475cdd0721f91cee759ec35f3ef2ad336cf6c24724203fda3416de2aa0637",
+        "rust/shim/tests/auth_windows_security.rs": "875e6a669a67edc4dd552ea4776f5c075650cbe30de3fc3d5c5197ee87f11d21",
+        "rust/shim/tests/board_bridge_contract.rs": "1b8da2fa4955494caace8208465f6b1b16835856c61dbc6fefb677625c05f269",
+        "rust/shim/tests/board_capture.rs": "90d9c57911517c3215e9db7329c9ffc6cd6dadb97ced4837299e99935e85ec42",
+        "rust/shim/tests/board_channel_contract.rs": "49daa81482f53405240c2dfe81a216b5fc2ca42828c12d1210c4aabb29e6a6e3",
+        "rust/shim/tests/board_claims.rs": "476dfde25de4d7bdbc26579bb773476309a428ccb76cc82dc50507c06b7dc802",
+        "rust/shim/tests/board_delivery.rs": "9fbd20b0e9ce20ebc3cc0197f7d7c47b4bd06f87ed9a4f0c2a88c9a6235e0850",
+        "rust/shim/tests/board_doorbell.rs": "12f27b23e107ef44655c41a7ef7fdfddfab39a2055fd59043f3c4eabb5bea975",
+        "rust/shim/tests/board_doorbell_completion.rs": "21d089470d8bdf637e137a0e0a0a7a0107ef4c7e468b8d18b85bca250b9071ed",
+        "rust/shim/tests/board_fixture.rs": "09799bdb63b4081da3b2e2e460fc1328829e9bdb9c716055417298ad7bc9e654",
+        "rust/shim/tests/board_identity.rs": "7df5a6b044efecc7e4e1d2903031b89822add9cba7f21b6ce6e763d8e20bba62",
+        "rust/shim/tests/board_network.rs": "144a80776a01dcd05509f24a63ee43741109afd601aa9cfec270afa3e20f99ac",
+        "rust/shim/tests/board_policy.rs": "f3e5ed4dc459d48d05fb7da17775ae5fc37c94a896a6c2fe42b1a4dd94de72ad",
+        "rust/shim/tests/board_renewal.rs": "d987669fbef9c3994182cd1646a53555b455dd9de7eb05f570147c1de931029a",
+        "rust/shim/tests/board_repository.rs": "9bb186d1740769384ceb54cb8bd935e25e772b76e939ff84201f3536dc96563c",
+        "rust/shim/tests/board_retry_contract.rs": "8212305540e6ffdcbf31f11ec9e0ccef6ad90f80e21eea2f6c7d89604c7c1be2",
+        "rust/shim/tests/board_ring_contract.rs": "a9cc778efd61c1512567c66b1233d99b12b5517585fdf8b7d93926694f651051",
+        "rust/shim/tests/board_state.rs": "5942785239526430ec301a7546bfd920af6858499a3f2687939b96e4bce6f30d",
+        "rust/shim/tests/board_without_delivery.rs": "b35b84383ada05fed92977c5244c73a3c117565b2ee43a1320a10546ad1bb567",
+        "rust/shim/tests/claims_recovery_contract.rs": "cd8748d726de48a95ad79ea7b7ddef6816f7e335b054ab5697c7f0d27630e8cc",
+        "rust/shim/tests/cli_dispatch_contract.rs": "5017a4c0469f67df2c3453cdeb44ff5fe00138597d6dcc675083402e87ea8159",
+        "rust/shim/tests/cli_invalid_argv.rs": "c208655a2dcc522475ef34f839bac45ae135d1f1458cd8cc6c4d5cce45fd1762",
+        "rust/shim/tests/cli_version_contract.rs": "918d2397df136bb34d1bcee83f0420afa1da5d1ae5bde14914c494d70f976e61",
+        "rust/shim/tests/common/mod.rs": "4ffbc03310e098e2e84db6cedb2d3cd264d0a6d06847597bd880bdf4412abf8a",
+        "rust/shim/tests/fixtures/doorbell_windows_errno.json": "dff231d2a1d184c5c8b757531a131c80a5431fc8e1d63d7a5582d2b41d1a35f2",
+        "rust/shim/tests/fixtures/lease_iso_clock_cpython311.json": "a078556a7cd01cc3c1771fe799a7cce0265c1e7d7319a58c63193877bd651009",
+        "rust/shim/tests/fixtures/lease_timestamp_clock_cpython311.json": "2ad30b9a3e15bfe1c03f75ff8b55fa780f960f87798415969faa427cc38116f7",
+        "rust/shim/tests/lease_board.rs": "d503b53b1a3b47df1dd7ae7b7f193433949c5beacf91c0c9de2edb79255350ef",
+        "rust/shim/tests/lease_cli.rs": "f59c67cf6b4b2b13fbe3165f4193216eab27fec2e8d22468dca1eaed6082b818",
+        "rust/shim/tests/lifecycle_executable.rs": "58a83b3ea36f8e2d03ba877d74d98991bb5ef9d89f814ddfda6c9b56f0e9c4f0",
+        "rust/shim/tests/nonboard_contract.rs": "54c7fbc732b124892a806a3a46e7ae186edd3f9cca07930a81d3de92c3158318",
+        "rust/shim/tests/nonboard_final_assertions.rs": "6587ab4e046cc075a963ddd0b71c9b64c8aa2b152d4f0bd9ab6c5f6338d7ba0e",
+        "rust/shim/tests/nonboard_rotation.rs": "98c6607b1bafe20d3aeaedf475c15b3f436485ff4574b4c65f22be7daf9610c7",
+        "rust/shim/tests/nonboard_spawn_policy.rs": "ca12019a3e32106751205069ef4d59ccfff41c86dbbb170d473161fb0d6fd3f8",
+        "rust/shim/tests/nonboard_startup.rs": "9ddcd69a640eb6be85db483ce6fe50b077e6343b231d2496aed0b3af8345e2cc",
+        "rust/shim/tests/shim_contract.rs": "1be701ae5cc8a8a8dbc6877a166e6d6a1c55586ba50eb575d6cfd8c3f15d2c84",
+        "rust/shim/tests/shim_transport_recovery_contract.rs": "dedcb3892c5ae8e7c6424dbc17881eb5b604a7013097ae1b08f9d5845d1579cb",
+        "rust/shim/tests/shim_wire_contract.rs": "d0b736102dea9d4ebec63d248918871d76ef69b323cacaac8135193cb019e110",
+        "rust/shim/tests/stdio_concurrent_contract.rs": "16faa583a47ad5c8b67e294e1a0d85cfa272aea223862ecc9f07c73e07d39791",
+        "rust/shim/tests/stdio_eof_contract.rs": "af605059e3a7739754bad195e81010a0c887e7ef3db96e5ec115159d63ccf308",
+        "rust/shim/tests/unix_accounts_lookup/mod.rs": "deaf6284799502079813783efeb0873794880d0aa040aaddc99a3901bf78e0f2",
+        "rust/test-buckets.json": "a9e19c8484ec17bd7709c8bba150655935ddf0dc325c2dfc45d9e78998b5d6ae",
+        "rust/test_contract_inventory.py": "53449299a24d0f5d38afa54a5ca7e18b65c513a6703e56c2cea3564eeb7791fe"
+      },
+      "build_command_path_substitution": "Only ephemeral archive path is replaced by $SOURCE_ARCHIVE for public portability; original path and producing command remain in private build packet."
+    }
+  },
+  "functional": {
+    "windows": {
+      "executed_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+      "executed_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+      "image_sha256": "567c6bb5b61e2997028aaedf014f47e08e781bb0ebe952e55e0b8b131b21479f",
+      "successful_child_status": "matched-with-own-invocation-windows",
+      "successful_child_source_sha256": "3c9ace1011d0183d97b148ccbb3d30556b364c40815217f721db6e394fd270f9",
+      "successful_child_AST_sha256": "545dbb916fd50f1e35ebd493c4b6e9e9b20674facc616c578b0c8625d23917e6",
+      "successful_child_clock_controls_rejected": 6,
+      "nonzero_raw_exact": true,
+      "nonzero_exit": 3,
+      "deferred_actions_exact": [
+        "hold",
+        "break",
+        "delegate",
+        "designate"
+      ],
+      "local_lock_reacquisitions": 4,
+      "independent_empty_board_probes": 4,
+      "cleanup_passed": true,
+      "raw_receipt_sha256": "90d872fe7ec0250bc5843a0714b2ab1d340f3af1d011aaabbf31dd50fea2e41d"
+    },
+    "linux": {
+      "executed_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+      "executed_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+      "image_sha256": "87366bc2303fea0799cdb0e528b4f4e83008e6789358a17f79fb4718b05db1b9",
+      "successful_child_status": "matched-with-own-invocation-windows",
+      "successful_child_source_sha256": "3308a15213ae04d0d9b439759667c6aff8ea0f4c24ad4e6bde06c097e85dcc06",
+      "successful_child_AST_sha256": "545dbb916fd50f1e35ebd493c4b6e9e9b20674facc616c578b0c8625d23917e6",
+      "successful_child_clock_controls_rejected": 6,
+      "nonzero_raw_exact": true,
+      "nonzero_exit": 3,
+      "deferred_actions_exact": [
+        "hold",
+        "break",
+        "delegate",
+        "designate"
+      ],
+      "local_lock_reacquisitions": 4,
+      "independent_empty_board_probes": 4,
+      "cleanup_passed": true,
+      "raw_receipt_sha256": "a94d0a93d135bf0f798ea1cbe7dfadfdca16a7470ddc157d7cdfed027b389def"
+    },
+    "windows_ctrlc": {
+      "event": "CTRL_C_EVENT",
+      "process_group_id": 0,
+      "normalizations": [],
+      "arms": {
+        "candidate": {
+          "exit_code": 130,
+          "stdout_b64": "",
+          "stderr_b64": "bGVhc2U6IGludGVycnVwdGVkOyByZWxlYXNpbmcgJ2N0cmxjLXByb29mJw0K",
+          "signal_to_exit_seconds": 10.022919178009033,
+          "hidden_console": true,
+          "console_members_owned": true,
+          "child_absent_before_helper_cleanup": true,
+          "helper_fallback_kill_count": 0,
+          "board_present_before_signal": true,
+          "board_released_after_signal": true,
+          "local_byte_lock_reacquired": true
+        },
+        "oracle": {
+          "exit_code": 130,
+          "stdout_b64": "",
+          "stderr_b64": "bGVhc2U6IGludGVycnVwdGVkOyByZWxlYXNpbmcgJ2N0cmxjLXByb29mJw0K",
+          "signal_to_exit_seconds": 10.10257363319397,
+          "hidden_console": true,
+          "console_members_owned": true,
+          "child_absent_before_helper_cleanup": true,
+          "helper_fallback_kill_count": 0,
+          "board_present_before_signal": true,
+          "board_released_after_signal": true,
+          "local_byte_lock_reacquired": true
+        }
+      },
+      "raw_exit_streams_and_home_exact": true,
+      "raw_receipt_sha256": "30e2c63c8b776e53fba115d5634e123415f4bae10e5820ffadacc5c1bff8dcbe"
+    }
+  },
+  "measurements": [
+    {
+      "host": "windows",
+      "mode": "lease-check",
+      "layout": "bare",
+      "profile": "debug",
+      "candidate_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+      "candidate_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+      "image_sha256": "567c6bb5b61e2997028aaedf014f47e08e781bb0ebe952e55e0b8b131b21479f",
+      "oracle_pin": {
+        "source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+        "instrument_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+        "instrument_dirty": false,
+        "instrument_sha256": {
+          "memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+          "memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+          "__init__.py": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+          "acceptance.py": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+          "broken_stdio.py": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+          "candidate.py": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+          "cli_argv.py": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+          "cli_argv_corpus.json": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+          "cli_corpus.py": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+          "cli_dispatch.py": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+          "cli_process.py": "d576ba623f81d0c11780de62eaa63c4cde9dab755568766fbb88b27e48e12a27",
+          "cli_public.py": "89ab9a9cda42728301884a25439d2eaf1c47ee3ccd6078baf0df3f38cad2078f",
+          "cli_version.py": "c7cc915ad309c613922b1b3e03aacbf8988e96b661644bb66c3ea4062cfd5afb",
+          "collection_guard.py": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+          "controls.py": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+          "fixtures.py": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+          "full_bank.py": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+          "full_seed.json": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+          "harness.py": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+          "lease_corpus.py": "6884940a1b79dd63ee5089ad0e416da99f3b7d6b760c8c9577d42c5f2e68979a",
+          "lease_headers.py": "387af1ebf31edf4dacb0759a89a8170165c39a2533909d61f8c791d3ef63e97c",
+          "lease_help.py": "e1db7b124fc8a1bb824b08d050bc2df3fb729b12fe2c1f9c1103fab597018e44",
+          "lease_policy_preparation.py": "3cd864d4bbf0e49e14c5ea6bc4bbd363402eacb050f735f5aca02991b7b83e48",
+          "onnx_cpu_compare.py": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+          "oracle.py": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+          "oracle_tests.json": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+          "phase1.py": "79ff6e64424c91b52229c956670989e7d153bc8c266cc0da91c725ef0ac801e3",
+          "phase1_ci.py": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+          "phase1_inventory.py": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+          "phase1_oracle.py": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+          "phase1_receipts.py": "fabca26955b889ddd362ca90ead363e7a9c4471d18d1949e5a00e8328bc4ee58",
+          "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+          "provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+          "pytest_plugin.py": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+          "registration_policy.py": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+          "seed.json": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+          "selfcheck.py": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+          "stdio.py": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+          "stdio_capture.py": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+          "stdio_concurrent_orders.json": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+          "stdio_corpus.py": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+          "stdio_daemon.py": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+          "stdio_eof.py": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+          "stdio_eof_orders.json": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+          "stdio_faults.py": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+          "stdio_fixture.py": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+          "stdio_judge.py": "969ebddbd7d90e56a023a34697943bc2892318775858747caabbd7521d35f311",
+          "stdio_minimal_daemon.py": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+          "stdio_process_controls.py": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+          "stdio_scenario_fixture.py": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+          "stdio_scenarios.py": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+          "stdio_startup_contract.f709.json": "b7dea0a3ab4d600476ac5be83d8f825d032dc6e581f11493d6896888d2946a9c",
+          "stdio_startup_contract.json": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+          "test_baseline_cleanup_grace.py": "00a26bfb34f9ad3b03029d06c7153c6e7f46842e865061aa49711ba2f3df733c",
+          "test_boundary_regressions.py": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+          "test_candidate.py": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+          "test_capture_provenance.py": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+          "test_cli_argv.py": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+          "test_cli_dispatch_lane.py": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+          "test_cli_environment.py": "5292da8e7706e0a80510601d6764ad6dd575a739da9e46aae2e84eec14cd922c",
+          "test_cli_invocation.py": "ac1f458fac1d5dc4f274c25d5142a6da909b586c9aa8f8eac65d449edac01946",
+          "test_cli_lease_integration.py": "0e3ec8bc6bd47f3701f2d8df6881f770dcffa2d2afbfbf5024aa0dbd821a33fd",
+          "test_cli_parent_helpers.py": "be571364c4d26d6f882dee46352571b32ce62efe6130711b08191baa75733a5a",
+          "test_cli_process.py": "bb5c5c3e4d73cc568c1483521ae2693fcbed910120930c771b9d080161187670",
+          "test_cli_public_summary.py": "6fb79374915b52dee7b86df663d87595742f185b1e14dc5d88b76d927dbb0460",
+          "test_cli_receipt_provenance.py": "d70f690039b6fb139aa1ac05d63a911be3f609cc640dc9966f282261012244aa",
+          "test_cli_relocated_admission.py": "a2ed340c8333a4d1aab3bd3209e28d848400f802e5b65475d3321c01abd74d39",
+          "test_cli_version.py": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+          "test_cli_version_missing_console.py": "73cc5322ef1eb8297f787090dac9dd7f82c3d9a8722958949c725c21c140b813",
+          "test_collection_guard.py": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+          "test_full_bank.py": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+          "test_harness.py": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+          "test_instrument_routing.py": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+          "test_lease_corpus.py": "ee3e6508faa5a724161b3dfc3524010ca6d7e9321087c97ec3f4d92db5400314",
+          "test_lease_headers.py": "58adf21a681d546efa1fd60b3cf5e190bdf86ecb893198399e39d248ec5bf609",
+          "test_lease_help.py": "7fc427cf91cf1db36a0464fb235d85d183ce323196dc7bd378f732fe5540f292",
+          "test_lease_policy_preparation.py": "f887fe99275a3e9b18161b42d1210c60ea681bff8d0ba082ad595b0a49eaf7a7",
+          "test_oracle_boundary.py": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+          "test_phase0b.py": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+          "test_phase1_completeness.py": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+          "test_phase1_full_suite.py": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+          "test_phase1_inventory.py": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+          "test_phase1_inventory_regeneration.py": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+          "test_phase1_oracle.py": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+          "test_phase1_receipts.py": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+          "test_phase1_routing.py": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+          "test_phase2c_version_identity.py": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+          "test_processes.py": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+          "test_provenance.py": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+          "test_python_selection.py": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+          "test_readiness_wait_normalization.py": "c802e72402129a5dc614438658c343498ad611fd97e444369c98342a2d9f0ed4",
+          "test_registration_policy.py": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+          "test_runtime_provenance.py": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+          "test_stderr_retention.py": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+          "test_stdio_boundary_retention.py": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+          "test_stdio_judge.py": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+          "test_stdio_process_controls.py": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+          "test_stdio_scenarios.py": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+          "test_wire.py": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+          "unicode14_reason.py": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+          "url_reference.py": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+          "which_comparison.py": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+          "wire.py": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f"
+        },
+        "process_helper_sha256": {
+          "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+          "codex_doorbell.py": "e3021d84eadf9c227866f7444069c8ed9bd9f91ce4ad74de3210ebe3cb50303c"
+        },
+        "source_schema": 55,
+        "historical_oracle": {
+          "source_head": "136a34ae95e981a691fcc31ba9fb4f35d83d4249",
+          "source_schema": 52
+        },
+        "historical_source_comparison_available": true,
+        "phase_oracle": {
+          "source_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+          "source_schema": 55
+        },
+        "production_source_matches_phase_oracle": true,
+        "production_source_matches_historical": false,
+        "source_comparison_paths": [
+          "pseudolife_memory",
+          "pyproject.toml",
+          "tests/pg_defaults.py",
+          "tests/test_cli_dispatch.py",
+          "tests/conftest.py",
+          "tests/fake_embedder.py"
+        ],
+        "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+        "oracle_schema": 55,
+        "production_source_matches_pin": true,
+        "behavior_test_sources_match_pin": true
+      },
+      "runtime": {
+        "python": "3.11.9",
+        "package_runtime_version": "0.17.0",
+        "pseudolife_distribution_version": "0.17.0"
+      },
+      "producing_controller": "phase2d-lease-final-check-measurement-driver-v2.py",
+      "producing_controller_sha256": "52b8636442d943b2b41a2c40ae0a4bcb557c0ee579721fbf1c7efd4eef521eaa",
+      "fixture_credential_helper": "phase2d-lease-final-fresh-fixture-credential.py",
+      "fixture_credential_helper_sha256": "6105e28cecb5b4a248437030086b8354a65575d87a85e5dedf0d46d61339b8bc",
+      "argv": [
+        "lease",
+        "check",
+        "sample",
+        "--json"
+      ],
+      "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state.",
+      "warmups": 6,
+      "repeats": 3,
+      "samples_per_arm": 30,
+      "alternating_pairs": true,
+      "untimed_exact_arm_controls_passed": true,
+      "untimed_mutation_controls_rejected": 4,
+      "all_timed_state_and_environment_checks_passed": true,
+      "raw_receipt_sha256": "afe996efe4769572c9682c12aab802daa972a0c3b02005415663ebc73b219420",
+      "runs": {
+        "python": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 570.0310000102036
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 578.010400000494
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 564.8279000306502
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 668.5285000130534
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 571.0122999735177
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 579.0874999947846
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 546.4553000056185
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 575.7121000206098
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 581.0410000267439
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 566.6223999578506
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 584.8928000195883
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 578.3352999715135
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 542.5871000043117
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 571.1441999883391
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 604.6567999874242
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 549.8435000190511
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 555.8435000129975
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 562.2897999710403
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 560.4338000412099
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 554.1678000008687
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 580.445499974303
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 550.8891000063159
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 576.2433000491001
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 565.7450000289828
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 570.0285999919288
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 569.9799999711104
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 548.2634999789298
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 574.0040999953635
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 568.615399999544
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 566.3927000132389
+          }
+        ],
+        "rust": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 25.43189999414608
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.611600008327514
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.205899993423373
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.4327999856323
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 48.997199977748096
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 20.862800010945648
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 23.813200008589774
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 23.423000006005168
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 49.11650001304224
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.73499995842576
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 48.579499998595566
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 20.94959997339174
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.010400018189102
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.66420000139624
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 25.293399987276644
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 26.371899992227554
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.954000022262335
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 55.45820004772395
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 21.3899000082165
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 51.09429999720305
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.01670000795275
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 22.33690000139177
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.899299976415932
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 20.992400008253753
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.839499986730516
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.65680000325665
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 25.387000001501292
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 25.249199999962002
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 23.84789998177439
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.075199998449534
+          }
+        ]
+      },
+      "metrics": {
+        "python": {
+          "distribution": {
+            "n": 30,
+            "p50": 569.9799999711104,
+            "p95": 604.6567999874242,
+            "median": 570.0042999815196,
+            "min": 542.5871000043117,
+            "max": 668.5285000130534
+          },
+          "median_control": {
+            "repeat_medians": [
+              573.3621999970637,
+              561.3618000061251,
+              569.2976999853272
+            ],
+            "noise_floor_abs": 12.000399990938604,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 569.9799999711104,
+            "repeat_values": [
+              571.0122999735177,
+              560.4338000412099,
+              568.615399999544
+            ],
+            "noise_floor_abs": 10.57849993230775,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 604.6567999874242,
+            "repeat_values": [
+              668.5285000130534,
+              604.6567999874242,
+              580.445499974303
+            ],
+            "noise_floor_abs": 88.08300003875047,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        },
+        "rust": {
+          "distribution": {
+            "n": 30,
+            "p50": 22.839499986730516,
+            "p95": 51.09429999720305,
+            "median": 22.869399981573224,
+            "min": 20.862800010945648,
+            "max": 55.45820004772395
+          },
+          "median_control": {
+            "repeat_medians": [
+              22.81444999971427,
+              25.12370000476949,
+              22.588199994061142
+            ],
+            "noise_floor_abs": 2.535500010708347,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 22.839499986730516,
+            "repeat_values": [
+              22.205899993423373,
+              24.954000022262335,
+              22.33690000139177
+            ],
+            "noise_floor_abs": 2.7481000288389623,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 51.09429999720305,
+            "repeat_values": [
+              49.11650001304224,
+              55.45820004772395,
+              25.387000001501292
+            ],
+            "noise_floor_abs": 30.071200046222657,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        }
+      },
+      "cleanup_passed": true
+    },
+    {
+      "host": "windows",
+      "mode": "lease-list",
+      "layout": "bare",
+      "profile": "debug",
+      "candidate_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+      "candidate_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+      "image_sha256": "567c6bb5b61e2997028aaedf014f47e08e781bb0ebe952e55e0b8b131b21479f",
+      "oracle_pin": {
+        "source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+        "instrument_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+        "instrument_dirty": false,
+        "instrument_sha256": {
+          "memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+          "memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+          "__init__.py": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+          "acceptance.py": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+          "broken_stdio.py": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+          "candidate.py": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+          "cli_argv.py": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+          "cli_argv_corpus.json": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+          "cli_corpus.py": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+          "cli_dispatch.py": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+          "cli_process.py": "d576ba623f81d0c11780de62eaa63c4cde9dab755568766fbb88b27e48e12a27",
+          "cli_public.py": "89ab9a9cda42728301884a25439d2eaf1c47ee3ccd6078baf0df3f38cad2078f",
+          "cli_version.py": "c7cc915ad309c613922b1b3e03aacbf8988e96b661644bb66c3ea4062cfd5afb",
+          "collection_guard.py": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+          "controls.py": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+          "fixtures.py": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+          "full_bank.py": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+          "full_seed.json": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+          "harness.py": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+          "lease_corpus.py": "6884940a1b79dd63ee5089ad0e416da99f3b7d6b760c8c9577d42c5f2e68979a",
+          "lease_headers.py": "387af1ebf31edf4dacb0759a89a8170165c39a2533909d61f8c791d3ef63e97c",
+          "lease_help.py": "e1db7b124fc8a1bb824b08d050bc2df3fb729b12fe2c1f9c1103fab597018e44",
+          "lease_policy_preparation.py": "3cd864d4bbf0e49e14c5ea6bc4bbd363402eacb050f735f5aca02991b7b83e48",
+          "onnx_cpu_compare.py": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+          "oracle.py": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+          "oracle_tests.json": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+          "phase1.py": "79ff6e64424c91b52229c956670989e7d153bc8c266cc0da91c725ef0ac801e3",
+          "phase1_ci.py": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+          "phase1_inventory.py": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+          "phase1_oracle.py": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+          "phase1_receipts.py": "fabca26955b889ddd362ca90ead363e7a9c4471d18d1949e5a00e8328bc4ee58",
+          "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+          "provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+          "pytest_plugin.py": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+          "registration_policy.py": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+          "seed.json": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+          "selfcheck.py": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+          "stdio.py": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+          "stdio_capture.py": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+          "stdio_concurrent_orders.json": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+          "stdio_corpus.py": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+          "stdio_daemon.py": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+          "stdio_eof.py": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+          "stdio_eof_orders.json": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+          "stdio_faults.py": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+          "stdio_fixture.py": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+          "stdio_judge.py": "969ebddbd7d90e56a023a34697943bc2892318775858747caabbd7521d35f311",
+          "stdio_minimal_daemon.py": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+          "stdio_process_controls.py": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+          "stdio_scenario_fixture.py": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+          "stdio_scenarios.py": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+          "stdio_startup_contract.f709.json": "b7dea0a3ab4d600476ac5be83d8f825d032dc6e581f11493d6896888d2946a9c",
+          "stdio_startup_contract.json": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+          "test_baseline_cleanup_grace.py": "00a26bfb34f9ad3b03029d06c7153c6e7f46842e865061aa49711ba2f3df733c",
+          "test_boundary_regressions.py": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+          "test_candidate.py": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+          "test_capture_provenance.py": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+          "test_cli_argv.py": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+          "test_cli_dispatch_lane.py": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+          "test_cli_environment.py": "5292da8e7706e0a80510601d6764ad6dd575a739da9e46aae2e84eec14cd922c",
+          "test_cli_invocation.py": "ac1f458fac1d5dc4f274c25d5142a6da909b586c9aa8f8eac65d449edac01946",
+          "test_cli_lease_integration.py": "0e3ec8bc6bd47f3701f2d8df6881f770dcffa2d2afbfbf5024aa0dbd821a33fd",
+          "test_cli_parent_helpers.py": "be571364c4d26d6f882dee46352571b32ce62efe6130711b08191baa75733a5a",
+          "test_cli_process.py": "bb5c5c3e4d73cc568c1483521ae2693fcbed910120930c771b9d080161187670",
+          "test_cli_public_summary.py": "6fb79374915b52dee7b86df663d87595742f185b1e14dc5d88b76d927dbb0460",
+          "test_cli_receipt_provenance.py": "d70f690039b6fb139aa1ac05d63a911be3f609cc640dc9966f282261012244aa",
+          "test_cli_relocated_admission.py": "a2ed340c8333a4d1aab3bd3209e28d848400f802e5b65475d3321c01abd74d39",
+          "test_cli_version.py": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+          "test_cli_version_missing_console.py": "73cc5322ef1eb8297f787090dac9dd7f82c3d9a8722958949c725c21c140b813",
+          "test_collection_guard.py": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+          "test_full_bank.py": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+          "test_harness.py": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+          "test_instrument_routing.py": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+          "test_lease_corpus.py": "ee3e6508faa5a724161b3dfc3524010ca6d7e9321087c97ec3f4d92db5400314",
+          "test_lease_headers.py": "58adf21a681d546efa1fd60b3cf5e190bdf86ecb893198399e39d248ec5bf609",
+          "test_lease_help.py": "7fc427cf91cf1db36a0464fb235d85d183ce323196dc7bd378f732fe5540f292",
+          "test_lease_policy_preparation.py": "f887fe99275a3e9b18161b42d1210c60ea681bff8d0ba082ad595b0a49eaf7a7",
+          "test_oracle_boundary.py": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+          "test_phase0b.py": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+          "test_phase1_completeness.py": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+          "test_phase1_full_suite.py": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+          "test_phase1_inventory.py": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+          "test_phase1_inventory_regeneration.py": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+          "test_phase1_oracle.py": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+          "test_phase1_receipts.py": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+          "test_phase1_routing.py": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+          "test_phase2c_version_identity.py": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+          "test_processes.py": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+          "test_provenance.py": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+          "test_python_selection.py": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+          "test_readiness_wait_normalization.py": "c802e72402129a5dc614438658c343498ad611fd97e444369c98342a2d9f0ed4",
+          "test_registration_policy.py": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+          "test_runtime_provenance.py": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+          "test_stderr_retention.py": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+          "test_stdio_boundary_retention.py": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+          "test_stdio_judge.py": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+          "test_stdio_process_controls.py": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+          "test_stdio_scenarios.py": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+          "test_wire.py": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+          "unicode14_reason.py": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+          "url_reference.py": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+          "which_comparison.py": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+          "wire.py": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f"
+        },
+        "process_helper_sha256": {
+          "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+          "codex_doorbell.py": "e3021d84eadf9c227866f7444069c8ed9bd9f91ce4ad74de3210ebe3cb50303c"
+        },
+        "source_schema": 55,
+        "historical_oracle": {
+          "source_head": "136a34ae95e981a691fcc31ba9fb4f35d83d4249",
+          "source_schema": 52
+        },
+        "historical_source_comparison_available": true,
+        "phase_oracle": {
+          "source_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+          "source_schema": 55
+        },
+        "production_source_matches_phase_oracle": true,
+        "production_source_matches_historical": false,
+        "source_comparison_paths": [
+          "pseudolife_memory",
+          "pyproject.toml",
+          "tests/pg_defaults.py",
+          "tests/test_cli_dispatch.py",
+          "tests/conftest.py",
+          "tests/fake_embedder.py"
+        ],
+        "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+        "oracle_schema": 55,
+        "production_source_matches_pin": true,
+        "behavior_test_sources_match_pin": true
+      },
+      "runtime": {
+        "python": "3.11.9",
+        "package_runtime_version": "0.17.0",
+        "pseudolife_distribution_version": "0.17.0"
+      },
+      "producing_controller": "phase2d-lease-final-list-measurement-driver-v2.py",
+      "producing_controller_sha256": "04935e4518c5847f04872954eb040d0c672e4d374f1998192bab63b247500886",
+      "fixture_credential_helper": "phase2d-lease-final-fresh-fixture-credential.py",
+      "fixture_credential_helper_sha256": "6105e28cecb5b4a248437030086b8354a65575d87a85e5dedf0d46d61339b8bc",
+      "argv": [
+        "lease",
+        "list",
+        "--json"
+      ],
+      "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state.",
+      "warmups": 6,
+      "repeats": 3,
+      "samples_per_arm": 30,
+      "alternating_pairs": true,
+      "untimed_exact_arm_controls_passed": true,
+      "untimed_mutation_controls_rejected": 4,
+      "all_timed_state_and_environment_checks_passed": true,
+      "raw_receipt_sha256": "62e37f0aad515a6ef46af14f7fc45fd4ac738604bc93bbc317c86ce0766f4da0",
+      "runs": {
+        "python": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 556.1793000088073
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 580.4233999806456
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 581.4865999855101
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 563.1605999660678
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 598.9767999853939
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 569.417999999132
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 574.1564999916591
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 569.4439000217244
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 602.2759000188671
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 558.9015000150539
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 562.9405999789014
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 592.5112999975681
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 585.2249999879859
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 585.567899979651
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 583.4170000161976
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 618.1381000205874
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 620.1880999724381
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 605.1977000315674
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 600.0736000132747
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 562.3213999788277
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 562.1753999730572
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 554.6525999670848
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 558.1182999885641
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 585.1345999981277
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 587.5059999525547
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 583.443499985151
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 595.5829999875277
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 556.8747000070289
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 573.4028999577276
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 574.8263000277802
+          }
+        ],
+        "rust": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.29839999927208
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.9601999851875
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.14990003267303
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 22.163700021337718
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 25.704999978188425
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.67899999767542
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 25.50750004593283
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 23.65059999283403
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.268100038170815
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 25.294699997175485
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 50.77150004217401
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 22.586399980355054
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.401100003160536
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 59.1850999626331
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 25.035500002559274
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 51.36089998995885
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 51.68029997730628
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 27.13100000983104
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.79759995872155
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 28.74009998049587
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 25.1189999980852
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 25.466599967330694
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.32500002719462
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.310899988748133
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 26.471400051377714
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 24.975699954666197
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.359900001902133
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 22.080799972172827
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 21.921299980022013
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.164999983739108
+          }
+        ]
+      },
+      "metrics": {
+        "python": {
+          "distribution": {
+            "n": 30,
+            "p50": 580.4233999806456,
+            "p95": 618.1381000205874,
+            "median": 580.9549999830779,
+            "min": 554.6525999670848,
+            "max": 620.1880999724381
+          },
+          "median_control": {
+            "repeat_medians": [
+              571.8002000066917,
+              589.0395999886096,
+              574.1145999927539
+            ],
+            "noise_floor_abs": 17.239399981917813,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 580.4233999806456,
+            "repeat_values": [
+              569.4439000217244,
+              585.567899979651,
+              573.4028999577276
+            ],
+            "noise_floor_abs": 16.12399995792657,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 618.1381000205874,
+            "repeat_values": [
+              602.2759000188671,
+              620.1880999724381,
+              595.5829999875277
+            ],
+            "noise_floor_abs": 24.60509998491034,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        },
+        "rust": {
+          "distribution": {
+            "n": 30,
+            "p50": 24.268100038170815,
+            "p95": 51.68029997730628,
+            "median": 24.334600020665675,
+            "min": 21.164999983739108,
+            "max": 59.1850999626331
+          },
+          "median_control": {
+            "repeat_medians": [
+              22.974499996053055,
+              27.935549995163456,
+              22.342450014548376
+            ],
+            "noise_floor_abs": 5.593099980615079,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 24.268100038170815,
+            "repeat_values": [
+              22.29839999927208,
+              27.13100000983104,
+              22.32500002719462
+            ],
+            "noise_floor_abs": 4.832600010558963,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 51.68029997730628,
+            "repeat_values": [
+              25.704999978188425,
+              59.1850999626331,
+              26.471400051377714
+            ],
+            "noise_floor_abs": 33.48009998444468,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        }
+      },
+      "cleanup_passed": true
+    },
+    {
+      "host": "linux",
+      "mode": "lease-check",
+      "layout": "bare",
+      "profile": "debug",
+      "candidate_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+      "candidate_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+      "image_sha256": "87366bc2303fea0799cdb0e528b4f4e83008e6789358a17f79fb4718b05db1b9",
+      "oracle_pin": {
+        "source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+        "instrument_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+        "instrument_dirty": false,
+        "instrument_sha256": {
+          "memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+          "memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+          "__init__.py": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+          "acceptance.py": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+          "broken_stdio.py": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+          "candidate.py": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+          "cli_argv.py": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+          "cli_argv_corpus.json": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+          "cli_corpus.py": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+          "cli_dispatch.py": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+          "cli_process.py": "d576ba623f81d0c11780de62eaa63c4cde9dab755568766fbb88b27e48e12a27",
+          "cli_public.py": "89ab9a9cda42728301884a25439d2eaf1c47ee3ccd6078baf0df3f38cad2078f",
+          "cli_version.py": "c7cc915ad309c613922b1b3e03aacbf8988e96b661644bb66c3ea4062cfd5afb",
+          "collection_guard.py": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+          "controls.py": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+          "fixtures.py": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+          "full_bank.py": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+          "full_seed.json": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+          "harness.py": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+          "lease_corpus.py": "6884940a1b79dd63ee5089ad0e416da99f3b7d6b760c8c9577d42c5f2e68979a",
+          "lease_headers.py": "387af1ebf31edf4dacb0759a89a8170165c39a2533909d61f8c791d3ef63e97c",
+          "lease_help.py": "e1db7b124fc8a1bb824b08d050bc2df3fb729b12fe2c1f9c1103fab597018e44",
+          "lease_policy_preparation.py": "3cd864d4bbf0e49e14c5ea6bc4bbd363402eacb050f735f5aca02991b7b83e48",
+          "onnx_cpu_compare.py": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+          "oracle.py": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+          "oracle_tests.json": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+          "phase1.py": "79ff6e64424c91b52229c956670989e7d153bc8c266cc0da91c725ef0ac801e3",
+          "phase1_ci.py": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+          "phase1_inventory.py": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+          "phase1_oracle.py": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+          "phase1_receipts.py": "fabca26955b889ddd362ca90ead363e7a9c4471d18d1949e5a00e8328bc4ee58",
+          "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+          "provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+          "pytest_plugin.py": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+          "registration_policy.py": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+          "seed.json": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+          "selfcheck.py": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+          "stdio.py": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+          "stdio_capture.py": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+          "stdio_concurrent_orders.json": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+          "stdio_corpus.py": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+          "stdio_daemon.py": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+          "stdio_eof.py": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+          "stdio_eof_orders.json": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+          "stdio_faults.py": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+          "stdio_fixture.py": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+          "stdio_judge.py": "969ebddbd7d90e56a023a34697943bc2892318775858747caabbd7521d35f311",
+          "stdio_minimal_daemon.py": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+          "stdio_process_controls.py": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+          "stdio_scenario_fixture.py": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+          "stdio_scenarios.py": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+          "stdio_startup_contract.f709.json": "b7dea0a3ab4d600476ac5be83d8f825d032dc6e581f11493d6896888d2946a9c",
+          "stdio_startup_contract.json": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+          "test_baseline_cleanup_grace.py": "00a26bfb34f9ad3b03029d06c7153c6e7f46842e865061aa49711ba2f3df733c",
+          "test_boundary_regressions.py": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+          "test_candidate.py": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+          "test_capture_provenance.py": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+          "test_cli_argv.py": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+          "test_cli_dispatch_lane.py": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+          "test_cli_environment.py": "5292da8e7706e0a80510601d6764ad6dd575a739da9e46aae2e84eec14cd922c",
+          "test_cli_invocation.py": "ac1f458fac1d5dc4f274c25d5142a6da909b586c9aa8f8eac65d449edac01946",
+          "test_cli_lease_integration.py": "0e3ec8bc6bd47f3701f2d8df6881f770dcffa2d2afbfbf5024aa0dbd821a33fd",
+          "test_cli_parent_helpers.py": "be571364c4d26d6f882dee46352571b32ce62efe6130711b08191baa75733a5a",
+          "test_cli_process.py": "bb5c5c3e4d73cc568c1483521ae2693fcbed910120930c771b9d080161187670",
+          "test_cli_public_summary.py": "6fb79374915b52dee7b86df663d87595742f185b1e14dc5d88b76d927dbb0460",
+          "test_cli_receipt_provenance.py": "d70f690039b6fb139aa1ac05d63a911be3f609cc640dc9966f282261012244aa",
+          "test_cli_relocated_admission.py": "a2ed340c8333a4d1aab3bd3209e28d848400f802e5b65475d3321c01abd74d39",
+          "test_cli_version.py": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+          "test_cli_version_missing_console.py": "73cc5322ef1eb8297f787090dac9dd7f82c3d9a8722958949c725c21c140b813",
+          "test_collection_guard.py": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+          "test_full_bank.py": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+          "test_harness.py": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+          "test_instrument_routing.py": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+          "test_lease_corpus.py": "ee3e6508faa5a724161b3dfc3524010ca6d7e9321087c97ec3f4d92db5400314",
+          "test_lease_headers.py": "58adf21a681d546efa1fd60b3cf5e190bdf86ecb893198399e39d248ec5bf609",
+          "test_lease_help.py": "7fc427cf91cf1db36a0464fb235d85d183ce323196dc7bd378f732fe5540f292",
+          "test_lease_policy_preparation.py": "f887fe99275a3e9b18161b42d1210c60ea681bff8d0ba082ad595b0a49eaf7a7",
+          "test_oracle_boundary.py": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+          "test_phase0b.py": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+          "test_phase1_completeness.py": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+          "test_phase1_full_suite.py": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+          "test_phase1_inventory.py": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+          "test_phase1_inventory_regeneration.py": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+          "test_phase1_oracle.py": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+          "test_phase1_receipts.py": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+          "test_phase1_routing.py": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+          "test_phase2c_version_identity.py": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+          "test_processes.py": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+          "test_provenance.py": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+          "test_python_selection.py": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+          "test_readiness_wait_normalization.py": "c802e72402129a5dc614438658c343498ad611fd97e444369c98342a2d9f0ed4",
+          "test_registration_policy.py": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+          "test_runtime_provenance.py": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+          "test_stderr_retention.py": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+          "test_stdio_boundary_retention.py": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+          "test_stdio_judge.py": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+          "test_stdio_process_controls.py": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+          "test_stdio_scenarios.py": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+          "test_wire.py": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+          "unicode14_reason.py": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+          "url_reference.py": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+          "which_comparison.py": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+          "wire.py": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f"
+        },
+        "process_helper_sha256": {
+          "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b"
+        },
+        "source_schema": 55,
+        "historical_oracle": {
+          "source_head": "136a34ae95e981a691fcc31ba9fb4f35d83d4249",
+          "source_schema": 52
+        },
+        "historical_source_comparison_available": true,
+        "phase_oracle": {
+          "source_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+          "source_schema": 55
+        },
+        "production_source_matches_phase_oracle": true,
+        "production_source_matches_historical": false,
+        "source_comparison_paths": [
+          "pseudolife_memory",
+          "pyproject.toml",
+          "tests/pg_defaults.py",
+          "tests/test_cli_dispatch.py",
+          "tests/conftest.py",
+          "tests/fake_embedder.py"
+        ],
+        "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+        "oracle_schema": 55,
+        "production_source_matches_pin": true,
+        "behavior_test_sources_match_pin": true
+      },
+      "runtime": {
+        "python": "3.11.15",
+        "package_runtime_version": "0.17.0",
+        "pseudolife_distribution_version": "0.17.0"
+      },
+      "producing_controller": "phase2d-lease-final-check-measurement-driver-v2.py",
+      "producing_controller_sha256": "52b8636442d943b2b41a2c40ae0a4bcb557c0ee579721fbf1c7efd4eef521eaa",
+      "fixture_credential_helper": "phase2d-lease-final-fresh-fixture-credential.py",
+      "fixture_credential_helper_sha256": "6105e28cecb5b4a248437030086b8354a65575d87a85e5dedf0d46d61339b8bc",
+      "argv": [
+        "lease",
+        "check",
+        "sample",
+        "--json"
+      ],
+      "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state.",
+      "warmups": 6,
+      "repeats": 3,
+      "samples_per_arm": 30,
+      "alternating_pairs": true,
+      "untimed_exact_arm_controls_passed": true,
+      "untimed_mutation_controls_rejected": 4,
+      "all_timed_state_and_environment_checks_passed": true,
+      "raw_receipt_sha256": "399f0ae0895ae1addca18513941bd554b295c0f06135b029f9191d134aa3b152",
+      "runs": {
+        "python": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 363.8621100108139
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.26703499211
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 365.39104499388486
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 357.23143100040033
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 356.11948498990387
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 357.6279139961116
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 356.1316240229644
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 364.28272200282663
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 356.16404499160126
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 350.4923200234771
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 351.0353929596022
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 357.0919869816862
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 354.09209900535643
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 358.758251008112
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 355.62753898557276
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 354.28843001136556
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 350.223911984358
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 355.5973940528929
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 344.13831296842545
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 349.0832799579948
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 365.13508000643924
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 355.74403300415725
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 354.09807797987014
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 360.6412279768847
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 348.7516439636238
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 345.0823250459507
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 353.3289270126261
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 351.63156501948833
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 349.82969297561795
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.82911598915234
+          }
+        ],
+        "rust": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 82.40974898217246
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 81.91890898160636
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.92336099455133
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 82.13083201553673
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.57965599093586
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 79.80527001200244
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 91.38134203385562
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 82.62999600265175
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 79.40611499361694
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 81.04689099127427
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 80.54749097209424
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 82.37295801518485
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 82.21152302576229
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 102.33379597775638
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 79.47992702247575
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 81.01715700468048
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 76.9449170329608
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.18012597737834
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.07641601236537
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 80.41819103527814
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.6948699648492
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 80.55936096934602
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.16901299217716
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.478405023925
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.6244599991478
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 81.66680997237563
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.24651300022379
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 84.47979798074812
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 83.70155899319798
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 80.75463300338015
+          }
+        ]
+      },
+      "metrics": {
+        "python": {
+          "distribution": {
+            "n": 30,
+            "p50": 354.28843001136556,
+            "p95": 365.13508000643924,
+            "median": 354.94291203212924,
+            "min": 344.13831296842545,
+            "max": 365.39104499388486
+          },
+          "median_control": {
+            "repeat_medians": [
+              356.6977379960008,
+              354.190264508361,
+              353.0790215008892
+            ],
+            "noise_floor_abs": 3.6187164951115847,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 354.28843001136556,
+            "repeat_values": [
+              356.16404499160126,
+              354.09209900535643,
+              352.82911598915234
+            ],
+            "noise_floor_abs": 3.3349290024489164,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 365.13508000643924,
+            "repeat_values": [
+              365.39104499388486,
+              358.758251008112,
+              365.13508000643924
+            ],
+            "noise_floor_abs": 6.632793985772878,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        },
+        "rust": {
+          "distribution": {
+            "n": 30,
+            "p50": 81.6244599991478,
+            "p95": 91.38134203385562,
+            "median": 81.64563498576172,
+            "min": 76.9449170329608,
+            "max": 102.33379597775638
+          },
+          "median_control": {
+            "repeat_medians": [
+              81.92113498807885,
+              81.04678650852293,
+              81.64563498576172
+            ],
+            "noise_floor_abs": 0.8743484795559198,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 81.6244599991478,
+            "repeat_values": [
+              81.91890898160636,
+              81.01715700468048,
+              81.6244599991478
+            ],
+            "noise_floor_abs": 0.9017519769258797,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 91.38134203385562,
+            "repeat_values": [
+              91.38134203385562,
+              102.33379597775638,
+              84.47979798074812
+            ],
+            "noise_floor_abs": 17.853997997008264,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        }
+      },
+      "cleanup_passed": true
+    },
+    {
+      "host": "linux",
+      "mode": "lease-list",
+      "layout": "bare",
+      "profile": "debug",
+      "candidate_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+      "candidate_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+      "image_sha256": "87366bc2303fea0799cdb0e528b4f4e83008e6789358a17f79fb4718b05db1b9",
+      "oracle_pin": {
+        "source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+        "instrument_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+        "instrument_dirty": false,
+        "instrument_sha256": {
+          "memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+          "memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+          "__init__.py": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f",
+          "acceptance.py": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+          "broken_stdio.py": "4f0a8e4aac3abb5893f39420f21f5468df566acedd226dc20b437c40f64cc411",
+          "candidate.py": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+          "cli_argv.py": "d92e84be5234e439eeeb7e3f9303c32111f9d095e5867761229384ceaea9402d",
+          "cli_argv_corpus.json": "0f270e4c80ce51689a835c4bd6e97666b26f3a5fd906d7d653b963f263414f1d",
+          "cli_corpus.py": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+          "cli_dispatch.py": "13433e239fad12f66636028ff3f53fa1816d59b1f4d59eef53bb32231af37ebe",
+          "cli_process.py": "d576ba623f81d0c11780de62eaa63c4cde9dab755568766fbb88b27e48e12a27",
+          "cli_public.py": "89ab9a9cda42728301884a25439d2eaf1c47ee3ccd6078baf0df3f38cad2078f",
+          "cli_version.py": "c7cc915ad309c613922b1b3e03aacbf8988e96b661644bb66c3ea4062cfd5afb",
+          "collection_guard.py": "cf3bd59b5f3e90c08f27e3c5ade4f08a9c9920c36bf0cfcaac41c4cf09ae8464",
+          "controls.py": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+          "fixtures.py": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+          "full_bank.py": "3bdf992deaac73808cc0ccbed1c7e068eb9c971040b9bb0a2a0a400bc23d2bb7",
+          "full_seed.json": "61e844c45016908cf9f0e785e3454b6e77039ef42811704b0f82a2f9d376aab8",
+          "harness.py": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+          "lease_corpus.py": "6884940a1b79dd63ee5089ad0e416da99f3b7d6b760c8c9577d42c5f2e68979a",
+          "lease_headers.py": "387af1ebf31edf4dacb0759a89a8170165c39a2533909d61f8c791d3ef63e97c",
+          "lease_help.py": "e1db7b124fc8a1bb824b08d050bc2df3fb729b12fe2c1f9c1103fab597018e44",
+          "lease_policy_preparation.py": "3cd864d4bbf0e49e14c5ea6bc4bbd363402eacb050f735f5aca02991b7b83e48",
+          "onnx_cpu_compare.py": "1d568199f37976c0cac6ffca12596f6f9135b47ca694269c6a3b5980c2d5837c",
+          "oracle.py": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+          "oracle_tests.json": "6ff2cc2b47aa1fa8312e4ec8409780414b78b891b3d8dd22206edfd3380deb43",
+          "phase1.py": "79ff6e64424c91b52229c956670989e7d153bc8c266cc0da91c725ef0ac801e3",
+          "phase1_ci.py": "b1b309cd34a04b37dde1e4bd58946c926292ee5864a89d3262a0daac0c890906",
+          "phase1_inventory.py": "f4e844cd0430464f2c185f606097619681bc8d41e621ed0359aae7656c88591a",
+          "phase1_oracle.py": "5020276a0aefe2852537cd17491ea41e5429a5bc7f2aace945b76d19d75aa45f",
+          "phase1_receipts.py": "fabca26955b889ddd362ca90ead363e7a9c4471d18d1949e5a00e8328bc4ee58",
+          "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+          "provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+          "pytest_plugin.py": "b7f22f8aafce630e6f82791d7cd96cce54aa3b893ef78ee1a929169268ee72c0",
+          "registration_policy.py": "a453ad1add21ebb779272bba227233122822c3584c3f8ef38a511003151aa855",
+          "seed.json": "b48c554d620b7f23135534b261f26ebfc38ba88a89a39d9bcab68d28e2475d90",
+          "selfcheck.py": "4c880251d2c31c1c78b016daf31d649c07649002be4d7a80fefd3a9a34bb1ae6",
+          "stdio.py": "fc7333e117f419420cc87faeeaf5aff7e12fd7d116a8af333f50ee05c08005ac",
+          "stdio_capture.py": "75126b48254eaaf6fe3f35d946cf684dccfc9fe0f225d5153a1e9f5fe89e67ef",
+          "stdio_concurrent_orders.json": "547547cca1b6d49629d260d0b6dda2f0811b812f8085f1e49f5ea4e1ae2cebf5",
+          "stdio_corpus.py": "07dc63e06e7928490650e6e23193ac58b7973fd9b3c07d916a51656e88d6188b",
+          "stdio_daemon.py": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+          "stdio_eof.py": "d2c0465e0a8847835b80a2143f5f8a64bdae58f0a82be37b1057895435cddd7d",
+          "stdio_eof_orders.json": "75d8a5186e170ad3acbc9126dd4d0520183c9a17c3533deb5661c43e3fd285a1",
+          "stdio_faults.py": "6df60338e5498ac8b5cb9e1a601ea619e2006feccf551613e5d628f31bbad7bd",
+          "stdio_fixture.py": "ac0ad2835d47d49a27637c1e0850f7a46608a5cd489649d82cd3e7074616e958",
+          "stdio_judge.py": "969ebddbd7d90e56a023a34697943bc2892318775858747caabbd7521d35f311",
+          "stdio_minimal_daemon.py": "3f236ce9b8511f5e21fc75c71beb2318df8fc65fcbfc6faee53d226a7b4a3853",
+          "stdio_process_controls.py": "ab73c32c74eba641bce3a57940fb505a8be2638c11eb77d4193bc6d5292a7c56",
+          "stdio_scenario_fixture.py": "a15554cf3486f20cf6d3c2ab3ca2cafe3d272a91e99ebaf53309b7c5f5b183e1",
+          "stdio_scenarios.py": "d2d38aff1b7c20b583d97ec309ed6119406d93da1f0ac86a6e6fa6af5477883a",
+          "stdio_startup_contract.f709.json": "b7dea0a3ab4d600476ac5be83d8f825d032dc6e581f11493d6896888d2946a9c",
+          "stdio_startup_contract.json": "fc0fd8bbb46333110f1135e50b4bf646147f3a3ffbf68b6cae3d51ced5aa4e8c",
+          "test_baseline_cleanup_grace.py": "00a26bfb34f9ad3b03029d06c7153c6e7f46842e865061aa49711ba2f3df733c",
+          "test_boundary_regressions.py": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+          "test_candidate.py": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+          "test_capture_provenance.py": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+          "test_cli_argv.py": "0475d5163a169842d4c20f19dec4c15f603937548f0e4967d7b38d201cccdc25",
+          "test_cli_dispatch_lane.py": "883fee046a63afd0ec5c370ad4173b63c7aac5de35fb3efd09dcf1f2d1e97277",
+          "test_cli_environment.py": "5292da8e7706e0a80510601d6764ad6dd575a739da9e46aae2e84eec14cd922c",
+          "test_cli_invocation.py": "ac1f458fac1d5dc4f274c25d5142a6da909b586c9aa8f8eac65d449edac01946",
+          "test_cli_lease_integration.py": "0e3ec8bc6bd47f3701f2d8df6881f770dcffa2d2afbfbf5024aa0dbd821a33fd",
+          "test_cli_parent_helpers.py": "be571364c4d26d6f882dee46352571b32ce62efe6130711b08191baa75733a5a",
+          "test_cli_process.py": "bb5c5c3e4d73cc568c1483521ae2693fcbed910120930c771b9d080161187670",
+          "test_cli_public_summary.py": "6fb79374915b52dee7b86df663d87595742f185b1e14dc5d88b76d927dbb0460",
+          "test_cli_receipt_provenance.py": "d70f690039b6fb139aa1ac05d63a911be3f609cc640dc9966f282261012244aa",
+          "test_cli_relocated_admission.py": "a2ed340c8333a4d1aab3bd3209e28d848400f802e5b65475d3321c01abd74d39",
+          "test_cli_version.py": "22146c6ec3aa0a5f6c4abda2723db9612a59b80c9308341723cbf9f70b4ea741",
+          "test_cli_version_missing_console.py": "73cc5322ef1eb8297f787090dac9dd7f82c3d9a8722958949c725c21c140b813",
+          "test_collection_guard.py": "d3bd3b8459890b31e61c1292e4967112307b8adba61d143fdb9dac465833b737",
+          "test_full_bank.py": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+          "test_harness.py": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+          "test_instrument_routing.py": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+          "test_lease_corpus.py": "ee3e6508faa5a724161b3dfc3524010ca6d7e9321087c97ec3f4d92db5400314",
+          "test_lease_headers.py": "58adf21a681d546efa1fd60b3cf5e190bdf86ecb893198399e39d248ec5bf609",
+          "test_lease_help.py": "7fc427cf91cf1db36a0464fb235d85d183ce323196dc7bd378f732fe5540f292",
+          "test_lease_policy_preparation.py": "f887fe99275a3e9b18161b42d1210c60ea681bff8d0ba082ad595b0a49eaf7a7",
+          "test_oracle_boundary.py": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+          "test_phase0b.py": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+          "test_phase1_completeness.py": "b9b1d31bda80c9245e72b74b12b7c459bad32bd74e028b0ecf7d0b8f9f396338",
+          "test_phase1_full_suite.py": "9841d686c0b002a560ba24bba1ecd1c4af83e4eeb4464cf54d69d569b40433e1",
+          "test_phase1_inventory.py": "8bad86945a952c960e36b7751befcb6703ea4552b104679a90269d2c3a308b7a",
+          "test_phase1_inventory_regeneration.py": "9be2d1c874b4ca527fea66b6e5d74d4bc18142d5c7de84f99c8573d4b17b8a2a",
+          "test_phase1_oracle.py": "45a70dd5331d9f05ead5f705597a52c084720254b5c8076c1926ae9a7853d715",
+          "test_phase1_receipts.py": "c53926a3cfde6a55b45b52780f8504508607b4768a2efb9ba809b060c618190f",
+          "test_phase1_routing.py": "5f101997d087bac88838bb54d24d4ecf9065ac41f5bb4c483ea8d85222961660",
+          "test_phase2c_version_identity.py": "3147f994fb48cfc74cc516af4b38b75d6ce6e4ae755693ee119e7760224a80f2",
+          "test_processes.py": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+          "test_provenance.py": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+          "test_python_selection.py": "9020f83648eba9e2e4b968cc9c192fc1198d2a444cb995da537b4ab0c70221f5",
+          "test_readiness_wait_normalization.py": "c802e72402129a5dc614438658c343498ad611fd97e444369c98342a2d9f0ed4",
+          "test_registration_policy.py": "687c1d5cb60c149394de7e0fed789abd2fc57cbba090f6f5c7acb5b0bb8f78ed",
+          "test_runtime_provenance.py": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+          "test_stderr_retention.py": "2378c3cf9d1cc79d3bd5b6f28a05c6a9318104a87529bb6b260c345301a0abb2",
+          "test_stdio_boundary_retention.py": "4dd8c362343a00e7965d03d2becdd71d3403caeffec5a9da13d1e0a7e4fcf2fb",
+          "test_stdio_judge.py": "3e063af4e5708da949c751b99d9248bc5eb7257080983c80f1acef0dea554d77",
+          "test_stdio_process_controls.py": "827ccc73e3e4654f5ec3ee1a5ee7f8e19aabc73c8ba9cbe3d1029171b9d63362",
+          "test_stdio_scenarios.py": "c7e35c92d8260a9d719e54ea26d0d970e7b2a2a12b3d906425a910baa519670f",
+          "test_wire.py": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+          "unicode14_reason.py": "5dc087c7220834450e9fdd62030147d47b15baf41b02c4a619ea93d9b15fb4ac",
+          "url_reference.py": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+          "which_comparison.py": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+          "wire.py": "3444be03fd254a0f98b5bef189fe9f4dae023514243ab1d67a22f452b0a7fb8f"
+        },
+        "process_helper_sha256": {
+          "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b"
+        },
+        "source_schema": 55,
+        "historical_oracle": {
+          "source_head": "136a34ae95e981a691fcc31ba9fb4f35d83d4249",
+          "source_schema": 52
+        },
+        "historical_source_comparison_available": true,
+        "phase_oracle": {
+          "source_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+          "source_schema": 55
+        },
+        "production_source_matches_phase_oracle": true,
+        "production_source_matches_historical": false,
+        "source_comparison_paths": [
+          "pseudolife_memory",
+          "pyproject.toml",
+          "tests/pg_defaults.py",
+          "tests/test_cli_dispatch.py",
+          "tests/conftest.py",
+          "tests/fake_embedder.py"
+        ],
+        "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+        "oracle_schema": 55,
+        "production_source_matches_pin": true,
+        "behavior_test_sources_match_pin": true
+      },
+      "runtime": {
+        "python": "3.11.15",
+        "package_runtime_version": "0.17.0",
+        "pseudolife_distribution_version": "0.17.0"
+      },
+      "producing_controller": "phase2d-lease-final-list-measurement-driver-v2.py",
+      "producing_controller_sha256": "04935e4518c5847f04872954eb040d0c672e4d374f1998192bab63b247500886",
+      "fixture_credential_helper": "phase2d-lease-final-fresh-fixture-credential.py",
+      "fixture_credential_helper_sha256": "6105e28cecb5b4a248437030086b8354a65575d87a85e5dedf0d46d61339b8bc",
+      "argv": [
+        "lease",
+        "list",
+        "--json"
+      ],
+      "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state.",
+      "warmups": 6,
+      "repeats": 3,
+      "samples_per_arm": 30,
+      "alternating_pairs": true,
+      "untimed_exact_arm_controls_passed": true,
+      "untimed_mutation_controls_rejected": 4,
+      "all_timed_state_and_environment_checks_passed": true,
+      "raw_receipt_sha256": "354c9a81123a848f2b315788be50e7a3cd1a9bfcae672ddd6ac8a953935e7081",
+      "runs": {
+        "python": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 352.45178296463564
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.95776900602505
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 353.260297968518
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 357.888623024337
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 357.04013699432835
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 360.2805809932761
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 358.11650002142414
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 366.6185109759681
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 350.1178300357424
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 349.1197699913755
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 353.1482140533626
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 360.5491839698516
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 349.0706940065138
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 355.2769119851291
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 352.5580969871953
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 364.3146360409446
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 353.39501599082723
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 351.46903595887125
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 362.29008599184453
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 348.52638200391084
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 351.33096802746877
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.8865809785202
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 362.0760789490305
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.01653599506244
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 355.5434500449337
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 357.0093579473905
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 350.00863298773766
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.01225703349337
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 352.15195803903043
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 353.70500897988677
+          }
+        ],
+        "rust": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 82.1014610119164
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.40341702569276
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 80.73182799853384
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 84.4800949562341
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.2582119833678
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.18344899453223
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 84.27456102799624
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.47970398608595
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 82.05368497874588
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.54646904626861
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 77.80978200025856
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 80.89386200299487
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 82.66802498837933
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 85.9985729912296
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 83.58964999206364
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 85.26799600804225
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 80.05148702068254
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 81.3926259870641
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.69860701309517
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 81.36945503065363
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 95.25157499592751
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 81.16110804257914
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 83.08139600558206
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 81.70481398701668
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 83.3850449998863
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.0940330051817
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 83.3282099920325
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 79.00286099174991
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 80.55958600016311
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 77.99659599550068
+          }
+        ]
+      },
+      "metrics": {
+        "python": {
+          "distribution": {
+            "n": 30,
+            "p50": 353.1482140533626,
+            "p95": 364.3146360409446,
+            "median": 353.2042560109403,
+            "min": 348.52638200391084,
+            "max": 366.6185109759681
+          },
+          "median_control": {
+            "repeat_medians": [
+              355.15021748142317,
+              353.2716150220949,
+              352.5192695087753
+            ],
+            "noise_floor_abs": 2.6309479726478457,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 353.1482140533626,
+            "repeat_values": [
+              353.260297968518,
+              353.1482140533626,
+              352.15195803903043
+            ],
+            "noise_floor_abs": 1.1083399294875562,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 364.3146360409446,
+            "repeat_values": [
+              366.6185109759681,
+              364.3146360409446,
+              362.0760789490305
+            ],
+            "noise_floor_abs": 4.542432026937604,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        },
+        "rust": {
+          "distribution": {
+            "n": 30,
+            "p50": 82.1014610119164,
+            "p95": 85.9985729912296,
+            "median": 82.38474300014786,
+            "min": 77.80978200025856,
+            "max": 95.25157499592751
+          },
+          "median_control": {
+            "repeat_medians": [
+              83.2934330101125,
+              81.54561650007963,
+              82.39310499629937
+            ],
+            "noise_floor_abs": 1.7478165100328624,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 82.1014610119164,
+            "repeat_values": [
+              83.18344899453223,
+              81.3926259870641,
+              81.70481398701668
+            ],
+            "noise_floor_abs": 1.7908230074681342,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 85.9985729912296,
+            "repeat_values": [
+              84.4800949562341,
+              85.9985729912296,
+              95.25157499592751
+            ],
+            "noise_floor_abs": 10.771480039693415,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        }
+      },
+      "cleanup_passed": true
+    }
+  ],
+  "limitations": [
+    "Debug profile only; no release-profile or installed-layout performance claim.",
+    "Thirty fresh process exits per arm after equal image warmups against an already running disposable owned daemon.",
+    "Timing includes owned-process setup, complete output collection and clean exit; fixture/reset/preparation/state checks and independent endpoint probes are outside timer.",
+    "p50/p95 floors are observed identical-input repeat-block quantile ranges, not confidence intervals; desktop/WSL ambient load remains uncontrolled.",
+    "Original Python/tests/oracle bytes remain unchanged; original lease nodes are not Rust-routed by this proof.",
+    "Successful-run timing is not admitted or claimed.",
+    "hold/break/delegate/designate remain explicitly deferred; complete CLI-LEASE and final acceptance are not claimed."
+  ]
+}

@@ -1,0 +1,1534 @@
+{
+  "schema": 1,
+  "oracle_commit": "3691f5cb75487d3fda54a6bde6fab35dcf32c681",
+  "database_schema": 53,
+  "config_sections": {
+    "EmbeddingConfig": [
+      "model_name",
+      "device",
+      "batch_size",
+      "backend",
+      "onnx_file_name",
+      "cache_size",
+      "query_prefix",
+      "max_seq_length",
+      "cpu_dtype"
+    ],
+    "MIRASBandSpec": [
+      "name",
+      "max_entries",
+      "update_interval",
+      "promotion_access_count",
+      "promotion_surprise",
+      "retention_policy"
+    ],
+    "MIRASConfig": [
+      "preset",
+      "bands"
+    ],
+    "ReferenceConfig": [
+      "persist_dir",
+      "collection_name",
+      "chunk_size",
+      "chunk_overlap",
+      "max_results"
+    ],
+    "NLIConfig": [
+      "enabled",
+      "model_name",
+      "threshold",
+      "max_candidates"
+    ],
+    "BM25Config": [
+      "enabled",
+      "k1",
+      "b",
+      "weight",
+      "top_n",
+      "min_score",
+      "cortex_enabled"
+    ],
+    "RerankerConfig": [
+      "enabled",
+      "model_name",
+      "top_n",
+      "fusion_weight",
+      "skip_margin"
+    ],
+    "DreamConfig": [
+      "enabled",
+      "eligible_sources",
+      "exclude_sources",
+      "digest_enabled",
+      "digest_context_chars",
+      "digest_target_chars",
+      "digest_max_per_cycle",
+      "min_batch",
+      "idle_seconds",
+      "max_batch",
+      "sweep_interval_seconds",
+      "stall_notice",
+      "stall_repeat_hours",
+      "quarantine_low_trust",
+      "trusted_sources",
+      "assistant_claims",
+      "extractor_base_url",
+      "extractor_api_key",
+      "extractor_model",
+      "extractor_source",
+      "extractor_model_override",
+      "extractor_reasoning_effort",
+      "extractor_max_tokens",
+      "extractor_cache_prompt",
+      "extractor_timeout_seconds",
+      "fallback_base_url",
+      "fallback_model",
+      "fallback_api_key",
+      "extractor_mode",
+      "extract_relations",
+      "min_relation_confidence",
+      "relation_quarantine_below",
+      "retype_quarantined_max",
+      "write_dedup_min_jaccard",
+      "alias_candidate_min_cosine",
+      "known_facts_window",
+      "literal_gate",
+      "literal_gate_scope",
+      "span_gate",
+      "runs_keep",
+      "chronicle"
+    ],
+    "DeepDreamConfig": [
+      "min_similarity",
+      "top_k_candidates",
+      "max_context_snippets",
+      "auto_apply_safe",
+      "min_entity_mentions",
+      "max_fallback_mentions",
+      "merge_min_similarity",
+      "junk_max_degree",
+      "max_support_overlap",
+      "snippet_max_chars",
+      "snapshot_keep",
+      "curation_min_similarity",
+      "curation_top_k",
+      "auto_tick",
+      "auto_min_new_entities",
+      "auto_interval_days",
+      "review_queue_alert_pending",
+      "review_queue_alert_age_days",
+      "review_queue_alert_min_pending",
+      "judge_mode",
+      "judge_batch",
+      "judge_snippet_max_chars",
+      "judge_reject_min_confidence",
+      "judge_url",
+      "judge_model",
+      "judges_enabled",
+      "judge_second_opinion",
+      "judge_second_model",
+      "judge_second_url",
+      "judge_reject_min_confidence_2",
+      "judge_accept_min_confidence",
+      "link_judge_mode",
+      "link_accept_min_confidence",
+      "link_reject_min_confidence",
+      "junk_judge_mode",
+      "junk_keep_min_confidence",
+      "junk_delete_min_confidence",
+      "junk_max_auto_degree",
+      "curation_judge_mode",
+      "curation_distinct_min_confidence",
+      "curation_forget_min_confidence",
+      "curation_rejudge_days",
+      "candidate_judge_mode",
+      "candidate_min_confidence",
+      "candidate_rejudge_days",
+      "analyzer_file_duplicates",
+      "orphan_sweep",
+      "orphan_min_age_days",
+      "orphan_max_per_apply"
+    ],
+    "CortexConfig": [
+      "enabled",
+      "auto_promote",
+      "promote_confidence",
+      "search_first",
+      "protect_provenance",
+      "supersede_confidence_margin",
+      "reinforce_rate",
+      "guard_min_score",
+      "dream_slot_match_threshold",
+      "read_tracking",
+      "pin_constraints"
+    ],
+    "LessonsConfig": [
+      "enabled",
+      "top_k",
+      "min_confidence",
+      "signal_retention_days",
+      "signal_retry_days",
+      "synthesize_in_dream",
+      "infer_outcomes",
+      "infer_outcomes_max_signals",
+      "synthesis_dedup_min_similarity",
+      "synthesis_max_signals",
+      "rule_mode"
+    ],
+    "RetrievalLogConfig": [
+      "enabled",
+      "retention_days",
+      "use_window_seconds"
+    ],
+    "CompactionConfig": [
+      "enabled",
+      "keep_per_slot",
+      "min_age_days"
+    ],
+    "MetaFilterConfig": [
+      "enabled"
+    ],
+    "GraphInsightConfig": [
+      "enabled",
+      "algorithm",
+      "resolution",
+      "max_community_fraction",
+      "god_nodes_top_n",
+      "surprises_top_n",
+      "questions_top_n",
+      "betweenness_sample"
+    ],
+    "TracesConfig": [
+      "enabled",
+      "retention_boost"
+    ],
+    "ScopesConfig": [
+      "exclude",
+      "rollup"
+    ],
+    "RecallConfig": [
+      "driver",
+      "default_hops",
+      "default_top_k",
+      "max_entities",
+      "hub_gate",
+      "hub_percentile",
+      "hub_floor",
+      "expand_budget",
+      "max_searches_per_hop",
+      "max_total_searches",
+      "time_budget_seconds",
+      "skip_part_of_expansion"
+    ],
+    "SearchConfig": [
+      "contiguity_neighbors",
+      "timeline_channel",
+      "stale_policy",
+      "candidate_pool_multiplier",
+      "fusion",
+      "min_score"
+    ],
+    "McpConfig": [
+      "compact_payloads",
+      "entry_text_chars"
+    ],
+    "MemoryConfig": [
+      "embedding_dim",
+      "miras",
+      "reference",
+      "nli",
+      "bm25",
+      "reranker",
+      "search",
+      "dream",
+      "deep_dream",
+      "cortex",
+      "lessons",
+      "compaction",
+      "recall",
+      "mcp",
+      "graph_insight",
+      "traces",
+      "retrieval_log",
+      "scopes",
+      "meta_filter",
+      "recency_base_half_life_s",
+      "recency_boost_enabled",
+      "delete_confirm_threshold",
+      "surprise_threshold",
+      "top_k",
+      "ref_top_k",
+      "save_dir",
+      "hide_superseded",
+      "search_confidence_floor",
+      "slot_index_shadow_rate"
+    ],
+    "ContextConfig": [
+      "max_memory_tokens"
+    ],
+    "TimeConfig": [
+      "relative_age"
+    ],
+    "StorageConfig": [
+      "write_mode"
+    ],
+    "MemoryPolicyConfig": [
+      "variant",
+      "ab_arms"
+    ],
+    "WakeConfig": [
+      "per_recipient_per_hour",
+      "urgent_per_sender_per_hour",
+      "nightly_total",
+      "fan_out_stagger_seconds",
+      "active_seconds"
+    ],
+    "CoordinationConfig": [
+      "enabled",
+      "awareness_limit",
+      "allowed_principals",
+      "daemon_notice_principals",
+      "audit_retention_days",
+      "wake"
+    ],
+    "UpdatesConfig": [
+      "check_releases",
+      "check_interval_seconds",
+      "unattended_clients",
+      "unattended_daemon"
+    ],
+    "AppConfig": [
+      "embedding",
+      "memory",
+      "context",
+      "storage",
+      "time",
+      "coordination",
+      "memory_policy",
+      "updates"
+    ]
+  },
+  "environment_variables": {
+    "PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS": [
+      "pseudolife_memory/service.py"
+    ],
+    "PSEUDOLIFE_AGENT_COORDINATION": [
+      "ops/setup-codex-coordination.py",
+      "ops/setup-codex-hooks.py",
+      "plugin/hooks/coordination-start.sh",
+      "plugin/hooks/hooks.json",
+      "plugin/hooks/lifecycle.ps1",
+      "plugin/hooks/stop-wake.sh",
+      "plugin/hooks/subagent-board-guard.sh",
+      "plugin/hooks/subagent-board.sh",
+      "pseudolife_memory/briefing_cli.py",
+      "pseudolife_memory/connect_cli.py",
+      "pseudolife_memory/doctor_cli.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_AGENT_LABEL": [
+      "pseudolife_memory/codex_coordination.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_AGENT_PROJECT": [
+      "ops/wsl-suite.ps1",
+      "pseudolife_memory/codex_coordination.py",
+      "pseudolife_memory/lease_cli.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_AGENT_STATE": [
+      "ops/setup-codex-coordination.py",
+      "pseudolife_memory/connect_cli.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_AGENT_STATE_DIR": [
+      "ops/install.ps1",
+      "ops/install.sh",
+      "ops/setup-codex-coordination.py",
+      "pseudolife_memory/codex_coordination.py",
+      "pseudolife_memory/connect_cli.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_AGENT_TASK": [
+      "pseudolife_memory/codex_coordination.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_AGENT_WAKE": [
+      "ops/setup-codex-coordination.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_AGENT_WAKE_HOOK": [
+      "plugin/hooks/hooks.json",
+      "plugin/hooks/lifecycle.ps1",
+      "plugin/hooks/stop-wake.sh",
+      "pseudolife_memory/doctor_cli.py"
+    ],
+    "PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT": [
+      "plugin/hooks/stop-wake.sh"
+    ],
+    "PSEUDOLIFE_BACKUP_MIRROR": [
+      "ops/backup.ps1",
+      "ops/backup.sh",
+      "ops/install-backup-task.ps1"
+    ],
+    "PSEUDOLIFE_BACKUP_MIRROR_KEEP": [
+      "ops/backup.ps1",
+      "ops/backup.sh"
+    ],
+    "PSEUDOLIFE_BANK_VOLUME": [
+      "ops/docker-compose.yml",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "ops/migrate-pg18.ps1",
+      "pseudolife_memory/compose/docker-compose.yml"
+    ],
+    "PSEUDOLIFE_BENCH_DB": [
+      "pseudolife_memory/storage/schema.py"
+    ],
+    "PSEUDOLIFE_BUILD_DIRTY": [
+      "ops/Dockerfile.daemon",
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/update_cli.py"
+    ],
+    "PSEUDOLIFE_BUILD_GIT_SHA": [
+      "ops/Dockerfile.daemon",
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/update_cli.py"
+    ],
+    "PSEUDOLIFE_BUILD_SOURCE": [
+      "ops/Dockerfile.daemon",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/web/session_hook.py"
+    ],
+    "PSEUDOLIFE_BUILD_TIME": [
+      "ops/Dockerfile.daemon",
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/update_cli.py"
+    ],
+    "PSEUDOLIFE_CLAUDE_SHIM_CLI": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CLAUDE_SHIM_HOST": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CLAUDE_SHIM_LOG": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CLAUDE_SHIM_MODEL": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CLAUDE_SHIM_PORT": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CLAUDE_SHIM_PYTHON": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CODEX_BIN": [
+      "ops/setup-codex-coordination.py",
+      "pseudolife_memory/codex_doorbell.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_CODEX_DOORBELL": [
+      "ops/setup-codex-coordination.py",
+      "pseudolife_memory/doctor_cli.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_CODEX_HOOK": [
+      "ops/setup-codex-hooks.py",
+      "plugin/hooks/coordination-start.sh",
+      "plugin/hooks/session-end.sh",
+      "plugin/hooks/session-start.sh",
+      "plugin/hooks/stop-wake.sh",
+      "plugin/hooks/subagent-board-guard.sh",
+      "plugin/hooks/subagent-board.sh"
+    ],
+    "PSEUDOLIFE_CODEX_SERVER_TOKEN": [
+      "ops/setup-codex-coordination.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_CODEX_SERVER_URL": [
+      "ops/setup-codex-coordination.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_CODEX_SHIM_CLI": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CODEX_SHIM_HEALTH_TTL": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CODEX_SHIM_HOST": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CODEX_SHIM_LOG": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CODEX_SHIM_MODEL": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CODEX_SHIM_PORT": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_CODEX_SHIM_PYTHON": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_DAEMON_MEM_LIMIT": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/daemon.py"
+    ],
+    "PSEUDOLIFE_DESKTOP_TOKENS_SOURCE": [
+      "ops/install.ps1",
+      "ops/install.sh"
+    ],
+    "PSEUDOLIFE_DESKTOP_TOKEN_SOURCE": [
+      "ops/install.ps1",
+      "ops/install.sh"
+    ],
+    "PSEUDOLIFE_DIGEST_DIR": [
+      "plugin/hooks/coordination-prompt.sh",
+      "plugin/hooks/coordination-start.sh",
+      "plugin/hooks/lifecycle.ps1",
+      "plugin/hooks/session-end.sh",
+      "plugin/hooks/session-start.sh",
+      "plugin/hooks/stop-wake.sh",
+      "plugin/hooks/subagent-board.sh",
+      "pseudolife_memory/briefing_cli.py",
+      "pseudolife_memory/coordination_identity.py",
+      "pseudolife_memory/wait_mail_cli.py"
+    ],
+    "PSEUDOLIFE_DOCKER": [
+      "pseudolife_memory/update_cli.py"
+    ],
+    "PSEUDOLIFE_DREAM_API_KEY": [
+      "ops/docker-compose.yml",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/memory/dream.py",
+      "pseudolife_memory/memory/recall.py"
+    ],
+    "PSEUDOLIFE_DREAM_BASE_URL": [
+      "ops/docker-compose.yml",
+      "ops/install-codex-shim-autostart.ps1",
+      "ops/install-codex-shim-autostart.sh",
+      "ops/install-shim-autostart.ps1",
+      "ops/install-shim-autostart.sh",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/memory/dream.py",
+      "pseudolife_memory/memory/recall.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_DREAM_EXTRACTOR_MODE": [
+      "ops/docker-compose.yml",
+      "ops/install-codex-shim-autostart.ps1",
+      "ops/install-codex-shim-autostart.sh",
+      "ops/install-shim-autostart.ps1",
+      "ops/install-shim-autostart.sh",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/memory/dream.py"
+    ],
+    "PSEUDOLIFE_DREAM_FALLBACK_API_KEY": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/memory/dream.py",
+      "pseudolife_memory/utils/config.py",
+      "pseudolife_memory/web/config_io.py"
+    ],
+    "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL": [
+      "ops/docker-compose.yml",
+      "ops/install-codex-shim-autostart.ps1",
+      "ops/install-codex-shim-autostart.sh",
+      "ops/install-shim-autostart.ps1",
+      "ops/install-shim-autostart.sh",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/memory/dream.py",
+      "pseudolife_memory/utils/config.py"
+    ],
+    "PSEUDOLIFE_DREAM_FALLBACK_MODEL": [
+      "ops/docker-compose.yml",
+      "ops/install-codex-shim-autostart.ps1",
+      "ops/install-codex-shim-autostart.sh",
+      "ops/install-shim-autostart.ps1",
+      "ops/install-shim-autostart.sh",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/memory/dream.py"
+    ],
+    "PSEUDOLIFE_DREAM_MAX_TOKENS": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/memory/dream.py",
+      "pseudolife_memory/utils/config.py"
+    ],
+    "PSEUDOLIFE_DREAM_MODEL": [
+      "ops/docker-compose.yml",
+      "ops/install-codex-shim-autostart.ps1",
+      "ops/install-codex-shim-autostart.sh",
+      "ops/install-shim-autostart.ps1",
+      "ops/install-shim-autostart.sh",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/memory/dream.py",
+      "pseudolife_memory/memory/recall.py",
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_DREAM_TIMEOUT_SECONDS": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/memory/dream.py",
+      "pseudolife_memory/utils/config.py"
+    ],
+    "PSEUDOLIFE_EMBEDDING_CPU_DTYPE": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/memory/embedding.py",
+      "pseudolife_memory/utils/config.py"
+    ],
+    "PSEUDOLIFE_EXTRACTOR_SLEEP_IDLE_SECONDS": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml"
+    ],
+    "PSEUDOLIFE_HANDLE_RESUME_SECONDS": [
+      "pseudolife_memory/service.py"
+    ],
+    "PSEUDOLIFE_IMAGE_TAG": [
+      "ops/docker-compose.ghcr.yml",
+      "pseudolife_memory/compose/docker-compose.ghcr.yml",
+      "pseudolife_memory/update_cli.py"
+    ],
+    "PSEUDOLIFE_INSTALLER_TOKEN": [
+      "ops/client_credentials.py",
+      "ops/install.ps1",
+      "ops/install.sh"
+    ],
+    "PSEUDOLIFE_INSTALLER_TOKENS": [
+      "ops/client_credentials.py",
+      "ops/install.ps1",
+      "ops/install.sh"
+    ],
+    "PSEUDOLIFE_JUDGE_API_KEY": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/service_dream.py",
+      "pseudolife_memory/web/config_io.py"
+    ],
+    "PSEUDOLIFE_JUDGE_SECOND_API_KEY": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/service_dream.py",
+      "pseudolife_memory/utils/config.py",
+      "pseudolife_memory/web/config_io.py"
+    ],
+    "PSEUDOLIFE_LEASES_HELD": [
+      "pseudolife_memory/lease_cli.py"
+    ],
+    "PSEUDOLIFE_LEASE_LOCK_DIR": [
+      "pseudolife_memory/lease_cli.py",
+      "pseudolife_memory/os_lock.py"
+    ],
+    "PSEUDOLIFE_LEGACY_TRANSPORT_SESSION": [
+      "pseudolife_memory/writer_context.py"
+    ],
+    "PSEUDOLIFE_MALLOC_TRIM_SECONDS": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/utils/heap_trim.py"
+    ],
+    "PSEUDOLIFE_MCP_AUTOSAVE_SECONDS": [
+      "pseudolife_memory/mcp_server.py"
+    ],
+    "PSEUDOLIFE_MCP_CONFIG": [
+      "ops/dedup_cortex.py",
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/web/config_io.py"
+    ],
+    "PSEUDOLIFE_MCP_DAEMON_URL": [
+      "ops/client_credentials.py",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "ops/register_claude_desktop.py",
+      "ops/remote-suite.ps1",
+      "ops/setup-codex-coordination.py",
+      "ops/setup-codex-hooks.py",
+      "ops/wsl-suite.ps1",
+      "plugin/hooks/coordination-start.sh",
+      "plugin/hooks/lifecycle.ps1",
+      "plugin/hooks/session-end.sh",
+      "plugin/hooks/session-start.sh",
+      "plugin/hooks/stop-wake.sh",
+      "plugin/hooks/subagent-board.sh",
+      "pseudolife_memory/client_config.py",
+      "pseudolife_memory/codex_connection.py",
+      "pseudolife_memory/connect_cli.py",
+      "pseudolife_memory/daemon_url.py",
+      "pseudolife_memory/doctor_cli.py",
+      "pseudolife_memory/lease_cli.py",
+      "pseudolife_memory/runtimes.py",
+      "pseudolife_memory/tunnel_bridge.py",
+      "pseudolife_memory/tunnel_cli.py",
+      "pseudolife_memory/tunnel_runtime.py",
+      "pseudolife_memory/unattended_update.py",
+      "pseudolife_memory/update_cli.py"
+    ],
+    "PSEUDOLIFE_MCP_DATABASE_URL": [
+      "ops/backfill_edge_confidence.py",
+      "ops/dedup_cortex.py",
+      "ops/docker-compose.yml",
+      "ops/install-autostart.ps1",
+      "ops/measure_reverify_population.py",
+      "ops/migrate_drop_age.py",
+      "ops/migrate_embeddings.py",
+      "ops/restore_from_pt.py",
+      "ops/retire_by_writer.py",
+      "pseudolife_memory/backup_cli.py",
+      "pseudolife_memory/board_audit_cli.py",
+      "pseudolife_memory/cli.py",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/coordination_recovery.py",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/invite_cli.py",
+      "pseudolife_memory/lease_cli.py",
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/move_cli.py",
+      "pseudolife_memory/service.py",
+      "pseudolife_memory/storage/embedded_pg.py",
+      "pseudolife_memory/storage/schema.py",
+      "pseudolife_memory/transfer_cli.py"
+    ],
+    "PSEUDOLIFE_MCP_DATA_DIR": [
+      "ops/Dockerfile.daemon",
+      "ops/dedup_cortex.py",
+      "ops/docker-compose.yml",
+      "ops/install-autostart.ps1",
+      "ops/restore_from_pt.py",
+      "pseudolife_memory/backup_cli.py",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/storage/embedded_pg.py",
+      "pseudolife_memory/transfer_cli.py",
+      "pseudolife_memory/update_cli.py"
+    ],
+    "PSEUDOLIFE_MCP_HOST": [
+      "ops/Dockerfile.daemon",
+      "ops/docker-compose.yml",
+      "ops/install-autostart.ps1",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/daemon.py"
+    ],
+    "PSEUDOLIFE_MCP_NO_SPAWN": [
+      "ops/install.ps1",
+      "ops/install.sh",
+      "ops/register_claude_desktop.py",
+      "ops/setup-codex-coordination.py",
+      "pseudolife_memory/client_updates.py",
+      "pseudolife_memory/codex_connection.py",
+      "pseudolife_memory/connect_cli.py",
+      "pseudolife_memory/doctor_cli.py",
+      "pseudolife_memory/runtimes.py",
+      "pseudolife_memory/shim.py",
+      "pseudolife_memory/tunnel_bridge.py",
+      "pseudolife_memory/tunnel_runtime.py"
+    ],
+    "PSEUDOLIFE_MCP_PORT": [
+      "ops/Dockerfile.daemon",
+      "ops/docker-compose.yml",
+      "ops/install-autostart.ps1",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/invite_cli.py"
+    ],
+    "PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS": [
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_MCP_SHARED_HOST": [
+      "pseudolife_memory/shim.py"
+    ],
+    "PSEUDOLIFE_MCP_STORAGE": [
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/storage/embedded_pg.py"
+    ],
+    "PSEUDOLIFE_MCP_TIER_MAP": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/invite_cli.py",
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/move_cli.py",
+      "pseudolife_memory/principals.py",
+      "pseudolife_memory/toolset_tiers.py"
+    ],
+    "PSEUDOLIFE_MCP_TOKEN": [
+      "ops/client_credentials.py",
+      "ops/docker-compose.yml",
+      "ops/install-autostart.ps1",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "ops/register_claude_desktop.py",
+      "ops/remote-suite.ps1",
+      "ops/setup-codex-coordination.py",
+      "ops/setup-codex-hooks.py",
+      "ops/wsl-suite.ps1",
+      "plugin/hooks/coordination-start.sh",
+      "plugin/hooks/lifecycle.ps1",
+      "plugin/hooks/session-end.sh",
+      "plugin/hooks/session-start.sh",
+      "plugin/hooks/stop-wake.sh",
+      "plugin/hooks/subagent-board.sh",
+      "pseudolife_memory/board_status.py",
+      "pseudolife_memory/briefing_cli.py",
+      "pseudolife_memory/cli.py",
+      "pseudolife_memory/client_config.py",
+      "pseudolife_memory/codex_connection.py",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/connect_cli.py",
+      "pseudolife_memory/credentials.py",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/doctor_cli.py",
+      "pseudolife_memory/episode_cli.py",
+      "pseudolife_memory/expose_cli.py",
+      "pseudolife_memory/lease_cli.py",
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/move_cli.py",
+      "pseudolife_memory/principal_store.py",
+      "pseudolife_memory/principals.py",
+      "pseudolife_memory/shim.py",
+      "pseudolife_memory/tunnel_bridge.py",
+      "pseudolife_memory/tunnel_cli.py",
+      "pseudolife_memory/unattended_update.py",
+      "pseudolife_memory/update_cli.py",
+      "pseudolife_memory/web/api.py"
+    ],
+    "PSEUDOLIFE_MCP_TOKENS": [
+      "ops/client_credentials.py",
+      "ops/docker-compose.yml",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "ops/register_claude_desktop.py",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/connect_cli.py",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/expose_cli.py",
+      "pseudolife_memory/invite_cli.py",
+      "pseudolife_memory/move_cli.py",
+      "pseudolife_memory/principal_store.py",
+      "pseudolife_memory/principals.py",
+      "pseudolife_memory/shim.py",
+      "pseudolife_memory/tunnel_bridge.py",
+      "pseudolife_memory/unattended_update.py",
+      "pseudolife_memory/update_cli.py",
+      "pseudolife_memory/utils/config.py",
+      "pseudolife_memory/web/routes.py",
+      "pseudolife_memory/writer_context.py"
+    ],
+    "PSEUDOLIFE_MCP_TOKEN_FILE": [
+      "ops/client_credentials.py",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "ops/register_claude_desktop.py",
+      "ops/setup-codex-coordination.py",
+      "ops/setup-codex-hooks.py",
+      "ops/wsl-suite.ps1",
+      "plugin/hooks/coordination-start.sh",
+      "plugin/hooks/lifecycle.ps1",
+      "plugin/hooks/session-end.sh",
+      "plugin/hooks/session-start.sh",
+      "plugin/hooks/stop-wake.sh",
+      "plugin/hooks/subagent-board.sh",
+      "pseudolife_memory/cli.py",
+      "pseudolife_memory/client_config.py",
+      "pseudolife_memory/codex_connection.py",
+      "pseudolife_memory/connect_cli.py",
+      "pseudolife_memory/credentials.py",
+      "pseudolife_memory/doctor_cli.py",
+      "pseudolife_memory/lease_cli.py",
+      "pseudolife_memory/shim.py",
+      "pseudolife_memory/storage/coordination.py",
+      "pseudolife_memory/tunnel_bridge.py",
+      "pseudolife_memory/tunnel_cli.py",
+      "pseudolife_memory/tunnel_runtime.py",
+      "pseudolife_memory/unattended_update.py",
+      "pseudolife_memory/update_cli.py"
+    ],
+    "PSEUDOLIFE_MCP_TOOLSET": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/move_cli.py",
+      "pseudolife_memory/toolset_tiers.py"
+    ],
+    "PSEUDOLIFE_MCP_TRUST_BIND": [
+      "ops/docker-compose.yml",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/daemon.py",
+      "pseudolife_memory/mcp_server.py"
+    ],
+    "PSEUDOLIFE_MODELS_DIR": [
+      "pseudolife_memory/memory/nli.py"
+    ],
+    "PSEUDOLIFE_PLUGIN_DIR": [
+      "ops/Dockerfile.daemon",
+      "pseudolife_memory/plugin_hooks.py"
+    ],
+    "PSEUDOLIFE_PRIVATE_FILE": [
+      "plugin/hooks/coordination-start.sh",
+      "plugin/hooks/session-end.sh",
+      "plugin/hooks/session-start.sh",
+      "plugin/hooks/stop-wake.sh",
+      "plugin/hooks/subagent-board.sh"
+    ],
+    "PSEUDOLIFE_RECALL_DRIVER": [
+      "pseudolife_memory/service.py",
+      "pseudolife_memory/utils/config.py"
+    ],
+    "PSEUDOLIFE_RELEASE_CHECK": [
+      "pseudolife_memory/release_check.py"
+    ],
+    "PSEUDOLIFE_REQUIRE_TEST_POSTGRES": [
+      "ops/ci_tests.sh",
+      "ops/wsl-suite.ps1"
+    ],
+    "PSEUDOLIFE_SESSION_IDLE_SECONDS": [
+      "pseudolife_memory/mcp_server.py"
+    ],
+    "PSEUDOLIFE_SESSION_REAP_SECONDS": [
+      "pseudolife_memory/mcp_server.py"
+    ],
+    "PSEUDOLIFE_SESSION_RESUME_SECONDS": [
+      "pseudolife_memory/service.py"
+    ],
+    "PSEUDOLIFE_SHIM_CLAUDE_CLI": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_SHIM_CODEX_CLI": [
+      "ops/shim_autostart.py"
+    ],
+    "PSEUDOLIFE_SHIM_LAUNCHER": [
+      "plugin/hooks/lifecycle.ps1",
+      "plugin/hooks/session-start.sh",
+      "pseudolife_memory/runtimes.py"
+    ],
+    "PSEUDOLIFE_SHIM_PYTHON": [
+      "ops/install.ps1",
+      "ops/install.sh"
+    ],
+    "PSEUDOLIFE_SHIM_RUNTIMES": [
+      "pseudolife_memory/runtimes.py"
+    ],
+    "PSEUDOLIFE_SHIM_USER_BIN": [
+      "pseudolife_memory/runtimes.py"
+    ],
+    "PSEUDOLIFE_STATE_VOLUME": [
+      "ops/docker-compose.yml",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "pseudolife_memory/compose/docker-compose.yml"
+    ],
+    "PSEUDOLIFE_SUITE_COMMIT": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_SUITE_DISPATCHED": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_SUITE_ENV_FILE": [
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_SUITE_GIT_COMMON": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_SUITE_LEASE": [
+      "ops/wsl-suite.sh",
+      "pseudolife_memory/lease_cli.py"
+    ],
+    "PSEUDOLIFE_SUITE_LOCK": [
+      "ops/wsl-suite.ps1"
+    ],
+    "PSEUDOLIFE_SUITE_LOCK_DIR": [
+      "ops/wsl-suite.sh",
+      "pseudolife_memory/board_audit_cli.py",
+      "pseudolife_memory/lease_cli.py"
+    ],
+    "PSEUDOLIFE_SUITE_NAME": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_SUITE_PYTHON": [
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_SUITE_REMOTE": [
+      "ops/remote-suite.ps1"
+    ],
+    "PSEUDOLIFE_SUITE_SLOTS": [
+      "ops/wsl-suite.ps1"
+    ],
+    "PSEUDOLIFE_SUITE_VENV": [
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_SUITE_WHERE": [
+      "ops/remote-suite.ps1"
+    ],
+    "PSEUDOLIFE_SUITE_WINDOWS": [
+      "ops/wsl-suite.ps1"
+    ],
+    "PSEUDOLIFE_TEST_CUDA": [
+      "ops/wsl-suite.ps1"
+    ],
+    "PSEUDOLIFE_TEST_DATABASE_URL": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh",
+      "pseudolife_memory/doctor_cli.py",
+      "pseudolife_memory/storage/schema.py"
+    ],
+    "PSEUDOLIFE_TEST_EMBEDDER": [
+      "ops/ci_tests.sh",
+      "ops/wsl-suite.ps1"
+    ],
+    "PSEUDOLIFE_TEST_PG_HOST_PORT": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_TEST_PG_PASSWORD": [
+      "ops/wsl-suite.ps1"
+    ],
+    "PSEUDOLIFE_TUNNEL_LAUNCH_PROFILE": [
+      "pseudolife_memory/tunnel_bridge.py",
+      "pseudolife_memory/tunnel_runtime.py"
+    ],
+    "PSEUDOLIFE_WRITER_ID": [
+      "ops/docker-compose.yml",
+      "ops/install.ps1",
+      "ops/install.sh",
+      "ops/register_claude_desktop.py",
+      "ops/setup-codex-coordination.py",
+      "pseudolife_memory/compose/docker-compose.yml",
+      "pseudolife_memory/connect_cli.py",
+      "pseudolife_memory/doctor_cli.py",
+      "pseudolife_memory/mcp_server.py",
+      "pseudolife_memory/service.py",
+      "pseudolife_memory/shim.py",
+      "pseudolife_memory/tunnel_runtime.py",
+      "pseudolife_memory/writer_context.py"
+    ],
+    "PSEUDOLIFE_WSL_DISTRO": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1"
+    ],
+    "PSEUDOLIFE_WSL_SUITE_SOURCE": [
+      "ops/wsl-suite.ps1"
+    ],
+    "_PSEUDOLIFE_PRODUCTION_DB": [
+      "pseudolife_memory/storage/schema.py"
+    ]
+  },
+  "tools": [
+    {
+      "name": "memory_agents",
+      "tier": "core"
+    },
+    {
+      "name": "memory_message",
+      "tier": "core"
+    },
+    {
+      "name": "memory_store",
+      "tier": "minimal"
+    },
+    {
+      "name": "memory_search",
+      "tier": "minimal"
+    },
+    {
+      "name": "memory_recent",
+      "tier": "full"
+    },
+    {
+      "name": "memory_supersede",
+      "tier": "full"
+    },
+    {
+      "name": "memory_reinstate",
+      "tier": "full"
+    },
+    {
+      "name": "memory_stats",
+      "tier": "core"
+    },
+    {
+      "name": "memory_get",
+      "tier": "core"
+    },
+    {
+      "name": "memory_reinforce",
+      "tier": "full"
+    },
+    {
+      "name": "memory_fact_get",
+      "tier": "minimal"
+    },
+    {
+      "name": "memory_fact_set",
+      "tier": "minimal"
+    },
+    {
+      "name": "memory_set_add",
+      "tier": "minimal"
+    },
+    {
+      "name": "memory_set_remove",
+      "tier": "minimal"
+    },
+    {
+      "name": "memory_fact_resolve",
+      "tier": "core"
+    },
+    {
+      "name": "memory_history",
+      "tier": "full"
+    },
+    {
+      "name": "memory_world_set",
+      "tier": "core"
+    },
+    {
+      "name": "memory_world_search",
+      "tier": "core"
+    },
+    {
+      "name": "memory_outcome",
+      "tier": "minimal"
+    },
+    {
+      "name": "memory_lesson_search",
+      "tier": "core"
+    },
+    {
+      "name": "memory_forget",
+      "tier": "full"
+    },
+    {
+      "name": "memory_dream",
+      "tier": "full"
+    },
+    {
+      "name": "memory_graph_review",
+      "tier": "full"
+    },
+    {
+      "name": "memory_episode_start",
+      "tier": "core"
+    },
+    {
+      "name": "memory_episode_end",
+      "tier": "core"
+    },
+    {
+      "name": "memory_session_title",
+      "tier": "minimal"
+    },
+    {
+      "name": "memory_episode_summary",
+      "tier": "full"
+    },
+    {
+      "name": "memory_consolidation_candidates",
+      "tier": "full"
+    },
+    {
+      "name": "memory_consolidate",
+      "tier": "full"
+    },
+    {
+      "name": "memory_graph_relate",
+      "tier": "core"
+    },
+    {
+      "name": "memory_graph_unrelate",
+      "tier": "full"
+    },
+    {
+      "name": "memory_alias",
+      "tier": "full"
+    },
+    {
+      "name": "memory_graph",
+      "tier": "core"
+    },
+    {
+      "name": "memory_recall",
+      "tier": "core"
+    },
+    {
+      "name": "memory_relation_define",
+      "tier": "full"
+    },
+    {
+      "name": "document_ingest",
+      "tier": "core"
+    },
+    {
+      "name": "document_search",
+      "tier": "core"
+    },
+    {
+      "name": "memory_toolset",
+      "tier": "minimal"
+    }
+  ],
+  "console_routes": [
+    {
+      "method": "GET",
+      "path": "/api/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/overview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/facts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/facts/history"
+    },
+    {
+      "method": "POST",
+      "path": "/api/facts/resolve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/facts/set"
+    },
+    {
+      "method": "POST",
+      "path": "/api/facts/forget"
+    },
+    {
+      "method": "GET",
+      "path": "/api/world"
+    },
+    {
+      "method": "GET",
+      "path": "/api/lessons"
+    },
+    {
+      "method": "GET",
+      "path": "/api/briefing"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents"
+    },
+    {
+      "method": "GET",
+      "path": "/api/episodes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/episodes/summary"
+    },
+    {
+      "method": "POST",
+      "path": "/api/episode/start"
+    },
+    {
+      "method": "POST",
+      "path": "/api/episode/end"
+    },
+    {
+      "method": "POST",
+      "path": "/api/episodes/prune"
+    },
+    {
+      "method": "POST",
+      "path": "/api/episodes/rename"
+    },
+    {
+      "method": "POST",
+      "path": "/api/episodes/merge"
+    },
+    {
+      "method": "GET",
+      "path": "/api/recent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/search"
+    },
+    {
+      "method": "GET",
+      "path": "/api/trace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/recall"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chain"
+    },
+    {
+      "method": "GET",
+      "path": "/api/entry"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reinforce"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/api/graph"
+    },
+    {
+      "method": "GET",
+      "path": "/api/graph/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/api/graph/digest"
+    },
+    {
+      "method": "GET",
+      "path": "/api/graph/communities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/graph/path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/graph/review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/graph/proposal-evidence"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/rejudge"
+    },
+    {
+      "method": "GET",
+      "path": "/api/wiki"
+    },
+    {
+      "method": "GET",
+      "path": "/api/graph/entity-provenance"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/assign-scope"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/unrelate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/relate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/bless-edge"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/dismiss-duplicate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/curation/duplicates"
+    },
+    {
+      "method": "POST",
+      "path": "/api/curation/dismiss-duplicate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/curation/retired"
+    },
+    {
+      "method": "POST",
+      "path": "/api/lessons/restore"
+    },
+    {
+      "method": "POST",
+      "path": "/api/world/restore"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/delete-entity"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/merge"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/accept-proposal"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/reject-proposal"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/accept-entity-merge"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/accept-entity-junk"
+    },
+    {
+      "method": "POST",
+      "path": "/api/graph/reject-entity-proposal"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dream/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dream/run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/consolidation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/consolidate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/delete"
+    },
+    {
+      "method": "POST",
+      "path": "/api/supersede"
+    },
+    {
+      "method": "POST",
+      "path": "/api/daemon-notice"
+    },
+    {
+      "method": "GET",
+      "path": "/api/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/config"
+    }
+  ],
+  "cli_modes": [
+    "backup",
+    "board-audit",
+    "briefing",
+    "channel",
+    "connect",
+    "coordination-recovery",
+    "doctor",
+    "embedded",
+    "episode-end",
+    "episode-start",
+    "export",
+    "expose",
+    "help",
+    "import",
+    "invite",
+    "lease",
+    "move",
+    "pair",
+    "prompt-hook",
+    "serve",
+    "shim",
+    "tunnel",
+    "update",
+    "version",
+    "wait-mail"
+  ],
+  "hook_endpoints": [
+    {
+      "path": "/api/hook/session-start",
+      "method": "GET"
+    },
+    {
+      "path": "/api/hook/memory-policy",
+      "method": "GET"
+    },
+    {
+      "path": "/api/hook/memory-changes",
+      "method": "GET"
+    },
+    {
+      "path": "/api/hook/session-end",
+      "method": "POST"
+    },
+    {
+      "path": "/api/hook/coordination-start",
+      "method": "GET"
+    },
+    {
+      "path": "/api/hook/park-gate",
+      "method": "GET"
+    },
+    {
+      "path": "/api/hook/woke",
+      "method": "POST"
+    },
+    {
+      "path": "/api/hook/subagent",
+      "method": "POST"
+    }
+  ],
+  "coordination_actions": [
+    "context",
+    "register",
+    "update",
+    "agents",
+    "lease",
+    "release",
+    "leases",
+    "attach",
+    "heartbeat",
+    "detach",
+    "send",
+    "receive",
+    "history",
+    "ack",
+    "attempt"
+  ]
+}

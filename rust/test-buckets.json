@@ -1,0 +1,2390 @@
+{
+  "schema": 1,
+  "oracle_commit": "3691f5cb75487d3fda54a6bde6fab35dcf32c681",
+  "database_schema": 53,
+  "policy": "Each file has one bucket. Candidate files route only listed concrete nodes; every other node remains oracle-only. Internal equivalents marked pending establish no Rust parity.",
+  "counts": {
+    "internal": 337,
+    "oracle": 68,
+    "candidate": 1
+  },
+  "candidate_node_count": 5,
+  "files": [
+    {
+      "path": "tests/test_abstain.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_access_count_semantics.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_agent_payload_budget.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_allocator_trim_probe.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_analyze_stale_policy.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_analyzer_queue_lifecycle.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_answerability_probe.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_apply_entity_kinds.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_assistant_provenance.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_atlas_currency.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_atomic_weights.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_audit_supersessions.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_backfill_edge_confidence.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_backup_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_band_ablation_flat.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_band_cosine.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_band_overflow_and_depth_prior.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_bank_dumps.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_beam_adapter.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_beam_attrib_ablation.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_beam_reader_sweep.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_beam_rejudge.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_beam_within_run_pairs.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_bench_pool_knobs.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_bench_production_port_guard.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_bench_reset_tables.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_bench_thinking_knobs.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_bm25.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_board_audit_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_board_audit_stats.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_board_status.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_briefing.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_capacity_guard.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_capture_metrics.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_channel.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_chronicle_store.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_classify_entity_kinds.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_claude_shim_contract.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_claude_shim_health.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_claude_shim_tools.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_cli_dispatch.py",
+      "bucket": "candidate",
+      "candidate_nodes": [
+        "tests/test_cli_dispatch.py::test_help_lists_version",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
+        "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
+        "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help"
+      ],
+      "adapter": "evals.rust_port.pytest_plugin:cli-main-process",
+      "remaining_nodes": "oracle",
+      "reason": "Only the listed dispatcher nodes replace main through the external process adapter; all remaining nodes run unchanged on Python."
+    },
+    {
+      "path": "tests/test_client_credentials_setup.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_client_environment.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_client_install_ux.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_client_sessions.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cms_legacy_load.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cms_pt_schema.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_coordination.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_coordination_setup.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_delivery.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_doorbell.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_doorbell_probe.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_hook_launcher.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_hook_setup.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_hook_setup_edges.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_hooks.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_installer_connection.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_reapproval.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_shim_health.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_codex_subagent_stop.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cognee_adapter.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_compaction.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_compare_arms.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_connect.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_connection_loss_recovery.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_console_build.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_console_knob_gapfill.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_console_source_guards.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_consolidation.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_consolidation_atomicity.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_constraint_pinning.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_contender_stamps.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_contiguity_cue_split.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_contradiction_cost.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_adapter.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_audit.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_auth.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_awareness.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_bench.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_bench_real_pg.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_checkin_bench.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_clock.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_console.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_context.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_credentials.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_daemon_notice.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_dispatch_isolation.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_fanout.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_id_prefix.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_integration.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_leases.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_leases_api.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_mail_continuity.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_multi_ack.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_probe.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_proof.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_recovery.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_report.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_roster_hygiene.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_secrets.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_storage.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_tools.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_turn_digest.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_wait.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_web.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_correction_affordance.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_correction_atomicity.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_correction_identity.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_correction_interfaces.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cortex.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cortex_alias.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cortex_bm25.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cortex_contenders.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cortex_dedup.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cortex_fact_currency.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cortex_promotion.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_cortex_sets.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_credentials.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_cross_judge_gates.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_curation_safety.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_daemon_http.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_daemon_image_is_cpu_only.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_daemon_moved_fence.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dedup_cortex_script.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_deep_dream.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_deep_dream_judge.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_deep_dream_response_bound.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_deep_dream_tick.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dim_mismatch_health.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dismissed_pairs.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_disposable_database_guard.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_doctor_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_doctor_coordination.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_document_ingest_batch_bound.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_document_parser.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dream.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dream_ack_storage.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dream_acknowledgement.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dream_chronicle.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dream_labels.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dream_quarantine.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dream_runs.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_dream_stall.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_edge_proposals.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_embedded_pg.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_embedding_asymmetry.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_embedding_backend.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_embedding_cache.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_embedding_cpu_dtype.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_embedding_dim_guard.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_embedding_precision.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_entity_kind_inference.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_entity_proposals.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_entity_provenance.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_entry_reinstatement.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_episode_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_episode_service.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_episodes.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_epistemic_bench.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_eval_embedder_stamp.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_eval_embedder_stamp_writers.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_eval_evidence.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_eval_ladder_sweep.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_eval_lesson_bench.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_eval_replicate.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_events_pass.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_expose_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_extractor_fallback.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_extractor_fallback_key.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_extractor_idle_sleep.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_extractor_model_lists.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_extractor_no_redirect.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_extractor_prompt.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_fact_render_enum.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_fail_closed_hydration.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_fake_embedder.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_fixture_contract.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_flat_migration.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_forget_cascade.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_forgetting_sweep_probe.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_freshness.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_freshness_resolve.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_graph.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_graph_ablation.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_graph_consolidation.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_graph_insight.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_graph_review.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_graph_store.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_graph_write_gating.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_hang_diagnostics.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_health_bank_fingerprint.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_health_build_stamp.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_health_last_backup.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_heap_trim.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_hlc.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_hook_glob_ranges.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_hooks_digest.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_hybrid_default.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_hydrate_capacity.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_i18n_readme.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_init_retry_model_reuse.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_installer_bank_question.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_installer_board_token.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_installer_board_token_ps.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_installer_client_only.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_installer_client_only_ps.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_installer_env_file.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_installer_existing_upgrade.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_installer_extractor_modes.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_installer_extractor_modes_ps.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_installer_legacy_hooks.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_installer_plugin.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_installer_shim_upgrade.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_invite_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_judge_ladder_caution.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_judge_lock_budget.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_judge_thinking_payload.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_label_pair.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_ladder_pair_compare.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_ladder_replicate.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_leak_check.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_lease_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lease_cli_board.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lesson_acknowledgement.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lesson_rule_mode.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lesson_source_lifecycle.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lesson_source_lineage.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lessons.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lessons_service.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lessons_storage.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lite_extractor_visibility.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_literal_gate.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_llms_txt.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_lme_chronicle.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lme_comparator_arms.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lme_rejudge.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_lme_types.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_lme_v2_adapter.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lme_v2_scoring.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_lme_v2_smoke_fact_lines.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_lme_v2_smoke_resume.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lme_variants.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_lock_monitor.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_longmemeval_bench_fact_lines.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_loop_health.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_mcp_client_neutrality.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_mcp_defaults_overlay.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_mcp_server.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_mcp_stdio_errlog.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_mcp_string_arguments.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_memcot_bench.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_memory_changes_hook.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_memory_config.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_memory_headroom.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_memory_policy_bench.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_memory_policy_variant.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_merge_queue.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_meta_filter.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_migrate_embeddings.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_migration.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_misleading_recall_probe.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_move_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_nomem_arm.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_onnx_artifacts.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_onnx_model_provision.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_op_prompt_artifact.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_ops_backup_integrity.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_ops_daemon_memory.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_ops_env_example.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_ops_install_backup_task.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_ops_install_cache_retention.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_ops_prune_build_cache.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_ops_prune_rollbacks.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_ops_restore_rehearsal.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_ops_restore_skips_held.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_ops_script_modes.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_ops_update_wrappers.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_outcome_inference.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_pair_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_pair_endpoint.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_pg_connect_retry.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_pg_defaults.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_pg_fixture_dream_wait.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_pg_run_isolation.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_pg_storage.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_pgvector_compat.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_plugin_packaging.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_principal_store_pg.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_principals.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_prompt_example_lifts.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_query_side_encoding.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_queue_judge_ladder_relate.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_queue_judges_extractor.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_queue_judges_service.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_queue_noise_leads.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_queue_noise_r2.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_rag_lite_arms.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_read_telemetry.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_rebuild_contexts_stripping.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_recall.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_recovery_lock_probe.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_reference_bank.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_refind_arm.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_register_claude_desktop.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_regression_gate_defaults.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_regression_gate_inputs.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_relation_bench.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_relation_quality.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_release_ux.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_report_redaction.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_repository_claims.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_reranker.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_reranker_margin_gate.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_rescore_strict_mc.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_restore_from_pt.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_retention_bench.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_retention_boost.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_retention_eval.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_retract_traversal.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_retraction_warning_service.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_retrieval_golden.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_retrieval_log.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_retrieval_pool.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_retrieval_replay.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_review_490_probes.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_review_decisions.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_review_judgment_freshness.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_router_offline.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_schema_ddl_shape.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_schema_healing.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_schema_version.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_scoped_dense_retrieval.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_search_contiguity.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_search_min_score.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_search_timeline.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_served_facts_and_graduation.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_service.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_service_lock_discipline.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_serving_policy_replay.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_session_digest.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_session_identity.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_session_title.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_shared_embedding_weights.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_shim.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_shim_autostart.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_shim_board_retry.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_shim_channel.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_shim_prompt.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_shim_python.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_shim_runtimes.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_shim_transport_recovery.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_slot_keyed_supersession.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_slot_persistence.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_slot_query_index.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_slots.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_span_gate.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_spawn_serve.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_stale_policy.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_stance_field.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_stop_wake_hook.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_storage_connect.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_store_retirement.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_store_source_preservation.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_stored_principals.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_stored_principals_daemon.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_stored_principals_daemon_wiring.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_stored_principals_mcp.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_subagent_board_guard.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_subagent_board_hook.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_suite_cost.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_suite_lock.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_suite_profile_summary.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_superseded_visibility.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_tag_filters.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_taubench_adapter.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_taubench_plugin.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_temporal_stamp.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_tool_annotations.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_tool_consolidation.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_toolset_tiers.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_trace_invalidations_storage.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_transfer_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_tunnel_bridge.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_tunnel_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_tunnel_profiles.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_tunnel_runtime.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_tunnel_service.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_unattended_update.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_update_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_update_clients.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_update_offer.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_verdict_tombstones.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_version_handshake.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_wait_mail_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_wake_defaults.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_wake_liveness.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_warmup_access.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_web.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_web_hardening.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_wiki_page.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_world_cortex.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_write_through.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_writer_context.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_writer_keying.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_writer_lease.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_wsl_suite_launcher.py",
+      "bucket": "oracle",
+      "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    }
+  ]
+}

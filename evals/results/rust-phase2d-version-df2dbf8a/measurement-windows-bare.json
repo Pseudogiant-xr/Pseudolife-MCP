@@ -1,0 +1,206 @@
+{
+  "schema": 1,
+  "platform": "windows",
+  "layout": "bare",
+  "executed_head": "df2dbf8adbe0d1fc84b87fb0d05da6457ba7d9ff",
+  "executed_tree": "288237846a3923ad49dfb6cf11d099935461a4d8",
+  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "mode": "version",
+  "argv": [
+    "version"
+  ],
+  "stream_contract": {
+    "stdout_stderr_encoding": "utf-8",
+    "argv_domain": "valid Unicode scalar strings",
+    "newlines": "Windows CRLF; LF on other platforms",
+    "deferred": [
+      "locale/default and other output encodings",
+      "non-UTF-8 or surrogate argv"
+    ]
+  },
+  "capture_platform": {
+    "os": "Windows",
+    "architecture": "AMD64"
+  },
+  "hardware": {
+    "os": "Windows",
+    "os_release": "10",
+    "architecture": "AMD64",
+    "logical_cpus": 16,
+    "physical_cpus": 8,
+    "ram_bytes": 66190344192
+  },
+  "candidate_executable": {
+    "sha256": "4b1e5ba2923d95fd0fd25f217c9f75f3ce90112ddcc3f969b010710e995c3c42",
+    "bytes": 13273600
+  },
+  "captured_at_utc": "2026-10-06T20:52:30Z",
+  "raw_receipt": {
+    "sha256": "0ff0401cc6aa18669953c2836ebdeedc43cdc61969001e4ce37e80ea83c58f59",
+    "bytes": 88892
+  },
+  "raw_status_preserved": "quiet-cli-pair-final",
+  "raw_limitations_preserved": [
+    "Fresh public CLI process after one untimed start of each unchanged executable per repeat; no daemon, database or models.",
+    "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
+    "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
+    "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file checks are untimed.",
+    "The historical cold_start_to_exit_ms key measures fresh processes; image warmup is recorded separately in start_protocol.",
+    "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
+    "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
+    "Final samples require the caller's quiet CPU window."
+  ],
+  "interpretation": "Warmed fresh-process observations under concurrent desktop load; raw quiet labels do not establish controlled idle. Floors are descriptive repeat-block ranges, not confidence intervals.",
+  "protocol": {
+    "repeats": 3,
+    "samples_per_arm_per_repeat": 10,
+    "untimed_byte_controls": 2,
+    "untimed_warm_starts": 6,
+    "timed_starts": 60,
+    "start_protocol": "One untimed start per arm before each repeat; timed starts reuse unchanged images and identical restored input state.",
+    "paired_order": "Even pair index Python then Rust; odd index Rust then Python. Images and restored input state unchanged across warm/timed starts."
+  },
+  "byte_controls": {
+    "python": {
+      "exit_code": 0,
+      "stdout_sha256": "eb13f916ed009343d5b8e9e492f5f62c78bd1de58103bd58a54884a2f6228713",
+      "stdout_bytes": 23,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 0
+    },
+    "rust": {
+      "exit_code": 0,
+      "stdout_sha256": "eb13f916ed009343d5b8e9e492f5f62c78bd1de58103bd58a54884a2f6228713",
+      "stdout_bytes": 23,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 0
+    }
+  },
+  "runs": {
+    "python": [
+      {"repeat": 0,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 117.18420003307983,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 120.6555999815464,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 126.49819999933243,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 122.94670002302155,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 116.00929999258369,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 114.55890000797808,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 121.76569999428466,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 148.177900002338,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 120.73769996641204,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 146.51210000738502,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 114.71850000089034,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 122.40339996060356,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 152.43219997501,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 115.40190002415329,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 115.36719999276102,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 124.51230001170188,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 121.76989996805787,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 114.72579999826849,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 121.81079998845235,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 123.26690001646057,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 121.53890001354739,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 120.45780004700646,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 157.533899997361,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 146.82639995589852,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 115.74730003485456,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 139.10269999178126,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 144.3668999709189,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 116.89190001925454,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 156.85069997562096,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 149.50210001552477,"warmed_file_identity_matches": true}
+    ],
+    "rust": [
+      {"repeat": 0,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 17.301000014413148,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 15.766100026667118,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 48.13429998466745,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 18.431499949656427,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 16.89939998323098,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 15.806799987331033,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 19.579800020437688,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 19.155299989506602,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 16.480299993418157,"warmed_file_identity_matches": true},
+      {"repeat": 0,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 16.104600043036044,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 16.23389997985214,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 16.346000018529594,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 19.023300032131374,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 19.906200002878904,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 19.231499987654388,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 20.337400026619434,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 17.314600001554936,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 41.181900014635175,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 18.245399987790734,"warmed_file_identity_matches": true},
+      {"repeat": 1,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 17.98810000764206,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 0,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 42.85590001381934,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 1,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 16.288600047118962,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 2,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 18.316500005312264,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 3,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 18.502700026147068,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 4,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 40.99479998694733,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 5,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 15.75249998131767,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 6,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 16.881899966392666,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 7,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 41.134500002954155,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 8,"arm_order": ["python","rust"],"cold_start_to_exit_ms": 47.99479997018352,"warmed_file_identity_matches": true},
+      {"repeat": 2,"sample": 9,"arm_order": ["rust","python"],"cold_start_to_exit_ms": 48.36209997301921,"warmed_file_identity_matches": true}
+    ]
+  },
+  "warmups": [
+    {"repeat": 0,"arm": "python","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 0,"arm": "rust","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 1,"arm": "python","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 1,"arm": "rust","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 2,"arm": "python","exact_control_response": true,"files_and_environment_match_control": true},
+    {"repeat": 2,"arm": "rust","exact_control_response": true,"files_and_environment_match_control": true}
+  ],
+  "metrics": {
+    "python": {
+      "median_ms": 121.79034997825511,
+      "p95_ms": 156.85069997562096,
+      "median_floor_ms": 20.48310000100173,
+      "p95_floor_ms": 9.355999995023012,
+      "samples": 30,
+      "repeat_medians_ms": [
+        121.25169998034835,
+        121.79034997825511,
+        141.73479998135008
+      ],
+      "repeat_p95_ms": [
+        148.177900002338,
+        152.43219997501,
+        157.533899997361
+      ]
+    },
+    "rust": {
+      "median_ms": 18.373999977484345,
+      "p95_ms": 48.13429998466745,
+      "median_floor_ms": 12.648550007725134,
+      "p95_floor_ms": 7.180199958384037,
+      "samples": 30,
+      "repeat_medians_ms": [
+        17.100199998822063,
+        18.634350009961054,
+        29.748750006547198
+      ],
+      "repeat_p95_ms": [
+        48.13429998466745,
+        41.181900014635175,
+        48.36209997301921
+      ]
+    }
+  },
+  "comparison": {
+    "median": {
+      "rust_minus_python_ms": -103.41635000077076,
+      "larger_both_arms_floor_ms": 20.48310000100173
+    },
+    "p95": {
+      "rust_minus_python_ms": -108.7163999909535,
+      "larger_both_arms_floor_ms": 9.355999995023012
+    }
+  },
+  "resource_context": {
+    "recorded_desktop_cpu_percent": 11.0,
+    "recorded_at_utc": "2026-10-06T20:52:13.1780769Z",
+    "no_controlled_idle_claim": true,
+    "oracle_overlay_global_dirty": true,
+    "production_and_original_test_guard_clean": true
+  }
+}

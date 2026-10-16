@@ -1,0 +1,979 @@
+{
+ "db_state": {
+  "catalog": {
+   "column_types": {
+    "rows": 479,
+    "sha256": "31be36024518ae8db6c8c43d"
+   },
+   "columns": {
+    "rows": 479,
+    "sha256": "f1091f0da2e3f7759837448c"
+   },
+   "constraints": {
+    "rows": 355,
+    "sha256": "55432b73a7315c6fff75e3df"
+   },
+   "extensions": {
+    "rows": 2,
+    "sha256": "f58378ad9e787652d80b1192"
+   },
+   "functions": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "indexes": {
+    "rows": 99,
+    "sha256": "3b955cd29ea7c77a4ed4a2ff"
+   },
+   "owners_and_comments": {
+    "rows": 161,
+    "sha256": "221ce8131afb68c41151a482"
+   },
+   "schemas": {
+    "rows": 1,
+    "sha256": "7bc06edb30fe47a6a1afd841"
+   },
+   "sequence_bounds": {
+    "rows": 19,
+    "sha256": "39772a7c4953e87dab66f88a"
+   },
+   "sequences": {
+    "rows": 19,
+    "sha256": "005c1c24fc31b16fd691330a"
+   },
+   "triggers": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   },
+   "views": {
+    "rows": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f"
+   }
+  },
+  "rows": {
+   "public.chronicle_events": {
+    "columns": [
+     "id",
+     "occurred_at",
+     "occurred_phrase",
+     "recorded_at",
+     "actor",
+     "actor_norm",
+     "description",
+     "description_norm",
+     "episode",
+     "src_entry_id",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "invalidated_at"
+    ],
+    "rows": []
+   },
+   "public.client_sessions": {
+    "columns": [
+     "session_key",
+     "registered_via",
+     "principal",
+     "started_at",
+     "ended_at",
+     "end_reason",
+     "policy_variant",
+     "episode_ids",
+     "start_times"
+    ],
+    "rows": []
+   },
+   "public.communities": {
+    "columns": [
+     "id",
+     "label",
+     "size",
+     "cohesion",
+     "computed_at"
+    ],
+    "rows": []
+   },
+   "public.coordination_agents": {
+    "columns": [
+     "agent_id",
+     "principal",
+     "credential_hash",
+     "label",
+     "project",
+     "task",
+     "status",
+     "episode",
+     "capabilities",
+     "wake_enabled",
+     "created_at",
+     "last_activity",
+     "lifecycle",
+     "next_sequence",
+     "attachment_id",
+     "generation",
+     "lease_until",
+     "status_expires_at",
+     "children",
+     "park_reason",
+     "park_needs",
+     "park_clear_by",
+     "park_resume",
+     "park_expires",
+     "park_set_at",
+     "parent_agent_id",
+     "parent_thread",
+     "name",
+     "name_source",
+     "name_set_at",
+     "harness_name"
+    ],
+    "rows": []
+   },
+   "public.coordination_events": {
+    "columns": [
+     "seq",
+     "event",
+     "actor",
+     "principal",
+     "agent_id",
+     "recipient_agent_id",
+     "project",
+     "task",
+     "message_id",
+     "payload",
+     "created_at",
+     "hlc",
+     "prev_hash",
+     "hash",
+     "body",
+     "body_salt"
+    ],
+    "rows": []
+   },
+   "public.coordination_lease_waiters": {
+    "columns": [
+     "name",
+     "agent_id",
+     "ticket",
+     "principal",
+     "purpose",
+     "ttl",
+     "expect",
+     "enqueued_at"
+    ],
+    "rows": []
+   },
+   "public.coordination_leases": {
+    "columns": [
+     "name",
+     "holder_agent_id",
+     "holder_principal",
+     "purpose",
+     "fence",
+     "acquired_at",
+     "expires_at",
+     "expect",
+     "expected_end",
+     "freed_at"
+    ],
+    "rows": []
+   },
+   "public.coordination_messages": {
+    "columns": [
+     "message_id",
+     "sender_agent_id",
+     "recipient_agent_id",
+     "sender_principal",
+     "project",
+     "task",
+     "text",
+     "reply_to",
+     "request_id",
+     "fingerprint",
+     "recipient_sequence",
+     "hlc",
+     "created_at",
+     "expires_at",
+     "attempt_at",
+     "attempt_generation",
+     "attempts",
+     "acknowledged_at",
+     "first_read_at",
+     "wake",
+     "origin",
+     "maintainer_proof",
+     "repudiated_at"
+    ],
+    "rows": []
+   },
+   "public.coordination_wakes": {
+    "columns": [
+     "wake_id",
+     "recipient_agent_id",
+     "sender_agent_id",
+     "message_id",
+     "decision",
+     "reason",
+     "urgent",
+     "ring_at",
+     "created_at",
+     "served_at"
+    ],
+    "rows": []
+   },
+   "public.curation_judgments": {
+    "columns": [
+     "store",
+     "a_key",
+     "b_key",
+     "verdict",
+     "keep",
+     "fold",
+     "confidence",
+     "note",
+     "model",
+     "judged_at"
+    ],
+    "rows": []
+   },
+   "public.dismissed_pairs": {
+    "columns": [
+     "a_norm",
+     "b_norm",
+     "dismissed_at"
+    ],
+    "rows": []
+   },
+   "public.dream_run_slots": {
+    "columns": [
+     "id",
+     "run_id",
+     "seq",
+     "entity",
+     "attribute",
+     "entity_norm",
+     "attribute_norm",
+     "kind",
+     "op",
+     "prev_kind",
+     "prev_value",
+     "prev_status",
+     "prev_confidence",
+     "prev_support",
+     "new_value",
+     "action",
+     "src_entry_id",
+     "at",
+     "chronicle_event_id"
+    ],
+    "rows": []
+   },
+   "public.dream_runs": {
+    "columns": [
+     "id",
+     "started_at",
+     "finished_at",
+     "cursor_before",
+     "cursor_after",
+     "pulled",
+     "claims",
+     "tallies",
+     "status",
+     "extractor",
+     "writer_id",
+     "rolled_back_at"
+    ],
+    "rows": []
+   },
+   "public.edge_evidence": {
+    "columns": [
+     "edge_id",
+     "entry_id"
+    ],
+    "rows": []
+   },
+   "public.edge_proposals": {
+    "columns": [
+     "id",
+     "src_id",
+     "relation",
+     "dst_id",
+     "confidence",
+     "similarity",
+     "rationale",
+     "source",
+     "created_at",
+     "status",
+     "judge_verdict",
+     "judge_confidence",
+     "judge_note",
+     "judge_model",
+     "judged_at",
+     "judge_relation",
+     "decided_by",
+     "decided_at"
+    ],
+    "rows": []
+   },
+   "public.edges": {
+    "columns": [
+     "id",
+     "src_id",
+     "relation",
+     "dst_id",
+     "confidence",
+     "origin",
+     "asserted_at",
+     "superseded_at",
+     "tx_time",
+     "valid_time",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "session_id",
+     "version"
+    ],
+    "rows": []
+   },
+   "public.entities": {
+    "columns": [
+     "id",
+     "canonical",
+     "display",
+     "etype",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.entity_aliases": {
+    "columns": [
+     "alias",
+     "entity_id"
+    ],
+    "rows": []
+   },
+   "public.entity_communities": {
+    "columns": [
+     "entity_id",
+     "community_id",
+     "computed_at"
+    ],
+    "rows": []
+   },
+   "public.entity_kinds": {
+    "columns": [
+     "entity_norm",
+     "kind",
+     "origin",
+     "confidence",
+     "decided_at"
+    ],
+    "rows": []
+   },
+   "public.entity_proposals": {
+    "columns": [
+     "id",
+     "kind",
+     "entity_id",
+     "into_id",
+     "score",
+     "reason",
+     "status",
+     "created_at",
+     "decided_by",
+     "decided_at",
+     "judge_verdict",
+     "judge_confidence",
+     "judge_note",
+     "judge_model",
+     "judged_at",
+     "judge2_verdict",
+     "judge2_confidence",
+     "judge2_model",
+     "judged2_at"
+    ],
+    "rows": []
+   },
+   "public.entity_sources": {
+    "columns": [
+     "entity_id",
+     "source",
+     "count",
+     "origin",
+     "updated_at"
+    ],
+    "rows": []
+   },
+   "public.entries": {
+    "columns": [
+     "id",
+     "band",
+     "text",
+     "embedding",
+     "surprise",
+     "ts",
+     "access_count",
+     "source",
+     "superseded_at",
+     "superseded_by_text",
+     "last_logical_turn",
+     "episode_id",
+     "episode_title",
+     "tags",
+     "slots",
+     "authority",
+     "distortion_tolerance",
+     "dream_state",
+     "reinforcements",
+     "explicit_reinforcements"
+    ],
+    "rows": [
+     [
+      1,
+      "flat",
+      "no vector",
+      null,
+      0.0,
+      1.0,
+      0,
+      "agent",
+      null,
+      null,
+      null,
+      null,
+      null,
+      [],
+      [],
+      null,
+      null,
+      "pending",
+      0,
+      0
+     ]
+    ]
+   },
+   "public.entry_reinstatement_decisions": {
+    "columns": [
+     "operation_id",
+     "entry_id",
+     "request_sha256",
+     "entry_text_sha256",
+     "entry_source_sha256",
+     "prior_superseded_at",
+     "prior_superseded_by_text",
+     "prior_superseded_by_text_sha256",
+     "evidence_packet_sha256",
+     "reviewer_ids",
+     "reason",
+     "decided_by",
+     "decided_at"
+    ],
+    "rows": []
+   },
+   "public.episodes": {
+    "columns": [
+     "id",
+     "title",
+     "hint",
+     "started_at",
+     "ended_at",
+     "closed_by_new_start",
+     "session_key",
+     "parent_id"
+    ],
+    "rows": []
+   },
+   "public.facts": {
+    "columns": [
+     "id",
+     "entity",
+     "attribute",
+     "entity_norm",
+     "attribute_norm",
+     "value",
+     "polarity",
+     "status",
+     "confidence",
+     "origin",
+     "support",
+     "provenance",
+     "asserted_at",
+     "last_confirmed",
+     "supersedes_value",
+     "superseded_by_value",
+     "superseded_at",
+     "embedding",
+     "entity_id",
+     "object_entity_id",
+     "freshness_class",
+     "kind",
+     "value_norm",
+     "stance",
+     "authority",
+     "distortion_tolerance",
+     "tx_time",
+     "valid_time",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "session_id",
+     "version"
+    ],
+    "rows": []
+   },
+   "public.lesson_search_events": {
+    "columns": [
+     "id",
+     "query_text",
+     "session_id",
+     "episode_id",
+     "served",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.lessons": {
+    "columns": [
+     "id",
+     "entity",
+     "attribute",
+     "entity_norm",
+     "attribute_norm",
+     "value",
+     "about",
+     "polarity",
+     "outcome",
+     "status",
+     "confidence",
+     "origin",
+     "support",
+     "provenance",
+     "asserted_at",
+     "last_confirmed",
+     "supersedes_value",
+     "superseded_by_value",
+     "superseded_at",
+     "embedding",
+     "entity_id",
+     "object_entity_id",
+     "tx_time",
+     "valid_time",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "session_id",
+     "version"
+    ],
+    "rows": []
+   },
+   "public.maintainer_bootstrap": {
+    "columns": [
+     "code_hash",
+     "expires_at",
+     "used_at",
+     "credential_id",
+     "failed_attempts"
+    ],
+    "rows": []
+   },
+   "public.maintainer_nonces": {
+    "columns": [
+     "nonce",
+     "expires_at"
+    ],
+    "rows": []
+   },
+   "public.maintainer_passkeys": {
+    "columns": [
+     "credential_id",
+     "public_key",
+     "alg",
+     "sign_count",
+     "label",
+     "enrolled_by",
+     "state",
+     "active_from",
+     "created_at",
+     "last_used_at",
+     "revoked_at",
+     "revoked_by",
+     "flagged_at"
+    ],
+    "rows": []
+   },
+   "public.memory_trace_invalidations": {
+    "columns": [
+     "entity_norm",
+     "attribute_norm",
+     "source_entry_id",
+     "invalidated_at",
+     "cause"
+    ],
+    "rows": []
+   },
+   "public.memory_traces": {
+    "columns": [
+     "entity_norm",
+     "attribute_norm",
+     "entry_id",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.merge_decisions": {
+    "columns": [
+     "id",
+     "proposal_id",
+     "entity_display",
+     "into_display",
+     "status",
+     "score",
+     "reason",
+     "decided_by",
+     "decided_at"
+    ],
+    "rows": []
+   },
+   "public.meta": {
+    "columns": [
+     "key",
+     "value"
+    ],
+    "rows": [
+     [
+      "schema_version",
+      55
+     ],
+     [
+      "writer_lease_epoch",
+      2
+     ]
+    ]
+   },
+   "public.outcome_signals": {
+    "columns": [
+     "id",
+     "task",
+     "outcome",
+     "about",
+     "detail",
+     "polarity",
+     "origin",
+     "episode_id",
+     "created_at",
+     "consumed_at",
+     "used_ids"
+    ],
+    "rows": []
+   },
+   "public.principals": {
+    "columns": [
+     "principal",
+     "token_hash",
+     "tier",
+     "board",
+     "code_hash",
+     "code_expires_at",
+     "paired_code_hash",
+     "created_at",
+     "paired_at",
+     "revoked_at"
+    ],
+    "rows": []
+   },
+   "public.relations": {
+    "columns": [
+     "name",
+     "description",
+     "src_type",
+     "dst_type",
+     "transitive",
+     "inverse_of",
+     "builtin",
+     "created_at"
+    ],
+    "rows": [
+     [
+      "avoids",
+      "src (a task-type) should avoid dead-end dst (negative lesson)",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1791533733.9939904
+     ],
+     [
+      "configures",
+      "src sets configuration for dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1791533733.9908235
+     ],
+     [
+      "depends-on",
+      "src requires dst to function",
+      null,
+      null,
+      true,
+      null,
+      true,
+      1791533733.9876468
+     ],
+     [
+      "hosts",
+      "src is the host/platform for dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1791533733.9892564
+     ],
+     [
+      "implements",
+      "src (a source file) realizes concept/role dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1791533733.9924028
+     ],
+     [
+      "part-of",
+      "src is a component of dst",
+      null,
+      null,
+      true,
+      null,
+      true,
+      1791533733.988706
+     ],
+     [
+      "prefers",
+      "src (a task-type) prefers approach/tool dst (positive lesson)",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1791533733.9934664
+     ],
+     [
+      "related-to",
+      "untyped catch-all association",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1791533733.9929361
+     ],
+     [
+      "runs-on",
+      "src executes on host/platform dst",
+      null,
+      null,
+      false,
+      "hosts",
+      true,
+      1791533733.9897778
+     ],
+     [
+      "stores-data-in",
+      "src persists its data in dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1791533733.9918761
+     ],
+     [
+      "uses",
+      "src makes use of dst",
+      null,
+      null,
+      false,
+      null,
+      true,
+      1791533733.9903007
+     ]
+    ]
+   },
+   "public.retrieval_events": {
+    "columns": [
+     "id",
+     "query_text",
+     "origin",
+     "session_id",
+     "episode_id",
+     "served",
+     "created_at",
+     "params",
+     "served_facts"
+    ],
+    "rows": []
+   },
+   "public.retrieval_uses": {
+    "columns": [
+     "event_id",
+     "entry_id",
+     "used_via",
+     "created_at"
+    ],
+    "rows": []
+   },
+   "public.slot_reads": {
+    "columns": [
+     "entity_norm",
+     "attribute_norm",
+     "read_count",
+     "last_read_at"
+    ],
+    "rows": []
+   },
+   "public.store_decisions": {
+    "columns": [
+     "id",
+     "store",
+     "entity_norm",
+     "attribute_norm",
+     "action",
+     "decided_by",
+     "reason",
+     "record",
+     "decided_at"
+    ],
+    "rows": []
+   },
+   "public.world_facts": {
+    "columns": [
+     "id",
+     "entity",
+     "attribute",
+     "entity_norm",
+     "attribute_norm",
+     "value",
+     "polarity",
+     "status",
+     "confidence",
+     "origin",
+     "support",
+     "provenance",
+     "asserted_at",
+     "last_confirmed",
+     "supersedes_value",
+     "superseded_by_value",
+     "superseded_at",
+     "embedding",
+     "source_url",
+     "source_quote",
+     "retrieved_at",
+     "freshness_class",
+     "content_hash",
+     "source_doc_id",
+     "tx_time",
+     "valid_time",
+     "hlc_phys",
+     "hlc_logical",
+     "writer_id",
+     "session_id",
+     "version"
+    ],
+    "rows": []
+   }
+  }
+ },
+ "normalizers": {
+  "db_declared": [
+   [
+    "row",
+    "meta",
+    "dream_ack_secret_v1",
+    "dream tracking init writes a random secret (W3-H)"
+   ],
+   [
+    "row",
+    "meta",
+    "curation_listing_spelling_v2",
+    "the listing-spelling carry-over stamps the clock (W2-E)"
+   ],
+   [
+    "table",
+    "retrieval_events",
+    null,
+    "the warmup search logs a retrieval event (W2-D telemetry)"
+   ],
+   [
+    "sequence",
+    "retrieval_events_id_seq",
+    null,
+    "advanced by that retrieval event (W2-D telemetry)"
+   ]
+  ],
+  "db_nondeterministic": [
+   [
+    "relations",
+    "created_at",
+    "clock: wall clock per row (storage/postgres.py:765)"
+   ]
+  ],
+  "golden": "golden_scrub in run.py",
+  "health": "normalize_health in run.py"
+ },
+ "responses": [
+  {
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+   },
+   "json": {
+    "auth": false,
+    "bank": null,
+    "coordination": {
+     "enabled": true,
+     "wake": {
+      "active_seconds": 60,
+      "authority_per_sender_per_hour": 12,
+      "fan_out_stagger_seconds": 30,
+      "nightly_total": 200,
+      "per_recipient_per_hour": 20,
+      "urgent_per_sender_per_hour": 6
+     }
+    },
+    "db": "ok",
+    "embedder": {
+     "backend": "<torch|onnx>",
+     "device": "cpu",
+     "dtype": "<str|null>"
+    },
+    "extractor": "none",
+    "hooks_digest": "c5f1ef7c6da48574d68a738f412e136941bb4b3ff0bc625a57bd633de02481d7",
+    "memory": {
+     "source": "unavailable"
+    },
+    "not_ready": "entry hydration failed: <free>",
+    "persist_errors": 0,
+    "schema": 55,
+    "status": "degraded",
+    "storage": "postgres",
+    "updates": {
+     "check_releases": false,
+     "checked_at": "<free number>",
+     "latest_release": "<free str|null>",
+     "unattended_clients": false,
+     "unattended_daemon": false
+    },
+    "version": "<free str>"
+   },
+   "status": 503
+  }
+ ]
+}
