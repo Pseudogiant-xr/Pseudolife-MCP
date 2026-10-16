@@ -511,10 +511,10 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 
 | Tool | Assigned tier | Port phase | Status |
 |---|---|---:|---|
-| memory_agents | core | 1/4 | ported |
-| memory_message | core | 1/4 | ported |
-| memory_store | minimal | 4 | ported |
-| memory_search | minimal | 3 | ported |
+| memory_agents | core | 1/4 | deferred |
+| memory_message | core | 1/4 | deferred |
+| memory_store | minimal | 4 | deferred |
+| memory_search | minimal | 3 | deferred |
 | memory_recent | full | 3 | deferred |
 | memory_supersede | full | 4 | deferred |
 | memory_reinstate | full | 4 | deferred |

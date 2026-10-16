@@ -46,10 +46,6 @@ def check_baseline(report):
         want_py, want_rs = _expected_pair(name)
         assert py == want_py, name
         assert rs == want_rs, name
-        if name not in REFUSAL_CLEANUP:
-            # Python dropped or forgot the session; Rust still knows it.
-            assert py["status"] == 404 and py["headers"]["mcp-session-id"] is None, name
-            assert rs != py and rs["headers"]["mcp-session-id"] == "<request>", name
     assert seen == expected
 
 

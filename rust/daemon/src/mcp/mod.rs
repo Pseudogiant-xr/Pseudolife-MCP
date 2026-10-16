@@ -418,6 +418,17 @@ pub async fn handle(
     if let Some(r) = security(state, &method, &headers) {
         return r;
     }
+    // A DELETE racing this request forgot the session after its lookup: the
+    // transport refuses it after security and before the method
+    // (streamable_http.py:506-516).
+    if known && matches!(state.lookup(&sid), Lookup::Unknown) {
+        return rpc_http_error(
+            404,
+            INVALID_REQUEST,
+            "Not Found: Session has been terminated",
+            Some(&sid),
+        );
+    }
     let response = match method {
         Method::POST => post(app, principal, &sid, known, headers, body).await,
         Method::GET => get(state, &sid, known, &headers),
