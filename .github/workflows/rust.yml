@@ -580,7 +580,10 @@ jobs:
       # release build, 2026-10-16).
       - name: Daemon MCP live parity and controls
         if: matrix.suite == 'cli'
-        timeout-minutes: 7
+        # Windows master 2026-10-15: 6m28s and 6m49s (runs 38689105018,
+        # 38794022446), so seven minutes had no headroom; fourteen is about
+        # twice that gate.
+        timeout-minutes: ${{ runner.os == 'Linux' && 7 || 14 }}
         shell: pwsh
         env:
           PL_HARNESS_SLICE: w2g

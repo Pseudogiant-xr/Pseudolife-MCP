@@ -225,6 +225,45 @@ brought in line as they are touched, with no retrofit sweep.
   builds only by checkout mode. A default install and release-mode update
   do neither.
 
+## Runtime experience (every surface a user or their agent meets)
+
+Maintainer rule, 2026-10-15: a user, or the agent working for them, should
+never hit friction that Pseudolife caused. That covers MCP tools and their
+errors, the plugin's hooks (session start, per-turn notes, Stop and wake,
+PreToolUse guards), CLI output, the Console and the served instructions.
+On 2026-10-15 the subagent board guard refused a main session's status
+update as a subagent's call. The model had passed an `agent_id` argument
+that `memory_agents` does not take, and the guard's pattern for the
+subagent marker (a top-level `agent_id` key in the hook input) also matched
+keys inside `tool_input`. The session believed the refusal and stopped
+updating its status.
+
+- **Friction a Pseudolife surface causes is a product bug**, also when it
+  shows up in our own sessions: a confusing error, a false refusal, a hook
+  that misfires, or a tool whose shape invites the wrong call is what users
+  will hit. Fix it in the product with a regression test, as its own PR
+  opened before the session ends, never folded into unrelated work. A
+  session that cannot open one (a subagent, a read-only reviewer) reports
+  the repro to its parent or the maintainer. Log the `memory_outcome` as
+  usual: the lesson records the friction, only the code change fixes it.
+  Friction from the host (Claude Code, Codex, the OS) is outside this rule.
+- **A guard never blocks a legitimate path.** Anything that denies,
+  refuses or rewrites a call decides on the exact signal it documents,
+  never on a text match that something else can produce. Its tests include
+  the near-miss: the legitimate call that looks most like the forbidden
+  one.
+- **An error states the true cause and the next step**, the runtime
+  counterpart of "A refusal names its fix" above. Agents act on error text
+  literally, so a wrong cause is worse than none. Name the real reason, the
+  parameter or setting involved, and the one fix.
+- **The natural guess works or fails helpfully.** Once agents have made
+  the same wrong call twice (an invented parameter, a field echoed back
+  from a result), change the tool, its description or its error until that
+  guess either succeeds or is refused with the right answer.
+- **Reproduce before attributing.** Don't put a Pseudolife misbehaviour down
+  to the host (compaction, a flake, the network) until you've reproduced it
+  or ruled it out.
+
 ## Derived state / caches / indexes
 
 When adding any derived structure over mutable state (an index over band
