@@ -443,6 +443,19 @@ def test_dream_command_reads_the_review_queue_health_block():
     assert "`review_queue`" in text and "attention" in text
 
 
+def test_dream_command_asks_for_no_lesson_fold_the_tools_cannot_do():
+    """No tool writes lesson text (lessons are distilled from outcomes, and
+    the curation judge may pick a survivor but never author replacement
+    text), so the step-6 duplicate rule must not ask an agent to fold a
+    dropped lesson into its survivor. On 2026-10-16 a triage following it
+    could only retire such lessons and lose their point, or leave them. A
+    world fact can be rewritten with memory_world_set, so that fold stays."""
+    text = _read("plugin/commands/dream.md")
+    assert "folding anything the\n     dropped slot added into the survivor first" not in text
+    assert "`memory_world_set`" in text
+    assert "no tool writes lesson text" in text
+
+
 def test_plugin_dream_command_matches_examples():
     plugin = _read("plugin/commands/dream.md")
     examples = _strip_leading_html_comment(_read("examples/commands/dream.md"))

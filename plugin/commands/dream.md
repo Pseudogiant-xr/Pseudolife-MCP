@@ -112,13 +112,19 @@ tool tier: if your client does not list them, call
    near-duplicate slots in the lesson / world stores; listing-only — the
    dream never deletes them). Judge from the per-side values:
    - **Duplicate**: keep the better-keyed slot and drop the other via
-     `memory_forget(scope="lesson"|"world", ...)`, folding anything the
-     dropped slot added into the survivor first. This now RETIRES the
+     `memory_forget(scope="lesson"|"world", ...)`. This RETIRES the
      slot rather than deleting it (row kept, `store_decisions` audit
      row) — a wrong call is undoable with
      `memory_graph_review(action="restore_slot", store="lesson"|"world",
      src="<entity>|<attribute>")`, so lean toward acting rather than
-     leaving a genuine duplicate pending.
+     leaving a genuine duplicate pending. When the dropped slot says
+     something the survivor does not:
+     - **world**: rewrite the survivor with `memory_world_set` to carry
+       it (same source), then drop the other.
+     - **lesson**: no tool writes lesson text (lessons are distilled from
+       outcomes), so retire the dropped lesson only when the survivor
+       already says everything it does. Otherwise leave the pair listed
+       and name the missing point in your report.
    - **Distinct**: `memory_graph_review(action="dismiss_slot_pair",
      store="lesson"|"world", src=<a_key>, dst=<b_key>)` so the pair
      never re-lists.
