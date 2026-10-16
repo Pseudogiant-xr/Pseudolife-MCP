@@ -31,7 +31,8 @@ def store_bearers(scn) -> list[str]:
 def test_scenarios_reaching_the_store_wait_for_it():
     # Settled scenarios too: the readiness settle searches with an environment
     # token, which never consults the stored view. An unreachable bank's view
-    # never loads, so principals_unavailable is its recorded answer.
+    # never loads, so principals_unavailable is its recorded answer. Blind
+    # spot: only cases() is read, so a timeline scenario's own requests are not.
     reaching = {}
     for name, cls in run.SCENARIOS.items():
         scn = cls()
@@ -75,12 +76,18 @@ def test_any_other_answer_is_a_misconfigured_scenario(monkeypatch, answer):
     (True, True, ["settled", "principals"])])
 def test_settle_before_cases_runs_the_declared_waits(monkeypatch, settle, principals, expected):
     waits = []
-    monkeypatch.setattr(run, "wait_settled", lambda ports, **kw: waits.append("settled"))
-    monkeypatch.setattr(run, "wait_principals", lambda ports: waits.append("principals"))
+    monkeypatch.setattr(run, "wait_settled",
+                        lambda ports, **kw: waits.append(("settled", ports, kw)))
+    monkeypatch.setattr(run, "wait_principals", lambda ports: waits.append(("principals", ports)))
     scn = run.Scenario()
+    scn.env = {"PSEUDOLIFE_MCP_TOKEN": "tok"}
     scn.settle, scn.principals_settle = settle, principals
     run.settle_before_cases(scn, [5555])
-    assert waits == expected
+    assert [w[0] for w in waits] == expected
+    for w in waits:
+        assert w[1] == [5555]
+        if w[0] == "settled":
+            assert w[2] == {"token": "tok", "check_db": not scn.settle_with_search}
 
 
 def test_wait_principals_gives_up(monkeypatch):
