@@ -328,8 +328,9 @@ statuses and every row the board writes; the free list is at the end.
 ## MCP surface (W2-G)
 
 Added 2026-10-09 for slice W2-G. Python references are to
-`pseudolife_memory/` at master `28c1f23c`; SDK references are to the pinned
-`mcp` 2.1.1 (`mcp/server/streamable_http.py`, `streamable_http_manager.py`,
+`pseudolife_memory/` at master `28c1f23c`; SDK references are to `mcp` 2.1.1,
+the pin when this section was written (the pin is now 2.2.0; see
+`divergences.md` for its session changes) (`mcp/server/streamable_http.py`, `streamable_http_manager.py`,
 `transport_security.py`). The canonical producers are the Python and Rust
 shims and `doctor`, which all speak the legacy handshake: POST `initialize`
 (protocol `2025-11-25`), POST `notifications/initialized`, POST requests with
@@ -345,7 +346,7 @@ for the MCP surface.
 |---|---|---|
 | M1 | `/mcp` and `/mcp/*` are served only on bearer-configured installs after the bearer gate (503/401 as for the catch-all). `/mcp/` answers 307 with `Location: http://<Host>/mcp[?query]`, no body; any other `/mcp/...` path answers 404 `text/plain; charset=utf-8` `Not Found`. | `web/api.py:858-886`; Starlette `redirect_slashes` |
 | M2 | An `MCP-Protocol-Version` header outside `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25` routes to the 2026-07-28 era (declared divergence: only its no-envelope refusal is served). | `streamable_http_manager.py:_handle_request` |
-| M3 | Session lookup first: a known id goes to its transport; an id the process terminated answers 404 `Not Found: Session has been terminated` (with the id header) after the security check; an unknown id answers 404 `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Session not found"}}`, no id header. No id: a new transport with a fresh `uuid4().hex` id, reported in `mcp-session-id` even on refusals. | `streamable_http_manager.py:_handle_stateful_request` |
+| M3 | Session lookup first: a known id goes to its transport; an id the process terminated answers 404 `Not Found: Session has been terminated` (with the id header) after the security check (on mcp 2.2.0 it answers `Session not found`, and a session whose first request failed is dropped: MCP-TERMINATED-SESSION-ID and MCP-SESSION-FAILED-FIRST-REQUEST, port pending); an unknown id answers 404 `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Session not found"}}`, no id header. No id: a new transport with a fresh `uuid4().hex` id, reported in `mcp-session-id` even on refusals. | `streamable_http_manager.py:_handle_stateful_request` |
 | M4 | Security, per request: POST needs a Content-Type whose lowercase starts with `application/json`, else 400 plain `Invalid Content-Type header` (no content type). Tokenless MCP remains unserved (501) under the forward-port ruling; the deferred transport policy requires Host to start with `127.0.0.1:`, `localhost:` or `[::1]:` (421 `Invalid Host header`), and a non-empty Origin must start with `http://127.0.0.1:`, `http://localhost:` or `http://[::1]:` (403 `Invalid Origin header`). With a token, no Host or Origin check. | `mcp_server.py:125-160`; `transport_security.py` |
 | M5 | POST order: Accept must cover both `application/json` and `text/event-stream` (`*/*`, `application/*`, `text/*` count; 406), then a Content-Type part equal to `application/json` (415), then JSON (400, -32700 `Parse error: ...`), then a JSON-RPC message (400, -32602 `Validation error: ...`), then, for anything but `initialize`, a session id (400 `Bad Request: Missing session ID`). Errors are `{"jsonrpc":"2.0","id":null,"error":{"code":C,"message":M}}`, `application/json`, with the id header. | `streamable_http.py:_handle_post_request`, `_create_error_response` |
 | M6 | Notifications and client responses answer 202, empty body, `application/json`, with the id header. Requests answer 200 SSE with `cache-control: no-cache, no-transform`, `connection: keep-alive`, `content-type: text/event-stream`, `mcp-session-id`, `x-accel-buffering: no`, and one `event: message\r\ndata: <json>\r\n\r\n` event; then the stream ends. | same; sse-starlette |
