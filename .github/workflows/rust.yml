@@ -27,8 +27,13 @@ on:
 permissions:
   contents: read
 
+# The nightly gets its own group. Sharing master's let it cancel the push run
+# a merge relies on: push run 38870639548 ended 2 s after nightly 38872655184
+# started (2026-10-16), and push 38704856443 / nightly 38705376001 match the
+# same pattern (2026-10-15); a later push then cancelled each nightly. A push
+# run is now cancelled only by a newer push.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || format('rust-{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || github.event_name == 'schedule' && format('rust-nightly-{0}-{1}', github.workflow, github.ref) || format('rust-{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 env:

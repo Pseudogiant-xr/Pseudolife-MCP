@@ -664,6 +664,42 @@ def test_scope_runs_everything_on_an_empty_or_unreadable_diff(tmp_path, files, g
     assert run_scope(tmp_path, "pull_request", files, git_exit) == ["rust=true"]
 
 
+def concurrency_group(event, ref="refs/heads/master", mode=None, run_id="101"):
+    """Evaluate the workflow's group expression the way Actions does."""
+    expression = workflow()["concurrency"]["group"]
+    assert expression.startswith("${{ ") and expression.endswith(" }}")
+    body = expression[4:-3]
+    # Actions' && / || return an operand, like Python's and / or.
+    assert set(re.findall(r"[a-z_.]+(?=\s*==)", body)) <= {"github.event_name", "inputs.mode"}
+    body = body.replace("&&", " and ").replace("||", " or ")
+    body = body.replace("github.event_name", "event").replace("inputs.mode", "mode")
+    body = body.replace("github.run_id", "run_id").replace("github.workflow", "'Rust shim'")
+    body = body.replace("github.ref", "ref")
+    import ast
+    tree = ast.parse(body, mode="eval")
+    allowed = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.Compare, ast.Eq, ast.Name,
+               ast.Load, ast.Constant, ast.Call)
+    # Only comparisons, and/or and format() calls; nothing else is evaluated.
+    assert all(isinstance(node, allowed) for node in ast.walk(tree)), body
+    assert all(node.func.id == "format" for node in ast.walk(tree) if isinstance(node, ast.Call))
+    return eval(compile(tree, "<concurrency>", "eval"),
+                {"__builtins__": {}, "format": lambda text, *args: text.format(*args)},
+                {"event": event, "mode": mode, "run_id": run_id, "ref": ref})
+
+
+def test_nightly_never_shares_a_group_with_master_pushes():
+    push = concurrency_group("push")
+    assert concurrency_group("schedule") != push
+    assert concurrency_group("schedule") == concurrency_group("schedule")
+    # A newer push still supersedes an older one, and pull requests stay per-ref.
+    assert concurrency_group("push") == push
+    assert concurrency_group("pull_request", "refs/pull/1/merge") != concurrency_group(
+        "pull_request", "refs/pull/2/merge")
+    assert concurrency_group("workflow_dispatch", mode="wait-mail") != concurrency_group(
+        "workflow_dispatch", mode="wait-mail", run_id="102")
+    assert workflow()["concurrency"]["cancel-in-progress"] is True
+
+
 def test_scope_gates_every_heavy_job_and_fails_safe():
     jobs = workflow()["jobs"]
     scope = jobs["scope"]
