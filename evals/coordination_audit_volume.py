@@ -141,7 +141,9 @@ def scratch_database(admin_url: str):
         params = conninfo_to_dict(admin_url)
         params["dbname"] = name
         dsn = make_conninfo(**params)
-        from pseudolife_memory.storage.schema import ensure_schema
+        from pseudolife_memory.storage.re_evidence_schema import (
+            ensure_python_schema as ensure_schema,
+        )
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute("SET search_path TO public")
             ensure_schema(conn)

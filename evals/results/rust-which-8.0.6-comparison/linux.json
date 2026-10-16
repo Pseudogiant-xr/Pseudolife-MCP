@@ -1,0 +1,154 @@
+{
+  "oracle_crate": "which",
+  "oracle_version": "8.0.6",
+  "owned_fixture_cleanup": true,
+  "platform": "linux",
+  "rows": [
+    {
+      "accepted": true,
+      "id": "ordered-path",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "absolute-path",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "relative-command",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": false,
+      "id": "missing-command",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": false,
+      "id": "directory-rejected",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "relative-path-entry",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "empty-path-entry-policy",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": false,
+      "id": "missing-path-rejects-bare",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "missing-path-allows-absolute",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "standalone-home-component",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "literal-tilde-prefix",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": false,
+      "id": "unix-execute-denied",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "unix-file-symlink",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": false,
+      "id": "unix-dangling-symlink",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": false,
+      "id": "unix-denied-target-symlink",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "unix-non-unicode-path",
+      "passed": true,
+      "relation": "public_api_equal"
+    },
+    {
+      "accepted": true,
+      "id": "unix-non-unicode-name",
+      "passed": true,
+      "relation": "public_api_equal"
+    }
+  ],
+  "schema": 1,
+  "selected_group": null,
+  "smoke_only": false,
+  "resolver_reference_head": "9dddf6fcc37fa329d7b2a5125b3725c09118b32e",
+  "reference_note": "Caller-verified resolver Git reference; instrument source identified by exact hashes, not claimed committed at this reference.",
+  "source_sha256": {
+    "evals/rust_port/which_comparison.py": "898e0ccea04126aff15d9b842caf5d213198071d845a57b8d548609c02ccfa8c",
+    "evals/rust_port/which_comparison/Cargo.toml": "48f3c763b8f2534c9a552eb0a697d7d132796bdf1ee908ba382b0ad010857a48",
+    "evals/rust_port/which_comparison/Cargo.lock": "642d911e835df088d3197e72c41f6eab33c223d29c09c7a31b800d908d182818",
+    "evals/rust_port/which_comparison/src/main.rs": "7badcba555d3abf128e9867aab1c51c0156dd6ea60760eb08ada70d0d7f8489f",
+    "rust/shim/src/lifecycle_executable.rs": "51fcba9905e02d37501d8afec61658df6a09b34042813a7aa87c6573e870ce20"
+  },
+  "rustc_version": "rustc 1.94.0 (4a4ef493e 2026-03-02)\nbinary: rustc\ncommit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db\ncommit-date: 2026-03-02\nhost: x86_64-unknown-linux-gnu\nrelease: 1.94.0\nLLVM version: 21.1.8\n",
+  "oracle_registry_checksum": "bae2f2b2b816647a1cab1acc91f5bd20812d53cb344382635ec2181940c8034f",
+  "oracle_verified_file_sha256": {
+    ".cargo_vcs_info.json": "adf1aeaeb13073aee1523848e13e05e8bc52a8a4fec28a428a7c75a968ed4196",
+    ".github/workflows/rust.yml": "45177b092cd172f7260286429298e348266833d987f3a3d5417247c2a339998a",
+    ".gitignore": "775a4074e58ac1de1dfe5383b6de7523bac0dcf1ec3f5fef357ba96a8d983c8f",
+    "CHANGELOG.md": "53c478477d3c498dd84b317bb753123aa819afcf62bc5eafcd8d32f16d0b2579",
+    "Cargo.lock": "43d6723bfbb2b0bac539ec16290a27914240856c3f65a4943a1bdac705cf8cdf",
+    "Cargo.toml": "3ac53b257174b2288e21734a1adbc35895b349e97b95b845d5e1c091fdb423b2",
+    "Cargo.toml.orig": "271ad655deb6d6d97961693e09c020a6e332b3c4c01c4c02ee840423929fa1a6",
+    "LICENSE.txt": "0041560f5d419c30e1594567f3b7ac2bc078ff6a68f437e0348ba85d9cf99112",
+    "README.md": "b5bb9c9e9f5b7fcd563d1272121a77a036f749f3695cd209a51838add31980b0",
+    "RELEASE_STEPS.md": "54501590dea1f632a15b00160cae232cbfe66d9db957eed0930864cec69257be",
+    "clippy.toml": "73619cd75a21017256019b26ad6075fbb59a18f1af4a67d8c786def3bc07d675",
+    "deny.toml": "1d4b580a2cd0d33c1041eabc5852adcb69e0f039377ff4384c2d97760b28f1b6",
+    "src/checker.rs": "b6e7bc3965922c7e895ba68c1c555454cd4bbe131d8f360349271bc62a9dfcda",
+    "src/error.rs": "83eedafcd582cf983b025e1026b1897c71cdab8b3d0f747959445802a0a51469",
+    "src/finder.rs": "d4a685a50230bd3ea58476a06e961296b122aa29603f381e4d47f376a8ceca37",
+    "src/helper.rs": "b3779ed4abe02f2ed368c6831d10234b80a011315a7d55e2110c55514cfbe8ac",
+    "src/lib.rs": "2698dff860b0e885a9f3ed41c40d054f4d088d93ade82eece02fe96a4aee95c0",
+    "src/sys.rs": "0f344997e2d0ed7e4f8337ab39a28600704b95fca1e06907b6071c900d92c3e6",
+    "src/win_ffi.rs": "76fa82ecd876502f7833aa58a7431cd4449f0d5c012cdf7a73ea63582e7ae56d",
+    "tests/basic.rs": "52c867490032169cc2bc0a901da8b31428cc8850178c98959ecfc508837dc0f2",
+    "tests/windows_no_pathext.rs": "6875af4e35ebbb87a9eb4e748e8b051e605740680271c8bf388dfc098396f28c"
+  },
+  "comparison_binary_sha256": "d0d79c95d22761abee91619bb57140bc87ee202f33b8ba54667952a24abe66e2",
+  "build_exit": 0,
+  "comparison_exit": 0,
+  "public_api_equal_cases": 17,
+  "intentional_owned_config_differences": 0,
+  "unavailable_cases": [],
+  "scope": "Ordinary lookup paths/acceptance, not error-string/type equivalence or exhaustive platform coverage; no full suite, service or installation."
+}

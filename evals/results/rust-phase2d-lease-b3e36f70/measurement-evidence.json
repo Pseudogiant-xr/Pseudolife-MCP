@@ -1,0 +1,2859 @@
+{
+  "schema": 1,
+  "candidate_head": "b3e36f707d4e8b038c258b5378c064d62b4d977a",
+  "candidate_tree": "6730038c3e4b40399c6493060293670ffca9be61",
+  "measurements": [
+    {
+      "host": "windows",
+      "mode": "lease-check",
+      "candidate_head": "b3e36f707d4e8b038c258b5378c064d62b4d977a",
+      "candidate_tree": "6730038c3e4b40399c6493060293670ffca9be61",
+      "image_sha256": "a0701acc5bfa80c68ee2fe3c250a411a81b8c2a4b12455182e42c245f11779b9",
+      "profile": "debug",
+      "layout": "bare",
+      "warm_images": true,
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_schema": 55,
+      "python": "3.11.9",
+      "controller": "phase2d-lease-final-check-measurement-driver-v2.py",
+      "controller_sha256": "52b8636442d943b2b41a2c40ae0a4bcb557c0ee579721fbf1c7efd4eef521eaa",
+      "credential_helper_sha256": "6105e28cecb5b4a248437030086b8354a65575d87a85e5dedf0d46d61339b8bc",
+      "repeats": 3,
+      "samples_per_repeat": 10,
+      "warmups": 6,
+      "runs": {
+        "python": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 559.1396999661811,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 591.7621999979019,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 559.18159999419,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 558.3643999998458,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 615.6595000065863,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 573.850599990692,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 563.4423000155948,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 561.9287000154145,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 586.1058000009507,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 555.4529999499209,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 578.5215999931097,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 587.0902999886312,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 572.130200045649,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 556.623500015121,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 605.1496000145562,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 591.8967999750748,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 594.7248000302352,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 565.7301000319421,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 567.5820999895222,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 554.5051000081003,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 574.4713000021875,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 571.764099993743,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 558.5491000092588,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 572.6904000039212,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 571.4065000065602,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 555.2519999910146,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 571.6558999847621,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 563.5706000030041,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 563.2663000142202,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 583.1181000103243,
+            "files_and_environment_match_control": true
+          }
+        ],
+        "rust": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 23.984000028576702,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 49.23210002016276,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 23.442199977580458,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 20.867799990810454,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.516899975016713,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 49.476100015453994,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 23.674199997913092,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.275600010994822,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 51.7526000039652,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 22.690200014039874,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.898100004065782,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 23.17250001942739,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.922499978449196,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 51.30190000636503,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.399500049185008,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 25.959999999031425,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.29079999960959,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 22.338900016620755,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.506400011479855,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 22.928500024136156,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.216000012122095,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.145900012925267,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.706599942874163,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.488099999260157,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.413199978880584,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 25.307499978225678,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.604400001000613,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 50.92409998178482,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 25.453300040680915,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 24.959700007457286,
+            "files_and_environment_match_control": true
+          }
+        ]
+      },
+      "metrics": {
+        "python": {
+          "distribution": {
+            "n": 30,
+            "p50": 571.4065000065602,
+            "p95": 605.1496000145562,
+            "median": 571.5311999956612,
+            "min": 554.5051000081003,
+            "max": 615.6595000065863
+          },
+          "median_control": {
+            "repeat_medians": [
+              562.6855000155047,
+              575.3259000193793,
+              571.5311999956612
+            ],
+            "noise_floor_abs": 12.640400003874674,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 571.4065000065602,
+            "repeat_values": [
+              561.9287000154145,
+              572.130200045649,
+              571.4065000065602
+            ],
+            "noise_floor_abs": 10.201500030234456,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 605.1496000145562,
+            "repeat_values": [
+              615.6595000065863,
+              605.1496000145562,
+              583.1181000103243
+            ],
+            "noise_floor_abs": 32.541399996262044,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        },
+        "rust": {
+          "distribution": {
+            "n": 30,
+            "p50": 23.442199977580458,
+            "p95": 51.30190000636503,
+            "median": 23.558199987746775,
+            "min": 20.867799990810454,
+            "max": 51.7526000039652
+          },
+          "median_control": {
+            "repeat_medians": [
+              23.558199987746775,
+              23.050500021781772,
+              24.559899960877374
+            ],
+            "noise_floor_abs": 1.5093999390956014,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 23.442199977580458,
+            "repeat_values": [
+              23.442199977580458,
+              22.928500024136156,
+              24.413199978880584
+            ],
+            "noise_floor_abs": 1.4846999547444284,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 51.30190000636503,
+            "repeat_values": [
+              51.7526000039652,
+              51.30190000636503,
+              50.92409998178482
+            ],
+            "noise_floor_abs": 0.8285000221803784,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        }
+      },
+      "mutation_controls_rejected": 4,
+      "cleanup_passed": true,
+      "raw_receipt_sha256": "b73ff13390d836ec7a5d8492d4203b51d31d99fcdbcffdfdd2c0e91851ec43c5"
+    },
+    {
+      "host": "windows",
+      "mode": "lease-list",
+      "candidate_head": "b3e36f707d4e8b038c258b5378c064d62b4d977a",
+      "candidate_tree": "6730038c3e4b40399c6493060293670ffca9be61",
+      "image_sha256": "a0701acc5bfa80c68ee2fe3c250a411a81b8c2a4b12455182e42c245f11779b9",
+      "profile": "debug",
+      "layout": "bare",
+      "warm_images": true,
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_schema": 55,
+      "python": "3.11.9",
+      "controller": "phase2d-lease-final-list-measurement-driver-v2.py",
+      "controller_sha256": "04935e4518c5847f04872954eb040d0c672e4d374f1998192bab63b247500886",
+      "credential_helper_sha256": "6105e28cecb5b4a248437030086b8354a65575d87a85e5dedf0d46d61339b8bc",
+      "repeats": 3,
+      "samples_per_repeat": 10,
+      "warmups": 6,
+      "runs": {
+        "python": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 588.0636000074446,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 556.8019999773242,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 565.9415000118315,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 648.5983000020497,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 566.7498999973759,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 562.7756000030786,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 558.2312000333332,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 565.9834999823943,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 550.7388000260107,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 584.0731000062078,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 574.1608999669552,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 575.9442999842577,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 557.9946999787353,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 568.5842999955639,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 554.3443999486044,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 580.6322999997064,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 561.4658000413328,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 567.5930000143126,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 578.7688000127673,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 572.7424999931827,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 561.5095000248402,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 555.8006000355817,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 566.1630000104196,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 578.8729999912903,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 552.5661000283435,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 548.4151000273414,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 552.9614999541081,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 553.9946000208147,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 561.581899994053,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 551.2512999703176,
+            "files_and_environment_match_control": true
+          }
+        ],
+        "rust": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 51.196100015658885,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 22.188900038599968,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 57.531300000846386,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 25.619000021833926,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.614500019699335,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 20.84630000172183,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.10290000261739,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 52.527999971061945,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 51.77029996411875,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 20.459000021219254,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.821599966846406,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 61.91450002370402,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 21.731399989221245,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.249599987640977,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.25379998749122,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 25.060899963136762,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 21.882599976379424,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 25.859499990474433,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 21.94870001403615,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 50.05769996205345,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.186599999666214,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 24.46590003091842,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 24.983000010252,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 24.98560003004968,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 50.5861000274308,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.522099967114627,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 22.971300000790507,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 21.590299962554127,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 25.675399985630065,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 24.959600006695837,
+            "files_and_environment_match_control": true
+          }
+        ]
+      },
+      "metrics": {
+        "python": {
+          "distribution": {
+            "n": 30,
+            "p50": 562.7756000030786,
+            "p95": 588.0636000074446,
+            "median": 564.358550007455,
+            "min": 548.4151000273414,
+            "max": 648.5983000020497
+          },
+          "median_control": {
+            "repeat_medians": [
+              565.9624999971129,
+              570.6633999943733,
+              554.8976000281982
+            ],
+            "noise_floor_abs": 15.76579996617511,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 562.7756000030786,
+            "repeat_values": [
+              565.9415000118315,
+              568.5842999955639,
+              553.9946000208147
+            ],
+            "noise_floor_abs": 14.589699974749237,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 588.0636000074446,
+            "repeat_values": [
+              648.5983000020497,
+              580.6322999997064,
+              578.8729999912903
+            ],
+            "noise_floor_abs": 69.72530001075938,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        },
+        "rust": {
+          "distribution": {
+            "n": 30,
+            "p50": 24.25379998749122,
+            "p95": 57.531300000846386,
+            "median": 24.35985000920482,
+            "min": 20.459000021219254,
+            "max": 61.91450002370402
+          },
+          "median_control": {
+            "repeat_medians": [
+              24.860950012225658,
+              23.537699977168813,
+              24.712750018807128
+            ],
+            "noise_floor_abs": 1.3232500350568444,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 24.25379998749122,
+            "repeat_values": [
+              24.10290000261739,
+              22.821599966846406,
+              24.46590003091842
+            ],
+            "noise_floor_abs": 1.644300064072013,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 57.531300000846386,
+            "repeat_values": [
+              57.531300000846386,
+              61.91450002370402,
+              50.5861000274308
+            ],
+            "noise_floor_abs": 11.32839999627322,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        }
+      },
+      "mutation_controls_rejected": 4,
+      "cleanup_passed": true,
+      "raw_receipt_sha256": "2606fab98056e0298b89c8cceb4500bd3136449c30e7fdaf675bf2efe7512d62"
+    },
+    {
+      "host": "linux",
+      "mode": "lease-check",
+      "candidate_head": "b3e36f707d4e8b038c258b5378c064d62b4d977a",
+      "candidate_tree": "6730038c3e4b40399c6493060293670ffca9be61",
+      "image_sha256": "6c2b30dce19378ee5f8c29c72c28e780d02fdaec2b97dfcf2f2a6660954d7109",
+      "profile": "debug",
+      "layout": "bare",
+      "warm_images": true,
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_schema": 55,
+      "python": "3.11.15",
+      "controller": "phase2d-lease-final-check-measurement-driver-v2.py",
+      "controller_sha256": "52b8636442d943b2b41a2c40ae0a4bcb557c0ee579721fbf1c7efd4eef521eaa",
+      "credential_helper_sha256": "6105e28cecb5b4a248437030086b8354a65575d87a85e5dedf0d46d61339b8bc",
+      "repeats": 3,
+      "samples_per_repeat": 10,
+      "warmups": 6,
+      "runs": {
+        "python": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 358.4715119795874,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 359.6616190043278,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 355.4979719920084,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 353.02160400897264,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 355.44309503166005,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 350.33569298684597,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 356.9739069789648,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.52642299747095,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 356.34930804371834,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 346.5667489799671,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 360.4612260241993,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 350.0319749582559,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 353.59827300999314,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 350.54343298543245,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 352.07153303781524,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 350.0405150116421,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 348.2467479771003,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.05675597535446,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 350.05291702691466,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 358.84590703062713,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 351.53970203828067,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 351.9417659845203,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 357.86233900580555,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 350.69458099314943,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 352.64125000685453,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 364.9837630218826,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 357.9552510054782,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 368.87606198433787,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 354.93465600302443,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 354.74539099959657,
+            "files_and_environment_match_control": true
+          }
+        ],
+        "rust": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 86.72913600457832,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 84.97914799954742,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 84.53109295805916,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 85.64212202327326,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 86.68544801184908,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 84.23972100717947,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 85.75612999266014,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 86.21614897856489,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 86.45118301501498,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.4375600097701,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 83.96744600031525,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 84.83651297865435,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 86.09166304813698,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 84.90206795977429,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 84.59726598812267,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 87.27488899603486,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 86.14514203509316,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 85.62109596095979,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 87.44682598626241,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 85.85276099620387,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 85.809855023399,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 87.18830597354099,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 83.34987901616842,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 85.93263401417062,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 88.1050499738194,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 86.48465503938496,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 90.11277300305665,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 85.368775005918,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 86.46907098591328,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 85.6310939998366,
+            "files_and_environment_match_control": true
+          }
+        ]
+      },
+      "metrics": {
+        "python": {
+          "distribution": {
+            "n": 30,
+            "p50": 353.02160400897264,
+            "p95": 364.9837630218826,
+            "median": 353.3099385094829,
+            "min": 346.5667489799671,
+            "max": 368.87606198433787
+          },
+          "median_control": {
+            "repeat_medians": [
+              355.4705335118342,
+              351.30009448039345,
+              354.8400235013105
+            ],
+            "noise_floor_abs": 4.170439031440765,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 353.02160400897264,
+            "repeat_values": [
+              355.44309503166005,
+              350.54343298543245,
+              354.74539099959657
+            ],
+            "noise_floor_abs": 4.899662046227604,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 364.9837630218826,
+            "repeat_values": [
+              359.6616190043278,
+              360.4612260241993,
+              368.87606198433787
+            ],
+            "noise_floor_abs": 9.214442980010062,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        },
+        "rust": {
+          "distribution": {
+            "n": 30,
+            "p50": 85.809855023399,
+            "p95": 88.1050499738194,
+            "median": 85.83130800980143,
+            "min": 83.34987901616842,
+            "max": 90.11277300305665
+          },
+          "median_control": {
+            "repeat_medians": [
+              85.6991260079667,
+              85.73692847858183,
+              86.20085250004195
+            ],
+            "noise_floor_abs": 0.5017264920752496,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 85.809855023399,
+            "repeat_values": [
+              85.64212202327326,
+              85.62109596095979,
+              85.93263401417062
+            ],
+            "noise_floor_abs": 0.31153805321082473,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 88.1050499738194,
+            "repeat_values": [
+              86.72913600457832,
+              87.44682598626241,
+              90.11277300305665
+            ],
+            "noise_floor_abs": 3.383636998478323,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        }
+      },
+      "mutation_controls_rejected": 4,
+      "cleanup_passed": true,
+      "raw_receipt_sha256": "122eea9def83323ee9de8c05474303c8adabd741d3c112195bbe3d680e0dd380"
+    },
+    {
+      "host": "linux",
+      "mode": "lease-list",
+      "candidate_head": "b3e36f707d4e8b038c258b5378c064d62b4d977a",
+      "candidate_tree": "6730038c3e4b40399c6493060293670ffca9be61",
+      "image_sha256": "6c2b30dce19378ee5f8c29c72c28e780d02fdaec2b97dfcf2f2a6660954d7109",
+      "profile": "debug",
+      "layout": "bare",
+      "warm_images": true,
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_schema": 55,
+      "python": "3.11.15",
+      "controller": "phase2d-lease-final-list-measurement-driver-v2.py",
+      "controller_sha256": "04935e4518c5847f04872954eb040d0c672e4d374f1998192bab63b247500886",
+      "credential_helper_sha256": "6105e28cecb5b4a248437030086b8354a65575d87a85e5dedf0d46d61339b8bc",
+      "repeats": 3,
+      "samples_per_repeat": 10,
+      "warmups": 6,
+      "runs": {
+        "python": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 355.0975130056031,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 351.5221200068481,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 359.0484710293822,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 355.2566030411981,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 353.2459770212881,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 357.49130602926016,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 359.2175570083782,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 353.06300898082554,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 361.29619501298293,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 349.2507360060699,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 351.77691001445055,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.7877749875188,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 349.0735129453242,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 356.8293559947051,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 355.8309439686127,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 351.73696698620915,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 355.51532299723476,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.96588100027293,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 354.7238989849575,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 349.2186110233888,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 358.14284096704796,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 352.35189396189526,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 346.92073898622766,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 345.09871003683656,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 368.6927270027809,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 356.09161999309435,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 357.2706669801846,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 357.6478019822389,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 358.6042699753307,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 356.6699369694106,
+            "files_and_environment_match_control": true
+          }
+        ],
+        "rust": [
+          {
+            "repeat": 0,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 85.44855797663331,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 87.36932696774602,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 85.89613495860249,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.20658700540662,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 85.39532398572192,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 82.21948600839823,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 77.74931896710768,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 84.90792999509722,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 78.80383398151025,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 0,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 87.09421701496467,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.31993102142587,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 88.30361202126369,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 81.87386597273871,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 82.80022401595488,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 85.59566200710833,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 86.69880899833515,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 88.70509604457766,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.26462702825665,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 77.89312402019277,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 1,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.9063529856503,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 0,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 86.98517899028957,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 1,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 86.80221601389349,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 2,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 87.87855296395719,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 3,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 83.75038095982745,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 4,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 83.93376198364422,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 5,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 85.33361100126058,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 6,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 84.65363300638273,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 7,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 95.90103098889813,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 8,
+            "arm_order": [
+              "python",
+              "rust"
+            ],
+            "cold_start_to_exit_ms": 85.84827597951517,
+            "files_and_environment_match_control": true
+          },
+          {
+            "repeat": 2,
+            "sample": 9,
+            "arm_order": [
+              "rust",
+              "python"
+            ],
+            "cold_start_to_exit_ms": 94.46678397944197,
+            "files_and_environment_match_control": true
+          }
+        ]
+      },
+      "metrics": {
+        "python": {
+          "distribution": {
+            "n": 30,
+            "p50": 355.0975130056031,
+            "p95": 361.29619501298293,
+            "median": 355.1770580234006,
+            "min": 345.09871003683656,
+            "max": 368.6927270027809
+          },
+          "median_control": {
+            "repeat_medians": [
+              355.1770580234006,
+              352.87682799389586,
+              356.9703019747976
+            ],
+            "noise_floor_abs": 4.093473980901763,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 355.0975130056031,
+            "repeat_values": [
+              355.0975130056031,
+              352.7877749875188,
+              356.6699369694106
+            ],
+            "noise_floor_abs": 3.8821619818918407,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 361.29619501298293,
+            "repeat_values": [
+              361.29619501298293,
+              356.8293559947051,
+              368.6927270027809
+            ],
+            "noise_floor_abs": 11.863371008075774,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        },
+        "rust": {
+          "distribution": {
+            "n": 30,
+            "p50": 85.33361100126058,
+            "p95": 94.46678397944197,
+            "median": 85.36446749349125,
+            "min": 77.74931896710768,
+            "max": 95.90103098889813
+          },
+          "median_control": {
+            "repeat_medians": [
+              85.15162699040957,
+              83.58549000695348,
+              86.32524599670433
+            ],
+            "noise_floor_abs": 2.739755989750847,
+            "available": true,
+            "method": "max minus min of medians of identical-input repeated control blocks",
+            "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+          },
+          "p50": {
+            "value": 85.33361100126058,
+            "repeat_values": [
+              84.90792999509722,
+              83.26462702825665,
+              85.84827597951517
+            ],
+            "noise_floor_abs": 2.5836489512585104,
+            "method": "max minus min of identical-input repeat block quantiles"
+          },
+          "p95": {
+            "value": 94.46678397944197,
+            "repeat_values": [
+              87.36932696774602,
+              88.70509604457766,
+              95.90103098889813
+            ],
+            "noise_floor_abs": 8.531704021152109,
+            "method": "max minus min of identical-input repeat block quantiles"
+          }
+        }
+      },
+      "mutation_controls_rejected": 4,
+      "cleanup_passed": true,
+      "raw_receipt_sha256": "473a8095d4937872350a945aef1ba9ee827fbeba24c5f285dc5a9de5910fb690"
+    }
+  ],
+  "limitations": [
+    "Bare debug warmed check/list only; successful run is functional evidence.",
+    "Descriptive repeat-block floors are not confidence intervals; final hosted acceptance and independent review remain pending."
+  ]
+}

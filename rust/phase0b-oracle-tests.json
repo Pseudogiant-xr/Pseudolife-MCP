@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "mapped": {
+    "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]": "cli-main-process",
+    "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]": "cli-main-process",
+    "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]": "cli-main-process",
+    "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help": "cli-main-process",
+    "tests/test_cli_dispatch.py::test_help_lists_version": "cli-main-process"
+  },
+  "unmapped": {
+    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]": "Monkeypatches Python runtimes.running_runtime; needs a disposable runtime fixture before crossing the process boundary.",
+    "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]": "Monkeypatches Python runtimes.running_runtime; needs a disposable runtime fixture before crossing the process boundary.",
+    "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit": "Constructs a Python Runtime object and replaces running_runtime; not mapped to a Rust process."
+  }
+}

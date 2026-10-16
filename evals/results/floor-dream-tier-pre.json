@@ -1,0 +1,30 @@
+{
+  "rung": "floor",
+  "label": "deterministic floor",
+  "kind": "floor",
+  "git_rev": "8f148fb453e7bd9dcd76acea00f8d1bd073ca4ac",
+  "bench_env": {
+    "dream": {
+      "assistant_claims": "contender"
+    }
+  },
+  "embedder": {
+    "backend": "torch",
+    "device": "cpu",
+    "dtype": "bf16"
+  },
+  "extract_seconds": 0.5,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 2,
+    "inserted": 2,
+    "superseded": 0,
+    "literal_flagged": 0,
+    "literal_dropped": 0
+  },
+  "gold_recoverable": 0.1,
+  "stale_leak": 0.1,
+  "tokens_per_query": 3.4,
+  "search_latency_ms": 51.2,
+  "status": "ok"
+}

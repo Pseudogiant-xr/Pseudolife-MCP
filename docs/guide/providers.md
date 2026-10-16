@@ -85,7 +85,8 @@ startup briefing is not a relevance-ranked answer to a prompt it has not seen.
 
 The provider that *talks* to the bank and the model that *consolidates* it
 are separate choices, and the installer wires both. `--extractor` /
-`-Extractor` takes `sidecar` (the bundled CPU model, the default),
+`-Extractor` (required: the installer has no default and asks when run
+interactively) takes `sidecar` (the bundled CPU model),
 `claude-fallback` / `claude-only` (a Claude Max plan via the CLI shim),
 `openai-fallback` / `openai-only` (a ChatGPT plan via the Codex CLI shim),
 or `endpoint` / `endpoint-fallback` (any OpenAI-compatible server, no shim:

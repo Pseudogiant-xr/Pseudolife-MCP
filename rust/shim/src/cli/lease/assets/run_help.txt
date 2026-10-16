@@ -1,0 +1,34 @@
+usage: pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]
+
+Wait for the lease NAME, run COMMAND while holding it, release it.
+
+positional arguments:
+  NAME                the lease name, 1 to 120 characters
+
+options:
+  -h, --help          show this help message and exit
+  --expect DURATION   how long the command should take; the board shows the
+                      expected end, and 'stale' once it has passed
+  --ttl SECONDS       how long the board keeps the lease without a renewal, 30
+                      to 86400 (default 120); renewed every ttl/3
+  --purpose TEXT      what it is for, shown on the board (at most 240
+                      characters)
+  --no-board          skip the agent board and wait on the local lock alone
+  --timeout DURATION  give up waiting after DURATION: exit 75 without running
+
+DURATION is whole seconds, minutes, hours or days: 90, 90s, 20m, 2h, 7d.
+
+The lease is an OS file lock in ~/.pseudolife-mcp/locks (PSEUDOLIFE_LEASE_LOCK_DIR
+overrides it), released by the OS when this process exits or dies. With a
+bearer token (PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKEN_FILE) and a daemon
+whose board is on, the board mirrors it: FIFO queue, holder, expected end.
+Otherwise, or with --no-board, the local lock alone decides (not FIFO). The
+command sees PSEUDOLIFE_LEASES_HELD=<names>.
+
+A stop (Ctrl-C, SIGTERM, SIGHUP) stops the command before releasing: it gets
+10 s to clean up on its own, then is interrupted, terminated and killed.
+
+exit codes: the command's own; 2 usage error; 64 nested inside a run of the
+same lease; 71 lock file unusable; 75 --timeout expired (the command did not
+run); 126 cannot start the command; 127 command not found; 128+N stopped by
+signal N (130 Ctrl-C).

@@ -868,7 +868,9 @@ class CoordinationAdapter:
         from .coordination_identity import fetch_context, check_binding
 
         self._check_snapshot(snapshot)
-        context = await fetch_context(self._client, self.url, snapshot)
+        # Startup establishes the bank identity deliberately. An existing
+        # authority check must never initialize it or its audit history.
+        context = await fetch_context(self._client, self.url, snapshot, read_only=True)
         self._check_snapshot(snapshot)
         if self._identity is not None:
             check_binding(self._identity, context)

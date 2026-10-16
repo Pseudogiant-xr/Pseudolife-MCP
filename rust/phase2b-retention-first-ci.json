@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "kind": "first-retention-ci-diagnostic-summary",
+  "run_id": 37281778651,
+  "attempt": 1,
+  "source_head": "d3f0022bc1b74a4fd8ab5649b39e7dc2abde3fb8",
+  "source_tree": "1f327c52f07105e94fba765e91c7452619b7a1d5",
+  "oracle_commit": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
+  "oracle_version": "0.16.1",
+  "oracle_schema": 54,
+  "scope": "Retention-only head before Phase 2b b-f fixes; no master-integrated final-head acceptance.",
+  "jobs": [
+    {
+      "name": "Rust / ubuntu-latest",
+      "conclusion": "success",
+      "started_utc": "2026-10-05T08:08:30Z",
+      "completed_utc": "2026-10-05T08:13:43Z",
+      "nextest_passed": 272,
+      "nextest_skipped": 0
+    },
+    {
+      "name": "Rust / windows-latest",
+      "conclusion": "success",
+      "started_utc": "2026-10-05T08:08:30Z",
+      "completed_utc": "2026-10-05T08:19:48Z",
+      "nextest_passed": 291,
+      "nextest_skipped": 0
+    },
+    {
+      "name": "Parity / ubuntu-latest",
+      "conclusion": "success",
+      "started_utc": "2026-10-05T08:19:51Z",
+      "completed_utc": "2026-10-05T08:25:29Z"
+    },
+    {
+      "name": "Parity / windows-latest",
+      "conclusion": "success",
+      "started_utc": "2026-10-05T08:19:53Z",
+      "completed_utc": "2026-10-05T08:33:46Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "platform": "Linux",
+      "artifact_id": 11332929747,
+      "receipt": "rust-parity-Linux/rust-phase1-ci-Linux.json",
+      "sha256": "3f32ad71690b943c717a362b275c50c1b44c362eba29ee5e9f62a2fb1aa42dbe"
+    },
+    {
+      "platform": "Windows",
+      "artifact_id": 11334141246,
+      "receipt": "rust-parity-Windows/rust-phase1-ci-Windows.json",
+      "sha256": "57dcbad2cf06c9c434031bb05b68dc97906d6833ce3af369f1b668858f4ac5a9"
+    }
+  ],
+  "verified_per_platform": {
+    "coverage_complete": true,
+    "bindings": {
+      "real_bank": 2,
+      "eof": 7,
+      "fault": 10,
+      "startup": 7,
+      "concurrent": 6
+    },
+    "selected_nodes_passed_once": 8,
+    "actual_rust_differences": 0,
+    "forwarding_controls_passed": 4,
+    "judge_sensitivity_controls_rejected": 6,
+    "generic_cases_passed": 25,
+    "graded_controls_rejected": 7,
+    "stderr_rejection_evidence": {
+      "oracle_bytes": 0,
+      "candidate_bytes": 38,
+      "both_arms_retained": true,
+      "truncated": false,
+      "complete": true
+    },
+    "frame_rejection_evidence": {
+      "both_stderr_arms_retained": true,
+      "complete": true
+    }
+  },
+  "binding_note": "Recorded source/instrument hashes match the exact head with only LF/CRLF checkout normalization; executable identity is a clean-checkout hash binding, not build attestation.",
+  "eof_verification": {
+    "Windows_live_frozen_checks": 7,
+    "Windows_all_matched": true,
+    "Linux_same_platform_frozen_checks": 0,
+    "Linux_note": "Uses live cross-platform oracle observations; the empty frozen-check list does not prove seven frozen verifications."
+  },
+  "finding": "No daemon emitter mismatch reproduced; earlier intermittent stderr mismatch remains unexplained.",
+  "readiness_condition_proposed": false,
+  "limits": [
+    "Hosted controls exercise 38-byte retention and frame/stderr rejection, not the 64 KiB truncation branch or a real exit-code rejection.",
+    "Raw passing arms/cells and private pytest streams are omitted from the public summaries; all passing frames cannot be independently rejudged from these artifacts.",
+    "No policy allowlist, timeout relaxation, unchanged rerun or final-head acceptance follows from this green diagnostic."
+  ]
+}

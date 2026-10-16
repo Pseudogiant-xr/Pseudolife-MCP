@@ -138,6 +138,8 @@ def stub_server(monkeypatch):
 
     monkeypatch.setattr(psycopg, "connect", _connect)
     monkeypatch.setattr(schema, "ensure_schema", _ensure_schema)
+    from pseudolife_memory.storage import re_evidence_schema
+    monkeypatch.setattr(re_evidence_schema, "ensure_python_schema", _ensure_schema)
     monkeypatch.setattr(transfer_tests, "ensure_schema", _ensure_schema)
     monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
     monkeypatch.delenv(schema.PRODUCTION_DATABASE_ENV, raising=False)

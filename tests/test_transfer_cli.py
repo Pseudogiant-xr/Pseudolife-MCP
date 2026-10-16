@@ -27,12 +27,14 @@ from contextlib import contextmanager
 import psycopg
 import pytest
 
+from pseudolife_memory.storage.re_evidence_schema import (
+    REHUB_SCHEMA_VERSION,
+    ensure_python_schema as ensure_schema,
+)
 from pseudolife_memory.storage.schema import (
     BENCH_RESET_TABLES,
-    REHUB_SCHEMA_VERSION,
     SCHEMA_META_VERSION,
     assert_disposable_database,
-    ensure_schema,
 )
 from pseudolife_memory.storage.postgres import PostgresStorage
 from pseudolife_memory.transfer_cli import (

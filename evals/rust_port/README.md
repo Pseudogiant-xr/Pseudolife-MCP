@@ -1,265 +1,522 @@
 # Rust port differential instrument
 
-This records requests and observed responses across whole CLI processes and
-HTTP/MCP connections, then replays the same requests against a candidate.
-It also provides an external pytest adapter for five explicitly mapped existing
-CLI assertions. Existing tests and `tests/conftest.py` stay unchanged.
+The instrument records whole CLI processes and HTTP/MCP responses and compares
+an independently observed candidate. Phase 0b pins Python production source to
+`3691f5cb75487d3fda54a6bde6fab35dcf32c681`, schema 53; evaluation code may
+change independently and every receipt fingerprints it. Existing `tests/` and
+production code remain unchanged.
 
-## Proven scope
+## Current evidence and its limits
 
-The corrected receipts below use historical Python source
-`136a34ae95e981a691fcc31ba9fb4f35d83d4249`, schema 52. The integration branch
-subsequently moved to `d398068743e7276e884bd2693501484b83f981e9`, which declares
-schema 53 and changes principal storage, HTTP authentication and MCP tier
-resolution. The provisional captures are preserved privately; the corrected
-captures use the current instrument and do not validate that new production
-source. Current-source daemon or fixture behavior has not been rebaselined.
+The combined acceptance receipt is `evals/results/rust-port-phase0b-acceptance.json`;
+it binds zero-difference Python command/URL lanes, every named proxy control,
+and compiled garbage Rust rejection to the hashed platform capture receipts.
 
-`selfcheck`, `oracle` and the full-bank runner require historical source by
-default. Select a separate clean checkout with `--oracle-root`; the current
-instrument runs there with production imports and subprocess working directories
-pointing at that checkout. The `evals` package resolves only from the current
-instrument checkout, including the external pytest plugin and process helper;
-an older `evals/rust_port` package in the oracle checkout cannot replace it.
-The source check covers production, dependency
-declarations and the existing test files used by the adapter, including local
-tracked/untracked source drift. It allows an instrument-only Git commit while
-refusing changed oracle code or a schema other than 52. No schema is migrated.
-New metadata distinguishes `source_head`/`source_schema` from `instrument_head`,
-names the historical oracle separately and hashes the current instrument,
-the process ownership helper and the native binding module it uses. It
-never emits the local checkout path. Dependencies are recorded, not silently
-pinned or upgraded; reconstruct the versions in the historical receipt for an
-equivalent dependency lane. `prepare` can inspect either tree without importing
-the daemon and explicitly reports that no requests executed.
+Current Linux selfcheck, Linux full-bank and Windows CLI receipts are under
+`evals/results/rust-port-phase0b-selfcheck-linux/`,
+`evals/results/rust-port-phase0b-full-bank-linux/` and
+`evals/results/rust-port-phase0b-cli-windows/`. Linux uses a native LF checkout
+of the pinned oracle; Windows keeps its own CLI capture. Receipts name the OS,
+architecture, source pin, schema, dependencies, instrument fingerprints and
+resource admission. Replay refuses a missing or mismatching capture platform.
 
-The [source reconstruction manifest](../results/rust-rewrite-source-reconstruction.json)
-maps every historical source digest in baseline R5, full-bank R5 and selfchecks R4/R5/R6
-to a canonical Git blob and its exact line endings. Read a blob with
-`git cat-file blob <git_blob_oid>`, verify `canonical_blob_sha256`, then replace
-the final LF with CRLF only on the one-based lines in `crlf_line_ranges`
-(inclusive ranges). Leave all other bytes unchanged and verify
-`recorded_raw_sha256`. This also preserves the mixed line endings in
-`test_processes.py`; a uniform conversion does not recover its captured digest.
-The manifest identifies historical oracle files separately and leaves every
-capture unchanged. Apply the same recipe to `receipts` and `referenced_artifacts`
-before checking their historical `sha256`/`recorded_raw_sha256`: together they
-cover all sixteen tracked captures, including both corpus and oracle files. Four
-baseline receipts require the declared CRLF ranges; the twelve port artifacts use
-LF. Git objects and these recipes suffice on a clean Linux checkout. Untracked
-executable hashes and semantic synthetic-corpus digests are separate observations.
-Resolve sources by path plus raw digest, since the selfchecks retain different
-versions of the oracle, runtime fixture and boundary test. Older versions declare
-their `source_commit`; never replace an old binding merely because its path repeats.
+The selfcheck covers two CLI cases, four HTTP cases and five MCP cases above a
+synthetic in-memory service seam. Its service does not exercise storage,
+embedding, durable identity, background work or full daemon lifecycle. The
+full-bank corpus covers 25 cases on fresh PostgreSQL banks with the real CPU
+embedder: bearer rejection, MCP negotiation/list/call, storage, search, fact
+supersession/history and addressed coordination mail. All banks are generated,
+never copied. Python versus Python proves the instrument can replay this
+corpus; it does not establish Rust implementation parity or complete coverage.
+The deliberately broken Rust executable fails the CLI selfcheck. No production
+surface becomes ported merely because a control passes.
 
-Runtime provenance distinguishes `parent_runtime` from `actual_child_runtime`.
-The fixture child reports its own metadata; the full-bank adapter retains the
-daemon's runtime observation from identity-verified health in each arm's cleanup.
-Interpreter basename/hash, installed distribution versions, package runtime
-version and selected source-file match/hash contain no absolute paths. CLI and
-pytest adapter runtime probes are explicitly separate processes with the same
-interpreter, environment and selected source, rather than observations written
-inside the tested CLI. Isolating APPDATA can hide user-site distribution metadata
-and expose an older base installation even when production source is pinned.
-Earlier receipts contain parent metadata and are preserved without relabeling.
+Seven graded controls pass responses through a small owned loopback proxy in
+front of the real Python daemon, changing one response per proxy: missing key
+(`field_presence`), reordered ranking (`ranking_order`), milliseconds epoch
+(`epoch_unit`), integer changed to float (`type`), error marked success
+(`tool_error_envelope`), changed tool description (`value`), and duplicate JSON
+member (`duplicate_json_key`). Each has a unit test and the full-bank receipt
+records the observed differences, preserved status and proxy cleanup. These
+controls make specific near misses load-bearing; they are not an exhaustive
+wrong-port detector. Controls use search/list/error requests on the already
+seeded oracle bank. Searches can update access counts and cortex state; receipts
+retain those additional differences and require the intended rejection at its
+named path.
 
-`seed.json` plus `fixtures.py` generate a synthetic in-memory bank and ordered
-request corpus. `oracle.py` runs the real Python `web.api` routes and registered
-tools in an owned loopback process. The production daemon entry point constructs
-the transport above a synthetic `MemoryService` constructor seam; eval code does
-not import or inspect the MCP projection. Fixture health and service background
-callbacks remain synthetic, and the listener uses the pre-bound owned socket.
-The CLI arm runs `pseudolife_memory.cli` in
-separate processes. No database, embedding model, live bank or client settings
-are used. The service seam validates transport, tool schema and payload
-projection, **not retrieval, storage, authentication or daemon lifecycle parity**.
+Historical schema-52 selfcheck R6 and full-bank R5 remain unchanged. Selfcheck
+R4/R5 were archived outside the working tree and remain recoverable from PR
+#540's original Git history at `f2ee1524`. The source-reconstruction manifest retains the
+recorded source digests and line-ending recipes for historical evidence; these
+are not current-oracle results.
 
-`selfcheck.py` requires a compiled negative fixture, records the Python oracle,
-passes Python replay and rejects `broken_fixture.rs` through CLI mismatches.
-Its HTTP/MCP replay target remains the Python fixture process; the negative
-control does not claim a Rust MCP or HTTP implementation. `--validate-plugin`
-also runs the same five existing assertions through Python subprocesses and the
-broken compiled executable, and verifies unmapped selected tests are refused.
-Source hashes demonstrate that the selected test file and conftest were not
-edited. No production surface is marked ported by these checks.
+## Real candidate entry points
 
-The phase-0 receipt, request corpus and oracle transcript are under
-`evals/results/rust-port-phase0-selfcheck-r6/`; R4/R5 remain preserved as historical
-evidence with their original sources. None of the eleven cases reaches a real
-bank or model: two use the real Python CLI, four use the
-real HTTP API with a fixture service, and five use real MCP handlers with that
-same service seam. The separate full-bank control below now exercises the real
-daemon, embedding model and PostgreSQL storage.
+`full_bank run` supports an already running `--candidate-url`, an owned
+`--candidate-command-json` argv, or `--python-candidate` to prove the owned
+command path using Python. The oracle and candidate arms each receive a freshly
+minted guarded PostgreSQL database and identical seed requests. No target DSN
+argument is accepted. The runner exclusively creates and drops the banks, uses
+private homes/configuration, hides CUDA, pins one-thread fp32 CPU embedding and
+permits only an explicit read-only offline model cache. Live credentials and
+installed settings never flow into a child. Runtime credentials stay private;
+HTTP registration identities are normalized bijectively and credential echoes,
+including in raw MCP bytes, refuse transcript publication.
 
-## Real PostgreSQL-bank control
+An owned candidate receives `PSEUDOLIFE_MCP_DATABASE_URL`,
+`PSEUDOLIFE_MCP_HOST`, `PSEUDOLIFE_MCP_PORT`, `PSEUDOLIFE_MCP_TOKEN`,
+`PSEUDOLIFE_MCP_CONFIG` and `PSEUDOLIFE_BASELINE_NONCE` through the isolated
+environment. Its evaluation readiness adapter must expose `/health` with
+`status: ok` and `baseline_instance: {nonce, pid}` using that nonce and its
+actual runtime PID. Ownership is established before process execution, and the
+runner verifies PID membership in its Job/process group before accepting
+readiness. All children are reclaimed on success, timeout and startup failure;
+no candidate executable paths or argv secrets are published in receipts.
 
-`full_bank.py` and `full_seed.json` generate three independent synthetic memories
-and a 25-case corpus. The adapter reuses `rust_baseline.daemon`'s guarded database
-creation and owned-process launcher, records requests on one fresh bank, then
-replays on a second fresh bank. It exercises bearer rejection, authenticated MCP
-initialize/list/call, store and empty-store behavior, unknown-tool error, MCP and
-REST search, fact insertion/supersession/read/history, coordination registration,
-ordered send/receive, acknowledgment and identity/error rejection. CLI coverage
-and the compiled Rust negative control remain in the separate selfcheck above.
-
-The [full-bank receipt](../results/rust-port-phase0-full-bank-r5/run.json) records
-25 passing cases, zero differences and cleanup of both daemons, their children
-and both databases. The [oracle transcript](../results/rust-port-phase0-full-bank-r5/python-oracle.json)
-contains every request and normalized response. This is functional Python-to-Python
-validation, not performance measurement or Rust-daemon parity. It uses the real
-CPU torch embedder; ONNX parity and the complete surface corpus remain future work.
+An external URL must be a loopback HTTP origin with an evaluation-only bank
+adapter and its private `--candidate-nonce`. Before disclosing bank credentials,
+the runner GETs `/_rust_port/ready` and requires exactly
+`{nonce: PRIVATE_ADAPTER_NONCE, disposable: true}` from the separately launched
+adapter. A nonce mismatch refuses binding before sending any DSN. The runner POSTs `/_rust_port/disposable-bank` with its minted
+`database_url`, synthetic `token`, `nonce`, `bank_sha256` (SHA256 of the minted
+bank name) and `disposable: true`. Before corpus requests the adapter must
+respond exactly with `{nonce, bank_sha256, disposable: true}` after selecting
+that empty bank. In cleanup it must acknowledge
+`/_rust_port/disposable-bank/release` with `{nonce, released: true}`. The bank is
+then dropped; the externally owned server is left to its caller. A bare server
+URL without verified binding is refused. This is an explicit candidate adapter
+contract, not a new production API.
 
 ```sh
-python -m pytest evals/rust_port/test_harness.py evals/rust_port/test_full_bank.py -q
-python -m evals.rust_port.full_bank prepare --oracle-root /path/to/python-oracle --out-dir /tmp/contract-prepared
-python -m evals.rust_port.full_bank run --oracle-root /path/to/python-oracle --out-dir /tmp/contract-run --board-checked-at VERIFIED_FREE_BOARD_UTC --score-abs-tol 0.000001
+python -m pytest evals/rust_port -q
+python -m evals.rust_port.full_bank prepare --oracle-root /path/to/pinned-oracle --out-dir /tmp/prepared
+python -m evals.rust_port.full_bank run --oracle-root /path/to/pinned-oracle --out-dir /tmp/full-bank --offline-resource-checked-at VERIFIED_FREE_UTC --python-candidate --validate-controls --validate-url-candidate
+python -m evals.rust_port.full_bank run --oracle-root /path/to/pinned-oracle --out-dir /tmp/candidate --offline-resource-checked-at VERIFIED_FREE_UTC --candidate-command-json '["/path/to/candidate"]'
+python -m evals.rust_port.full_bank run --oracle-root /path/to/pinned-oracle --out-dir /tmp/external --offline-resource-checked-at VERIFIED_FREE_UTC --candidate-url http://127.0.0.1:19002 --candidate-nonce PRIVATE_ADAPTER_NONCE
+rustc evals/rust_port/broken_fixture.rs --edition 2021 -C codegen-units=1 -o /tmp/broken
+python -m evals.rust_port.selfcheck --oracle-root /path/to/pinned-oracle --broken-binary /tmp/broken --out-dir /tmp/selfcheck --offline-resource-checked-at VERIFIED_FREE_UTC --validate-plugin
+python -m evals.rust_port.selfcheck --oracle-root /path/to/pinned-oracle --broken-binary /tmp/broken --out-dir /tmp/cli --offline-resource-checked-at VERIFIED_FREE_UTC --cli-only
 ```
 
-Run only after the lead grants the CPU slot and verifies resource clearance;
-the launcher also checks the local lease. When the board is unavailable, the
-mutually exclusive `--offline-resource-checked-at VERIFIED_OFFLINE_CLEARANCE_UTC`
-option records independent local/WSL lock and peer workload clearance. It never
-invents a board timestamp or overrides an available busy board or local lock.
-No caller-supplied DSN is accepted. Private directory removal uses the launcher's
-bounded filesystem retry after owned-process shutdown.
-Every arm gets private home/configuration directories; only the explicit offline
-model artifact cache is shared. Bearer and agent credentials are injected at
-runtime, never stored in the corpus, and a credential escape rejects publication.
+Resource clearance is checked with `pseudolife-mcp lease check full-suite`
+before captures and every full-bank arm. Busy means refusal. When CLI board
+access is unavailable, `--offline-resource-checked-at` records independently
+verified local/WSL locks and peer clearance; it does not invent a board check or
+bypass a held lease. Coordinate the CPU slot before model loading. One-thread
+fixture compilation is bounded and on Windows runs below normal priority.
+Every artifact uses exclusive create and cannot overwrite earlier evidence.
 
-Normalization names only fields in the declared operation shapes. Agent/message
-UUIDs use bijective symbols; later references must resolve to the same identity.
-Credential fields become vault symbols. Epoch clock symbols retain their exact
-integer or float type, including captures and later references; booleans are
-rejected. Fact stamps must agree across write/read/history. Mail
-creation/expiry must agree across receipts and reads, have the expected lifetime,
-and acknowledgments must fall within it. Mail sequence numbers, cursor positions,
-message order, text and continuity fields remain exact, with strictly advancing
-HLCs checked before their wall-clock-dependent stamps become symbols. Fact values
-and version ordering remain exact. Human age strings and compact calendar dates
-are compared exactly; a run crossing their rendering bucket fails honestly.
-Search returns all three distinct integer storage IDs, which remain exact and
-ordered independently of the configurable score tolerance. Both MCP text JSON
-and structured content are compared. Unknown-tool error text is compared as text.
+## Comparison policy
 
-## Run
+The recorded header allowlist is `content-type`, `content-length`,
+`cache-control`, `location`, `www-authenticate`, `allow`, `retry-after`,
+`mcp-protocol-version`, `mcp-session-id` and `x-pl-board`. Deliberately set
+application/SDK headers are compared, including absent versus present. Session
+IDs become per-session symbols after continuity checks. `content-length` is
+retained for fixed framing and omitted from comparison only for an explicitly
+observed fixed-versus-chunked pair. `content-length-authorized-wire-spans`
+first validates the declared length against entity bytes, then adjusts only
+the exact disjoint tokens changed by the declared identity, clock or source-text
+line-ending normalization.
+Nested MCP JSON adjustments retain the original outer escaping. The transcript
+records raw length, adjustment and compared length; all bytes outside those
+tokens still count, including whitespace and Unicode. Whole-body serialization
+never determines the adjustment. This establishes normalized length parity,
+with the raw lengths available for inspection. Date and Server are incidental server
+metadata outside this contract. Redirects and environment proxies are refused.
 
-Use a dependency environment containing the repository's Python requirements.
-Before compiling, check `pseudolife-mcp lease check full-suite`; respect the host's
-resource rules. The fixture has no crate dependencies and uses one codegen unit;
-on a shared Windows host launch the compiler at BelowNormal priority, with a
-bounded job count. Compile it once to a disposable directory:
+CLI stdout/stderr are stored as base64 and compared byte-exact with the ordinary
+integer exit code (0 through 255) on the captured platform. Signals and Windows
+exception termination are boundary failures. `source-text-lf` normalizes CRLF
+and lone CR to LF only at the named MCP tool-description paths. No broad
+whitespace or string-case normalization is applied.
+
+Clock normalization is declared per operation: epoch symbols preserve JSON
+integer/float type, seconds versus milliseconds unit class and decimal order of
+magnitude. Relative constraints and write/read identity continuity are checked
+before normalization; a milliseconds epoch cannot pass as seconds. Booleans,
+nonfinite values, missing declared fields and changed reference types fail.
+Fact versions, message order, recipient sequences, cursor positions and ranking
+IDs remain exact. Human age strings and compact dates remain exact, so crossing
+a rendering boundary produces a difference.
+
+JSON object key order is ignored; array order and multiplicity remain exact.
+Score tolerance is opt-in at explicit JSON Pointer paths (default absolute
+`1e-6`, relative zero), with one-segment wildcards. Tolerance never masks ranking
+order. Embedded MCP JSON text is parsed only at declared paths and compared
+alongside structured content. Duplicate members are rejected before top-level,
+SSE-envelope or embedded-text parsing discards them. Raw MCP response bytes are
+retained as `raw_mcp_body_b64` beside the parsed form and excluded by the named
+`raw-mcp-retained-not-compared` rule; future stricter byte policies can use them
+without recapture. SSE envelope arrival order remains exact; event framing
+IDs/retry directives are not graded.
+
+`oracle_tests.json` maps five existing CLI assertions to an external pytest
+adapter. Candidate mode refuses unmapped selected nodes with usage error 4;
+original assertions and SystemExit expectations are unchanged. Broader CLI,
+shim and storage routing remain pending. Protocol negotiation records what the
+installed MCP SDK actually supports; initializing a requested July-2026 protocol
+that falls back to an older revision does not establish modern support.
+# Phase 1 stdio judge
+
+Run the bounded shim judge from a checkout installed with `[dev,lite]`:
 
 ```sh
-rustc evals/rust_port/broken_fixture.rs --edition 2021 -C codegen-units=1 -o /tmp/rust-port-broken
-python -m pytest evals/rust_port/test_harness.py -q
-python -m evals.rust_port.selfcheck --oracle-root /path/to/python-oracle --broken-binary /tmp/rust-port-broken --out-dir /tmp/rust-port-proof --validate-plugin
+python -m evals.rust_port.phase1 --candidate-json '["/absolute/path/pseudolife-stdio"]' --candidate-root /absolute/candidate-checkout --out /private/phase1.json --public-out evals/results/phase1.json --offline-resource-checked-at VERIFIED_UTC_TIME
 ```
 
-Use a fresh output directory on every run. Artifact writes use exclusive create
-and refuse to overwrite existing evidence. The selfcheck stops and waits for its
-owned oracle process before writing the success receipt; private process logs
-and client homes are temporary and removed. Evidence contains responses and
-safe path/reason differences, without executable paths or target origins.
+Omit `--candidate-json` for Python self-replay. The command selects eight public
+stdio test functions without changing their assertions, runs both protocol eras
+on fresh guarded disposable PostgreSQL banks, and exercises EOF, refusal,
+credential rotation, recovery and graded forwarding controls. PostgreSQL must
+already be available through the existing `tests.pg_defaults` resolver or
+`PSEUDOLIFE_BENCH_ADMIN_URL`. The clearance timestamp is the lead's independent
+resource check; the runner also checks the local full-suite lease. No full test
+suite runs.
 
-The CLI, pytest adapter and fixture oracle establish subtree ownership before
-child code runs and reclaim it on success, timeout and startup failure, including
-when the direct parent has already exited. Windows uses a suspended launch and
-job assignment before resume, then waits for the job's active process count to
-reach zero. Readiness can verify the live CPython PID behind a virtualenv
-redirector through exact opened-handle PID equality and membership in that Job;
-invalid, overflowing, aliased and unrelated PIDs are refused. It refuses unavailable ownership instead of using a descendant
-snapshot or `taskkill` fallback. POSIX uses a new process group and waits for its
-running members to exit; runtime membership requires that group and a live
-non-zombie process. Deliberately detached sessions are unsupported. The
-new cleanup and routing regressions exercise real disposable subprocesses; the
-linked receipts bind the execution sources present at capture time by hash.
-Subsequent instrument fixes require fresh captures; historical receipts remain
-unchanged.
+Receipt schema 2 records each selected node's outcome from pytest's private
+JUnit report. Exit zero alone is insufficient: skipped, errored, failed,
+missing, duplicate or unexpected nodes cannot produce a passing receipt.
+The public summary retains node identities/outcomes and the XML hash; raw test
+output, error messages and XML stay beside the private receipt.
 
-To record your own disposable target, generate a corpus and start its server,
-then supply a JSON argv prefix and explicit loopback origin:
+`--candidate-root` names the native Git checkout that holds the committed Rust
+source, independently of `--oracle-root`. It must resolve on the OS running the
+judge; a Windows checkout path with unavailable Git metadata is not a Linux
+source identity. Receipts record its commit/tree, clean source hashes and binary
+SHA-256, and bind the process tests and every candidate real-bank, EOF, fault,
+startup and concurrent-call cell to that executable. The source/binary pairing
+is not a build attestation: retain the build evidence separately. Python
+self-replays bind the interpreter and
+the checked production oracle source instead.
+
+All judge sections must run for a complete passing receipt. The `--skip-*`
+switches produce incomplete evidence. Process-test reuse refuses legacy
+receipts, differing platform/oracle/instrument fingerprints, missing per-node
+passes or a different executable. Final Python self-replays run fresh without
+reuse or skip switches, once per platform after the instrument is frozen.
+
+For a CI runner with `[lite]` installed and no prestarted PostgreSQL, use
+`python -m evals.rust_port.phase1_ci` with the same arguments. It provisions a
+fresh owned embedded instance through the existing provider, supplies disposable
+test/admin URLs internally, and stops the listener before writing
+`<private-receipt>.postgres.json`. It never prints database credentials.
+
+`--port-stdio-json` and `PSEUDOLIFE_PORT_STDIO_JSON` select the candidate for the
+external pytest adapter. Unmapped functions and private Python entrypoints are
+rejected. Without these switches, tests retain their Python default. Only public
+default, `shim` and `channel` launches can be replaced.
+The stdio harness binds `PSEUDOLIFE_MCP_PYTHON` to its own `sys.executable`;
+`env_extra` may override it, including with an empty value. The external stdio
+adapter preserves a selector in the test's child environment, otherwise uses
+the explicitly configured caller selector or its own interpreter. The CLI
+adapter uses that same caller-or-interpreter choice. These bindings do not
+change remote or no-spawn controls. The Parity workflow runs the instrument
+with the prepared oracle interpreter and explicitly selects it for children.
+For a full-suite gate, add `--port-full-suite` with `--port-stdio-json`:
+all mapped stdio nodes use Rust, and every other collected node runs its original
+Python assertions. This mode reports both counts and refuses a selection with
+zero mapped stdio nodes. The default explicit selection still rejects unmapped
+nodes; neither mode skips or deselects assertions.
+
+The `stdio-raw-compared` policy retains and compares stdout bytes, including
+member order, spacing, integer spelling and line framing. It changes only named
+source newline spans at `/body/result/tools/*/description` and
+`/body/result/instructions`. Stderr's allowlist is empty and exit codes are exact.
+Only the real-bank corpus opts into `completed-readiness-wait-notice`: after
+stdout matches under the existing comparison and both processes exit 0, stderr
+may differ between empty bytes and the sole exact no-spawn, five-second wait
+notice for `http://127.0.0.1:<port>` (1–65535). One terminating LF or CRLF is
+required; extra lines, logs or altered text fail. Both arms must retain genuine
+process provenance. Applied events include both raw stderr captures in
+`normalizations_applied`, including in the public summary; missing evidence makes
+the receipt incomplete. The capture streams remain unchanged. Startup, fault,
+EOF and concurrent-call policies do not enable this rule.
+`eof-observed-final-pair-orders` permits only the observed final two connection
+errors to swap; their bytes, multiplicity and all preceding frames stay exact.
+Each platform supplies its own byte oracle. Frozen Windows observations authorize
+only the observed ID order sets on Linux, not stream newline normalization.
+
+Generic HTTP controls use the exact per-case comparison Policy used for the
+real candidate, including embedded JSON and ranking checks. Malformed responses
+pass through the shared boundary observation wrapper and generic comparator.
+The identity proxy seeds a fresh bank and must make zero mutations and produce
+zero differences. HTTP raw bodies remain retained but ignored until Phase 3.
+Deterministic test embeddings establish protocol and storage execution, not
+model or retrieval parity. Historically, at `2e628b27`, all 125 scoped Phase 1
+internal functions named Rust targets with Windows/Linux assertion evidence.
+The current mapping contains 121 completed equivalents, exactly 3 SDK cases
+retired-by-decision, and 1 pending postframe update-scheduling substitution.
+The pending row now records targeted Windows/Linux evidence at frozen tree
+`a4ff3236eb349aaed427d80129513fe22cf0183f`; Windows retains its transient reset
+and successful reruns, and Linux passed all four checks (66 integration and
+5 wire cases). The 55 other internal functions remain outside this phase.
+The inventory mapping is frozen before acceptance; its pending labels remain
+unchanged. Final bounded implementation acceptance is recorded separately in
+`evals/results/rust-phase1-closeout-8b7a6c95.json` and PORT-STATE.md; current
+documentation PR-head CI, full suites and final review remain required before ready.
+
+The final judge always executes the seven startup scenarios and six concurrent
+call cells in addition to the original nineteen candidate cells. Both scenario
+JSON contracts are included in the instrument fingerprint; public bindings
+retain the executable identity of all thirty-two cells, while their raw streams
+remain private. Startup stderr still has no allowlist. Concurrent call order is
+authorized only by the separately captured per-platform final-pair contract.
+
+New parity selects its Python source from immutable workflow event commits:
+`pull_request` normally uses `git merge-base(base.sha, head.sha)`, not the synthetic PR
+merge checkout; `push` uses `after`; manual master capture uses `frozen_head`,
+which must equal the dispatched checkout, with `GITHUB_REF` required to be
+`refs/heads/master`. Both manual `ci` and `wait-mail` modes require `frozen_head`.
+The selection JSON records the ref. No extra dispatch input is needed.
+Each new receipt records `oracle_head`; source receipts also retain the event
+selection and actual source/schema. A stale historical pin is information only
+and cannot freeze the port. Source/import binding and behavior comparisons
+remain required. Historical receipts, inventories and frozen contracts retain
+their recorded SHAs and are never rewritten as current evidence. Active EOF
+parity keeps successful silent completion, terminal responses, frame coverage
+and the existing final-pair ordering policy. Startup keeps required exit/frame
+outcomes, health requests, diagnostic presence and refusal traffic controls;
+current Python and Rust stderr bytes remain fully compared. Historical EOF
+streams and startup identity templates are retained as informational comparisons.
+
+PR parity intentionally uses the merge-base Python behavior as its baseline.
+A Python-only behavior change therefore passes PR parity against the unchanged
+Rust port and is first caught by the master push run, which selects the new
+Python commit. A PR changing Python behavior and its Rust port together fails
+PR parity until its base includes the Python change. This is the intended
+ordering for changes to `pseudolife_memory/`.
+
+A version-only release is the narrow exception: the selector uses the immutable
+PR head when `pyproject.toml` changes only `project.version`, all Python behavior
+and original tests stay unchanged, and every other changed path is recognized
+documentation or an allowlisted version-bearing file. Native changes are limited
+to the shim's Cargo package/lock version, `lifecycle.rs` version literals and
+`auth_lifecycle_http.rs` version fixtures, with all other bytes unchanged.
+Dependency, workflow, instrument, script,
+hook or unknown-path changes keep the merge-base rule. The receipt records
+`release_cut` with the old and new versions, and loading it recomputes eligibility.
+No stderr, frame, instruction or version text is removed from comparisons.
+
+For the next release, bump `rust/shim/Cargo.toml`, the `pseudolife-stdio` lock
+entry, `lifecycle::PACKAGE_VERSION` and its version-specific test literals in
+the same PR as the Python release metadata. The release PR selects the new
+version for both the daemon and Python shim; the candidate must match it.
+After merge, push and scheduled checks select the same new version. A later
+native-only PR again uses its merge base. A stale native version still fails;
+there is no crate-bump grace period. The historical Phase 1 inventory and
+startup captures retain their pins: the candidate identity test uses the event
+oracle (the checkout version outside event CI), so a version cut alone needs
+no inventory re-pin. Land any Python behavior or test changes before the cut.
+
+The workflow binds `PSEUDOLIFE_PORT_ORACLE_SELECTION` before preparing metadata,
+running harness tests or creating the isolated oracle. For an explicit local
+proof, save the actual event payload and select it first (no moving-master
+fallback):
 
 ```sh
-python -m evals.rust_port.fixtures > /tmp/corpus.json
-python -m evals.rust_port.harness record --input /tmp/corpus.json --out /tmp/oracle.json --cli-json '["python", "-m", "pseudolife_memory.cli"]' --base-url http://127.0.0.1:19001
-python -m evals.rust_port.harness replay --input /tmp/oracle.json --out /tmp/diff.json --cli-json '["./candidate"]' --base-url http://127.0.0.1:19002
+python -m evals.rust_port.oracle_selection --event-name pull_request --event-path /private/event.json --checkout-head FULL_CHECKOUT_SHA --out /private/selection.json
+export PSEUDOLIFE_PORT_ORACLE_SELECTION="$(cat /private/selection.json)"
 ```
 
-Replay exits 1 on differences; boundary timeouts, malformed responses,
-abnormal termination and launch failures are negative evidence. CLI observations
-admit only integer exit codes in the portable ordinary range 0 through 255,
-including nonzero CLI errors. POSIX signals and Windows exception/NTSTATUS
-termination cannot become an oracle or pass candidate replay. A record containing boundary errors
-cannot be used as an oracle. CLI stdout/stderr are byte-preserving base64
-fields alongside the exact exit code. Requests contain argv or relative HTTP
-paths/methods/bodies, never executable paths, target URLs or credentials.
-Use only curated synthetic input: transcripts are public artifacts, so do not
-include real names, addresses, secrets or private text in requests/responses.
+The fixed Phase 1 inventory pin is master `1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4`
+(the v0.18.0 release commit, Python 0.18.0, schema 55). The historical selected pin
+was master `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1` (the #637 squash commit, Python 0.17.0, schema 55).
 
-## Comparison contract
+Historical selected-pin evidence: Selected-pin validation and exact-head CI are recorded by [the re-pin CI run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37807737497) at `1f33ef7c12eaa5250ad2e62d46b5fb2bfc177195`: both Parity jobs passed, including the unchanged differential judges. [Independent publication review](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/642) approved the frozen tree `d1e2a8395ad955b39594ca4c7639aa31594ecdf0` with no findings; the actual re-pin merge is `cebbf63f6970636c5c3da48853f220d9ddbe14ab`.
 
-JSON object key order is ignored; every array retains order and multiplicity.
-Numbers are exact unless a named score path opts into tolerance. Each case's
-`policy` is persisted with the request:
-
-```json
-{
-  "abs_tol": 0.000001,
-  "rel_tol": 0.0,
-  "score_paths": ["/body/entries/*/score"],
-  "ranking_paths": ["/body/entries"],
-  "ranking_key": "id",
-  "ignored_values": ["/body/generated_at"],
-  "json_text_paths": []
-}
-```
-
-Paths use JSON Pointer escaping and one-segment wildcards. `ignored_values`
-ignores only a present scalar's value while checking its type and preserving
-presence; it cannot remove a field or ignore an object/list. No timestamp, ID,
-whitespace, string case or numeric normalization happens by heuristic.
-NaN/infinity fail, including at ignored scalar paths. Ranking IDs are compared
-in strict order independently of score tolerance, and ordinary array comparison
-also remains strict. MCP JSON payloads inside text blocks are parsed only at
-explicit `json_text_paths`; both text content and structured content are checked.
-
-HTTP response status, body and semantic `content-type`, `cache-control` and
-`location` headers are recorded. Incidental transport headers such as Date,
-Server, Content-Length and SDK-generated session IDs are outside this initial
-instrument's comparison scope. SSE data envelopes retain arrival order;
-SSE framing IDs/retry directives are not checked. MCP session IDs are negotiated
-anew for each pass, not replayed as credentials, and the negotiated protocol
-version is sent on subsequent requests. Redirects and environment proxy
-discovery are disabled. Authentication headers are refused in recordable input;
-the full-bank adapter supplies authenticated synthetic credentials privately.
-Only disposable loopback HTTP origins are accepted by this phase-0 instrument.
-
-## External pytest selection
-
-`oracle_tests.json` is an explicit node manifest. Without `--port-cli-json`, the
-plugin leaves Python tests untouched. With that option, selected mapped tests
-replace their imported `main` entry point with a whole CLI process invocation,
-copy the candidate's bytes to the captured streams as UTF-8 text, and raise
-`SystemExit` with its exit code. Assertions and expected errors remain the
-original test code; no candidate comparison is delegated to the candidate.
+Then prepare an isolated oracle from the checkout-installed dependency runtime:
 
 ```sh
-python -m pytest -p evals.rust_port.pytest_plugin tests/test_cli_dispatch.py --port-cli-json '["./candidate"]' -k 'help or unknown_mode' -q
+python -m evals.rust_port.phase1_oracle --destination /private/new-phase1-oracle
+cd /private/new-phase1-oracle/source
+export PATH="$PWD/../runtime/bin:$PATH"
+../runtime/bin/python -m evals.rust_port.phase1_ci --oracle-root . --candidate-json '["/absolute/current/rust/target/release/pseudolife-stdio"]' --candidate-root /absolute/current --out /private/new-result.json --public-out /absolute/current/evals/results/new-result.json --offline-resource-checked-at VERIFIED_UTC_TIME
 ```
 
-Selecting an unmapped node in candidate mode exits with pytest usage error 4;
-no tests are silently skipped or deselected by the plugin. Version/runtime
-monkeypatch cases are explicitly unmapped. HTTP, stdio shim, storage and other
-test pools still need audited external adapters. The five mappings establish
-only help/unknown-mode behavior, not complete CLI parity.
+On Windows the interpreter is `../runtime/Scripts/python.exe`; prepend its
+directory to `PATH` so the existing lease CLI resolves from that runtime. Preparation
+creates a detached clone at the selected event oracle SHA, overlays
+only the current harness instruments, and installs that oracle editable without
+dependencies in a private runtime. It checks both source bytes and imported
+package/version identity. The candidate is the current absolute binary path;
+the immutable test functions execute from the selected source. Dependency paths
+come from the caller's installed `[dev,lite]` runtime. The destination must be new.
 
-## Recorded protocol coverage
 
-The selfcheck requests MCP `2026-07-28` and records the version Python actually
-negotiates. In the initial environment, SDK `2.1.1` negotiated `2025-11-25`.
-The transcript preserves that observed legacy response. July 2026 uses
-`server/discover` and reserved per-request `_meta`, so an `initialize` request
-does not test modern protocol support. Phase 1 needs a separate revision matrix
-and modern subscription proof; these phase-0 captures establish the legacy lane.
-Score tolerance here tests the comparator; it does not establish embedding
-tolerance or same-graph ONNX equivalence.
+Historical candidate `2e628b27` receipts are retained at
+`evals/results/rust-port-phase1-rust-windows-2e628b27.json` and
+`evals/results/rust-port-phase1-rust-linux-2e628b27.json` to reconstruct the
+strict-judge evidence associated with the original paired measurements below.
+They record zero differences and process cleanup, but lack actual pytest node
+outcomes; their binary bindings were added outside the committed instrument.
+They are explicitly historical and cannot satisfy final close-out acceptance
+or be reused by schema 2. Their recorded source identities remain unchanged.
+
+Keep one current complete combined receipt per replay kind (`python-self` or
+`rust-candidate`) and platform (Windows or Linux). Promote four fresh receipts
+only after checking their final instrument fingerprints, source/executable
+bindings, all eight actual node passes, zero differences and cleanup.
+The four current 690bb8ac captures are
+`rust-port-phase1-python-windows-690bb8ac.json`,
+`rust-port-phase1-python-linux-690bb8ac.json`,
+`rust-port-phase1-rust-windows-690bb8ac.json` and
+`rust-port-phase1-rust-linux-690bb8ac.json` under `evals/results/`.
+They each record eight actual pytest passes, 32 bound candidate cells, zero
+retained-wire differences and verified complete private cleanup. The public
+files exactly use the committed export behavior, omitting raw stream cells.
+Separate `rust-port-phase1-cli-python-{windows,linux}-690bb8ac.json` receipts
+record five Python dispatcher passes per OS; they are not Rust CLI coverage.
+The eleven other superseded or failed Phase 1 receipts are pruned;
+they have no retained-history exception. The two named `2e628b27` files above
+are the sole historical exception. The contaminated Windows measurement smoke
+is removed; it is not measurement evidence.
+
+Paired measurements of `2e628b27` completed three ten-sample repeats per arm
+on each platform, with SDK preflight included and all 120 launches clean.
+Receipts are `evals/results/rust-phase1-measurement-windows-2e628b27.json` and
+`evals/results/rust-phase1-measurement-linux-2e628b27.json`. Peak RSS is sampled;
+executable size excludes runtime/dependency footprint. These two paired
+receipts are retained as the named before-retirement measurement history,
+with their original source/runtime bindings; they are not current evidence.
+
+Current post-retirement pairs are
+`evals/results/rust-phase1-measurement-windows-690bb8ac.json` and
+`evals/results/rust-phase1-measurement-linux-690bb8ac.json`, each three repeats
+of ten samples per arm with clean normal and separate RSS launches. PORT-STATE.md
+records their numeric quantiles and per-arm repeat floors. Historical r5 remains
+unchanged and noncomparable; its canonical LF Git blob SHA256 is
+`3d29fcba85601c4647208da7448e85245861af16671ec22a33c9393c43fac581`.
+Implementation-head suites and integrated CI passed at `8b7a6c95`; the separate
+close-out ledger preserves their source chain and actual routing. Current
+documentation PR-head suites, CI and final independent review remain required
+before #560 is marked ready.
+
+Phase 2 adds `cli_corpus.py` and `cli_dispatch.py` without changing the historical
+Phase 0b corpus. The 15 cases cover help aliases/trailing argv and unknown valid
+Unicode scalar arguments, including Python quote/control/separator spelling, with
+UTF-8 stdout/stderr explicitly selected. Windows CRLF is preserved; other platforms
+use LF. The Rust-local attribute keeps the compiled help asset canonical LF in a
+fresh `core.autocrlf=true` checkout. The cases capture ordinary exit status and
+raw stdout/stderr from the genuine pinned Python 3.11
+runtime, self-replay on the same platform, then compare the candidate with no
+newline normalization. Three mutations per case prove that both streams and the
+exit code are compared. Five immutable dispatcher tests route through the external
+plugin via `PSEUDOLIFE_PORT_CLI_JSON`; explicit `--port-cli-json` takes precedence,
+and the default remains Python. JUnit outcomes, executable/source hashes and
+unchanged dispatcher/conftest hashes bind the receipt. Logs and JUnit stay in the
+private `--evidence-directory`; `--out` is a new public-safe receipt path.
+
+Run `evals.rust_port.cli_dispatch` under the prepared pinned interpreter with
+`--oracle-root`, `--candidate-root`, `--candidate-json`, `--evidence-directory`,
+`--out` and the existing resource-check option. Candidate Rust source must be
+committed and clean. The existing Parity job runs this additive lane on both OS.
+Receipts record the UTF-8 stream, scalar argv and platform newline boundary.
+Locale/default and other output encodings, non-UTF-8 or surrogate argv,
+version/runtime identity and all other mode contracts stay deferred;
+Acceptance closes only help and the scoped CLI-DISPATCH cases; other modes
+remain deferred.
+
+Current local CLI receipts at `779c588c` are
+[`rust-port-phase2-cli-windows-779c588c.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-windows-779c588c.json)
+and [`rust-port-phase2-cli-linux-native-779c588c.json`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-linux-native-779c588c.json).
+Each has 15 passing self/candidate cases, 45 rejected mutations and five passing
+original outcomes for Python and Rust. Native Linux temporary/evidence storage
+is used. Both help measurement pairs, numerical repeat floors and exact
+source/tree/binary/runtime identities are linked in `rust/PORT-STATE.md`.
+The lock implementation uses Rust 1.94 standard file locks; only `fs2` and its
+three unused `winapi` packages were pruned, with `libc` retained. Source validation
+passed 277 Linux and 296 Windows Rust tests without skips.
+[Run 37245992895](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37245992895)
+passed all four Rust/Parity jobs for PR head `779c588c`. Both retained CI CLI
+receipts verify the same 15 cases, 45 controls and five Python/five Rust outcomes
+at actual PR merge checkout `b5f485c9`, whose tree matches the local head.
+All nine reported PR checks passed at `779c588c`.
+Only the UTF-8/scalar help/unknown-dispatch slice is accepted; current
+documentation-head review/checks remain separate.
+
+Historical local CLI receipts at `6e936887` remain unchanged:
+[`Windows`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-windows-6e936887.json) and
+[`native Linux`](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-port-phase2-cli-linux-native-6e936887.json).
+Their help pairs and executing
+[CI run 37242071017](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37242071017)
+retain their original identities in `rust/PORT-STATE.md`. The earlier mounted-home
+Linux collection failure remains private and is excluded from acceptance.
+
+## Combined version capture scope
+
+The additive `evals.rust_port.lease_headers` lane runs the public candidate
+against a disposable loopback HTTP peer and retains genuine pinned Python
+captures unchanged before policy comparison. The approved
+`http-forbidden-input-refused` substitution requires exact exit 1, empty
+stdout, field-only stderr and unchanged pre-state, without lease/release
+requests or child launch. The corpus retains the eight DEL/CR/LF/NUL instance
+cases, all C0 bytes and folded values in the three approved fields,
+bearer-file inputs, and check/list propagation.
+
+The approved `http-reply-not-understood` policy takes priority for malformed
+surrogate registration replies, including mixed malformed/forbidden fields:
+exit 1, empty stdout, `lease: HTTP_REPLY_NOT_UNDERSTOOD` plus the platform
+newline, unchanged pre-state and only the registration request needed to
+receive the reply. Successfully parsed forbidden fields still take the
+header refusal before incomplete-pair fallback. Selected ordinary non-ASCII
+registration cases retain local fallback under `native-lease-diagnostics`,
+substituting only the named registration-header reason bytes; every unaffected
+stream, exit and state field remains exact. Unaffected ordinary bearer-file
+cases compare the full raw response exactly. See the
+[producer admission contract](../../rust/PARITY.md#lease-producer-admission-and-native-refusals).
+
+Output/file/request mutation controls accompany every substituted response.
+The Parity job runs this separate lane without a database or daemon. Private
+credential fixtures use OS-native temporary storage; existing corpus
+normalizations and Python source are unchanged. This scoped lane does not
+promote CLI-LEASE or establish its deferred action, timing or lifecycle gates.
+
+Frozen `5220b5ee` Windows/Linux CLI cells cover 28 exact byte/state cases and
+112 rejected mutations per OS. Thirteen version cases include a Python-
+shaped marker and native image with canonical console missing, plus a valid
+installed fixture using an actual non-ASCII home. UTF-8 streams and platform
+newlines are explicit; locale/default encoding remains deferred. Eight
+immutable original CLI nodes pass once/non-skipped per arm, and each OS
+retains one native invalid-argv control. These storage-free cells start no
+daemon or database and do not establish a real-bank transcript. Exact source,
+runtime, helper and image bindings remain attached to `5220b5ee`; a docs/results
+carrier does not change the executed head. PORT-STATE.md records counts,
+source ratio, numeric tables and remaining hosted/review gates. Version
+remains deferred.
+
+`lease_operator_cases.json` is an additive Phase 4 **unrun fixture plan** for
+native offline break. Its first whole-command cell uses an existing guarded
+disposable PG bank with no matching lease, compares exact raw streams and all
+unchanged rows/files, and starts no daemon. Held-row cells then require the
+identical `fixed-clock-replay` seam in both arms and exact fences, payload TEXT,
+audit hashes, expiry and queue changes. Named embedded refusal and native PG
+diagnostics have rejecting controls; the retained container transport compares
+its actual argv and inherited streams. Use the existing `cli_process` fixture
+and `harness.run_cli` capture, preserving raw observations before policy. This
+plan supplies no execution receipt or acceptance claim.
+
+Manual `rust.yml` dispatch with `mode=wait-mail` captures one to three named
+Windows wait-mail pairs using the frozen master head's Python oracle and a fresh
+native release image; ordinary CI remains the default dispatch mode. Set
+`case_list` to comma-separated `wait-mail-long-ring-watermark`,
+`wait-mail-bad-ring-reason`, `wait-mail-unicode-delivery` or
+`wait-mail-positive-long-ring-watermark` IDs and `frozen_head`
+to the full commit ID of the dispatched master head. Start with the long-ring
+case after this workflow and selector land. The selector uses whole CLI arms,
+disposable homes, existing comparison policies and rejecting output controls,
+without a daemon or PostgreSQL. A run-specific artifact retains raw pairs,
+source/image build bindings, logs and cleanup; download and hash it before
+using it as evidence. Capture does not promote acceptance or establish
+installed-image timing. An OS selector is a later increment; this lane runs
+only on Windows.
+
+`wait-mail-positive-long-ring-watermark` seeds a valid twelve-digit ring
+watermark (`123456789012`), digest watermark 12, unseen marker 0 and `peer\n`
+body. It targets exit 0 with those exact five stdout bytes, `.seen` advanced
+to `12\n` and one delivery ledger line. Only the existing named delivery
+HH:MM:SS and ledger epoch fields use the per-arm invocation-window policy;
+all other bytes remain exact. The ring watermark is a sequence value, not
+a scheduled timestamp. The separate thirteen-digit `wait-mail-long-ring-watermark`
+case remains a malformed-marker timeout probe. Source preparation supplies
+no hosted execution or acceptance result for the new case.

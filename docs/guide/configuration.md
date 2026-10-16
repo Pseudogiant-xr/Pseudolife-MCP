@@ -1028,6 +1028,15 @@ on fork. Process environment variables, checkout names and titles do not select
 the mailbox. Missing or malformed metadata leaves ordinary memory available
 without attaching a mailbox.
 
+Once a task's mailbox is attached, each later coordination call first
+re-checks the bank's identity with a read-only request that never
+initializes anything. A timeout, an unreachable daemon or a 429, 500, 502,
+503 or 504 answer gets one automatic retry with the same adapter and saved
+mailbox (each check allows six seconds). A refused credential, a different
+bank or a credential that changed meanwhile fails closed at once, and the
+task's hint says whether validation, access or attachment failed. Message
+operations are never replayed by this retry.
+
 A native subagent (`collaboration.spawn_agent`) is a thread of its own, so it
 gets its own address too, and since schema v50 that address is linked to its
 parent's. Codex 0.158.0 (CLI and desktop, measured 2026-09-29) sends
@@ -1086,8 +1095,8 @@ A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map (principal `codex`, say) is
 off the board until an operator lists it: without `allowed_principals` only
 `default` is admitted. On the default setting the shim's startup question
 then leaves coordination off with no error, and memory keeps working. In
-explicit mode each task instead gets an "identity attachment unavailable"
-hint. In either mode the check reports
+explicit mode each task instead gets a hint that identity attachment "was
+refused by authentication or access policy". In either mode the check reports
 `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
 Add the principal the map gives that bearer, keeping `default` if the
 singular token should stay on the board, and restart the daemon:
@@ -2804,9 +2813,11 @@ every variant.
   Since schema v39, correction events for existing traces survive source
   deletion and are preserved even while tracing is off; new trace formation
   remains disabled. Re-enabling tracing can therefore surface those warnings.
-  `memory.traces.retention_boost` (default `0.0`) is the separate Phase-2
-  MTT-retention weight this same cross-index feeds; `0.0` is today's
-  eviction behavior unchanged.
+  `memory.traces.retention_boost` is the separate Phase-2 MTT-retention
+  weight this same cross-index feeds: the daemon runs `1.0` unless the key
+  is set (a reinforced entry resists eviction by
+  `retention_boost * log1p(reinforcements)`), while the library default is
+  `0.0`, eviction unchanged.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -2936,7 +2947,8 @@ every variant.
   (`evals/digest_sidecar_probe.py`).
 - **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
   false`) — when on, a scalar dream claim whose backing entry is
-  agent-tier (its `source` maps to origin `agent`) and outside
+  agent-tier (its `source` maps to origin `agent`, or it cites a
+  user-stated note that fails the citation check) and outside
   `memory.dream.trusted_sources` never takes `current` directly: it
   parks via the existing contender machinery (visible in
   `memory_fact_get` as contested), promotable only by an explicit

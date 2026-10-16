@@ -1,0 +1,295 @@
+{
+  "schema": 1,
+  "kind": "current-startup-byte-proof",
+  "platform": "windows",
+  "status": "passed-current-literal-contract",
+  "oracle_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+  "oracle_schema": 55,
+  "package_version": "0.17.0",
+  "instrument_head": "ac0c64a1a5f2b727cde892146302feae666af086",
+  "instrument_tree": "01956b508c4b1e0c256847c6dc096bda910b5a19",
+  "candidate_sha256": "64193340ed20df5dc0183e761043e57616a848ee4184d352865d23680d96874b",
+  "candidate_build_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+  "candidate_rust_source_equivalent_to_instrument_head": true,
+  "runtime": {
+    "python": "3.11.9",
+    "executable_basename": "python.exe",
+    "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+    "environment_kind": "virtualenv",
+    "distribution_versions": {
+      "pseudolife-mcp": "0.17.0",
+      "mcp": "2.1.1",
+      "httpx": "0.28.1",
+      "torch": "2.10.0+cu126",
+      "psycopg": "3.3.4",
+      "sentence-transformers": "5.3.0"
+    },
+    "package_runtime_version": "0.17.0",
+    "source_origin_matches_selected_root": true,
+    "source_file": "pseudolife_memory/__init__.py",
+    "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c"
+  },
+  "source_binding": {
+    "pyproject.toml": {
+      "git_blob": "a4add026b5398c958df774516e71c3a816068bb9",
+      "git_blob_sha256": "025d0a199c1d46226f84396400d7e704c85711017011fb5c9d8bc82eab90d699",
+      "selected_bytes_sha256": "0218a1d741fef4621f735fe6ef8f85dbc79753b7ed89409c0ebaa9fb803840f0",
+      "selected_source_lf_matches_pin": true
+    },
+    "pseudolife_memory/__init__.py": {
+      "git_blob": "9048d8dec7366db531c886a246784823d2312c2a",
+      "git_blob_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+      "selected_bytes_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+      "selected_source_lf_matches_pin": true
+    },
+    "pseudolife_memory/cli.py": {
+      "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+      "git_blob_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+      "selected_bytes_sha256": "2febebd662ee521fd2937dcf6455bf4e7823d9a24651bd962061d2e3682afbf2",
+      "selected_source_lf_matches_pin": true
+    },
+    "pseudolife_memory/shim.py": {
+      "git_blob": "660a5e0890c26b7a083e6b65c91d8634a7906b2a",
+      "git_blob_sha256": "d073589552504f50e41e75aa3dfdcf1071333f07dbf24d7797f23a1127e1750c",
+      "selected_bytes_sha256": "b647ea4c5ea275806beaa1c97a049be29acbf951f691a637cc0cbc86446d24d0",
+      "selected_source_lf_matches_pin": true
+    },
+    "pseudolife_memory/daemon_url.py": {
+      "git_blob": "915c8f87e89be78ec68d0fa1d143b22c9f686f9d",
+      "git_blob_sha256": "c4fc8f7a7a50be3853bf093197abaa24a65b35e08d161a541bf33183c1893197",
+      "selected_bytes_sha256": "a1a74d8da2ad6ef35fa6428955c69522e675494a210f0df8ed7882b914d76b58",
+      "selected_source_lf_matches_pin": true
+    },
+    "pseudolife_memory/credentials.py": {
+      "git_blob": "fa286e25028b3dfbfab1bd0fc7e4cf382dd380a5",
+      "git_blob_sha256": "3f2f1b1a341bc7cf21547dbc86ba9d7404e3c6d28121ca84dc4ef45c6699ec96",
+      "selected_bytes_sha256": "797808d6a4448b63c5eb998b9d1d802476fe3ac2cba284d3c0c2234d659fe1dd",
+      "selected_source_lf_matches_pin": true
+    }
+  },
+  "scenario_helper_sha256": "13e82033cf154fe2d4f6bb839ee4d6047c82932c846c731a914498fd59bb228d",
+  "captured_contract_sha256": "b7dea0a3ab4d600476ac5be83d8f825d032dc6e581f11493d6896888d2946a9c",
+  "grading": "Original raw captures checked against the repaired literal contract; no capture stream was rewritten.",
+  "capture_started_at_utc": "2026-10-05T13:51:39.883927+00:00",
+  "capture_finished_at_utc": "2026-10-05T13:52:10.748862+00:00",
+  "case_count": 7,
+  "arm_cell_count": 14,
+  "case_inventory": [
+    "degraded-200",
+    "auth-invalid",
+    "auth-missing",
+    "version-mismatch",
+    "preframe-refusal",
+    "loopback-no-spawn",
+    "remote-origin"
+  ],
+  "cells": [
+    {
+      "case": "degraded-200",
+      "arm": "oracle",
+      "exit_code": 0,
+      "stdout_frame_count": 1,
+      "stdout_sha256": "b422f24650dfef0b0b100e7587607fb222595d58ec7e2495e9bb83a4568b0d8a",
+      "stdout_bytes": 237,
+      "stderr_sha256": "9c9e80602f93005c044612751e241a3c53e5d554ca7bd5f21315ddc10619ecb7",
+      "stderr_bytes": 103,
+      "expected_stderr_lf_template": "[shim] note: the daemon at {fixture_url} reports status=degraded (db: synthetic unavailable)\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "degraded-200",
+      "arm": "candidate",
+      "exit_code": 0,
+      "stdout_frame_count": 1,
+      "stdout_sha256": "b422f24650dfef0b0b100e7587607fb222595d58ec7e2495e9bb83a4568b0d8a",
+      "stdout_bytes": 237,
+      "stderr_sha256": "9c9e80602f93005c044612751e241a3c53e5d554ca7bd5f21315ddc10619ecb7",
+      "stderr_bytes": 103,
+      "expected_stderr_lf_template": "[shim] note: the daemon at {fixture_url} reports status=degraded (db: synthetic unavailable)\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "auth-invalid",
+      "arm": "oracle",
+      "exit_code": 1,
+      "stdout_frame_count": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 0,
+      "stderr_sha256": "4b60e990352a1a18a100b9a0180e5145fe8a223a411eea54b433e59840cf4dcd",
+      "stderr_bytes": 516,
+      "expected_stderr_lf_template": "[shim] the daemon at {fixture_url} requires bearer authentication (/health reports auth=true) and the configured credential file cannot be used: credential file contains an invalid bearer token\n  PSEUDOLIFE_MCP_TOKEN_FILE={credential_file}\n  The file must exist, be owner-only, and hold only the token. Re-run ops/install.* --client <client> with PSEUDOLIFE_MCP_TOKEN set in the environment so the installer (re)writes it, or fix the file by hand.\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "auth-invalid",
+      "arm": "candidate",
+      "exit_code": 1,
+      "stdout_frame_count": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 0,
+      "stderr_sha256": "4b60e990352a1a18a100b9a0180e5145fe8a223a411eea54b433e59840cf4dcd",
+      "stderr_bytes": 516,
+      "expected_stderr_lf_template": "[shim] the daemon at {fixture_url} requires bearer authentication (/health reports auth=true) and the configured credential file cannot be used: credential file contains an invalid bearer token\n  PSEUDOLIFE_MCP_TOKEN_FILE={credential_file}\n  The file must exist, be owner-only, and hold only the token. Re-run ops/install.* --client <client> with PSEUDOLIFE_MCP_TOKEN set in the environment so the installer (re)writes it, or fix the file by hand.\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "auth-missing",
+      "arm": "oracle",
+      "exit_code": 1,
+      "stdout_frame_count": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 0,
+      "stderr_sha256": "97d3294752fa5cf2cd1a7b3b5494c42d7b5db0d8b1d686b3f27799f9b451f3a1",
+      "stderr_bytes": 711,
+      "expected_stderr_lf_template": "[shim] the daemon at {fixture_url} requires bearer authentication (/health reports auth=true) and this shim has no credential configured \u2014 every call would be rejected with 401.\n  Give the MCP registration one of these in its env block:\n    PSEUDOLIFE_MCP_TOKEN_FILE=<absolute path to a private file holding the token>   (preferred; reloaded per call)\n    PSEUDOLIFE_MCP_TOKEN=<the token>\n  Claude Desktop launches MCP servers with a sanitized environment, so a token exported in the OS env (setx / shell profile) does NOT reach it \u2014 the entry in claude_desktop_config.json must carry the setting itself (ops/install.* --client claude-desktop writes it; then fully quit and relaunch Desktop).\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "auth-missing",
+      "arm": "candidate",
+      "exit_code": 1,
+      "stdout_frame_count": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 0,
+      "stderr_sha256": "97d3294752fa5cf2cd1a7b3b5494c42d7b5db0d8b1d686b3f27799f9b451f3a1",
+      "stderr_bytes": 711,
+      "expected_stderr_lf_template": "[shim] the daemon at {fixture_url} requires bearer authentication (/health reports auth=true) and this shim has no credential configured \u2014 every call would be rejected with 401.\n  Give the MCP registration one of these in its env block:\n    PSEUDOLIFE_MCP_TOKEN_FILE=<absolute path to a private file holding the token>   (preferred; reloaded per call)\n    PSEUDOLIFE_MCP_TOKEN=<the token>\n  Claude Desktop launches MCP servers with a sanitized environment, so a token exported in the OS env (setx / shell profile) does NOT reach it \u2014 the entry in claude_desktop_config.json must carry the setting itself (ops/install.* --client claude-desktop writes it; then fully quit and relaunch Desktop).\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "version-mismatch",
+      "arm": "oracle",
+      "exit_code": 0,
+      "stdout_frame_count": 1,
+      "stdout_sha256": "afad556abaab86f622321b927ef81f08059653e1c27f47b9fd322c706ed93650",
+      "stdout_bytes": 532,
+      "stderr_sha256": "80b3040a469b290901d9947b35164f96ac9cead8478608da3f22c5eb04745093",
+      "stderr_bytes": 385,
+      "expected_stderr_lf_template": "[shim] this shim is pseudolife-mcp 0.17.0 but the daemon at {fixture_url} is 99.0.0 \u2014 run pseudolife-mcp update --clients-only --tag 99.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon (pseudolife-mcp update); then start a new session.\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "version-mismatch",
+      "arm": "candidate",
+      "exit_code": 0,
+      "stdout_frame_count": 1,
+      "stdout_sha256": "afad556abaab86f622321b927ef81f08059653e1c27f47b9fd322c706ed93650",
+      "stdout_bytes": 532,
+      "stderr_sha256": "80b3040a469b290901d9947b35164f96ac9cead8478608da3f22c5eb04745093",
+      "stderr_bytes": 385,
+      "expected_stderr_lf_template": "[shim] this shim is pseudolife-mcp 0.17.0 but the daemon at {fixture_url} is 99.0.0 \u2014 run pseudolife-mcp update --clients-only --tag 99.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon (pseudolife-mcp update); then start a new session.\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "preframe-refusal",
+      "arm": "oracle",
+      "exit_code": 1,
+      "stdout_frame_count": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 0,
+      "stderr_sha256": "16d9365761ed3d90eab517765c4a192100d0e84781db742795fa7a4ead6ac039",
+      "stderr_bytes": 110,
+      "expected_stderr_lf_template": "[shim] the daemon at {fixture_url} is up but refusing to serve:\n  synthetic initialization refusal\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "preframe-refusal",
+      "arm": "candidate",
+      "exit_code": 1,
+      "stdout_frame_count": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 0,
+      "stderr_sha256": "16d9365761ed3d90eab517765c4a192100d0e84781db742795fa7a4ead6ac039",
+      "stderr_bytes": 110,
+      "expected_stderr_lf_template": "[shim] the daemon at {fixture_url} is up but refusing to serve:\n  synthetic initialization refusal\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "loopback-no-spawn",
+      "arm": "oracle",
+      "exit_code": 0,
+      "stdout_frame_count": 1,
+      "stdout_sha256": "94c3571cd8ff0431ba88ca30fb2bce47097f2e0cd3475486f5231586723799b7",
+      "stdout_bytes": 399,
+      "stderr_sha256": "2ce44f5e4e9d4d9ceb9db50d52ec63dbfe91ceecb74d004201c780f9aaedb062",
+      "stderr_bytes": 711,
+      "expected_stderr_lf_template": "[shim] no daemon at {fixture_url} and PSEUDOLIFE_MCP_NO_SPAWN is set \u2014 waiting up to 5s for it instead of spawning a fallback (Docker may still be starting)...\n[shim] no answer from the memory daemon at {fixture_url}.\n  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was spawned.)\n  Docker tier:  docker compose -f ops/docker-compose.yml up -d\n  Pip tiers:    pseudolife-mcp serve   (run it in a terminal \u2014 the daemon logs to its own stderr, so this shows why it died)\n  This session starts without it: the shim serves the last tool list it\n  saw from that daemon, retries the daemon on every call and in the\n  background, and has the client re-list tools once it answers.\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "loopback-no-spawn",
+      "arm": "candidate",
+      "exit_code": 0,
+      "stdout_frame_count": 1,
+      "stdout_sha256": "94c3571cd8ff0431ba88ca30fb2bce47097f2e0cd3475486f5231586723799b7",
+      "stdout_bytes": 399,
+      "stderr_sha256": "2ce44f5e4e9d4d9ceb9db50d52ec63dbfe91ceecb74d004201c780f9aaedb062",
+      "stderr_bytes": 711,
+      "expected_stderr_lf_template": "[shim] no daemon at {fixture_url} and PSEUDOLIFE_MCP_NO_SPAWN is set \u2014 waiting up to 5s for it instead of spawning a fallback (Docker may still be starting)...\n[shim] no answer from the memory daemon at {fixture_url}.\n  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was spawned.)\n  Docker tier:  docker compose -f ops/docker-compose.yml up -d\n  Pip tiers:    pseudolife-mcp serve   (run it in a terminal \u2014 the daemon logs to its own stderr, so this shows why it died)\n  This session starts without it: the shim serves the last tool list it\n  saw from that daemon, retries the daemon on every call and in the\n  background, and has the client re-list tools once it answers.\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "remote-origin",
+      "arm": "oracle",
+      "exit_code": 0,
+      "stdout_frame_count": 1,
+      "stdout_sha256": "94c3571cd8ff0431ba88ca30fb2bce47097f2e0cd3475486f5231586723799b7",
+      "stdout_bytes": 399,
+      "stderr_sha256": "7d9f122ba4045547ca279f243660a851da62d274e30c63a3acd0515625fb37c6",
+      "stderr_bytes": 752,
+      "expected_stderr_lf_template": "[shim] no daemon answering at {fixture_url} (another machine) \u2014 waiting up to 5s for it; this shim never starts a local daemon for a remote URL...\n[shim] no answer from the memory daemon at {fixture_url}.\n  That address is another machine, so no local daemon was started:\n  a daemon spawned here could never be that one.\n  Check the link to the daemon host (tailnet up? LAN route?), that\n  the host exposes the port to this machine (e.g. `tailscale serve status` there), and that the daemon is running there (GET /health).\n  This session starts without it: the shim serves the last tool list it\n  saw from that daemon, retries the daemon on every call and in the\n  background, and has the client re-list tools once it answers.\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    },
+    {
+      "case": "remote-origin",
+      "arm": "candidate",
+      "exit_code": 0,
+      "stdout_frame_count": 1,
+      "stdout_sha256": "94c3571cd8ff0431ba88ca30fb2bce47097f2e0cd3475486f5231586723799b7",
+      "stdout_bytes": 399,
+      "stderr_sha256": "7d9f122ba4045547ca279f243660a851da62d274e30c63a3acd0515625fb37c6",
+      "stderr_bytes": 752,
+      "expected_stderr_lf_template": "[shim] no daemon answering at {fixture_url} (another machine) \u2014 waiting up to 5s for it; this shim never starts a local daemon for a remote URL...\n[shim] no answer from the memory daemon at {fixture_url}.\n  That address is another machine, so no local daemon was started:\n  a daemon spawned here could never be that one.\n  Check the link to the daemon host (tailnet up? LAN route?), that\n  the host exposes the port to this machine (e.g. `tailscale serve status` there), and that the daemon is running there (GET /health).\n  This session starts without it: the shim serves the last tool list it\n  saw from that daemon, retries the daemon on every call and in the\n  background, and has the client re-list tools once it answers.\n",
+      "expected_stderr_matches": true,
+      "cleanup_verified": true
+    }
+  ],
+  "raw_receipt_sha256": "db5bd10ddba3475e45715f31380d30f7c5979c0fcf76cfc5b2bdd2929f9a528b",
+  "raw_receipt_bytes": 56011,
+  "historical_expectation_differences": [
+    {
+      "case": "version-mismatch",
+      "arm": "oracle",
+      "path": "/stderr",
+      "reason": "startup_stderr_bytes"
+    },
+    {
+      "case": "version-mismatch",
+      "arm": "candidate",
+      "path": "/stderr",
+      "reason": "startup_stderr_bytes"
+    }
+  ],
+  "current_expectation_differences": [],
+  "cleanup_verified": true,
+  "storage_daemon_or_postgres_launched": false,
+  "comparison_rule": "Only exact owned fixture URL and credential-file parameters replaced; expected newline generated for capture platform. Actual streams remain raw.",
+  "limits": [
+    "Private raw captures retain exact streams and owned fixture parameters.",
+    "Public templates substitute only the declared owned URL/credential-file parameters and capture-platform newline.",
+    "Startup-only evidence; no generic name policy, full Phase1 or hosted acceptance claim."
+  ]
+}
