@@ -32,8 +32,11 @@ def snapshot_harness(monkeypatch, tmp_path):
         events.append(("wait", selected, kwargs))
         initialized.update(side for side, port in ports.items() if port in selected)
 
-    def call(port, method, path, *args, **kwargs):
+    def call(port, method, path, headers=(), *args, **kwargs):
         events.append(("request", port))
+        if ("Authorization", run.PRINCIPAL_PROBE) in list(headers):
+            # A loaded stored-principal view refuses the probe's bearer.
+            return {"status": 401, "headers": {}, "json": {"error": "unauthorized"}}
         return {"status": 200, "headers": {}, "json": {"ok": True}}
 
     monkeypatch.setattr(run.pg, "name", lambda label: label)
