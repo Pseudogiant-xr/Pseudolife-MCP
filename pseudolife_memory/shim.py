@@ -264,43 +264,41 @@ _RESPONSE_LOST_MESSAGE = (
 # every such call through the shim died as a phantom disconnect. The SDK does
 # not expose the limit, so the shim widens it at both places the SDK builds an
 # event source: the module-level ``EventSource`` used for a POST's response
-# stream, and the http client's ``sse`` method used for the listen stream and
-# for resuming a cut response. 16 MiB is far above any tool result the daemon
-# emits and still bounds a runaway stream.
+# stream, and (since mcp 2.2) the module-level ``sse_within_origin`` used for
+# the listen stream and for resuming a cut response, which builds its own
+# ``httpx2.EventSource`` with the default limit. 16 MiB is far above any tool
+# result the daemon emits and still bounds a runaway stream.
 _SSE_EVENT_LIMIT_BYTES = 16 * 1024 * 1024
 
 
 def _widen_sse_event_limit(streamable_http) -> None:
-    """Rebind the SDK client module's ``EventSource`` so every response
-    stream it reads carries ``_SSE_EVENT_LIMIT_BYTES``. Idempotent; a no-op
-    when the module has no EventSource to rebind."""
+    """Rebind the SDK client module's ``EventSource`` and ``sse_within_origin``
+    so every response stream it reads carries ``_SSE_EVENT_LIMIT_BYTES``.
+    Idempotent; each name the module lacks is left alone."""
+    import contextlib
+
     source = getattr(streamable_http, "EventSource", None)
-    if source is None or getattr(source, "_pseudolife_event_limit", None) == _SSE_EVENT_LIMIT_BYTES:
-        return
+    if source is not None and getattr(source, "_pseudolife_event_limit", None) != _SSE_EVENT_LIMIT_BYTES:
+        def event_source(response, *args, **kwargs):
+            kwargs.setdefault("max_event_size", _SSE_EVENT_LIMIT_BYTES)
+            return source(response, *args, **kwargs)
 
-    def event_source(response, *args, **kwargs):
-        kwargs.setdefault("max_event_size", _SSE_EVENT_LIMIT_BYTES)
-        return source(response, *args, **kwargs)
+        event_source._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
+        event_source._pseudolife_original = source
+        streamable_http.EventSource = event_source
 
-    event_source._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
-    event_source._pseudolife_original = source
-    streamable_http.EventSource = event_source
+    within = getattr(streamable_http, "sse_within_origin", None)
+    if within is not None and getattr(within, "_pseudolife_event_limit", None) != _SSE_EVENT_LIMIT_BYTES:
+        @contextlib.asynccontextmanager
+        async def sse_within_origin(*args, **kwargs):
+            async with within(*args, **kwargs) as capped:
+                # Same response, nothing read yet: a fresh source over it
+                # replaces the capped one the SDK built.
+                yield type(capped)(capped.response, max_event_size=_SSE_EVENT_LIMIT_BYTES)
 
-
-def _widen_client_sse_limit(http) -> None:
-    """Wrap one http client's ``sse`` method (the SDK's listen-stream and
-    resumption path) so its event sources carry ``_SSE_EVENT_LIMIT_BYTES``
-    unless the caller chose a limit. Idempotent per client."""
-    original = getattr(http, "sse", None)
-    if original is None or getattr(original, "_pseudolife_event_limit", None) == _SSE_EVENT_LIMIT_BYTES:
-        return
-
-    def sse(*args, **kwargs):
-        kwargs.setdefault("max_event_size", _SSE_EVENT_LIMIT_BYTES)
-        return original(*args, **kwargs)
-
-    sse._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
-    http.sse = sse
+        sse_within_origin._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
+        sse_within_origin._pseudolife_original = within
+        streamable_http.sse_within_origin = sse_within_origin
 
 
 def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
@@ -1493,12 +1491,14 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             timeout_seconds, connect=connect_seconds)
         async with streamable_http.create_mcp_http_client(
                 headers=request_headers or None, timeout=timeout) as http:
-            # The SDK enables redirects by default. httpx strips Authorization
-            # across origins but retains custom coordination credentials, so a
-            # redirect could disclose an instance key or bank binding.
+            # httpx strips Authorization across origins but retains custom
+            # coordination credentials, so a cross-origin redirect could
+            # disclose an instance key or bank binding. mcp 2.1 followed every
+            # redirect this flag allowed; since 2.2 the transport ignores it
+            # and follows only same-origin redirects itself. Kept off for any
+            # request the SDK leaves to the client's own setting.
             if hasattr(http, "follow_redirects"):
                 http.follow_redirects = False
-            _widen_client_sse_limit(http)
             hooks = getattr(http, "event_hooks", None)
             if hooks is not None:
                 hooks.setdefault("response", []).append(attempt.observe_response)
@@ -1933,8 +1933,8 @@ def _require_mcp_sdk_v2() -> None:
         installed = "not installed"
     print(
         f"[shim] this environment's MCP SDK (mcp {installed}) predates v2 — "
-        f"the shim needs mcp>=2.1 (no {_SDK_V2_PROBE_MODULE}).\n"
-        f'  Fix:  "{sys.executable}" -m pip install -U "mcp>=2.1,<2.2"\n'
+        f"the shim needs mcp>=2.2 (no {_SDK_V2_PROBE_MODULE}).\n"
+        f'  Fix:  "{sys.executable}" -m pip install -U "mcp>=2.2,<2.3"\n'
         f"  (or re-run the repo installer, which registers the project "
         f"venv's shim)",
         file=sys.stderr,

@@ -1009,25 +1009,28 @@ def test_large_tool_results_survive_the_client_sse_event_cap(tmp_path, upstream)
 
 
 def test_listen_and_resume_streams_get_the_wider_event_limit(upstream):
-    """The SDK opens its listen stream and resumes a cut response through the
-    http client's own ``sse`` method, which passes the 1 MiB default
-    explicitly, so rebinding the module's EventSource alone leaves those
-    paths capped. The shim wraps the client too."""
+    """Since mcp 2.2 the SDK opens its listen stream and resumes a cut
+    response through ``sse_within_origin`` (imported by name into the client
+    module), which builds ``httpx2.EventSource(response)`` with the 1 MiB
+    default: neither the module's ``EventSource`` rebind nor a wrapper on
+    the http client's ``sse`` method reaches it. The shim rebinds that name
+    too. This drives the very function the transport calls, so an SDK that
+    moves the path again fails here instead of capping silently."""
     from mcp.client import streamable_http
+    from mcp.shared import _httpx_utils
 
     size = 1_400_000
     url = f"{upstream.url}/bulk?bytes={size}"
 
     async def drive():
-        # The cap is real: an unwrapped client refuses the event.
-        async with streamable_http.create_mcp_http_client() as plain:
+        async with streamable_http.create_mcp_http_client() as http:
+            # The cap is real: the SDK's own helper refuses the event.
             with pytest.raises(Exception) as caught:
-                async with plain.sse(url) as source:
+                async with _httpx_utils.sse_within_origin(http, url) as source:
                     [event async for event in source]
             assert "byte limit" in str(caught.value)
-        async with streamable_http.create_mcp_http_client() as http:
-            shim._widen_client_sse_limit(http)
-            async with http.sse(url) as source:
+            shim._widen_sse_event_limit(streamable_http)
+            async with streamable_http.sse_within_origin(http, url) as source:
                 events = [event async for event in source]
         assert len(events) == 1
         assert len(json.loads(events[0].data)["params"]["data"]) == size
