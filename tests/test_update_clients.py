@@ -453,8 +453,9 @@ def test_a_rebuild_that_keeps_the_mismatch_says_so_and_names_the_fix(cli):
 
 
 @pytest.mark.parametrize("command,windows,expected", [
-    ('"C:\\Users\\A B\\pseudolife-mcp.exe"', True, '& "C:\\Users\\A B\\pseudolife-mcp.exe"'),
-    ("C:\\Users\\ab\\pseudolife-mcp.exe", True, "C:\\Users\\ab\\pseudolife-mcp.exe"),
+    ('"C:\\Users\\<user>\\App Data\\pseudolife-mcp.exe"', True,
+     '& "C:\\Users\\<user>\\App Data\\pseudolife-mcp.exe"'),
+    ("C:\\Users\\<user>\\bin\\pseudolife-mcp.exe", True, "C:\\Users\\<user>\\bin\\pseudolife-mcp.exe"),
     ("pseudolife-mcp", True, "pseudolife-mcp"),
     ('"/home/a b/.local/bin/pseudolife-mcp"', False, '"/home/a b/.local/bin/pseudolife-mcp"'),
 ])
