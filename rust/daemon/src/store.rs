@@ -375,6 +375,43 @@ fn resolved_label(r: Resolved) -> Option<String> {
     }
 }
 
+/// The tools this module serves on `/mcp` (`mcp::dispatch::registry`).
+pub fn mcp_tools() -> Vec<(&'static str, crate::mcp::dispatch::ToolFn)> {
+    vec![("memory_store", mcp_memory_store)]
+}
+
+/// `memory_store` on the MCP surface (spec W0.4): bound arguments and the
+/// request's caller identity into the body below. A service `ValueError`
+/// is `invalid_argument` prose; anything else, initialization included,
+/// is `internal_error` (`mcp_server._error_payload`).
+fn mcp_memory_store<'a>(
+    app: &'a crate::http::App,
+    call: crate::mcp::dispatch::ToolCall<'a>,
+) -> crate::mcp::dispatch::ToolFuture<'a> {
+    use crate::mcp::dispatch::ToolError as McpError;
+    Box::pin(async move {
+        let ready = app
+            .service
+            .ensure_init()
+            .await
+            .map_err(|e| McpError::Internal(anyhow::anyhow!(e)))?;
+        let caller = Caller {
+            header_session: call
+                .ident
+                .header_session
+                .clone()
+                .filter(|_| !crate::mutants::active("mcp-store-no-session")),
+            transport_session: call.ident.transport_session.clone(),
+        };
+        memory_store(&ready, &app.service.config.memory, &caller, call.args)
+            .await
+            .map_err(|e| match e {
+                ToolError::Invalid(text) => McpError::Invalid(text),
+                ToolError::Internal(text) => McpError::Internal(anyhow::anyhow!(text)),
+            })
+    })
+}
+
 /// The `memory_store` tool body (W1): the dict `_store_noted` returns.
 ///
 /// Runs to completion in its own task: Python's body runs on a worker

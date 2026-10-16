@@ -63,14 +63,9 @@ run_daemon()
             procs[side] = daemon
             daemon.start(300)
             h.w1a.wait_settled([port], token=h.TOKEN)
-            if side == "python":
-                mcp = h.Mcp(port)
-                mcp.init()
-                mcp.abandon("memory_store", call_args)
-            else:
-                h.abandon(port, "/api/_harness/tool/memory_store",
-                          [h.AUTH, ("Content-Type", "application/json")],
-                          json.dumps(call_args).encode())
+            mcp = h.Mcp(port)
+            mcp.init()
+            mcp.abandon("memory_store", call_args)
             with psycopg.connect(dsn) as conn:
                 pending = conn.execute("SELECT count(*) FROM entries WHERE text=%s", (text,)).fetchone()[0] == 0
             if not pending:
