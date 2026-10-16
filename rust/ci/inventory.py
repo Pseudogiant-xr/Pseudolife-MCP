@@ -11,18 +11,19 @@ from test_workflow import commands
 
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
-SOURCE_EVENTS = "github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
+SOURCE_EVENTS = "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
 PARITY_EVENT_GATE = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
+$docsOnly = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
 foreach ($job in @('rust', 'candidate', 'parity-checks')) {
-  if ($results[$job].result -cne 'success') {
+  if ($results[$job].result -cne 'success' -and -not ($docsOnly -and $results[$job].result -ceq 'skipped')) {
     Write-Error "$job did not succeed"
     exit 1
   }
 }
 $sourceResult = $results['source-mutants'].result
-if ($sourceResult -cne 'success' -and -not ($env:GATE_EVENT -ceq 'pull_request' -and $sourceResult -ceq 'skipped')) {
-  Write-Error "source-mutants did not succeed outside the PR skip exception"
+if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
+  Write-Error "source-mutants did not succeed outside the PR and push skip exception"
   exit 1
 }
 """
@@ -131,7 +132,8 @@ def check(workflow):
     jobs = workflow["jobs"]
     parity = jobs["parity-checks"]
     ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'"
-    assert parity['if'] == ordinary_ci, 'H5 PR event selection changed'
+    assert parity['if'] == (f"${{{{ !cancelled() && ({ordinary_ci}) && needs.candidate.result == 'success' "
+                            "&& needs.rust.result == 'success' }}"), 'H5 PR event selection changed'
     matrix = parity["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS and "exclude" not in matrix
     assert set(SUITES) <= set(matrix["suite"]), "missing H5 suite"
@@ -169,9 +171,10 @@ def check(workflow):
     assert events.get('push') == {'branches': ['master']} \
         and events.get('schedule') == [{'cron': '23 3 * * *'}], 'source events dropped or changed'
     assert 'pull_request' in events and 'workflow_dispatch' in events, 'source events dropped or changed'
-    assert source['if'] == SOURCE_EVENTS, 'source event selection changed'
+    assert source['if'] == (f"${{{{ !cancelled() && ({SOURCE_EVENTS}) "
+                            "&& needs.candidate.result == 'success' }}"), 'source event selection changed'
     gate = jobs['parity']
-    assert gate['needs'] == ['rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
+    assert gate['needs'] == ['scope', 'rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
     assert gate['if'] == f'always() && ({ordinary_ci})' and not gate.get('continue-on-error'), 'Parity event gate can skip failures'
     assert len(gate['steps']) == 1, 'Parity event gate steps changed'
     required = gate['steps'][0]
