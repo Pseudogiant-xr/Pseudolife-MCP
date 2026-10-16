@@ -68,6 +68,7 @@ CLOCK_COLUMNS = {
     ("relations", "created_at"): "clock: wall clock per row (storage/postgres.py:765)",
     ("slot_reads", "last_read_at"): "clock: wall clock per read",
     ("slot_reads", "first_read_at"): "clock: wall clock per read",
+    ("retrieval_uses", "created_at"): "clock: wall clock per use label (storage/postgres.py:2199)",
 }
 # Each deliberate break (rust/daemon/src/mutants.rs, `--features mutants`)
 # and the scenario that must catch it.

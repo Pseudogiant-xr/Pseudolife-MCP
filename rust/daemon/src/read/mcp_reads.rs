@@ -197,14 +197,26 @@ fn mcp_memory_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFutu
             return Ok(faded());
         };
         let db = ready.storage.client();
-        let row = crate::txn::with_client(db, |db| async move {
+        // The read and its bump in one transaction, the row locked: Python
+        // holds the service lock across both, so a concurrent get answers
+        // the count after this one's bump, never the same count.
+        let bump = !crate::mutants::active("mcp-get-no-db-bump");
+        let row = crate::txn::run(db, |db| async move {
             let r = db
                 .query_opt(
                     "SELECT id, text, source, reinforcements, explicit_reinforcements, \
-                     access_count, superseded_at, superseded_by_text FROM entries WHERE id = $1",
+                     access_count, superseded_at, superseded_by_text FROM entries WHERE id = $1 \
+                     FOR UPDATE",
                     &[&id],
                 )
                 .await?;
+            if r.is_some() && bump {
+                db.execute(
+                    "UPDATE entries SET access_count = access_count + 1 WHERE id = $1",
+                    &[&id],
+                )
+                .await?;
+            }
             Ok::<_, anyhow::Error>(r.map(|r| EntryRow {
                 id: r.get(0),
                 text: r.get(1),
@@ -221,19 +233,7 @@ fn mcp_memory_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFutu
         let Some(row) = row else {
             return Ok(faded());
         };
-        // bump_access_count: its own transaction, then the resident copy.
-        if !crate::mutants::active("mcp-get-no-db-bump") {
-            crate::txn::run(db, |db| async move {
-                db.execute(
-                    "UPDATE entries SET access_count = access_count + 1 WHERE id = $1",
-                    &[&id],
-                )
-                .await?;
-                Ok::<_, anyhow::Error>(())
-            })
-            .await
-            .map_err(internal)?;
-        }
+        // The resident copy follows the database bump.
         {
             let bank = ready.bank.read().expect("bank lock");
             if let Some(e) = bank.entries.iter().find(|e| e.id == id) {
