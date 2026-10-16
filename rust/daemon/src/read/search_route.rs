@@ -406,8 +406,7 @@ async fn log_event(
     let episode = match &session {
         // `_caller_episode_id`: no episode for an empty session id.
         Some(s) if !s.is_empty() => identity::open_leaf_episode(db, s).await,
-        Some(_) => None,
-        None => None,
+        _ => None,
     };
     let served = Value::Array(served);
     let res = db

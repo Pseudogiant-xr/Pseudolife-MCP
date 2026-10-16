@@ -343,7 +343,7 @@ class McpTransportSession(Scenario):
     an empty mcp-session-id is kept as given."""
     name = "mcp-transport-session"
     env = {"PSEUDOLIFE_LEGACY_TRANSPORT_SESSION": "1", "PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS": "1"}
-    require = {"transport_sessions": 2, "events_rows": 5}
+    require = {"transport_sessions": 2, "sessions": 5, "events_rows": 5}
 
     def cases(self):
         return [*(mcp_case(f"transport session {i}", {"query": t}) for i, t in enumerate(CRAFTED[:2])),
