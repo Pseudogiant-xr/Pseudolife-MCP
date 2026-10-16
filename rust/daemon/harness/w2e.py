@@ -7,15 +7,16 @@ usage:
   python w2e.py calibrate --rust-bin PATH [--out FILE]   (no tolerances: records them)
   python w2e.py mutants --rust-bin PATH_BUILT_WITH_FEATURES_HARNESS_MUTANTS [--only NAME ...]
 
-The Rust binary must be built with ``--features harness`` (``mutants`` adds
-the deliberate breaks). Each scenario prepares one template bank through the
+Any Rust build serves ``memory_store`` on ``/mcp`` (``--features mutants``
+adds the deliberate breaks). Each scenario prepares one template bank through the
 Python daemon's own write path (seed calls only, never hand-written rows),
 clones it for each side, starts both daemons, then sends every operation to
 both. After every operation it compares:
 
-* the response by value: Python's MCP ``tools/call`` result
-  (``structuredContent``, ``isError``) against the Rust harness route's
-  answer; ``surprise`` within the measured tolerance, everything else exact;
+* the response by value: each daemon's MCP ``tools/call`` result
+  (``structuredContent``, ``isError``), so argument binding and the
+  envelope are compared with the body; ``surprise`` within the measured
+  tolerance, everything else exact;
 * the full database state of both banks (``dbstate.dump``), after the
   declared normalizers below, which replace values by rule, never by hand.
 
@@ -68,8 +69,10 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
 GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+# store-cancellable is w2e_shutdown.py's control: over MCP every call runs
+# detached from its connection, so only the shutdown drain can observe it.
 MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw",
-           "store-cancellable"]
+           "mcp-store-no-session"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -146,13 +149,6 @@ def abandon(port: int, path: str, headers: list, body: bytes, after_s: float = 0
     s.sendall(CRLF.join(head).encode("latin-1") + body)
     time.sleep(after_s)
     s.close()
-
-
-def rust_tool(port: int, name: str, args: dict, headers=()) -> dict:
-    r = w1a.call(port, "POST", f"/api/_harness/tool/{name}",
-                 [AUTH, ("Content-Type", "application/json"), *headers],
-                 json.dumps(args).encode())
-    return {"isError": r["status"] != 200, "value": r.get("json", r.get("bytes"))}
 
 
 # ── scenarios ─────────────────────────────────────────────────────────────
@@ -536,7 +532,7 @@ def side_env(scn: dict, dsn: str, extra: dict | None = None) -> dict:
     return env
 
 
-def run_op(op: dict, port: int, mcp: Mcp | None, dsn: str, rust: bool) -> dict | None:
+def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
     if op["op"] == "sleep":
         time.sleep(op["s"])
         return {"isError": False, "value": None}
@@ -548,17 +544,29 @@ def run_op(op: dict, port: int, mcp: Mcp | None, dsn: str, rust: bool) -> dict |
     args = resolve_args(op["args"], dsn)
     headers = [tuple(h) for h in op.get("headers", [])]
     if op.get("abandon"):
-        if rust:
-            abandon(port, f"/api/_harness/tool/{op['name']}",
-                    [AUTH, ("Content-Type", "application/json"), *headers],
-                    json.dumps(args).encode())
+        mcp.abandon(op["name"], args, headers)
+        if op["name"] == "memory_store":
+            wait_landed(dsn, args.get("text", ""))
         else:
-            mcp.abandon(op["name"], args, headers)
-        time.sleep(4)  # let a call that survives the disconnect finish
+            time.sleep(4)  # let a call that survives the disconnect finish
         return {"isError": False, "value": "<abandoned>"}
-    if rust:
-        return rust_tool(port, op["name"], args, headers)
     return mcp.call(op["name"], args, headers)
+
+
+def wait_landed(dsn: str, text: str, deadline_s: float = 30.0) -> None:
+    """Wait until an abandoned store's row exists, up to the deadline: a
+    store that survives its caller's disconnect lands whatever the embedder's
+    speed, and one that was cancelled never does (the comparison then shows
+    the missing row). A fixed sleep judged a slow debug build's 512-token
+    embedding as lost."""
+    import psycopg
+    stripped = text.strip()  # the stored text (service.py strips it)
+    end = time.monotonic() + deadline_s
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        while time.monotonic() < end:
+            if conn.execute("SELECT 1 FROM entries WHERE text = %s", (stripped,)).fetchone():
+                return
+            time.sleep(0.25)
 
 
 def prepare_template(scn: dict, tag: str, root: Path, owned: list[str]) -> str:
@@ -574,7 +582,7 @@ def prepare_template(scn: dict, tag: str, root: Path, owned: list[str]) -> str:
         mcp = Mcp(d.port)
         mcp.init()
         for op in scn["seed"]:
-            r = run_op(op, d.port, mcp, dsn, rust=False)
+            r = run_op(op, d.port, mcp, dsn)
             if r and r["isError"]:
                 raise RuntimeError(f"seed op failed: {op} -> {r}")
     finally:
@@ -618,13 +626,14 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
         for d in procs.values():
             d.start(300)
         w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
-        mcp = Mcp(procs["python"].port)
-        mcp.init()
+        clients = {side: Mcp(d.port) for side, d in procs.items()}
+        for client in clients.values():
+            client.init()
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
             row = {"step": i, "op": op, "diffs": []}
             if op["op"] != "init":
-                py = run_op(op, procs["python"].port, mcp, dsns["python"], rust=False)
-                rs = run_op(op, procs["rust"].port, None, dsns["rust"], rust=True)
+                py = run_op(op, procs["python"].port, clients["python"], dsns["python"])
+                rs = run_op(op, procs["rust"].port, clients["rust"], dsns["rust"])
                 row["python"], row["rust"] = py, rs
             sp, np_, ep = normalize_state(dbstate.dump(dsns["python"]), before["python"])
             sr, nr, er = normalize_state(dbstate.dump(dsns["rust"]), before["rust"])
@@ -719,10 +728,12 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
         d.stop()
         d.start(300)
         w1a.wait_settled([d.port], token=TOKEN)
+        client = Mcp(d.port)
+        client.init()
         for i, rec in enumerate(golden["steps"]):
             op = rec["op"]
             row = {"step": i, "op": op, "diffs": []}
-            rs = run_op(op, d.port, None, dsn, rust=True) if op["op"] != "init" else None
+            rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
             sr, nr, er = normalize_state(dbstate.dump(dsn), before)
             if rs is not None:
                 row["rust"] = rename_prefixes(rs, er)

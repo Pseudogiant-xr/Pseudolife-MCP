@@ -164,6 +164,29 @@ impl Board {
             .unwrap_or_else(|e| Err(BoardError::Internal(e.to_string())))
     }
 
+    /// The context lookup of the `/mcp` binding gate. Python calls
+    /// `coordination.dispatch` on an executor thread there (`web/api.py`),
+    /// outside the hub, so no hub admission limit applies; the spawned task,
+    /// like that thread, finishes even when the caller disconnects.
+    pub async fn binding_context(
+        self: &Arc<Self>,
+        headers: &HashMap<String, String>,
+        principal: &str,
+    ) -> Result<Value> {
+        if crate::mutants::active("mcp-binding-hub") {
+            return self.invoke("context", Map::new(), headers, principal).await;
+        }
+        let board = self.clone();
+        let (headers, principal) = (headers.clone(), principal.to_string());
+        tokio::spawn(async move {
+            board
+                .dispatch("context", Map::new(), &headers, &principal)
+                .await
+        })
+        .await
+        .unwrap_or_else(|e| Err(BoardError::Internal(e.to_string())))
+    }
+
     /// `CoordinationHub.handle`.
     pub async fn handle(
         self: &Arc<Self>,
@@ -273,6 +296,20 @@ mod tests {
             service,
             Arc::new(crate::auth::PrincipalStore::new()),
         ))
+    }
+
+    #[tokio::test]
+    async fn binding_context_bypasses_hub_admission() {
+        let board = board();
+        board.hub.pending_calls.store(MAX_WAITERS, Ordering::SeqCst);
+        let saturated = |r: &Result<Value>| matches!(r, Err(BoardError::Refused(x)) if x.code == "wait_capacity_exceeded");
+        let through_hub = board
+            .invoke("context", Map::new(), &HashMap::new(), "default")
+            .await;
+        assert!(saturated(&through_hub));
+        let direct = board.binding_context(&HashMap::new(), "default").await;
+        assert!(!saturated(&direct), "{direct:?}");
+        assert_eq!(board.hub.pending_calls.load(Ordering::SeqCst), MAX_WAITERS);
     }
 
     #[tokio::test]

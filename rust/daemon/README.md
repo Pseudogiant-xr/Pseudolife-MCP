@@ -9,7 +9,7 @@ reviews. It is not a release artifact: nothing installs or runs it yet.
 | File | What it holds |
 |---|---|
 | `spec-w1a-foundation.md` | Configuration, route table and gate order, `/health`, the lazy init lifecycle, the storage constructor, stored principals (slice W1-A) |
-| `spec.md` | `GET /api/search` (the 2026-10-09 spike) |
+| `spec.md` | `GET /api/search` (the 2026-10-09 spike), the MCP surface and tool argument binding |
 | `spec-principals.md` | Durable principal service operations, snapshot races and identity refusal policy |
 | `spec-http-static.md` | Root redirect, every committed Console asset, path containment, fallbacks and response headers |
 | `spec-w3h-graph-store.md` | Entity, alias, relation and edge storage (first W3-H increment) |
@@ -32,6 +32,14 @@ It uses the CPU provider through the ONNX Runtime library named by
 and `PSEUDOLIFE_PLUGIN_DIR` at the plugin tree for `hooks_digest`.
 
 ## The harness
+
+MCP tool argument binding has an in-process sweep that needs no database,
+model or daemon (pinned pydantic 2.14.0 / core 2.50.0, as in CI):
+
+```bash
+python rust/daemon/harness/mcp_binding_table.py --check
+python rust/daemon/harness/mcp_binding_sweep.py --rust-bin <pseudolife-daemon built with --features mutants> --mutants
+```
 
 The W2-F coordination board's live, golden and mutant modes are documented in
 [`harness/board/README.md`](harness/board/README.md).

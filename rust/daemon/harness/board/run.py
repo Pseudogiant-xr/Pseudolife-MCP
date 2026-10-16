@@ -27,6 +27,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -52,7 +53,12 @@ SEQUENCES = ("coordination_lease_fence", "coordination_lease_waiters_ticket_seq"
 META_KEYS = ("coordination_bank_id", "coordination_hlc_highwater")
 MUTANTS = ["board-chain-skip-seq", "board-clock-behind", "board-lease-never-expires",
            "board-canonical-unsorted", "board-urgent-cap-off", "board-no-read-event",
-           "board-receipt-path-live", "board-park-default-ttl"]
+           "board-receipt-path-live", "board-park-default-ttl",
+           "mcp-agents-no-file-claim", "mcp-agents-no-awareness",
+           "mcp-agents-awareness-self", "mcp-agents-awareness-order"]
+# The MCP tool mutants live in the mcp-tools scenario; the rest in the REST ones.
+MCP_MUTANTS = {"mcp-agents-no-file-claim", "mcp-agents-no-awareness",
+               "mcp-agents-awareness-self", "mcp-agents-awareness-order"}
 
 
 # ---- HTTP -----------------------------------------------------------------------
@@ -78,6 +84,44 @@ def call(port: int, method: str, path: str, headers, body: bytes | None, timeout
         out["bytes"] = raw.decode("utf-8", "replace")
     c.close()
     return out
+
+
+GENERIC_TITLE = re.compile(r"session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+
+
+def mcp_call(port: int, headers, tool: str, args: dict, timeout=180.0) -> dict:
+    """One MCP tools/call on a fresh session: the structured result, an
+    error result as status 422 (the board's REST statuses never use it)."""
+    from mcp_wire import ACCEPT, PROTOCOL, header, request, sse_data
+    base = [("Content-Type", "application/json"), ("Accept", ACCEPT), *headers]
+    init = request(port, "POST", {
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": PROTOCOL, "capabilities": {},
+                   "clientInfo": {"name": "board-harness", "version": "0"}}}, base, timeout)
+    sid = header(init, "mcp-session-id")
+    session = base + [("mcp-session-id", sid or ""), ("mcp-protocol-version", PROTOCOL)]
+    request(port, "POST", {"jsonrpc": "2.0", "method": "notifications/initialized"}, session, timeout)
+    r = request(port, "POST", {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                               "params": {"name": tool, "arguments": args}}, session, timeout)
+    request(port, "DELETE", None, session, timeout)
+    try:
+        res = json.loads(sse_data(r)[0])["result"]
+    except (IndexError, KeyError, ValueError):
+        # A broken session flow must not compare equal on both arms.
+        raise RuntimeError(f"{tool}: no tools/call result (HTTP {r['status']}): {r['body'][:300]!r}")
+    text = res["content"][0]["text"]
+    value = res.get("structuredContent")
+    if json.loads(text) != value:
+        raise RuntimeError(f"{tool}: text and structuredContent differ")
+    if isinstance(value, dict) and isinstance(value.get("peers"), list):
+        # Awareness: each arm's own wall clock and minute-stamped titles.
+        for peer in value["peers"]:
+            if isinstance(peer.get("last_reported_at"), (int, float)):
+                peer["last_reported_at"] = "<time>"
+            if GENERIC_TITLE.fullmatch(peer.get("title") or ""):
+                peer["title"] = "<session - date time>"
+    return {"status": 422 if res.get("isError") else 200, "headers": {"content-type": "mcp"},
+            "json": value}
 
 
 # ---- bank state ----------------------------------------------------------------------
@@ -195,6 +239,10 @@ class Arm:
             S.age_bank(self.dsn, step.seconds)
             self.windows.shifts.append((len(self.windows.steps) - 1, step.seconds))
             resp = {"status": 0}
+        elif step.kind == "mcp":
+            _, _, headers, _ = step.request(self.ctx)
+            tool, args = step.mcp(self.ctx) if callable(step.mcp) else step.mcp
+            resp = mcp_call(self.daemon.port, headers, tool, args, timeout=step.timeout)
         else:
             method, path, headers, body = step.request(self.ctx)
             if path in ("/api/coordination/attach", "/api/coordination/heartbeat") and body is not None:
@@ -261,6 +309,11 @@ def start(kind: str, scn: S.Scenario, binary: Path, root: Path, dsn: str, tag: s
         d = daemons.python_daemon(home, port, env)
     else:
         env["PSEUDOLIFE_DAEMON_DEBUG_BOARD"] = "1"
+        # base_env scrubs these; the warmed-up scenarios need the model.
+        for key in ("ORT_DYLIB_PATH", "PSEUDOLIFE_DAEMON_ONNX_DIR", "PSEUDOLIFE_DAEMON_RERANK_DIR",
+                    "PSEUDOLIFE_DAEMON_ORT_THREADS"):
+            if os.environ.get(key):
+                env[key] = os.environ[key]
         if os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"):
             env["PSEUDOLIFE_DAEMON_MUTANT"] = os.environ["PSEUDOLIFE_DAEMON_MUTANT"]
         d = daemons.rust_daemon(binary, home, port, env)
@@ -303,11 +356,11 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
             # Both arms need storage before read-only Console snapshots.
             # Python also finishes embedding warmup, which holds its service
             # lock; the Rust board intentionally needs only the storage tier.
-            wait_ready(proc.port, require_embedder=side == "python")
+            wait_ready(proc.port, require_embedder=side == "python" or getattr(scn, "needs_bank", False))
         recorded = {"responses": {}, "states": {}}
         for i, step in enumerate(scn.steps()):
             out = {side: arms[side].run(step) for side in sides}
-            if step.kind != "http":
+            if step.kind not in ("http", "mcp") or not getattr(step, "compare", True):
                 continue
             py = (normalize_response(out["python"], arms["python"].norm) if "python" in out
                   else golden["responses"][str(i)])
@@ -418,7 +471,12 @@ def main() -> int:
                         "baseline_results": baseline_results, "mutants": {}, "survivors": [],
                         "error": "unmutated_baseline_differs"}, indent=1, default=str), encoding="utf-8")
                 return 1
+            only = set(args.only or [])
             for m in MUTANTS:
+                # Each group runs when any of its scenarios was selected.
+                wanted = ("mcp-tools" in only) if m in MCP_MUTANTS else bool(only - {"mcp-tools"})
+                if only and not wanted:
+                    continue
                 os.environ["PSEUDOLIFE_DAEMON_MUTANT"] = m
                 steps, diff_steps, state, chain = summarize(one_pass("live"))
                 outcome[m] = {"diff_steps": diff_steps, "state_diffs": state, "chain": chain}

@@ -39,13 +39,12 @@ FREE_PREFIXES = ("Parse error: ", "Validation error: ")
 # Bodies not yet served by the Rust daemon: tool -> owning slice. Mirrors
 # rust/daemon/divergences.md; delete a row when its body is wired.
 UNSERVED = {
-    "memory_agents": "W2-F", "memory_message": "W2-F",
-    "memory_search": "W2-D", "memory_recall": "W2-D", "memory_world_search": "W2-D",
+    "memory_recall": "W2-D", "memory_world_search": "W2-D",
     "memory_lesson_search": "W2-D", "memory_get": "W2-D", "memory_recent": "W2-D",
     "memory_history": "W2-D", "memory_stats": "W2-D", "memory_graph": "W2-D",
     "memory_fact_get": "W2-D", "document_search": "W2-D", "memory_episode_summary": "W2-D",
     "memory_consolidation_candidates": "W2-D",
-    "memory_store": "W2-E", "memory_fact_set": "W2-E", "memory_set_add": "W2-E",
+    "memory_fact_set": "W2-E", "memory_set_add": "W2-E",
     "memory_set_remove": "W2-E", "memory_fact_resolve": "W2-E", "memory_world_set": "W2-E",
     "memory_outcome": "W2-E", "memory_episode_start": "W2-E", "memory_episode_end": "W2-E",
     "memory_session_title": "W2-E", "memory_supersede": "W2-E", "memory_reinstate": "W2-E",
@@ -54,6 +53,17 @@ UNSERVED = {
     "memory_graph_relate": "W3-H", "memory_graph_unrelate": "W3-H", "memory_alias": "W3-H",
     "memory_relation_define": "W3-H",
 }
+
+
+BINDING = json.loads((Path(__file__).resolve().parents[1] / "src/mcp/binding.json")
+                     .read_text(encoding="utf-8"))["tools"]
+
+
+def binding_args(name):
+    """Each required parameter of the tool at a value its binding accepts."""
+    from mcp_binding_sweep import baseline
+    return {p["name"]: baseline(p["schema"])
+            for p in BINDING[name]["params"] if "default" not in p}
 
 
 def init_body(version=PROTOCOL, params=None):
@@ -459,9 +469,10 @@ def stub_tools(port):
 
 
 def _stub_tools(port):
+    # Arguments that bind, so an unserved body answers its stub.
     s = Session(port, TOK["carol"])
     s.tool("memory_toolset", {"action": "expand"})
-    out = {name: norm(s.tool(name, {})) for name in UNSERVED}
+    out = {name: norm(s.tool(name, binding_args(name))) for name in UNSERVED}
     s.tool("memory_toolset", {"action": "collapse"})
     s.close()
     return out
@@ -528,14 +539,94 @@ def config_lists(port):
     return out
 
 
+def tool_binding(port):
+    """Binding precedes every body, served or not (binding.rs): an unknown
+    name for each tool, then, for a tool with required parameters, none."""
+    s = Session(port, TOK["carol"])
+    out = []
+    for name, table in BINDING.items():
+        out.append(norm(s.tool(name, {"zzz": 1})))
+        if any("default" not in p for p in table["params"]):
+            out.append(norm(s.tool(name, {})))
+    # The transport refuses an integer literal past 4,300 characters as a
+    # parse error before binding (json.dumps cannot write one).
+    raw = (b'{"jsonrpc":"2.0","id":99,"method":"tools/call","params":{"name":"memory_get",'
+           b'"arguments":{"entry_id":' + b"1" * 4301 + b"}}}")
+    out.append(norm(request(port, "POST", raw, s._headers())))
+    s.close()
+    return out
+
+
+def _board_context(port, token):
+    """The bearer's own board context (bank id, principal) on this daemon."""
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=120)
+    try:
+        c.request("POST", "/api/coordination/context", body=b"{}",
+                  headers={"Content-Type": "application/json",
+                           "Authorization": f"Bearer {token}"})
+        r = c.getresponse()
+        body = r.read()
+    finally:
+        c.close()
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def bound_identity(port):
+    """X-PL-Bank / X-PL-Principal must name the bearer's own board context
+    before the MCP app sees the request (web/api.py). Each daemon is asked
+    with its own bank id, which differs between the two banks. The default
+    principal is on the board's default allow list; carol is not, and the
+    last calls show that refusal too."""
+    ctx = _board_context(port, TOK["default"])
+    bank = ctx.get("bank_id") if isinstance(ctx.get("bank_id"), str) else "no-bank"
+    principal = ctx.get("principal") if isinstance(ctx.get("principal"), str) else "default"
+    bearer = [("Authorization", f"Bearer {TOK['default']}")]
+    out = []
+    for extra in [
+        [], [("X-PL-Bank", bank)], [("X-PL-Principal", principal)],
+        [("X-PL-Bank", ""), ("X-PL-Principal", principal)],
+        [("X-PL-Bank", bank), ("X-PL-Principal", principal)],
+        [("X-PL-Bank", "0" * 64), ("X-PL-Principal", principal)],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "mallory")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "%63arol")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "%ZZ")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "%0A")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "%FF")],
+        [("X-PL-Bank", bank), ("X-PL-Principal", "a" * 257)],
+        # A repeated header: the last value is the one checked.
+        [("X-PL-Bank", bank), ("X-PL-Principal", "mallory"), ("X-PL-Principal", principal)],
+        [("X-PL-Bank", bank), ("X-PL-Principal", principal), ("X-PL-Principal", "mallory")],
+    ]:
+        out.append(norm(request(port, "POST", init_body(), JSON_HDRS + bearer + extra)))
+    # A live session's later request is checked too, and a matching binding
+    # still reaches the tools.
+    s = Session(port, TOK["default"], {"X-PL-Bank": bank, "X-PL-Principal": principal})
+    out.append(norm(s.init))
+    out.append(norm(s.call("tools/list", {})))
+    s.base = [h for h in s.base if h[0] != "X-PL-Principal"] + [("X-PL-Principal", "mallory")]
+    out.append(norm(s.call("tools/list", {})))
+    out.append(norm(s.close()))
+    out.append(norm(request(port, "POST", init_body(), JSON_HDRS + [
+        ("Authorization", f"Bearer {TOK['carol']}"), ("X-PL-Bank", bank),
+        ("X-PL-Principal", "carol")])))
+    return out
+
+
 CASES = [handshake, lists, protocol_versions, methods, calls, toolset, stored, list_changed_stream,
-         stream_reconnect, init_gate, body_limit, messages, concurrent, transport, paths]
+         stream_reconnect, init_gate, body_limit, messages, concurrent, transport, paths,
+         tool_binding, bound_identity]
 BASE_CASES = tuple(CASES)
 CASE_RESPONSE_COUNTS = {
     'handshake': 4, 'lists': 18, 'protocol_versions': 10, 'methods': 24,
     'calls': 4, 'toolset': 53, 'stored': 30, 'list_changed_stream': 2,
     'stream_reconnect': 3, 'init_gate': 21, 'body_limit': 6,
-    'messages': 13, 'concurrent': 8, 'transport': 21, 'paths': 7,
+    'messages': 13, 'concurrent': 8, 'transport': 21, 'paths': 7, 'tool_binding': 71,
+    'bound_identity': 19,
     'rebinding': 24, 'open_lists': 6, 'config_lists': 10,
 }
 if "--tokenless" in sys.argv:
@@ -602,6 +693,14 @@ def sanity(data, diffs):
         # full), alice, bob (the later valid entry), carol (full)
         if got != [10, 38, 10, 24, 38]:
             diffs.append(f"sanity config_lists: tool counts {got}")
+    if "bound_identity" in data:
+        # The oracle took each path: no binding, refusals, matches (including
+        # the last of a repeated header) and an unadmitted principal.
+        got = [r["status"] for r in data["bound_identity"]]
+        want_bound = [200, 409, 409, 409, 200, 409, 409, 409, 409, 409, 409, 409, 200, 409,
+                      200, 200, 409, 409, 403]
+        if got != want_bound:
+            diffs.append(f"sanity bound_identity: statuses {got} != {want_bound}")
     if "rebinding" in data:
         statuses = sorted({r["status"] for r in data["rebinding"]})
         # 400: a POST's Content-Type is checked before Host; 404: an unknown
@@ -666,7 +765,7 @@ def recording_errors(data, cases=None):
                  for response in stubs.values()):
             errors.append('stub_tools: oracle call failed')
     total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
-    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 261
+    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 347
     if total != expected_total:
         errors.append(f'corpus: {total} responses, expected {expected_total}')
     if not errors:

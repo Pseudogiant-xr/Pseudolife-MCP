@@ -4,6 +4,7 @@ pub mod chronicle;
 pub mod cortex_search;
 pub mod embed_cache;
 pub mod identity;
+pub mod mcp_search;
 pub mod rerank;
 pub mod search_route;
 
