@@ -13,7 +13,11 @@ message per batch of events.
 The events, each reported once (state persists in --state):
 - a pull request opened, merged or closed;
 - a pull request's checks all finished green (with its merge state), or a
-  check failed (on that head);
+  check failed (on that head), or they all finished with some cancelled
+  (never as a failure, and once per finish, however many jobs it took);
+  green and cancelled also wait for every workflow run on the head to
+  complete, since a queued run has no checks yet, and a run that ended
+  failed or cancelled before creating any check makes the head so;
 - a pull request newly conflicting with its base;
 - the newest completed master run of a workflow (push or schedule) failing,
   or passing again after a failure (cancelled runs are neither);
@@ -79,8 +83,11 @@ DETACH_POLL = 0.2
 MAX_TEXT_BYTES = 8192
 DEFAULT_LEASES = ("full-suite", "full-suite@box")
 PR_FIELDS = "number,title,headRefOid,mergeable,mergeStateStatus,isDraft,statusCheckRollup"
-RUN_FIELDS = "attempt,databaseId,workflowName,status,conclusion,headSha,event"
-FAILED_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+RUN_FIELDS = "attempt,databaseId,workflowDatabaseId,workflowName,status,conclusion,headSha,event"
+# CANCELLED is not a failure: a cancelled run is usually one the delegate
+# stopped itself, and each of its jobs concluding woke it again as "failing"
+# (2026-10-16, three wakes in 15 minutes for one head of PR #784).
+FAILED_CONCLUSIONS = {"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
 MASTER_FAILED = {"failure", "timed_out", "startup_failure"}
 TITLE = 70
 # gh paginates up to this; a pull request missing from the list is looked up
@@ -115,10 +122,12 @@ def run(cmd: list[str]) -> tuple[int, str, str]:
 # the Rust port's contract tests read the same file.
 
 def checks_state(rollup) -> tuple[str, list[str]]:
-    """``failing`` with the failed names, ``pending``, ``green``, or ``none``
+    """``failing`` with the failed names, ``pending``, ``cancelled`` with the
+    cancelled names once every check has finished, ``green``, or ``none``
     for a head with no checks. One failure is enough: waiting for the rest
-    would delay the decision it forces."""
-    failed, pending = [], False
+    would delay the decision it forces. A cancellation waits for the rest,
+    so a cancelled run is one state however many of its jobs conclude."""
+    failed, cancelled, pending = [], [], False
     for check in rollup or []:
         if check.get("__typename") == "StatusContext":
             state = (check.get("state") or "").upper()
@@ -131,15 +140,53 @@ def checks_state(rollup) -> tuple[str, list[str]]:
             pending = True
         elif (check.get("conclusion") or "").upper() in FAILED_CONCLUSIONS:
             failed.append(check.get("name") or check.get("workflowName") or "check")
+        elif (check.get("conclusion") or "").upper() == "CANCELLED":
+            cancelled.append(check.get("name") or check.get("workflowName") or "check")
     if failed:
         return "failing", sorted(set(failed))
     if pending:
         return "pending", []
+    if cancelled:
+        return "cancelled", sorted(set(cancelled))
     return ("green" if rollup else "none"), []
 
 
+def runs_state(runs) -> tuple[str, list[str]]:
+    """The workflow runs on a head, from ``gh run list --commit``, as
+    ``checks_state`` reads a rollup: ``pending`` with the workflows not yet
+    completed, else ``failing`` or ``cancelled`` with the workflows whose
+    newest run ended so, else ``green``, or ``none`` with no runs. A run
+    waiting in its queue or concurrency group has no check runs yet, so the
+    rollup alone read green: "PR #781 green" went out on 2026-10-16 with its
+    Rust shim run pending. A run cancelled, or failing to start, before it
+    created any check run never shows in the rollup at all (review,
+    2026-10-16). Only the newest run of each workflow counts (re-runs keep
+    the run's id), keyed by workflow id: two workflow files may share a
+    display name (Codex review, 2026-10-16)."""
+    newest: dict = {}
+    for r in runs or []:
+        key = r.get("workflowDatabaseId") or r.get("workflowName") or "workflow"
+        if key not in newest or (r.get("databaseId") or 0) > (newest[key].get("databaseId") or 0):
+            newest[key] = r
+    by_state: dict[str, set[str]] = {"pending": set(), "failing": set(), "cancelled": set()}
+    for r in newest.values():
+        name = r.get("workflowName") or "workflow"
+        conclusion = (r.get("conclusion") or "").upper()
+        if (r.get("status") or "").lower() != "completed":
+            by_state["pending"].add(name)
+        elif conclusion in FAILED_CONCLUSIONS:
+            by_state["failing"].add(name)
+        elif conclusion == "CANCELLED":
+            by_state["cancelled"].add(name)
+    for state in ("pending", "failing", "cancelled"):
+        if by_state[state]:
+            return state, sorted(by_state[state])
+    return ("green" if newest else "none"), []
+
+
 def pr_snapshot(old, prs) -> dict:
-    """The open pull requests from ``gh pr list --json``, keyed by number."""
+    """The open pull requests from ``gh pr list --json``, keyed by number.
+    ``failed`` holds the names behind a ``failing`` or ``cancelled`` state."""
     snap = {}
     for p in prs:
         checks, failed = checks_state(p.get("statusCheckRollup"))
@@ -176,6 +223,8 @@ def pr_events(old: dict, new: dict, closed: dict) -> list[str]:
             out.append(f"PR #{number} failing at {p['head'][:8]}: {', '.join(p['failed'][:4])}")
         elif p["checks"] == "green" and not (same_head and before["checks"] == "green"):
             out.append(f"PR #{number} green at {p['head'][:8]}, merge state {p['merge_state']}")
+        elif p["checks"] == "cancelled" and not (same_head and before["checks"] == "cancelled"):
+            out.append(f"PR #{number} cancelled at {p['head'][:8]}: {', '.join(p['failed'][:4])}")
         if p["mergeable"] == "CONFLICTING" and before["mergeable"] != "CONFLICTING":
             out.append(f"PR #{number} conflicts with its base")
     for number in sorted(old.keys() - new.keys(), key=int):
@@ -288,7 +337,22 @@ class Watcher:
         args = ["pr", "list", "--state", "open", "--limit", str(PR_LIMIT), "--json", PR_FIELDS]
         if self.args.author:
             args += ["--author", self.args.author]
-        return pr_snapshot(old, self.gh(*args))
+        snap = pr_snapshot(old, self.gh(*args))
+        for number, p in snap.items():
+            # Only a head about to be reported green or cancelled is looked
+            # up, so a poll with nothing new costs no extra gh calls.
+            before = (old or {}).get(number)
+            if p["checks"] in {"green", "cancelled"} and not (
+                    before and before["head"] == p["head"] and before["checks"] == p["checks"]):
+                runs, names = runs_state(self.gh("run", "list", "--commit", p["head"], "--limit", "100",
+                                                 "--json", RUN_FIELDS))
+                # The runs can only hold or worsen what the rollup says:
+                # pending, then failing, then cancelled over green.
+                if runs == "pending":
+                    p["checks"], p["failed"] = "pending", []
+                elif runs == "failing" or (runs == "cancelled" and p["checks"] == "green"):
+                    p["checks"], p["failed"] = runs, names
+        return snap
 
     def master(self, old):
         return master_snapshot(old, self.gh("run", "list", "--branch", "master", "--limit", "30",
