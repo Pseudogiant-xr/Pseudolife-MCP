@@ -1512,7 +1512,10 @@
           "requestId": {
             "anyOf": [
               {
-                "$ref": "#/$defs/RequestId"
+                "type": "string"
+              },
+              {
+                "type": "integer"
               },
               {
                 "type": "null"
@@ -1565,7 +1568,14 @@
             "type": "number"
           },
           "progressToken": {
-            "$ref": "#/$defs/ProgressToken"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
           },
           "total": {
             "anyOf": [
@@ -1583,26 +1593,6 @@
           "progressToken"
         ],
         "type": "object"
-      },
-      "ProgressToken": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "integer"
-          }
-        ]
-      },
-      "RequestId": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "integer"
-          }
-        ]
       }
     },
     "params": {
@@ -2024,26 +2014,16 @@
         ],
         "type": "object"
       },
-      "LoggingLevel": {
-        "enum": [
-          "alert",
-          "critical",
-          "debug",
-          "emergency",
-          "error",
-          "info",
-          "notice",
-          "warning"
-        ],
-        "type": "string"
-      },
       "Meta": {
         "additionalProperties": true,
         "properties": {
           "progressToken": {
             "anyOf": [
               {
-                "$ref": "#/$defs/ProgressToken"
+                "type": "string"
+              },
+              {
+                "type": "integer"
               },
               {
                 "type": "null"
@@ -2077,16 +2057,6 @@
           }
         },
         "type": "object"
-      },
-      "ProgressToken": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "integer"
-          }
-        ]
       },
       "PromptReference": {
         "properties": {
@@ -2134,16 +2104,6 @@
           "uri"
         ],
         "type": "object"
-      },
-      "RequestId": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "integer"
-          }
-        ]
       },
       "RequestParams": {
         "properties": {
@@ -2272,7 +2232,17 @@
             ]
           },
           "level": {
-            "$ref": "#/$defs/LoggingLevel"
+            "enum": [
+              "alert",
+              "critical",
+              "debug",
+              "emergency",
+              "error",
+              "info",
+              "notice",
+              "warning"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -2458,8 +2428,8 @@
     "tools/call"
   ],
   "source": {
-    "mcp": "2.1.1",
-    "mcp-types": "2.1.1",
+    "mcp": "2.2.0",
+    "mcp-types": "2.2.0",
     "pydantic": "2.14.0",
     "pydantic-core": "2.50.0"
   }

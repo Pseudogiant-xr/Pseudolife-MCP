@@ -1378,10 +1378,10 @@ pseudolife-mcp-daemon`).
   few seconds.
 - **Tools vanish after an upgrade / the client log says "Connection
   closed"**: the shim's registered command can live outside the repo venv,
-  and the MCP SDK v2 migration set an `mcp>=2.1` floor — an older SDK in
-  that environment crashes the shim on start. The shim detects this and
+  and the shim needs the MCP SDK v2 — an SDK older than v2 in that
+  environment crashes the shim on start. The shim detects this and
   prints the interpreter path and the exact fix on stderr: `pip install -U
-  "mcp>=2.1,<2.2"` in that interpreter, or re-run the installer (which
+  "mcp>=2.2,<2.3"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception

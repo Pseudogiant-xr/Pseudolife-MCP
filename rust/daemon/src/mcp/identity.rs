@@ -43,7 +43,7 @@ pub fn call_identity(principal: &str, headers: &HeaderMap) -> CallIdentity {
 }
 
 /// `_legacy_transport_session_enabled`: explicit truthy values only.
-fn legacy_transport_session() -> bool {
+pub(crate) fn legacy_transport_session() -> bool {
     std::env::var("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION").is_ok_and(|v| {
         matches!(
             v.trim().to_lowercase().as_str(),

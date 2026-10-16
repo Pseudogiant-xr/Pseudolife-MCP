@@ -65,7 +65,7 @@ def collect(models):
 def source_versions():
     versions = {name: importlib.metadata.version(name)
                 for name in ('mcp', 'mcp-types', 'pydantic', 'pydantic-core')}
-    assert versions['mcp'] == versions['mcp-types'] == '2.1.1', versions
+    assert versions['mcp'] == versions['mcp-types'] == '2.2.0', versions
     assert versions['pydantic-core'] == '2.50.0', {'pydantic-core': versions['pydantic-core']}
     return versions
 

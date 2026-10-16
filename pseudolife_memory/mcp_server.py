@@ -188,7 +188,13 @@ def build_streamable_http_app():
     """Build the SDK's streamable-HTTP Starlette app with the selected
     transport-security policy (v2 moved the setting from the server
     constructor to this call)."""
-    return mcp.streamable_http_app(transport_security=_TRANSPORT_SECURITY)
+    # Session lifetime stays as on mcp 2.1 (maintainer decision 2026-10-16):
+    # mcp 2.2.0's defaults close a stateful session after 1800 s idle and
+    # answer 503 past 10,000 live sessions; None turns both off. Adopting
+    # limits is a separate decision (and the Rust daemon's parity row
+    # MCP-LIVE-SESSIONS in rust/daemon/divergences.md moves with it).
+    return mcp.streamable_http_app(transport_security=_TRANSPORT_SECURITY,
+                                   session_idle_timeout=None, max_sessions=None)
 
 
 from pseudolife_memory.toolset_tiers import (

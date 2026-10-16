@@ -1,6 +1,6 @@
 //! Pinned SDK parameter validation. The generated table contains both the
 //! protocol schema and the registered handler's schema; they are separate
-//! validation stages in MCP 2.1.1. See harness/mcp_validation_schema.py.
+//! validation stages in MCP 2.2.0. See harness/mcp_validation_schema.py.
 
 use serde_json::Value;
 use std::sync::OnceLock;

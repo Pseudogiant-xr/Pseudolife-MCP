@@ -729,17 +729,19 @@ finish (finish it with the commands the report and the move record list).
 ## Troubleshooting
 
 **"unhandled errors in a TaskGroup" on every `tools/list`, while `curl` with
-the same token succeeds.** This is not an auth failure. The shim's MCP client
-library must be on the same major-minor line as the daemon's: a client on
-`mcp` 2.2 against a daemon on 2.1 fails exactly this way. The project pins
-the range (`mcp>=2.1,<2.2`); a shim pipx-installed from an older release may
-need:
+the same token succeeds.** This is not an auth failure. Keep the shim's MCP
+client library on the same major-minor line as the daemon's: a remote client
+on `mcp` 2.2 against a daemon on 2.1 failed exactly this way over a tailnet
+(2026-09-28), although the same mix works on loopback. Each release pins one
+line for both (`mcp>=2.2,<2.3` since 0.18.2, `mcp>=2.1,<2.2` before), so the
+fix is a shim from the daemon's release:
 
 ```bash
-pipx runpip pseudolife-mcp install "mcp<2.2"
+pipx install --force "pseudolife-mcp==<the daemon's version>"
 ```
 
-or a reinstall of `pseudolife-mcp`.
+or, for a daemon on the 2.1 line, `pipx runpip pseudolife-mcp install
+"mcp<2.2"`.
 
 **The shim exits at startup naming the credential file.** The file is
 missing, not owner-only, or holds more than the token. Fix the file; the

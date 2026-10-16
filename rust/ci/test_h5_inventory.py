@@ -80,7 +80,7 @@ def test_inventory_rejects_missing_source_event(event):
         check(workflow)
 
 
-def test_inventory_rejects_aggregate_accepting_skipped_source_on_push():
+def test_inventory_rejects_aggregate_accepting_any_skipped_job():
     import os
     import subprocess
     from inventory import check
@@ -95,7 +95,7 @@ foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
 }
 """
     needs = {job: {'result': 'success'} for job in workflow['jobs']['parity']['needs']}
-    needs['source-mutants']['result'] = 'skipped'
+    needs['rust']['result'] = 'skipped'
     executed = subprocess.run(['pwsh', '-NoProfile', '-Command', gate['run']],
                               env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT='push'),
                               capture_output=True, text=True)
@@ -104,12 +104,15 @@ foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
         check(workflow)
 
 
-@pytest.mark.parametrize('event', ['push', 'schedule'])
+@pytest.mark.parametrize('event', ['schedule', 'workflow_dispatch'])
 def test_inventory_rejects_source_filter_dropping_event(event):
     from inventory import check
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    workflow['jobs']['source-mutants']['if'] = workflow['jobs']['source-mutants']['if'].replace(
-        f"github.event_name == '{event}' || ", '')
+    source = workflow['jobs']['source-mutants']
+    dropped = (f"github.event_name == '{event}' || " if event == 'schedule'
+               else " || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')")
+    assert dropped in source['if']
+    source['if'] = source['if'].replace(dropped, '')
     with pytest.raises(AssertionError, match='source event selection'):
         check(workflow)
 

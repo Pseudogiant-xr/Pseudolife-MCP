@@ -88,6 +88,7 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
             bm25: a.get("bm25").and_then(Value::as_bool),
             count_access: true,
             header_session: call.ident.header_session.clone(),
+            transport_session: call.ident.transport_session.clone(),
         };
         let (searched, facts) = search_with_facts(&app.service, &ready, req, raw_q, fact_k)
             .await
