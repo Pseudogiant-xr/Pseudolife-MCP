@@ -77,7 +77,8 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "search-no-cortex": "default", "search-rerank-unfused": "margin-gate",
            "search-neighbours-reversed": "contiguity", "search-recency-off": "continuum",
            "search-cortex-stripped-q": "default", "w2d-cortex-skip-slot-reads": "default",
-           "mcp-search-no-dedup": "mcp-search", "mcp-search-no-correct-with": "mcp-search"}
+           "mcp-search-no-dedup": "mcp-search", "mcp-search-no-correct-with": "mcp-search",
+           "search-no-subtree": "mcp-search"}
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
 
 
@@ -326,6 +327,9 @@ class ConfidenceRounding(Scenario):
                      [bearer(TOKEN)])]
 
 
+EPISODE_PROBE = "episode filter probe child step deploy health check"
+
+
 class McpSearch(Scenario):
     """memory_search over MCP: the projection (compact, verbose, truncation,
     replaced_by, cortex whitelist, correct_with, dedup, low_confidence),
@@ -334,7 +338,8 @@ class McpSearch(Scenario):
     name = "mcp-search"
     mcp_extra_seed = True
     require = {"with_entries": 12, "with_cortex": 8, "correct_with.contested": 1,
-               "correct_with.aged": 1, "truncated": 1, "replaced_by": 1, "episodes": 1}
+               "correct_with.aged": 1, "truncated": 1, "replaced_by": 1,
+               "episode_filter_child_hit": 1}
 
     def cases(self):
         os_q = "what os does the homelab box run"
@@ -355,7 +360,8 @@ class McpSearch(Scenario):
             mcp_case("band flat", {"query": "deploy", "bands": ["flat"]}),
             mcp_case("unknown band", {"query": "deploy", "bands": ["working", "flat"]}),
             mcp_case("blank query", {"query": "   "}),
-            mcp_case("episode filter", {"query": "deploy incident", "episodes": ["<seed-episode>"]}),
+            mcp_case("episode filter reaches the child episode",
+                     {"query": EPISODE_PROBE, "episodes": ["<seed-episode>"]}),
             mcp_case("session header", {"query": "deploy the daemon"}, [("X-PL-Session", "sess-mcp")]),
             mcp_case("min_score and recency", {"query": "deploy the daemon", "min_score": 0.5,
                                                "disable_recency_boost": True}),
@@ -553,7 +559,8 @@ def coverage(responses: list[dict], state: dict) -> dict:
            "rerank_fired": 0, "rerank_skips": {}, "timeline_fired": 0, "events_rows": 0,
            "recency_boost": 0, "sessions": 0, "episodes": 0, "low_confidence_true": 0,
            "low_confidence_false": 0, "disconnects": 0, "chronicle_over_limit": 0, "confidence_boundary": 0,
-           "correct_with": {"contested": 0, "aged": 0}, "truncated": 0, "replaced_by": 0}
+           "correct_with": {"contested": 0, "aged": 0}, "truncated": 0, "replaced_by": 0,
+           "episode_filter_child_hit": 0}
     for r in responses:
         body = r.get("json") or {}
         if not isinstance(body, dict):
@@ -568,6 +575,10 @@ def coverage(responses: list[dict], state: dict) -> dict:
         cov["disconnects"] += bool(r.get("disconnected"))
         if "low_confidence" in body and body.get("query"):
             cov["low_confidence_true" if body["low_confidence"] else "low_confidence_false"] += 1
+        if body.get("query") == EPISODE_PROBE:
+            cov["episode_filter_child_hit"] += any(
+                (e.get("text") or "").startswith("Episode filter probe")
+                for e in body.get("entries") or [])
         for f in body.get("cortex") or []:
             cw = f.get("correct_with") or ""
             if cw.startswith("memory_fact_get("):
@@ -657,9 +668,16 @@ def seed_episode(template: str) -> str | None:
 def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
     derived = None
-    if getattr(scn, "mcp_extra_seed", False) and mode != "golden":
+    if getattr(scn, "mcp_extra_seed", False):
+        if mode == "golden":
+            # Its template is derived through the Python daemon; a recording
+            # replayed against the base template would differ by design.
+            raise SystemExit(f"{scn.name} runs live only (derived template)")
         derived = template = derive_template(template, tag)
     episode = seed_episode(template) if mode != "golden" else None
+    if any("mcp" in c and "<seed-episode>" in json.dumps(c["mcp"]) for c in scn.cases()) \
+            and episode is None:
+        raise RuntimeError("the seeded session episode is missing from the template")
     dbs = {side: pg.name(f"pl_cf_w2d_{tag}_{suffix}")
            for side, suffix in (("python", "py"), ("rust", "rs"))}
     sides = ("python", "rust") if mode != "golden" else ("rust",)

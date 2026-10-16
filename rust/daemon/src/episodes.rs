@@ -128,7 +128,9 @@ impl EpisodeLog {
                     break;
                 }
                 if want.contains(c.id.as_str()) {
-                    out.insert(ep.id.clone());
+                    if !crate::mutants::active("search-no-subtree") {
+                        out.insert(ep.id.clone());
+                    }
                     break;
                 }
                 cur = c.parent_id.as_deref().and_then(|p| self.get(p));

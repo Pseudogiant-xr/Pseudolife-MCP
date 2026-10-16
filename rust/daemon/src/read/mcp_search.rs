@@ -387,9 +387,13 @@ fn compact_entry(e: &Value, text_chars: Option<i64>) -> Value {
     Value::Object(out)
 }
 
-/// Python `str.isalnum` for one character.
+/// Python `str.isalnum` for one character: a letter (L*) or a number
+/// (N*). Rust's `is_alphanumeric` also counts Other_Alphabetic marks such as
+/// Devanagari vowel signs, which Python does not.
 fn py_isalnum(c: char) -> bool {
-    c.is_alphanumeric()
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"^[\p{L}\p{N}]$").expect("static pattern"))
+        .is_match(c.encode_utf8(&mut [0; 4]))
 }
 
 /// `_restates_fact`: an entry that only restates a served cortex value.
@@ -444,6 +448,17 @@ mod tests {
             "8765"
         ));
         assert!(restates_fact("  Port   8765 ", "port 8765"));
+    }
+
+    #[test]
+    fn combining_marks_bound_a_restated_value_as_python_does() {
+        // U+0940 is Mc, not alphanumeric to Python: the match is bounded.
+        assert!(restates_fact(
+            "\u{92d}\u{93e}\u{930}\u{924} \u{926}\u{947}\u{936}\u{940} \u{932}\u{94b}\u{917}",
+            "\u{92d}\u{93e}\u{930}\u{924} \u{926}\u{947}\u{936}"
+        ));
+        assert!(py_isalnum('\u{2460}')); // circled digit one: No
+        assert!(!py_isalnum('\u{940}'));
     }
 
     #[test]

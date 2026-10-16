@@ -90,6 +90,12 @@ def mcp_extra(svc) -> None:
     svc.cortex_write("homelab box", "os", "Ubuntu 24.04", confidence=0.7, force_contend=True)
     # Restates the "Debian 13" fact: dropped when the fact is served.
     svc.store("OS: Debian 13", source="notes")
+    # A child episode under the seeded session, holding an entry only an
+    # episode filter that expands to the subtree reaches.
+    root = next(e.id for e in svc._cms.episodes.episodes.values() if e.title == "W2-D seed session")
+    svc.episode_start("W2-D child step", episode=root)
+    svc.store("Episode filter probe: the child step reran the deploy health check.",
+              source="session-notes")
 
 
 def main() -> int:
