@@ -14,33 +14,12 @@ from mcp_validation_sweep import EXPECTED_COERCION_CASES
 
 HERE = Path(__file__).resolve().parent
 MUTANTS = ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-hint",
-           "mcp-binding-open")
+           "mcp-binding-open", "mcp-keep-failed-opening", "mcp-delete-keeps-session")
 
 
 # Declared differences (divergences.md), by name, as the strict corpus reports them.
 # MCP-REFUSAL-CLEANUP: Rust closes the connection after a 413.
 REFUSAL_CLEANUP = {f"body_limit[{index}]" for index in (0, 2, 3, 4, 5)}
-# MCP-SESSION-FAILED-FIRST-REQUEST (port pending): mcp 2.2.0 drops a session
-# whose first request was refused or failed; Rust keeps it, so the follow-up
-# ping (id 2) or uninitialized tools/list (id 3) is still answered.
-FAILED_FIRST_REQUEST = {6: 2, 7: 3, 9: 2, 10: 3, 13: 2, 14: 3, 16: 2, 18: 2, 20: 2}
-# MCP-TERMINATED-SESSION-ID (port pending): mcp 2.2.0 forgets a DELETEd id.
-TERMINATED_SESSION_ID = (12, 13)
-SESSION_NOT_FOUND = {"status": 404, "headers": {"content-type": "application/json", "mcp-session-id": None},
-                     "body": {"raw": '{"jsonrpc":"2.0","id":null,"error":{"code":-32600,'
-                                     '"message":"Session not found"}}'}}
-SSE_HEADERS = {"content-type": "text/event-stream", "cache-control": "no-cache, no-transform",
-               "connection": "keep-alive", "x-accel-buffering": "no", "mcp-session-id": "<request>"}
-
-
-def _kept_session_answer(request_id):
-    """Rust's answer on a session mcp 2.1 kept: ping succeeds, tools/list is refused."""
-    message = ({"jsonrpc": "2.0", "id": 2, "result": {}} if request_id == 2 else
-               {"jsonrpc": "2.0", "id": 3,
-                "error": {"code": -32602, "message": "Invalid request parameters", "data": ""}})
-    text = json.dumps(message, separators=(",", ":"))
-    return {"status": 200, "headers": SSE_HEADERS,
-            "body": {"sse": [text], "events": [f"event: message\r\ndata: {text}"]}}
 
 
 def _expected_pair(name):
@@ -48,24 +27,15 @@ def _expected_pair(name):
     if name in REFUSAL_CLEANUP:
         py = {"status": 413, "headers": {"mcp-session-id": None}, "body": {"raw": "Request body too large"}}
         return py, {**py, "headers": {**py["headers"], "connection": "close"}}
-    for index, request_id in FAILED_FIRST_REQUEST.items():
-        if name == f"init_gate[{index}]":
-            return SESSION_NOT_FOUND, _kept_session_answer(request_id)
-    if name in {f"transport[{index}]" for index in TERMINATED_SESSION_ID}:
-        return SESSION_NOT_FOUND, {
-            "status": 404, "headers": {"content-type": "application/json", "mcp-session-id": "<request>"},
-            "body": {"raw": '{"jsonrpc":"2.0","id":null,"error":{"code":-32600,'
-                            '"message":"Not Found: Session has been terminated"}}'}}
     raise AssertionError(f"undeclared difference: {name}")
 
 
 def check_baseline(report):
     """Accept exactly the declared differences; the strict report stays red."""
     summary = report["summary"]
-    assert (summary["responses"], summary["cases"], summary["diffs"]) == (345, 18, 16)
+    assert (summary["responses"], summary["cases"], summary["diffs"]) == (345, 18, 5)
     assert set(summary["unserved_checked"]) == set(UNSERVED)
-    expected = (REFUSAL_CLEANUP | {f"init_gate[{index}]" for index in FAILED_FIRST_REQUEST}
-                | {f"transport[{index}]" for index in TERMINATED_SESSION_ID})
+    expected = REFUSAL_CLEANUP
     seen = set()
     for diff in report["diffs"]:
         name, pair = diff.split(": python=", 1)
@@ -76,10 +46,6 @@ def check_baseline(report):
         want_py, want_rs = _expected_pair(name)
         assert py == want_py, name
         assert rs == want_rs, name
-        if name not in REFUSAL_CLEANUP:
-            # Python dropped or forgot the session; Rust still knows it.
-            assert py["status"] == 404 and py["headers"]["mcp-session-id"] is None, name
-            assert rs != py and rs["headers"]["mcp-session-id"] == "<request>", name
     assert seen == expected
 
 
@@ -127,8 +93,8 @@ def main(argv=None):
     print(f'SDK coercion gate: {2 * EXPECTED_COERCION_CASES} observations, zero differences', flush=True)
     mount = json.loads((baseline_dir / "foundation-mount.json").read_text(encoding="utf-8"))
     assert mount["case"] == "mcp path, auth" and not mount["diffs"]
-    print("strict baseline: 16 declared differences (five 413 close headers, nine dropped-session"
-          " follow-ups, two terminated ids); foundation mount matches", flush=True)
+    print("strict baseline: 5 declared differences (the 413 close headers); foundation mount matches",
+          flush=True)
     for mutant in MUTANTS:
         target = run(mutant, args.mutant_bin, ["--mutant", mutant, "--baseline", str(baseline_file)], 0)
         report = json.loads((target / f"mutant-{mutant}.json").read_text(encoding="utf-8"))
