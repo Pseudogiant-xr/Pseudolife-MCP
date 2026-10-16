@@ -13,6 +13,7 @@ pub mod http;
 pub mod hub;
 pub mod lease;
 pub mod mail;
+pub mod mcp;
 pub mod notice;
 pub mod store;
 pub mod text;
@@ -25,6 +26,10 @@ mod secrets;
 #[path = "../../../shim/src/board/unicode14.rs"]
 #[allow(dead_code)]
 mod unicode14;
+// The shim's exact file-claim names (`repository_claims.file_claim_name`).
+#[path = "../../../shim/src/board/claim_name.rs"]
+#[allow(dead_code)]
+mod claim_name;
 
 use crate::auth::PrincipalStore;
 use crate::config::CoordinationConfig;
