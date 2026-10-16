@@ -473,10 +473,10 @@ class McpFactGet(Scenario):
             get("stale fact", "build cache", "state"),
             get("alias retry reaches the canonical's fact", "builder", "cpu"),
             get("alias hit, verbose (source_entries, re_verify)", "builder", "cpu", verbose=True),
+            # Retried, the shadowed alias would serve the printer's firmware
+            # record; it may still be offered as a similar-slot candidate.
             get("a shadowed alias is not retried", "builder", "firmware",
-                check=lambda b: b.get("record") is None and not any(
-                    c.get("entity") == "printer" and c.get("attribute") == "firmware"
-                    for c in b.get("candidates") or [])),
+                check=lambda b: b.get("record") is None),
             get("set slot with a removed member", "dev box", "users"),
             get("set slot, verbose", "dev box", "users", verbose=True,
                 check=lambda b: (b.get("record") or {}).get("re_verify") is True),
