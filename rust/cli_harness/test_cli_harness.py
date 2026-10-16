@@ -1625,3 +1625,75 @@ def test_golden_secret_guards_scan_surrogateescape_strings(tmp_path, monkeypatch
         with pytest.raises(SystemExit, match="refusing to write"):
             runner.write_golden(tmp_path / "unsafe.json", rejected)
         assert not (tmp_path / "unsafe.json").exists()
+
+
+def test_digest_removal_waits_out_a_reader_holding_the_file(tmp_path):
+    """digest-disappears removes the digest while the Python waiter may be
+    reading it; on Windows that reader's open handle refuses the unlink
+    (WinError 32) until it closes (CI run 37952726143, 2026-10-09)."""
+    import threading  # noqa: PLC0415
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from cli_harness.rows import mail  # noqa: PLC0415
+    arm = SimpleNamespace(home=tmp_path)
+    digest = mail._paths(tmp_path)["digest"]
+    digest.parent.mkdir(parents=True, exist_ok=True)
+    digest.write_bytes(b"7\n")
+    reader = digest.open("rb")
+    threading.Timer(0.3, reader.close).start()
+    try:
+        mail._remove_digest(arm)
+    finally:
+        reader.close()
+    assert not digest.exists()
+
+
+@pytest.mark.parametrize("held", ["digest", "ring"])
+def test_digest_advance_waits_out_a_reader_holding_the_file(tmp_path, monkeypatch, held):
+    """digest-advances-later replaces the digest and ring while the Python
+    waiter may be reading them; on Windows an open handle refuses the
+    replace (WinError 5) and the producer reports it as a failed write."""
+    import threading  # noqa: PLC0415
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from cli_harness import producers as p  # noqa: PLC0415
+    from cli_harness.rows import mail  # noqa: PLC0415
+    monkeypatch.setattr(mail, "_body", lambda: "1 new message")
+    arm = SimpleNamespace(home=tmp_path)
+    paths = mail._paths(tmp_path)
+    paths["dir"].mkdir(parents=True, exist_ok=True)
+    p.write_digest(paths["digest"], 3, "")
+    p.write_ring(paths["ring"], 3, "rung", "urgent")
+    reader = paths[held].open("rb")
+    threading.Timer(0.3, reader.close).start()
+    try:
+        mail._advance_digest(arm)
+    finally:
+        reader.close()
+    assert paths["digest"].read_bytes().startswith(b"8\n")
+    assert paths["ring"].read_bytes() == b"8\nrung urgent\n"
+
+
+def test_tls_fixture_is_warm_before_an_arm_connects(monkeypatch):
+    """The first server-side TLS handshake on a cold machine pages in
+    OpenSSL's server code and outran the CLI's 0.25 s health probe, so the
+    first https case's first arm saw no daemon (CI, 2026-10-12/13/15). The
+    fixture completes one exchange itself before returning, and forgets it."""
+    import ssl  # noqa: PLC0415
+
+    from cli_harness.fixture_daemon import FixtureDaemon  # noqa: PLC0415
+    server_handshakes = []
+    original = ssl.SSLSocket.do_handshake
+
+    def spy(self, *args, **kwargs):
+        if self.server_side:
+            server_handshakes.append(self)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(ssl.SSLSocket, "do_handshake", spy)
+    daemon = FixtureDaemon({}, tls=True)
+    try:
+        assert server_handshakes, "no server-side handshake before the first arm"
+        assert daemon.requests() == []
+    finally:
+        daemon.close()
