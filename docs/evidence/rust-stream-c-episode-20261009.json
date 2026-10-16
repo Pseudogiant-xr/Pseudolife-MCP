@@ -1,0 +1,1719 @@
+{
+  "schema": "rust-episode-scripted-evidence/v1",
+  "scope": "Recorded historical scripted correspondence; evidence-only follow-up, no new execution or mode acceptance.",
+  "fixture_source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+  "fixture_source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+  "compiled_candidate": {
+    "actual_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+    "actual_build_tree": "2c56d25e80fc322f5a1d75cb905cadf46c024902",
+    "profile": "debug/default",
+    "fresh_fixture_head_build": false,
+    "compiled_components_matched": 71,
+    "whole_source_map_equivalence_claim": false,
+    "images": {
+      "Windows": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "Linux": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d"
+    }
+  },
+  "historical_oracle": {
+    "source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+    "declared_pin": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+    "version": "0.17.0",
+    "schema": 55,
+    "child_import_origin": "UNMEASURED"
+  },
+  "parent_runtime_observations": {
+    "Windows-parent": {
+      "python": "3.11.9",
+      "executable_basename": "python.exe",
+      "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "environment_kind": "virtualenv",
+      "distribution_versions": {
+        "pseudolife-mcp": "0.17.0",
+        "mcp": "2.1.1",
+        "httpx": "0.28.1",
+        "torch": "2.10.0+cu126",
+        "psycopg": "3.3.4",
+        "sentence-transformers": "5.3.0"
+      },
+      "package_runtime_version": "0.17.0",
+      "source_origin_matches_selected_root": true,
+      "source_file": "pseudolife_memory/__init__.py",
+      "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c"
+    },
+    "Linux-parent": {
+      "python": "3.11.17",
+      "executable_basename": "python",
+      "executable_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "environment_kind": "virtualenv",
+      "distribution_versions": {
+        "pseudolife-mcp": "0.17.0",
+        "mcp": "2.1.1",
+        "httpx": "0.28.1",
+        "torch": "2.14.1+cpu",
+        "psycopg": "3.3.6",
+        "sentence-transformers": "6.1.0"
+      },
+      "package_runtime_version": "0.17.0",
+      "source_origin_matches_selected_root": true,
+      "source_file": "pseudolife_memory/__init__.py",
+      "source_file_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b"
+    }
+  },
+  "historical_inventory_unchanged": {
+    "A": 2,
+    "B": 0,
+    "C": 0,
+    "original_in_process": 10,
+    "routable": 0,
+    "unclassified": 0,
+    "producer_mapped": 10,
+    "executable_new_cases_prepared": 16,
+    "daemon_state_scenarios_prepared": 2,
+    "new_both_os_proven_closures": 0,
+    "existing_bounded_correspondences": 8,
+    "ordinary_assertion_cases_prepared": 13,
+    "original_rust_execution": 0
+  },
+  "historical_wire_admission_unchanged": {
+    "count_per_os": 73,
+    "prior_ids": 57,
+    "added_plan_ids": 16,
+    "meaning": "Admission list, not executed case count; immutable historical F192 rule"
+  },
+  "totals": {
+    "Windows": {
+      "distinct_prepared_ids": 14,
+      "pairs": 16,
+      "cli_arms": 32,
+      "http_requests": 52,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 104
+    },
+    "Linux": {
+      "distinct_prepared_ids": 14,
+      "pairs": 16,
+      "cli_arms": 32,
+      "http_requests": 52,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 104
+    }
+  },
+  "prepared_case_map": [
+    {
+      "case_id": "episode-cwd-outside-home-no-git",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-01"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-17"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-source-vote-mixed",
+      "Windows": {
+        "status": "UNRUN",
+        "pair_count": 0,
+        "record_ids": []
+      },
+      "Linux": {
+        "status": "UNRUN",
+        "pair_count": 0,
+        "record_ids": []
+      }
+    },
+    {
+      "case_id": "episode-source-vote-only-default",
+      "Windows": {
+        "status": "UNRUN",
+        "pair_count": 0,
+        "record_ids": []
+      },
+      "Linux": {
+        "status": "UNRUN",
+        "pair_count": 0,
+        "record_ids": []
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-parsed-project",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-07"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-23"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-missing-cwd",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-06"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-22"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-nested-git",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-08"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-24"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-owned-home",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-09"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-25"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-system32",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-10"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-26"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-windows",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-11"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-27"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-syswow64",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-12"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-28"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-cold-episode-start",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-13"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-29"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-cold-episode-end",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-14"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-30"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-start",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 2,
+        "record_ids": [
+          "pair-02",
+          "pair-03"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 2,
+        "record_ids": [
+          "pair-19",
+          "pair-21"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-end",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 2,
+        "record_ids": [
+          "pair-04",
+          "pair-05"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 2,
+        "record_ids": [
+          "pair-18",
+          "pair-20"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-post-cross-origin-episode-start",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-15"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-31"
+        ]
+      }
+    },
+    {
+      "case_id": "episode-assertion-post-cross-origin-episode-end",
+      "Windows": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-16"
+        ]
+      },
+      "Linux": {
+        "status": "SCOPED_SCRIPTED_PASS",
+        "pair_count": 1,
+        "record_ids": [
+          "pair-32"
+        ]
+      }
+    }
+  ],
+  "original_assertion_map": [
+    {
+      "nodeid": "tests/test_episode_cli.py::test_daemon_down_is_silent_exit_zero",
+      "historical_class": null,
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 17,
+          "expression": "capsys.readouterr().out == ''",
+          "producer_case_ids": [
+            "cold-owned-nonlistener",
+            "health-degraded",
+            "episode-assertion-cold-episode-start",
+            "episode-assertion-cold-episode-end",
+            "episode-assertion-degraded-episode-start",
+            "episode-assertion-degraded-episode-end"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "cold-owned-nonlistener",
+            "health-degraded"
+          ]
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_episode_cli.py::test_parses_session_key_from_stdin",
+      "historical_class": null,
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 32,
+          "expression": "captured['path'] == '/api/episode/start'",
+          "producer_case_ids": [
+            "episode-key-11-episode-start",
+            "title-nested-git",
+            "episode-assertion-title-parsed-project"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "episode-key-11-episode-start",
+            "title-nested-git"
+          ]
+        },
+        {
+          "line": 33,
+          "expression": "captured['payload']['session_key'] == 'abc'",
+          "producer_case_ids": [
+            "episode-key-11-episode-start",
+            "title-nested-git",
+            "episode-assertion-title-parsed-project"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "episode-key-11-episode-start",
+            "title-nested-git"
+          ]
+        },
+        {
+          "line": 34,
+          "expression": "'Proj' in captured['payload']['title']",
+          "producer_case_ids": [
+            "episode-key-11-episode-start",
+            "title-nested-git",
+            "episode-assertion-title-parsed-project"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "episode-key-11-episode-start",
+            "title-nested-git"
+          ]
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_episode_cli.py::test_post_refuses_redirects",
+      "historical_class": null,
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 72,
+          "expression": "seen['handlers'] == (_NoRedirectHandler,)",
+          "producer_case_ids": [
+            "post-redirect",
+            "post-cross-origin",
+            "episode-assertion-post-cross-origin-episode-start",
+            "episode-assertion-post-cross-origin-episode-end"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "post-redirect",
+            "post-cross-origin"
+          ]
+        },
+        {
+          "line": 73,
+          "expression": "seen['auth'] == 'Bearer tok'",
+          "producer_case_ids": [
+            "post-redirect",
+            "post-cross-origin",
+            "episode-assertion-post-cross-origin-episode-start",
+            "episode-assertion-post-cross-origin-episode-end"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "post-redirect",
+            "post-cross-origin"
+          ]
+        },
+        {
+          "line": 74,
+          "expression": "seen['timeout'] == 5",
+          "producer_case_ids": [
+            "post-redirect",
+            "post-cross-origin",
+            "episode-assertion-post-cross-origin-episode-start",
+            "episode-assertion-post-cross-origin-episode-end"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "post-redirect",
+            "post-cross-origin"
+          ]
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_episode_cli.py::test_post_does_not_forward_the_bearer_across_a_redirect",
+      "historical_class": null,
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 120,
+          "expression": "exc.value.code == 302",
+          "producer_case_ids": [
+            "post-cross-origin",
+            "episode-assertion-post-cross-origin-episode-start",
+            "episode-assertion-post-cross-origin-episode-end"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "post-cross-origin"
+          ]
+        },
+        {
+          "line": 121,
+          "expression": "received == []",
+          "producer_case_ids": [
+            "post-cross-origin",
+            "episode-assertion-post-cross-origin-episode-start",
+            "episode-assertion-post-cross-origin-episode-end"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "post-cross-origin"
+          ]
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_session_title.py::test_title_includes_date_and_time",
+      "historical_class": null,
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 10,
+          "expression": "t.startswith('session - ')",
+          "producer_case_ids": [
+            "title-owned-home",
+            "episode-key-11-episode-start",
+            "episode-assertion-title-missing-cwd"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "title-owned-home",
+            "episode-key-11-episode-start"
+          ]
+        },
+        {
+          "line": 12,
+          "expression": "len(stamp) == len('2026-06-30 14:32')",
+          "producer_case_ids": [
+            "title-owned-home",
+            "episode-key-11-episode-start",
+            "episode-assertion-title-missing-cwd"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "title-owned-home",
+            "episode-key-11-episode-start"
+          ]
+        },
+        {
+          "line": 13,
+          "expression": "stamp[4] == '-' and stamp[10] == ' ' and (stamp[13] == ':')",
+          "producer_case_ids": [
+            "title-owned-home",
+            "episode-key-11-episode-start",
+            "episode-assertion-title-missing-cwd"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "title-owned-home",
+            "episode-key-11-episode-start"
+          ]
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_session_title.py::test_git_project_name_finds_repo_root",
+      "historical_class": null,
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 21,
+          "expression": "git_project_name(str(sub)) == 'MyProj'",
+          "producer_case_ids": [
+            "title-nested-git",
+            "title-nearest-git",
+            "episode-assertion-title-nested-git"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "title-nested-git",
+            "title-nearest-git"
+          ]
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_session_title.py::test_git_project_name_none_outside_repo",
+      "historical_class": "A",
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 25,
+          "expression": "git_project_name(str(tmp_path)) is None",
+          "producer_case_ids": [
+            "episode-cwd-outside-home-no-git"
+          ],
+          "unconsolidated_historical_correspondence_ids": []
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_session_title.py::test_title_ignores_home_dir",
+      "historical_class": null,
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 38,
+          "expression": "title.startswith('session - ')",
+          "producer_case_ids": [
+            "title-owned-home",
+            "episode-assertion-title-owned-home"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "title-owned-home"
+          ]
+        },
+        {
+          "line": 39,
+          "expression": "'someuser' not in title",
+          "producer_case_ids": [
+            "title-owned-home",
+            "episode-assertion-title-owned-home"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "title-owned-home"
+          ]
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_session_title.py::test_system_dir_is_not_a_project_title",
+      "historical_class": null,
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 48,
+          "expression": "t.startswith('session - ')",
+          "producer_case_ids": [
+            "episode-cwd-3",
+            "episode-assertion-title-system32",
+            "episode-assertion-title-windows",
+            "episode-assertion-title-syswow64"
+          ],
+          "unconsolidated_historical_correspondence_ids": [
+            "episode-cwd-3"
+          ]
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_session_title.py::test_default_agent_source_is_noise_in_dominant_source_vote",
+      "historical_class": "A",
+      "original_execution": "python-in-process",
+      "original_rust_execution": false,
+      "assertions": [
+        {
+          "line": 65,
+          "expression": "title.startswith('myproject - ')",
+          "producer_case_ids": [
+            "episode-source-vote-mixed"
+          ],
+          "unconsolidated_historical_correspondence_ids": []
+        },
+        {
+          "line": 68,
+          "expression": "derive_session_title(0.0, only_default).startswith('agent - ')",
+          "producer_case_ids": [
+            "episode-source-vote-only-default"
+          ],
+          "unconsolidated_historical_correspondence_ids": []
+        }
+      ]
+    }
+  ],
+  "pair_records": [
+    {
+      "case_id": "episode-cwd-outside-home-no-git",
+      "scenario_id": "outside-home-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 0,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": null,
+      "binding_sha256": null,
+      "driver_sha256": "233deb370fdc87c6bcb3e5f8f29225c7b479117ad407fe71c14f62b1b846aaa6",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-01",
+      "platform": "Windows",
+      "raw_result_sha256": "8c9be2e05530387f0c45e72bb7d93d18abcc24d81b89aa2eafa4c7b89270190e",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": true,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-start",
+      "scenario_id": "health503-null-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 2,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "d8e3aedb48123bc7665a7fb1722eb1af644f2db84eec3cfe00009835cdcee553",
+      "driver_sha256": "57fc3143fd69b8e85d3514fcc2fa334e3ed1d226b647de9eba6c5f64b329d8b7",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-02",
+      "platform": "Windows",
+      "raw_result_sha256": "50275ff111b4b35206f018d9c3cd519735b47af4262e9b7805eef3b2f74a3108",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-start",
+      "scenario_id": "health503-object-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "d8e3aedb48123bc7665a7fb1722eb1af644f2db84eec3cfe00009835cdcee553",
+      "driver_sha256": "57fc3143fd69b8e85d3514fcc2fa334e3ed1d226b647de9eba6c5f64b329d8b7",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-03",
+      "platform": "Windows",
+      "raw_result_sha256": "0f8e62f646d88650599cce09ff876524ee2a29eab54b9d1b75dd2a429b6fcccb",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-end",
+      "scenario_id": "health503-null-episode-end",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 2,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "d8e3aedb48123bc7665a7fb1722eb1af644f2db84eec3cfe00009835cdcee553",
+      "driver_sha256": "57fc3143fd69b8e85d3514fcc2fa334e3ed1d226b647de9eba6c5f64b329d8b7",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-04",
+      "platform": "Windows",
+      "raw_result_sha256": "bcb5902e07e441cadc2df8c3befa6639be7bafac012a97b4200e146ee486059c",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-end",
+      "scenario_id": "health503-object-episode-end",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "d8e3aedb48123bc7665a7fb1722eb1af644f2db84eec3cfe00009835cdcee553",
+      "driver_sha256": "57fc3143fd69b8e85d3514fcc2fa334e3ed1d226b647de9eba6c5f64b329d8b7",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-05",
+      "platform": "Windows",
+      "raw_result_sha256": "7dfb09c96c3df842a8261313f7826b092f63abd49873305a55f9e97766fd5891",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-missing-cwd",
+      "scenario_id": "title-missing-cwd-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "44c5fe9cc9524981e8d17bb7c5913fd807d64dea8cf9ef77f63d907e8761ab2d",
+      "driver_sha256": "78b15347096e2f25cdbcc82a4ea107f9fae40041740131aa8723c5689e11b9b8",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-06",
+      "platform": "Windows",
+      "raw_result_sha256": "e9bbf35ac476417784ddb5023f2d2aeba19cd0461438a621c89580eb8675e407",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-parsed-project",
+      "scenario_id": "title-parsed-project-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "7402740a5431551a74810b864e30e5bcc86c48768ddb6cf5aae9cb1f9338d280",
+      "driver_sha256": "cf1acd55d878465eff06af6a0c4e7a0547c62399649dfc30ebda4457f84238b1",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-07",
+      "platform": "Windows",
+      "raw_result_sha256": "980551caf2cd00272a1c178b3f61309f942e4d39702567e99faf525fb42f3421",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-nested-git",
+      "scenario_id": "title-nested-git-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "7402740a5431551a74810b864e30e5bcc86c48768ddb6cf5aae9cb1f9338d280",
+      "driver_sha256": "cf1acd55d878465eff06af6a0c4e7a0547c62399649dfc30ebda4457f84238b1",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-08",
+      "platform": "Windows",
+      "raw_result_sha256": "d831fcfddbbe0b74a924d71558c4ee89785b10ac10a377d222924349c6dbacf6",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-owned-home",
+      "scenario_id": "title-owned-home-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "7402740a5431551a74810b864e30e5bcc86c48768ddb6cf5aae9cb1f9338d280",
+      "driver_sha256": "cf1acd55d878465eff06af6a0c4e7a0547c62399649dfc30ebda4457f84238b1",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-09",
+      "platform": "Windows",
+      "raw_result_sha256": "8fe07673f04206e72d96f0a995104e826daff9284257b11f3916d5cb5b582589",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-system32",
+      "scenario_id": "title-system32-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "7402740a5431551a74810b864e30e5bcc86c48768ddb6cf5aae9cb1f9338d280",
+      "driver_sha256": "cf1acd55d878465eff06af6a0c4e7a0547c62399649dfc30ebda4457f84238b1",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-10",
+      "platform": "Windows",
+      "raw_result_sha256": "73567b6011d4ae8eb7f0af80868b10999b62361044d1591d3970ca2ffff4ddc5",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-windows",
+      "scenario_id": "title-windows-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "7402740a5431551a74810b864e30e5bcc86c48768ddb6cf5aae9cb1f9338d280",
+      "driver_sha256": "cf1acd55d878465eff06af6a0c4e7a0547c62399649dfc30ebda4457f84238b1",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-11",
+      "platform": "Windows",
+      "raw_result_sha256": "269f5886e1170ae604c6ee69447a39d83abf52c3eac961e82d4a79019c7efccc",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-syswow64",
+      "scenario_id": "title-syswow64-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "7402740a5431551a74810b864e30e5bcc86c48768ddb6cf5aae9cb1f9338d280",
+      "driver_sha256": "cf1acd55d878465eff06af6a0c4e7a0547c62399649dfc30ebda4457f84238b1",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-12",
+      "platform": "Windows",
+      "raw_result_sha256": "6cbb9d3414517c09d36c6e3addafe9ab467097a3b9097076f95921a9df8c1209",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-cold-episode-start",
+      "scenario_id": "cold-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 0,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 0,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "17b719ee30d0dc638ce398f0a992ff5773b0dda690a1a2438f5a8cfa7960cb5e",
+      "driver_sha256": "132727888d2c4681b92c4cdaf5b1a6724c509653b287cd4ef170e6463643c3cf",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-13",
+      "platform": "Windows",
+      "raw_result_sha256": "e11154a858e5a27f7a66cb0928753f54261600fcfefe61eb79190e51b4c789c1",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-cold-episode-end",
+      "scenario_id": "cold-episode-end",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 0,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 0,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "17b719ee30d0dc638ce398f0a992ff5773b0dda690a1a2438f5a8cfa7960cb5e",
+      "driver_sha256": "132727888d2c4681b92c4cdaf5b1a6724c509653b287cd4ef170e6463643c3cf",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-14",
+      "platform": "Windows",
+      "raw_result_sha256": "2ab72a53a37f04f10c722296af83af20184b3617b985267f0235a935c7374af8",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-post-cross-origin-episode-start",
+      "scenario_id": "redirect-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "17b719ee30d0dc638ce398f0a992ff5773b0dda690a1a2438f5a8cfa7960cb5e",
+      "driver_sha256": "132727888d2c4681b92c4cdaf5b1a6724c509653b287cd4ef170e6463643c3cf",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-15",
+      "platform": "Windows",
+      "raw_result_sha256": "8e08e3a7ce7e52d5bb04ec99553a5c7bd6283723cfae0fd1d9701b4b885b3b57",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-post-cross-origin-episode-end",
+      "scenario_id": "redirect-episode-end",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "binding_sha256": "17b719ee30d0dc638ce398f0a992ff5773b0dda690a1a2438f5a8cfa7960cb5e",
+      "driver_sha256": "132727888d2c4681b92c4cdaf5b1a6724c509653b287cd4ef170e6463643c3cf",
+      "child_import_origin": "UNMEASURED",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-16",
+      "platform": "Windows",
+      "raw_result_sha256": "e6af79f2b52488039450d2a91a212e9d0de0bed996fa557a6925e402e64b859c",
+      "recorded_image_sha256": "9e83bc062d86415325574eab1d4bd27dddaadbfff7721d09832575dd3ccb38f3",
+      "oracle_interpreter_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-cwd-outside-home-no-git",
+      "scenario_id": "outside-home-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 0,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "120a208d050866a49e24d1943bc600025329c35f9c75b763170d21464197e90d",
+      "driver_sha256": "9ce7def592f5ce38db273d6bba0a84a861be2a93c5dc9288fed33ea57a769abc",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-17",
+      "platform": "Linux",
+      "raw_result_sha256": "a789d782ee23454272921ad518f693783284e41080187edfd2d2da082430a217",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": true,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-end",
+      "scenario_id": "health503-null-episode-end",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 2,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "e9ea3b86e49d8b6ebeccaffb6788218de3c448f6b1eb7f7449d1964d67fe5c4a",
+      "driver_sha256": "f02079a1c8dab26af2851cc5116653b57422b01dbf486edbad62ed086df9e819",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-18",
+      "platform": "Linux",
+      "raw_result_sha256": "c22cbf6f4164da884a099b61ec38f3f122e6da78ac19ef1d257f8f14906f9de5",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-start",
+      "scenario_id": "health503-null-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 2,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "e9ea3b86e49d8b6ebeccaffb6788218de3c448f6b1eb7f7449d1964d67fe5c4a",
+      "driver_sha256": "f02079a1c8dab26af2851cc5116653b57422b01dbf486edbad62ed086df9e819",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-19",
+      "platform": "Linux",
+      "raw_result_sha256": "5e1d4a49410a0cd24e45f59cfeb2089786ad6d41901675faf9c865cf7f3b5dd5",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-end",
+      "scenario_id": "health503-object-episode-end",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "e9ea3b86e49d8b6ebeccaffb6788218de3c448f6b1eb7f7449d1964d67fe5c4a",
+      "driver_sha256": "f02079a1c8dab26af2851cc5116653b57422b01dbf486edbad62ed086df9e819",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-20",
+      "platform": "Linux",
+      "raw_result_sha256": "f95f95142f75d081688af25fb2a5fd10945aa17ae459c47c7d1b5377da761618",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-degraded-episode-start",
+      "scenario_id": "health503-object-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "e9ea3b86e49d8b6ebeccaffb6788218de3c448f6b1eb7f7449d1964d67fe5c4a",
+      "driver_sha256": "f02079a1c8dab26af2851cc5116653b57422b01dbf486edbad62ed086df9e819",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-21",
+      "platform": "Linux",
+      "raw_result_sha256": "393fbb2a07ba190cf13edc4e2ccb8707302d4f6aef10fb8c7e7be3bf5558f775",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-missing-cwd",
+      "scenario_id": "title-missing-cwd-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "193886d8915a826b95d836d4c3e757037053338349fbd995e0ba52f77c71552c",
+      "driver_sha256": "47e0cd5a8cca9fd5c7a6d7f6a031695d05bbe89e25637067bbe539aa01c9469b",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-22",
+      "platform": "Linux",
+      "raw_result_sha256": "9a48d3316245ba39b1c9bf5b71cbc11d20489b2d68d2f96f70bb772794540a59",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-parsed-project",
+      "scenario_id": "title-parsed-project-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "79f52927a1e4bfa33e0909a05989c20aa8f78b76e1418f4094d1cd61f0e14e42",
+      "driver_sha256": "bcc9603c4a085fcb884dd5fe4c04ff69e86cb5053e512a8dac725ad8f3fe3877",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-23",
+      "platform": "Linux",
+      "raw_result_sha256": "36984bfe0279b83ec47bb43c52094f25f7a9489c79cd0d9aa35c6d5e93a560d8",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-nested-git",
+      "scenario_id": "title-nested-git-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "79f52927a1e4bfa33e0909a05989c20aa8f78b76e1418f4094d1cd61f0e14e42",
+      "driver_sha256": "bcc9603c4a085fcb884dd5fe4c04ff69e86cb5053e512a8dac725ad8f3fe3877",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-24",
+      "platform": "Linux",
+      "raw_result_sha256": "f67a46171cd7dd6533492dc6208ab4f714d4415c58527604912a35e366868026",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-owned-home",
+      "scenario_id": "title-owned-home-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "79f52927a1e4bfa33e0909a05989c20aa8f78b76e1418f4094d1cd61f0e14e42",
+      "driver_sha256": "bcc9603c4a085fcb884dd5fe4c04ff69e86cb5053e512a8dac725ad8f3fe3877",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-25",
+      "platform": "Linux",
+      "raw_result_sha256": "503c53260423f8ed16d8403c97ef81248bbfe4ab07d8ee2b2d540215614c167d",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-system32",
+      "scenario_id": "title-system32-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "79f52927a1e4bfa33e0909a05989c20aa8f78b76e1418f4094d1cd61f0e14e42",
+      "driver_sha256": "bcc9603c4a085fcb884dd5fe4c04ff69e86cb5053e512a8dac725ad8f3fe3877",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-26",
+      "platform": "Linux",
+      "raw_result_sha256": "d1f17961a406c64be653a6af6a4a92d448e29b50f14924e2ea4568549cc312f2",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-windows",
+      "scenario_id": "title-windows-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "79f52927a1e4bfa33e0909a05989c20aa8f78b76e1418f4094d1cd61f0e14e42",
+      "driver_sha256": "bcc9603c4a085fcb884dd5fe4c04ff69e86cb5053e512a8dac725ad8f3fe3877",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-27",
+      "platform": "Linux",
+      "raw_result_sha256": "132e0d7a22de4777237a2560e14e8099b01ae8884a4b5743b6923c8395ed288f",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-title-syswow64",
+      "scenario_id": "title-syswow64-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "79f52927a1e4bfa33e0909a05989c20aa8f78b76e1418f4094d1cd61f0e14e42",
+      "driver_sha256": "bcc9603c4a085fcb884dd5fe4c04ff69e86cb5053e512a8dac725ad8f3fe3877",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-28",
+      "platform": "Linux",
+      "raw_result_sha256": "a29c0f335ea7dce3b432bf8169e56b54ef3040d0796c8d33dd2f46161b88217e",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-cold-episode-start",
+      "scenario_id": "cold-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 0,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 0,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "012512134a000dfdbc0ad33994ce4c58f5669f03eaec529b6e6f6387f88c7c14",
+      "driver_sha256": "b120d71d29bd50ab4473e6adb996f5c6c3199b578dfc07b6b0664a5f682b8283",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-29",
+      "platform": "Linux",
+      "raw_result_sha256": "2af750456a9ef409b62ac2db2c3ed7b2bb4898d5cb2911bb43ddf5c634091766",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-cold-episode-end",
+      "scenario_id": "cold-episode-end",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 0,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 0,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "012512134a000dfdbc0ad33994ce4c58f5669f03eaec529b6e6f6387f88c7c14",
+      "driver_sha256": "b120d71d29bd50ab4473e6adb996f5c6c3199b578dfc07b6b0664a5f682b8283",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-30",
+      "platform": "Linux",
+      "raw_result_sha256": "742c8457518b83ef499702a0d52592b489569bc324047ffafdca7c4fd0d8a613",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-post-cross-origin-episode-start",
+      "scenario_id": "redirect-episode-start",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "012512134a000dfdbc0ad33994ce4c58f5669f03eaec529b6e6f6387f88c7c14",
+      "driver_sha256": "b120d71d29bd50ab4473e6adb996f5c6c3199b578dfc07b6b0664a5f682b8283",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-31",
+      "platform": "Linux",
+      "raw_result_sha256": "3511471d9f1410ed2abb627e79c95bf12bd572031dd04ae335bd1403667a4cc2",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    },
+    {
+      "case_id": "episode-assertion-post-cross-origin-episode-end",
+      "scenario_id": "redirect-episode-end",
+      "status": "SCOPED_SCRIPTED_PAIR_PASS",
+      "cli_arms": 2,
+      "http_requests": 4,
+      "redirect_sink_requests": 0,
+      "synthetic_comparator_rejects": 8,
+      "source_head": "e9987bb3350970a37db153164c73ec28fac96833",
+      "source_tree": "a8867c79c2de1ecab07129e0f8480a399c208de2",
+      "image_build_head": "c2525de993b198f22bc0427da8e7d9fc5cbbda4b",
+      "image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "binding_sha256": "012512134a000dfdbc0ad33994ce4c58f5669f03eaec529b6e6f6387f88c7c14",
+      "driver_sha256": "b120d71d29bd50ab4473e6adb996f5c6c3199b578dfc07b6b0664a5f682b8283",
+      "child_import_origin": "unmeasured",
+      "daemon_or_persisted_title_proof": false,
+      "record_id": "pair-32",
+      "platform": "Linux",
+      "raw_result_sha256": "4f3d031e27ac544ed2119ba724a5a4b89d8126c5ae4838c8f21c700ed72e722a",
+      "recorded_image_sha256": "285b5a13be3bfb6d6af2f8d03b3deb2949676b30eb2aec0d006dbbe39b9f0a4d",
+      "oracle_interpreter_sha256": "a2886d92ebf115fde6eb05569bda5ce2d09113adad3264a267b29f7dbff2c076",
+      "recorded_policy_match": true,
+      "recorded_exact_body_pair_match": null,
+      "stdout_pair_equal": true,
+      "stderr_pair_equal": true,
+      "exit_codes": {
+        "oracle": 0,
+        "candidate": 0
+      }
+    }
+  ],
+  "historical_reds": [
+    {
+      "record_id": "windows-initial-wire",
+      "status": "scripted-pair-difference",
+      "raw_result_sha256": "efa7d42b11ee6fe29ff3c7658efa4f3ac57c5c6feb4092652eabcb0c99f60d3b",
+      "meaning": "Named-case wire policy mismatch; exact body matched. Source 372dcdfc, original c252 image retained."
+    },
+    {
+      "record_id": "windows-repeat-wire",
+      "status": "scripted-pair-difference",
+      "raw_result_sha256": "880dee67a057f35408d4e192ab765f5b946d55449d7204f6af1006e582dcd013",
+      "meaning": "Repeated wire policy mismatch; not relabelled by later results."
+    },
+    {
+      "record_id": "linux-health-preflight",
+      "status": "HARNESS_PREFLIGHT_RED_RETAINED",
+      "raw_result_sha256": "6fd3617133661145f992bdc5eb8a8d84181bc0b7068d36b1d2a2acf47f1cfbfb",
+      "meaning": "Output-prefix binding mismatch stopped preflight before image/oracle/source-map validation."
+    },
+    {
+      "record_id": "source-vote-checkout-bytes",
+      "status": "PRESERVED_SOURCE_SELFCHECK_FAILURE",
+      "raw_result_sha256": "dea256fb5a18d2880f7576b2d92f6f24bef88a1041f38c028d7bbd6db3a89a49",
+      "meaning": "CRLF checkout bytes differed from frozen LF Git blobs; original failure retained."
+    },
+    {
+      "record_id": "source-vote-static-check",
+      "status": "STATIC_SELF_CHECK_RED",
+      "raw_result_sha256": "1e5d4b4bff2bf8eb89df6242837a9323a910ec6c8126ca2e423965326860fb4e",
+      "meaning": "Offline substring check matched an event label; controller execution and runtime remained UNRUN."
+    }
+  ],
+  "source_vote": {
+    "coordinator_reference": "A162",
+    "status": "UNRUN",
+    "case_ids": [
+      "episode-source-vote-mixed",
+      "episode-source-vote-only-default"
+    ],
+    "unrun_arm_cells": 8,
+    "owner_controller_runtime": "UNRUN",
+    "ready_commands": [],
+    "real_daemon_persisted_title_proof": false,
+    "activation_gaps": [
+      "Final oracle target/tree/source attribution remains unresolved; historical source and declared pin differ.",
+      "Owned disposable fixture, genuine production-bank guard, provisioning privileges and actual CPU model readiness are unproven.",
+      "Process ownership, actual child imports, matching actual timezone and cleanup still require authorized runtime evidence.",
+      "No Windows owner/daemon/interpreter binding is established for source-vote execution."
+    ]
+  },
+  "limits": [
+    "Scoped scripted pair records do not prove a real daemon or persisted title.",
+    "Child oracle import origin remains unmeasured; no child-origin proof claimed.",
+    "Cold nonlistener cases have no child cold-connection observations or wire controls; no such proof claimed.",
+    "Synthetic comparator rejects are mutations of captures, not real CLI rejection executions.",
+    "Exact frozen episode mapping has 10 original nodes, not an invented 41-count inventory.",
+    "All historical REDs and immutable original mapping/classification/policy packets remain unchanged.",
+    "Parent runtime and package-origin observations are not child import-origin proof.",
+    "No new request/header/title normalization, waiver, clock witness or performance claim is introduced.",
+    "Original structural assertions remain Python in-process controls; the producer map is correspondence, not original Rust execution.",
+    "Readiness, final-head both-OS proof, independent review and hosted CI remain open; both episode modes remain deferred.",
+    "Preparation-only status fields in historical packets are retained; only named result records establish completed scripted cells."
+  ],
+  "transformation": {
+    "method": "Explicit allowlist projection of hash-verified private originals; aggregate counts independently recomputed from raw arm/wire/control lists.",
+    "retained": "Case and scenario IDs, statuses, counters, source/build/image/interpreter bindings, original assertion mapping and exact raw-result SHA256 digests.",
+    "omitted": "Host/account identifiers, local paths, credentials, endpoints, command environments, captured payload bytes and private coordination metadata.",
+    "raw_preservation": "Original payloads remain unchanged in private evidence custody. SHA256 digests bind these projections to their exact originals; they do not make omitted payload bytes publicly replayable.",
+    "projection_source_sha256": "dd553eaa9e98690ac044a4685cde7e859739bc5ce54ddb8aca71f7df39c1603c",
+    "owner_preparation_source_sha256": "0354c366c85d8b8faf53611e32c77ee8e26ae7fc7d48fb40e26698a48db753b9"
+  }
+}

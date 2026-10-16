@@ -1,0 +1,457 @@
+{
+  "schema": 1,
+  "scope": [
+    "lease check",
+    "lease list",
+    "lease run"
+  ],
+  "preparation_head": "a6cdf024fb09836a4428268086f39ae71493ca8c",
+  "status": "deferred",
+  "acceptance": "Historical preparation and final7e evidence retained; reduced successor execution and final hosted acceptance pending.",
+  "timestamp_display_substitution": {
+    "scope": [
+      "expected_end",
+      "enqueued_at"
+    ],
+    "contract": "Chrono platform local zone; HH:MM today, YYYY-MM-DD HH:MM otherwise; floor fractional seconds; unsupported calendar values display ?; JSON numbers unchanged.",
+    "timezone": "POSIX supported TZ settings included; Windows CRT-only overrides excluded.",
+    "historical_exception_cases": [
+      "list-expected-extreme",
+      "list-waiter-extreme"
+    ],
+    "final_head_status": "historical-final7e-matched; reduced-successor-pending"
+  },
+  "cases": [
+    {
+      "id": "I3-0-text",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXIgJ1x1ZDgwMCcgaW4gcG9zaXRpb24gMDogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "I3-0-json",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXIgJ1x1ZDgwMCcgaW4gcG9zaXRpb24gMDogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "I3-1-text",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXIgJ1x1ZGZmZicgaW4gcG9zaXRpb24gMjogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "I3-1-json",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXIgJ1x1ZGZmZicgaW4gcG9zaXRpb24gMjogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "I3-2-text",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXJzIGluIHBvc2l0aW9uIDAtMTogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "I3-2-json",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXJzIGluIHBvc2l0aW9uIDAtMTogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "I3-3-text",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXJzIGluIHBvc2l0aW9uIDAtMTogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "I3-3-json",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXJzIGluIHBvc2l0aW9uIDAtMTogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "I3-4-text",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXIgJ1x1ZDgwMCcgaW4gcG9zaXRpb24gODogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "I3-4-json",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "VW5pY29kZUVuY29kZUVycm9yOiAndXRmLTgnIGNvZGVjIGNhbid0IGVuY29kZSBjaGFyYWN0ZXIgJ1x1ZDgwMCcgaW4gcG9zaXRpb24gODogc3Vycm9nYXRlcyBub3QgYWxsb3dlZA0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-i123-green.json",
+      "retained_receipt_sha256": "fac745235ddb2792ebd5a60e38090e17411a46c907fb760fc7af6177486a2a34",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending",
+      "successor_policy": "http-reply-not-understood",
+      "successor_shape_bound": "Malformed/unpaired-surrogate HTTP 200 JSON: exit 1, empty stdout, HTTP_REPLY_NOT_UNDERSTOOD line, unchanged pre-state and no subsequent request/lock/child."
+    },
+    {
+      "id": "list-expected-extreme",
+      "current_candidate_contract": "timestamp_display_substitution",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "T3ZlcmZsb3dFcnJvcjogc2lnbmVkIGludGVnZXIgaXMgZ3JlYXRlciB0aGFuIG1heGltdW0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-d2-year-linux-green.json",
+      "retained_receipt_sha256": "0c2e7d8d35feb63c73e356a4d8eb5e0df068c8cb47da2951827f580b1dd97def",
+      "retained_platform": "linux",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "list-waiter-extreme",
+      "current_candidate_contract": "timestamp_display_substitution",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "T3ZlcmZsb3dFcnJvcjogc2lnbmVkIGludGVnZXIgaXMgZ3JlYXRlciB0aGFuIG1heGltdW0K",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-d2-year-linux-green.json",
+      "retained_receipt_sha256": "0c2e7d8d35feb63c73e356a4d8eb5e0df068c8cb47da2951827f580b1dd97def",
+      "retained_platform": "linux",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "approved-timeout-overflow-traceback",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "T3ZlcmZsb3dFcnJvcjogaW50IHRvbyBsYXJnZSB0byBjb252ZXJ0IHRvIGZsb2F0DQo=",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-c1c4-green.json",
+      "retained_receipt_sha256": "4a0c669e89fca575c7f02edaabe29d41ee4ad3635ca8dbce949b3f2b1c431a64",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "C3-large-list-closed-stdout",
+      "policy": "python-traceback-not-contract",
+      "fields": [
+        "stderr.traceback_header",
+        "stderr.traceback_frames"
+      ],
+      "terminal_b64": "T1NFcnJvcjogW0Vycm5vIDIyXSBJbnZhbGlkIGFyZ3VtZW50DQo=",
+      "shape_bound": "One validated Python traceback; terminal including newline, remaining stderr, exit, stdout and all post-state bytes exact.",
+      "retained_receipt": "lease-c1c4-green.json",
+      "retained_receipt_sha256": "4a0c669e89fca575c7f02edaabe29d41ee4ad3635ca8dbce949b3f2b1c431a64",
+      "retained_platform": "windows",
+      "retained_result": "historical-policy-match",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "D3-DEL-agent_id",
+      "retained_id": "registration-nonascii-agent",
+      "policy": "http-forbidden-input-refused",
+      "fields": [
+        "agent_id"
+      ],
+      "shape_bound": "Exit 1; empty stdout; one HTTP_FORBIDDEN_INPUT_REFUSED diagnostic naming agent_id; unchanged pre-state; no lease/release request or child.",
+      "candidate_expected_stderr_lf": "lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid agent_id header\n",
+      "expected_arm": "candidate-only intentional substitution",
+      "retained_receipt": "lease-d123-review-windows-control-del.json",
+      "retained_receipt_sha256": "e72f5b029882c9cbf874fcfd88ebc8f154b30363ca1eeda8bfa5f8ea542e43d4",
+      "retained_platform": "windows",
+      "retained_candidate_exit": 75,
+      "retained_result": "implementation-pending",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "D3-DEL-credential",
+      "retained_id": "registration-nonascii-key",
+      "policy": "http-forbidden-input-refused",
+      "fields": [
+        "credential"
+      ],
+      "shape_bound": "Exit 1; empty stdout; one HTTP_FORBIDDEN_INPUT_REFUSED diagnostic naming credential; unchanged pre-state; no lease/release request or child.",
+      "candidate_expected_stderr_lf": "lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid credential header\n",
+      "expected_arm": "candidate-only intentional substitution",
+      "retained_receipt": "lease-d123-review-windows-control-del.json",
+      "retained_receipt_sha256": "e72f5b029882c9cbf874fcfd88ebc8f154b30363ca1eeda8bfa5f8ea542e43d4",
+      "retained_platform": "windows",
+      "retained_candidate_exit": 75,
+      "retained_result": "implementation-pending",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "D3-CR-agent_id",
+      "retained_id": "registration-nonascii-agent",
+      "policy": "http-forbidden-input-refused",
+      "fields": [
+        "agent_id"
+      ],
+      "shape_bound": "Exit 1; empty stdout; one HTTP_FORBIDDEN_INPUT_REFUSED diagnostic naming agent_id; unchanged pre-state; no lease/release request or child.",
+      "candidate_expected_stderr_lf": "lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid agent_id header\n",
+      "expected_arm": "candidate-only intentional substitution",
+      "retained_receipt": "lease-d123-review-windows-control-cr.json",
+      "retained_receipt_sha256": "b20da8236421d9f0c01fb7129863a72bbf8b2eec9d7b4ab19fb9fec343922079",
+      "retained_platform": "windows",
+      "retained_candidate_exit": 75,
+      "retained_result": "implementation-pending",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "D3-CR-credential",
+      "retained_id": "registration-nonascii-key",
+      "policy": "http-forbidden-input-refused",
+      "fields": [
+        "credential"
+      ],
+      "shape_bound": "Exit 1; empty stdout; one HTTP_FORBIDDEN_INPUT_REFUSED diagnostic naming credential; unchanged pre-state; no lease/release request or child.",
+      "candidate_expected_stderr_lf": "lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid credential header\n",
+      "expected_arm": "candidate-only intentional substitution",
+      "retained_receipt": "lease-d123-review-windows-control-cr.json",
+      "retained_receipt_sha256": "b20da8236421d9f0c01fb7129863a72bbf8b2eec9d7b4ab19fb9fec343922079",
+      "retained_platform": "windows",
+      "retained_candidate_exit": 75,
+      "retained_result": "implementation-pending",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "D3-LF-agent_id",
+      "retained_id": "registration-nonascii-agent",
+      "policy": "http-forbidden-input-refused",
+      "fields": [
+        "agent_id"
+      ],
+      "shape_bound": "Exit 1; empty stdout; one HTTP_FORBIDDEN_INPUT_REFUSED diagnostic naming agent_id; unchanged pre-state; no lease/release request or child.",
+      "candidate_expected_stderr_lf": "lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid agent_id header\n",
+      "expected_arm": "candidate-only intentional substitution",
+      "retained_receipt": "lease-d123-review-windows-control-lf.json",
+      "retained_receipt_sha256": "ce812b2906dcfa822ffcc454b1fd15b7bc51eebcd10948f2e438f27fda8280bc",
+      "retained_platform": "windows",
+      "retained_candidate_exit": 75,
+      "retained_result": "implementation-pending",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "D3-LF-credential",
+      "retained_id": "registration-nonascii-key",
+      "policy": "http-forbidden-input-refused",
+      "fields": [
+        "credential"
+      ],
+      "shape_bound": "Exit 1; empty stdout; one HTTP_FORBIDDEN_INPUT_REFUSED diagnostic naming credential; unchanged pre-state; no lease/release request or child.",
+      "candidate_expected_stderr_lf": "lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid credential header\n",
+      "expected_arm": "candidate-only intentional substitution",
+      "retained_receipt": "lease-d123-review-windows-control-lf.json",
+      "retained_receipt_sha256": "ce812b2906dcfa822ffcc454b1fd15b7bc51eebcd10948f2e438f27fda8280bc",
+      "retained_platform": "windows",
+      "retained_candidate_exit": 75,
+      "retained_result": "implementation-pending",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "D3-NUL-agent_id",
+      "retained_id": "registration-nonascii-agent",
+      "policy": "http-forbidden-input-refused",
+      "fields": [
+        "agent_id"
+      ],
+      "shape_bound": "Exit 1; empty stdout; one HTTP_FORBIDDEN_INPUT_REFUSED diagnostic naming agent_id; unchanged pre-state; no lease/release request or child.",
+      "candidate_expected_stderr_lf": "lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid agent_id header\n",
+      "expected_arm": "candidate-only intentional substitution",
+      "retained_receipt": "lease-d123-review-windows-control-nul.json",
+      "retained_receipt_sha256": "1095fd15507968622c157a54047d70d768e1f8fafdfaf94cff0cfc7d21e941c4",
+      "retained_platform": "windows",
+      "retained_candidate_exit": 75,
+      "retained_result": "implementation-pending",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "D3-NUL-credential",
+      "retained_id": "registration-nonascii-key",
+      "policy": "http-forbidden-input-refused",
+      "fields": [
+        "credential"
+      ],
+      "shape_bound": "Exit 1; empty stdout; one HTTP_FORBIDDEN_INPUT_REFUSED diagnostic naming credential; unchanged pre-state; no lease/release request or child.",
+      "candidate_expected_stderr_lf": "lease: HTTP_FORBIDDEN_INPUT_REFUSED: invalid credential header\n",
+      "expected_arm": "candidate-only intentional substitution",
+      "retained_receipt": "lease-d123-review-windows-control-nul.json",
+      "retained_receipt_sha256": "1095fd15507968622c157a54047d70d768e1f8fafdfaf94cff0cfc7d21e941c4",
+      "retained_platform": "windows",
+      "retained_candidate_exit": 75,
+      "retained_result": "implementation-pending",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    },
+    {
+      "id": "lease-run-existing-successful-child",
+      "policy": "nondeterministic-bytes-semantic",
+      "fields": [
+        "post_files_b64/ran.json/t"
+      ],
+      "shape_bound": "Finite unsigned decimal float in exact ran.json byte layout; each arm start_unix <= t <= end_unix; two oracle runs must differ only at t, each within its retained window; all other bytes exact.",
+      "invocation_windows": null,
+      "retained_receipt": "lease-list-run-windows-first.json",
+      "retained_receipt_sha256": "03d5c9540e99eca7f4f0cfbc0ab2dcb9b6dc1da482c360b83e81770742ca1cb3",
+      "retained_platform": "windows",
+      "retained_result": "incomplete-missing-invocation-windows",
+      "final_head_status": "historical-final7e-evidence-retained; reduced-successor-pending"
+    }
+  ],
+  "final7e_bounded_evidence": {
+    "status": "bounded-functional-policy-proof-hosted-acceptance-pending",
+    "executed_head": "7e6927b7b72db62569281d3477dc8e8924c82292",
+    "executed_tree": "34b24d60d854e28448079bfc0c8e8eea83551d47",
+    "public_evidence": "evals/results/rust-phase2d-lease-7e6927b7/README.md",
+    "remaining_policy_ids_observed_and_accepted": 14,
+    "json_companions_raw_exact": 2,
+    "platforms": [
+      "windows",
+      "linux"
+    ],
+    "historical_cases_unchanged": true,
+    "core_ported": false,
+    "header_final_hosted_execution": "pending",
+    "successful_child_final_proof": "matched-own-windows-repeat-and-six-controls-per-OS",
+    "extreme_text_exit_rule": {
+      "policy": "python-traceback-not-contract",
+      "ids": [
+        "list-expected-extreme",
+        "list-waiter-extreme"
+      ],
+      "linux_raw_exits": {
+        "oracle": 1,
+        "candidate": 0
+      },
+      "windows_raw_exits": {
+        "oracle": 0,
+        "candidate": 0
+      },
+      "json_companions": "raw-exact",
+      "other_list_exit_differences": "rejected",
+      "raw_receipt_sha256": {
+        "windows": "97bfcefebe9a397eb1323df10c93687dd276ac4ab128c9c0b79c98bb0171d45f",
+        "linux": "0a819e13c9a1fcf8fc238f64a74447970ab413ef47b46d038faa093d55d67e44"
+      }
+    }
+  },
+  "producer_admission": {
+    "policy": "http-reply-not-understood",
+    "grammar": "finite UTF-8 serde_json; healthy own coordination fields",
+    "http_200_parse_failure": {
+      "exit_code": 1,
+      "stdout": "",
+      "stderr_lf": "lease: HTTP_REPLY_NOT_UNDERSTOOD\n",
+      "effects": "pre-state unchanged; no local fallback, lock creation or child; no subsequent lease/release request"
+    },
+    "successfully_parsed_forbidden_headers": "http-forbidden-input-refused remains required before incomplete registration fallback",
+    "status": "implemented; successor-proof-pending"
+  }
+}

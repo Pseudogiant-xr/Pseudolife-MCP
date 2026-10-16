@@ -409,10 +409,7 @@ def _pg_conn_session(pg_url):
     re-seed the schema_version row, yield the connection. Separate from the
     fixture so tests/test_pg_fixture_dream_wait.py can run one setup pass
     on demand and pin that the wait happens BEFORE the first connection."""
-    from pseudolife_memory.storage.schema import (
-        SCHEMA_META_VERSION,
-        ensure_schema,
-    )
+    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
     # BEFORE the reap: a dream thread the previous test fired is this
     # process's own live backend. Killing it mid-dream makes the storage
@@ -445,7 +442,8 @@ def _pg_conn_session(pg_url):
                 "AND backend_type = 'client backend' AND usename = current_user"
             )
         conn.commit()
-        ensure_schema(conn)
+        from pseudolife_memory.storage.re_evidence_schema import ensure_python_schema
+        ensure_python_schema(conn)
         with conn.cursor() as cur:
             cur.execute(
                 "TRUNCATE " + ", ".join(_ALL_TABLES) + " RESTART IDENTITY CASCADE"

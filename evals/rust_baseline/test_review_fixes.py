@@ -9,6 +9,7 @@ import pytest
 
 from . import ci
 from .common import ROOT, child_environment
+from .process_checks import assert_child_stopped
 from .transport import Stdio, TOKEN, shim_fixture
 
 
@@ -47,7 +48,7 @@ def test_stdio_reclaims_ordinary_descendant_after_eof_or_timeout(tmp_path, linge
         # Exercise the existing normal/timeout close path without a 15s test wait.
         with patch.object(client.process, 'wait', side_effect=lambda timeout=None: actual_wait(timeout=.5)):
             cleanup = client.close()
-        assert stopped(int(pid_file.read_text())), 'ordinary descendant survived cleanup receipt'
+        assert_child_stopped(pid_file, 'ordinary descendant survived cleanup receipt')
         assert cleanup['cleanup_confirmed']
         assert cleanup['subtree_stopped']
         assert cleanup['forced'] is linger

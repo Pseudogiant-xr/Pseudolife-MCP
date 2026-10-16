@@ -1329,7 +1329,7 @@ mistaken for a real bank.
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use; the offline daemon image does not include it); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, RE evidence, config editor (read-mostly, token-gated like `/mcp`) |
 | Schema version | v55 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 | RE Hub extension schema | `v34-rehub` (`rehub_schema_version`) — an independent, idempotent extension lineage that does not consume or override upstream's integer schema version |
@@ -1558,7 +1558,9 @@ slots](#set-valued-slots)), retrievable out of the context window.
   [Benchmarks](benchmarks.md)).
 - **Deliberate write / correction.** `memory_fact_set(entity, attribute,
   value, origin="user")` asserts a fact at higher confidence; setting a new
-  value at an existing slot supersedes the old (kept as audit history).
+  value at an existing slot supersedes the old (kept as audit history) when
+  the write's tier is equal to or stronger than the standing value's. A
+  weaker write parks as a contender instead (see "Provenance contenders").
 
 ### How current is this fact?
 
@@ -1953,8 +1955,86 @@ it came from a live `memory_set_add` call or a dream claim.
 
 Every cortex fact carries a provenance tier: **`user` > `action` >
 `agent` > `assistant`** (set via `origin=`, or defaulted from `source`). A
-write may only *supersede* a slot whose current value is backed by an
-equal-or-weaker tier. A **weaker-tier** write (e.g. an `agent` value
+dream-consolidated fact takes the tier of its backing note's `source` tag
+(`user` / `conversation` → `user`; an unmapped tag or no backing note →
+`agent`); the claim's own `origin` field is model output and is never read.
+The extractor chooses which note a claim cites, in a one-note batch as in a
+larger one, so a tier above `agent` also needs the cited note to pass a
+citation check: the claim's whole value appears in it as one phrase
+(case-insensitive, on Unicode word boundaries, every word kept, so
+"retired" does not back `not retired`, nor "UK" back `US`), at least once
+without a negator (`not`, `no`, `never`, `without`, `neither`, `nor`,
+`cannot` or an `n't` form) among the three words before it in the same
+clause, so "editor: never emacs" does not back `emacs`; and the note
+contains at least one word of the claim's entity or attribute name (split
+on `-`, `_`, `.` and spaces; stop words and single letters skipped; a
+plural or paraphrase does not match). A retraction (`op: "remove"`) skips
+the negation rule, since "no longer serves X" is what backs removing X.
+Otherwise the claim counts as unbacked: `agent` tier, and low-trust to the
+consolidation quarantine (which then parks it rather than writing it). A
+`source` index that is a boolean is not read as a note number.
+
+The check bounds the tier a claim may borrow; it is not a fact check, and
+its limits are deliberate trade-offs, not guarantees:
+
+- It proves a *mention*, not an *assertion*: "I tried vim but hated it; my
+  editor is emacs" mentions `vim` and names the editor slot, so a claim of
+  `vim` passes. The rule below keeps such a claim from replacing a value
+  the user set directly.
+- Hyphens and apostrophes are word edges: "editor-vim" backs `vim`, and
+  "O'Brien" backs `O`.
+- A value that contains its own slot word (`home city` at `user.home_city`)
+  passes the slot-word check by itself.
+- Negation is read only from the three words before a mention in its
+  clause: a negation further back, after the value, or in other words
+  ("hated", "gave up on") is not seen.
+- A retraction skips the negation rule, so a note that mentions a
+  dream-consolidated member and names the slot can back an extractor's
+  misread removal of it even when the note affirms it. A member added by a
+  direct write is not affected (see below).
+- Only a string value is checked: a `None`, number, boolean, list or dict
+  value stays at `agent` tier, and so does a number or other non-string
+  value the shipped extractor's parser turned into text. The shipped extractor's parser drops a claim
+  whose value is JSON `null` rather than storing the text `None`.
+- `memory_dream(rollback)` restores the previous value as a direct write,
+  so a restored value the dream had consolidated is protected from later
+  dream claims until it is changed directly.
+
+**A dream claim never replaces a value a direct write set.** When the
+current value's `user` or `action` tier comes from a direct write
+(`memory_fact_set`, a resolve, a store's auto-promote, anything but the
+dream), a dream claim for a different value parks as a contender, whatever
+its own tier and whether or not the quarantine is on. The same holds on the
+set paths: a dream add parks rather than convert such a scalar into a set
+(`member_add_blocked_direct`), and a dream retraction of a member a direct
+user- or action-tier write added is dropped (`member_remove_refused`); a
+retraction aimed at a scalar slot finds no member and changes nothing.
+Members added by `memory_set_add`, which passes no origin, carry no tier
+(empty support, empty origin) and are not guarded against a dream
+retraction; an assistant-origin retraction of one is still refused. A
+quarantine promotion checks again when it promotes,
+so a direct write that lands in between is not replaced. A value the dream
+itself consolidated from a user note still updates from a later backed
+user note, so changed preferences keep flowing. The record tells the two
+apart by a `dream:<tier>` provenance mark the dream adds when it is the
+write that first gives a fact that tier; a direct write at the tier clears
+it, so a direct confirmation (of a member too, by exact or near-duplicate
+value) protects the value from then on. A scalar converted into a set keeps
+every support tier and its marks. Only the dream writes a mark: a `dream:`
+token in a caller's provenance or `source` tag is dropped. Facts written
+before this release carry no mark and count as direct, with one exception:
+before this release a store with `source="dream:user"` and auto-promote on
+could leave a literal `dream:user` token in a fact's provenance, and such a
+stored token is indistinguishable from a mark, so it is honoured as one
+after a reload. A dream restatement
+that is a shorter form of the current value (a compression echo) confirms
+it without raising its tier; only an exact restatement can. With
+`protect_provenance` off, these rules are off as well.
+
+A write may only *supersede* a slot whose current value is backed by an
+equal-or-weaker tier, so a `memory_fact_set` with no `origin` (recorded as
+`agent`) parks against a fact the dream consolidated at `user` tier. A
+**weaker-tier** write (e.g. an `agent` value
 conflicting with a `user`-stated fact), or one below the confidence margin,
 is **not applied** — it's parked as a *contender*:
 
@@ -1989,6 +2069,12 @@ member another tier added (the retraction is dropped, `action:
 "member_remove_refused"`). It may fill an empty slot, extend a set it
 alone built, and retract its own members. Nothing supersedes *it*
 in return: an assistant-origin value is replaced by any later write.
+With `protect_provenance` on, every other tier gets the same two set-slot
+guards against a stronger tier: a weaker-tier add cannot convert a
+stronger tier's scalar into a set (it parks, `member_add_blocked_tier`),
+and a weaker-tier retraction of a stronger tier's member is dropped
+(`member_remove_refused`). Joining a set is not tier-guarded, and the MCP
+set tools, which pass no tier, are unguarded by design.
 Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
 for assistant-stated facts lifts the fact-only arm on
 `single-session-assistant` from 0.054 to 0.536 while the knowledge-update
@@ -2508,7 +2594,10 @@ calls cost ~10 ms per reranked candidate on CPU (≈ 200 ms wall-clock
 added to a top-20 search). A `reranker.skip_margin` skips the pass when
 the top-2 bi-encoder gap is decisive. If the model fails to load, the
 reranker disables itself silently and retrieval falls back to bi-encoder
-ranking — search never breaks because of an optional component.
+ranking — search never breaks because of an optional component. The
+daemon image runs offline (`HF_HUB_OFFLINE=1`) and does not include the
+reranker's model, so in the container stack it takes that fallback; the
+download applies to pip and host-process installs.
 
 `memory_search(..., rerank=True, explain=True)` surfaces the per-candidate
 `original_score`, `ce_score`, and `fused_score` under `trace.reranker`
@@ -3271,9 +3360,12 @@ menu):
   - `claude-opus-5`: the previous default, until 2026-09-29. The 2026-08-02 judged
     comparison that chose Opus over Sonnet (best measured extraction quality) ran on it
     (`evals/results/dreamer-choice-verdict.json`).
-  - `claude-sonnet-5`: balanced.
-  - `claude-haiku-4-5`: fastest, lightest on plan usage.
-  - `claude-fable-5`: the most capable tier.
+  - `claude-sonnet-5-5`: balanced.
+  - `claude-sonnet-5`: the earlier Sonnet.
+  - `claude-haiku-5-5`: fastest, lightest on plan usage.
+  - `claude-haiku-4-5`: the earlier Haiku.
+  - `claude-fable-5-1`: the most capable tier.
+  - `claude-fable-5`: the earlier Fable.
 - OpenAI:
   - `gpt-5.6-terra`: the default, balanced.
   - `gpt-5.6-sol`: flagship.
@@ -3321,8 +3413,9 @@ steps:
      and fails, rather than reporting success, if no listener appears.
    The shim also honors a concrete `claude-*` model named per request, so
    the Console's **Dreamer** card switches the dreamer live — one click
-   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5` /
-   `claude-haiku-4-5` / `claude-fable-5` (or any `claude-*` name typed in),
+   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5-5` /
+   `claude-sonnet-5` / `claude-haiku-5-5` / `claude-haiku-4-5` /
+   `claude-fable-5-1` / `claude-fable-5` (or any `claude-*` name typed in),
    no shim restart and
    no settings-source flip; alias names like the compose default
    `extractor` keep the launch model.
@@ -3662,9 +3755,9 @@ superseded-row compaction. Design doc:
 poisoning-amplifier path with a defense keyed on *who wrote*, never on
 what the text says (the MAFIA result in `SECURITY.md` closes the argument
 that content inspection can defend this path). When on, a **scalar** claim
-whose backing entry is agent-tier — its `source` maps to origin `agent` —
-and outside `memory.dream.trusted_sources` never takes `current`
-directly:
+whose backing entry is agent-tier — its `source` maps to origin `agent`,
+or it cites a user-stated note that fails the citation check — and outside
+`memory.dream.trusted_sources` never takes `current` directly:
 
 - it **parks** via the ordinary contender machinery (visible as
   `contested` in `memory_fact_get`, `quarantine:low_trust` in its
@@ -3676,9 +3769,15 @@ directly:
   **and only when the witness's tier is not below the standing current's
   origin**: the two-man rule is never weaker than the provenance guard
   it reinforces, so two agent witnesses cannot supersede a user-stated
-  fact. The same witness restating merely re-confirms the parked value;
-  an automated promotion is stamped agent-supported (a literal, never
-  the claim's own origin field), and never as a user act.
+  fact, and no promotion replaces a value a direct (non-dream) user or
+  action write set. The witness's tier here is the tier a direct write of
+  the same claim would get: its note's `source` tag, kept only when the
+  note passes the citation check ("Provenance contenders" in
+  [memory-model.md](memory-model.md)), and lowered to `assistant` for an
+  assistant-stated claim. The same witness restating merely re-confirms
+  the parked value; an automated promotion adds that same tier to the
+  value's support (never the claim's own origin field), so a value a
+  user-sourced note confirms is as protected as one it wrote directly.
 
 Run results carry `quarantine_parked` / `quarantine_held` /
 `quarantine_promoted`; parks and promotions are journaled (a promotion
@@ -5433,6 +5532,15 @@ on fork. Process environment variables, checkout names and titles do not select
 the mailbox. Missing or malformed metadata leaves ordinary memory available
 without attaching a mailbox.
 
+Once a task's mailbox is attached, each later coordination call first
+re-checks the bank's identity with a read-only request that never
+initializes anything. A timeout, an unreachable daemon or a 429, 500, 502,
+503 or 504 answer gets one automatic retry with the same adapter and saved
+mailbox (each check allows six seconds). A refused credential, a different
+bank or a credential that changed meanwhile fails closed at once, and the
+task's hint says whether validation, access or attachment failed. Message
+operations are never replayed by this retry.
+
 A native subagent (`collaboration.spawn_agent`) is a thread of its own, so it
 gets its own address too, and since schema v50 that address is linked to its
 parent's. Codex 0.158.0 (CLI and desktop, measured 2026-09-29) sends
@@ -5491,8 +5599,8 @@ A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map (principal `codex`, say) is
 off the board until an operator lists it: without `allowed_principals` only
 `default` is admitted. On the default setting the shim's startup question
 then leaves coordination off with no error, and memory keeps working. In
-explicit mode each task instead gets an "identity attachment unavailable"
-hint. In either mode the check reports
+explicit mode each task instead gets a hint that identity attachment "was
+refused by authentication or access policy". In either mode the check reports
 `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
 Add the principal the map gives that bearer, keeping `default` if the
 singular token should stay on the board, and restart the daemon:
@@ -7209,9 +7317,11 @@ every variant.
   Since schema v39, correction events for existing traces survive source
   deletion and are preserved even while tracing is off; new trace formation
   remains disabled. Re-enabling tracing can therefore surface those warnings.
-  `memory.traces.retention_boost` (default `0.0`) is the separate Phase-2
-  MTT-retention weight this same cross-index feeds; `0.0` is today's
-  eviction behavior unchanged.
+  `memory.traces.retention_boost` is the separate Phase-2 MTT-retention
+  weight this same cross-index feeds: the daemon runs `1.0` unless the key
+  is set (a reinforced entry resists eviction by
+  `retention_boost * log1p(reinforcements)`), while the library default is
+  `0.0`, eviction unchanged.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -7341,7 +7451,8 @@ every variant.
   (`evals/digest_sidecar_probe.py`).
 - **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
   false`) — when on, a scalar dream claim whose backing entry is
-  agent-tier (its `source` maps to origin `agent`) and outside
+  agent-tier (its `source` maps to origin `agent`, or it cites a
+  user-stated note that fails the citation check) and outside
   `memory.dream.trusted_sources` never takes `current` directly: it
   parks via the existing contender machinery (visible in
   `memory_fact_get` as contested), promotable only by an explicit
@@ -8780,7 +8891,8 @@ startup briefing is not a relevance-ranked answer to a prompt it has not seen.
 
 The provider that *talks* to the bank and the model that *consolidates* it
 are separate choices, and the installer wires both. `--extractor` /
-`-Extractor` takes `sidecar` (the bundled CPU model, the default),
+`-Extractor` (required: the installer has no default and asks when run
+interactively) takes `sidecar` (the bundled CPU model),
 `claude-fallback` / `claude-only` (a Claude Max plan via the CLI shim),
 `openai-fallback` / `openai-only` (a ChatGPT plan via the Codex CLI shim),
 or `endpoint` / `endpoint-fallback` (any OpenAI-compatible server, no shim:
@@ -9479,13 +9591,18 @@ Graph views, and the Console cannot create or mutate RE evidence.
 
 ## Upgrading the fork
 
-This fork includes upstream **v0.17.0**, with the upstream **v55** schema and
+This fork includes upstream **v0.18.1**, with the upstream **v55** schema and
 the independent **`v34-rehub`** extension. Follow the ordinary upgrade and
 backup instructions for the chosen durable or lite installation; use this
 fork's checkout when rebuilding so the RE extension remains installed.
 Startup applies upstream's additive migrations to an existing v37 RE bank
 and keeps its proof rows, original-byte hashes and claim links. It still
-refuses incompatible unpublished pilot table shapes.
+refuses incompatible unpublished pilot table shapes. Canonical and RE extension
+initialization share one transaction in the Python service, so a refused
+extension does not commit a partial canonical upgrade.
+
+This fork's RE tools use the Python daemon and shim. The upstream native
+Rust candidate remains an explicit opt-in and does not implement the RE tools.
 
 The `re_evidence` tool is in the **core** tier. If the client does not list
 it, expand with `memory_toolset` and rediscover tools. The Svelte Console
@@ -9500,6 +9617,30 @@ memory transfer still excludes all three proof tables; use the RE archive
 workflow below when moving them to another bank.
 
 ## Evidence Hub workflow
+
+### Instructions for Claude Code and Codex
+
+The shared [RE coordination instructions](../../examples/RE.coordination.md)
+define the messageboard handoff protocol. In this fork's checkout, Claude Code
+loads `CLAUDE.md`, which requires that protocol; Codex reads `AGENTS.md`, whose
+pointer requires `CLAUDE.md` and the same protocol. Start a fresh session after
+changing standing instructions.
+
+A session in a separate SRFN recreation checkout does not automatically read
+this fork's instruction files. Make the protocol available there through the
+project's loaded standing instructions: Codex's `AGENTS.md` and Claude Code's
+`CLAUDE.md` (which can import `@AGENTS.md`). The template is self-contained, so
+it can instead be appended to the loaded global file for each client:
+`~/.claude/CLAUDE.md` for Claude Code, and the active Codex-home `AGENTS.md`
+(or nonempty `AGENTS.override.md`, which takes precedence) for Codex. Preserve
+existing instructions and make these edits only when the user authorizes them.
+
+The existing installers append `examples/CLAUDE.memory.md` when selected; that
+general memory-loop template is separate from the RE protocol. They skip an
+existing block, and compact session hooks do not load the RE template. Adding
+this protocol to the fork therefore does not refresh already installed files
+or sessions, change client configuration, or enable a wake listener. Use the
+RE protocol only for an authorized RE task with the fork's tools available.
 
 First capture JSON using the project's existing terminal-only evidence helper.
 For the SRFN recreation repository, the checked-in wrapper is:
@@ -10580,9 +10721,15 @@ mitigation that is off by default is a mitigation you have not got yet.
 | **Serving-side quarantine** (`stale_policy`: `annotate` \| `demote` \| `quarantine`) | Not poisoning per se, but the same family: a fact past twice its TTL is flagged `stale`, can be demoted below fresh records, or — at `quarantine` — has its `value` replaced by a wrapper with the original moved to `last_known_value`, so a rotted value cannot be read as current. `stale: true` means *re-verify at the source*, never "the value is wrong" | `annotate` (flag only) |
 | **`memory_forget` + engram links** | Remediation. `scope="memory"`/`"fact"` hard-delete; `scope="lesson"`/`"world"` retire (status flips, row kept with a `store_decisions` audit trail, undoable via `restore_slot` until compaction purges it) — a poisoned lesson/world fact is contained, not purged, until then. Forgetting an entry also retires the facts, dream edges and lessons it alone supported (Postgres); the links tell you what else to retire | On |
 
-Two of these deserve their exact claim restated, because overselling them
+Three of these deserve their exact claim restated, because overselling them
 would be the same failure this page is about:
 
+- The **provenance tiers** key on a label the caller supplies, not on
+  who actually spoke: `origin=` on a write, or for a dream claim the
+  backing entry's `source` tag (`user` and `conversation` map to the
+  `user` tier). They stop an honestly labelled agent write from
+  displacing a user fact. A write that lies about its own tier is a
+  different attack, listed below.
 - The **consolidation quarantine** does not stop a poisoned entry from
   being *stored* or *retrieved* — episodic search still surfaces it. It
   stops poison from silently gaining *canonical* authority. And writer
@@ -10605,8 +10752,10 @@ problem than the limitation it hides.
 - **Content screening.** There is none, deliberately — see the evaded-class
   note above. Do not read the literal-faithfulness gate, the novelty gate,
   or the contradiction detector as trust filters. In particular the
-  **surprise gate** is an *admission* filter that drops near-duplicates:
-  novel malicious content passes it preferentially.
+  **surprise gate** is an *admission* filter that can drop near-duplicates
+  when `memory.surprise_threshold` is above `0` (the shipped default,
+  `0.0`, is permissive and stores everything): novel malicious content
+  passes it preferentially.
 - **Cryptographic writer authentication.** Writer identity is
   self-reported over MCP. Per-principal bearer tokens improve on this
   (the token determines the writer id) but agent writers have no signing,
@@ -10614,6 +10763,13 @@ problem than the limitation it hides.
   really made a given write. This is roadmap, not a promise. The one
   signed channel is the maintainer's: maintainer mail and board role
   changes carry a WebAuthn passkey assertion made in the Console.
+- **Origin-tier authentication.** The provenance tier is self-declared in
+  the same way. Nothing checks it against who actually spoke, so a model
+  steered into calling `memory_store(source="conversation", ...)` or
+  `memory_fact_set(..., origin="user")` writes with user-tier standing,
+  and the tier rule and the consolidation quarantine treat that write as
+  the user's. The tiers defend against an honestly labelled agent write,
+  not against a write that misstates its own tier.
 - **Ranking as a defense.** Retrieval scoring is optimizable by an
   attacker who can influence stored text. Treat rank as convenience, not
   as a trust signal.

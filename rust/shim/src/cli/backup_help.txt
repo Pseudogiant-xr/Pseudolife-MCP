@@ -1,0 +1,13 @@
+usage: pseudolife-mcp backup [-h] [--data-dir DATA_DIR] [--out OUT]
+                             [--keep-days KEEP_DAYS]
+
+Back up the memory bank (pg_dump + state archive).
+
+options:
+  -h, --help            show this help message and exit
+  --data-dir DATA_DIR   bank data dir (default: PSEUDOLIFE_MCP_DATA_DIR, the
+                        lite tier's per-user dir, or ./data)
+  --out OUT             destination dir (default: <data-dir>/backups)
+  --keep-days KEEP_DAYS
+                        rotate this tool's own backups older than N days
+                        (default 7)

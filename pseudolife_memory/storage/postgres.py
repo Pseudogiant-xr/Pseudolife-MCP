@@ -37,7 +37,9 @@ import psycopg
 from pgvector.psycopg import register_vector
 from psycopg.types.json import Jsonb
 
-from pseudolife_memory.storage.schema import ensure_schema
+from pseudolife_memory.storage.re_evidence_schema import (
+    ensure_python_schema as ensure_schema,
+)
 from pseudolife_memory.storage.re_evidence import ReEvidenceStore
 
 logger = logging.getLogger(__name__)

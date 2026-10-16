@@ -382,9 +382,12 @@ menu):
   - `claude-opus-5`: the previous default, until 2026-09-29. The 2026-08-02 judged
     comparison that chose Opus over Sonnet (best measured extraction quality) ran on it
     (`evals/results/dreamer-choice-verdict.json`).
-  - `claude-sonnet-5`: balanced.
-  - `claude-haiku-4-5`: fastest, lightest on plan usage.
-  - `claude-fable-5`: the most capable tier.
+  - `claude-sonnet-5-5`: balanced.
+  - `claude-sonnet-5`: the earlier Sonnet.
+  - `claude-haiku-5-5`: fastest, lightest on plan usage.
+  - `claude-haiku-4-5`: the earlier Haiku.
+  - `claude-fable-5-1`: the most capable tier.
+  - `claude-fable-5`: the earlier Fable.
 - OpenAI:
   - `gpt-5.6-terra`: the default, balanced.
   - `gpt-5.6-sol`: flagship.
@@ -432,8 +435,9 @@ steps:
      and fails, rather than reporting success, if no listener appears.
    The shim also honors a concrete `claude-*` model named per request, so
    the Console's **Dreamer** card switches the dreamer live — one click
-   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5` /
-   `claude-haiku-4-5` / `claude-fable-5` (or any `claude-*` name typed in),
+   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5-5` /
+   `claude-sonnet-5` / `claude-haiku-5-5` / `claude-haiku-4-5` /
+   `claude-fable-5-1` / `claude-fable-5` (or any `claude-*` name typed in),
    no shim restart and
    no settings-source flip; alias names like the compose default
    `extractor` keep the launch model.
@@ -773,9 +777,9 @@ superseded-row compaction. Design doc:
 poisoning-amplifier path with a defense keyed on *who wrote*, never on
 what the text says (the MAFIA result in `SECURITY.md` closes the argument
 that content inspection can defend this path). When on, a **scalar** claim
-whose backing entry is agent-tier — its `source` maps to origin `agent` —
-and outside `memory.dream.trusted_sources` never takes `current`
-directly:
+whose backing entry is agent-tier — its `source` maps to origin `agent`,
+or it cites a user-stated note that fails the citation check — and outside
+`memory.dream.trusted_sources` never takes `current` directly:
 
 - it **parks** via the ordinary contender machinery (visible as
   `contested` in `memory_fact_get`, `quarantine:low_trust` in its
@@ -787,9 +791,15 @@ directly:
   **and only when the witness's tier is not below the standing current's
   origin**: the two-man rule is never weaker than the provenance guard
   it reinforces, so two agent witnesses cannot supersede a user-stated
-  fact. The same witness restating merely re-confirms the parked value;
-  an automated promotion is stamped agent-supported (a literal, never
-  the claim's own origin field), and never as a user act.
+  fact, and no promotion replaces a value a direct (non-dream) user or
+  action write set. The witness's tier here is the tier a direct write of
+  the same claim would get: its note's `source` tag, kept only when the
+  note passes the citation check ("Provenance contenders" in
+  [memory-model.md](memory-model.md)), and lowered to `assistant` for an
+  assistant-stated claim. The same witness restating merely re-confirms
+  the parked value; an automated promotion adds that same tier to the
+  value's support (never the claim's own origin field), so a value a
+  user-sourced note confirms is as protected as one it wrote directly.
 
 Run results carry `quarantine_parked` / `quarantine_held` /
 `quarantine_promoted`; parks and promotions are journaled (a promotion

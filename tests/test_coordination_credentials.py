@@ -81,7 +81,7 @@ class Bank:
         if action == "context":
             assert "x-pl-agent-key" not in request.headers
             result = {"bank_id": self.bank_id, "principal": self.principal}
-            if body:
+            if "agent_id" in body:
                 if body.get("agent_id") != self.agent:
                     return httpx.Response(401, json={"error": "invalid_credential"})
                 message = json.dumps(["pseudolife-context-v1", self.bank_id,
@@ -108,6 +108,28 @@ def instance(bank, provider, path, **kwargs):
     client = httpx.AsyncClient(transport=httpx.MockTransport(bank))
     return client, CoordinationAdapter(URL, provider.token, client=client,
         provider=provider, state_path=path, **kwargs)
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+def test_context_mode_preserves_mailbox_proof_body(read_only):
+    from pseudolife_memory.coordination_identity import fetch_context
+
+    async def run():
+        provider, bank = Provider(), Bank()
+        bank.agent = "a" * 32
+        identity = {"agent_id": bank.agent, "credential": bank.credential}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(bank)) as client:
+            context = await fetch_context(client, URL, provider.snapshot(),
+                                          identity=identity, read_only=read_only)
+        assert context == {"bank_id": bank.bank_id, "principal": bank.principal}
+        action, body, headers = bank.calls[0]
+        assert action == "context" and body["agent_id"] == bank.agent
+        assert len(body["nonce"]) == 32 and "x-pl-agent-key" not in headers
+        assert set(body) == ({"agent_id", "nonce", "read_only"} if read_only
+                             else {"agent_id", "nonce"})
+        if read_only:
+            assert body["read_only"] is True
+    asyncio.run(run())
 
 
 def test_context_accepts_existing_maximum_length_principal(tmp_path):
@@ -240,7 +262,7 @@ def test_legacy_migration_proves_server_ownership_without_sending_key(tmp_path):
         async with client, migrated:
             assert migrated.instance_headers["X-PL-Agent"] == bank.agent
         proof_call = next(i for i, (action, body, _) in enumerate(bank.calls)
-                          if action == "context" and body)
+                          if action == "context" and "agent_id" in body)
         first_key = next(i for i, (_, _, headers) in enumerate(bank.calls)
                          if "x-pl-agent-key" in headers)
         assert proof_call < first_key

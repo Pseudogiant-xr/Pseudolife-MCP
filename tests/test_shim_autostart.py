@@ -41,7 +41,22 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(sa, "default_host", lambda: "127.0.0.1")
     monkeypatch.setattr(sa.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
     monkeypatch.setattr(sa.sys, "executable", str(tmp_path / "py" / "python"))
+    # No real interpreter is probed here: the tests below that need the
+    # verification set these themselves.
+    monkeypatch.setattr(sa, "pick_python", lambda repo: None)
+    monkeypatch.setattr(sa, "probe_interpreter", lambda python, repo: (True, ""))
     return root
+
+
+def _stub_package(root: Path, dream: str = "") -> None:
+    """What the shims import, as a stub in the checkout: the probe puts the
+    checkout first on the path, so it imports this and not the real package
+    (which needs torch)."""
+    pkg = root / "pseudolife_memory" / "memory"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (root / "pseudolife_memory" / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "dream.py").write_text(dream, encoding="utf-8")
 
 
 # ── ops/.env ────────────────────────────────────────────────────────────────
@@ -250,6 +265,7 @@ def test_run_dry_run_prints_the_resolved_command(tmp_path):
     (root / "evals" / "claude_shim.py").write_text("# shim\n", encoding="utf-8")
     (root / "evals" / "prompts" / "sonnet_extractor_v5.md").write_text("prompt\n", encoding="utf-8")
     (root / "ops" / ".env").write_text("PSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-sonnet-5\n", encoding="utf-8")
+    _stub_package(root)
     proc = _run_script(root, "run", "claude", "--dry-run", "--port", "8099", "--python", sys.executable)
     assert proc.returncode == 0, proc.stderr
     report = json.loads(proc.stdout)
@@ -276,6 +292,7 @@ def test_a_detached_run_writes_a_failed_start_into_the_log(tmp_path):
     (root / "evals" / "prompts").mkdir(parents=True)
     (root / "ops").mkdir()
     (root / "evals" / "claude_shim.py").write_text("# shim\n", encoding="utf-8")
+    _stub_package(root)
     log = tmp_path / "logs" / "claude-shim.log"
     (root / "ops" / ".env").write_text(f"PSEUDOLIFE_CLAUDE_SHIM_LOG={log.as_posix()}\n"
                                        "PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE=evals/prompts/nope.md\n", encoding="utf-8")
@@ -287,6 +304,78 @@ def test_a_detached_run_writes_a_failed_start_into_the_log(tmp_path):
     (root / "ops" / ".env").write_text("PSEUDOLIFE_CLAUDE_SHIM_PORT=eighty\n", encoding="utf-8")
     proc = _run_script(root, "run", "claude", "--dry-run")
     assert proc.returncode == 1 and "PSEUDOLIFE_CLAUDE_SHIM_PORT must be a number" in proc.stderr
+
+
+# ── the interpreter must import what the shim imports ──────────────────────
+
+def test_the_default_interpreter_is_the_first_that_imports_what_the_shim_imports(repo, monkeypatch):
+    """2026-10-16, Windows: no PSEUDOLIFE_CODEX_SHIM_PYTHON in ops/.env, so
+    the runner took the global Python 3.14, which has no torch; the shim
+    died on its first import. The default is now the first interpreter that
+    passes ops/shim_python.py's probe, in that helper's order."""
+    monkeypatch.undo()
+    monkeypatch.setattr(sa, "default_host", lambda: "127.0.0.1")
+    monkeypatch.setattr(sa.sys, "executable", "/global/python3.14")
+    monkeypatch.setattr(sa, "interpreter_candidates", lambda repo: ["/repo/.venv/python", "/shim-venv/python"])
+    works = {"/shim-venv/python"}
+    monkeypatch.setattr(sa, "probe_interpreter", lambda python, repo: (python in works, "No module named 'torch'"))
+    for kind in ("claude", "codex"):
+        assert sa.resolve(kind, repo)["python"] == "/shim-venv/python"
+    # a configured interpreter is used as given (check() verifies it)
+    (repo / "ops" / ".env").write_text("PSEUDOLIFE_CODEX_SHIM_PYTHON=/global/python3.14\n", encoding="utf-8")
+    assert sa.resolve("codex", repo)["python"] == "/global/python3.14"
+    # nothing imports: the old default stays, for check() to report
+    works.clear()
+    assert sa.resolve("claude", repo)["python"] == sa.default_python(repo)
+
+
+def test_check_reports_an_interpreter_that_cannot_import_the_package_and_names_the_fix(repo, monkeypatch):
+    python = repo / "python.exe"
+    python.write_text("", encoding="utf-8")
+    monkeypatch.setattr(sa, "probe_interpreter",
+                        lambda exe, repo: (False, "ModuleNotFoundError: No module named 'torch'"))
+    for kind in ("claude", "codex"):
+        problems = sa.check(kind, repo, sa.resolve(kind, repo, {"python": str(python)}))
+        [problem] = [p for p in problems if "cannot import" in p]
+        assert str(python) in problem and "pseudolife_memory.memory.dream" in problem
+        assert "No module named 'torch'" in problem
+        assert "ops/shim_python.py --repo" in problem
+        assert f"shim_autostart.py config {kind} --python" in problem
+    monkeypatch.setattr(sa, "probe_interpreter", lambda exe, repo: (True, ""))
+    assert sa.check("codex", repo, sa.resolve("codex", repo, {"python": str(python)})) == []
+
+
+def test_show_run_and_restart_refuse_an_interpreter_that_cannot_import_the_package(tmp_path):
+    """End to end, through the script: ``show`` prints the problem,
+    ``run`` and ``restart`` refuse before stopping or starting anything."""
+    root = tmp_path / "checkout"
+    (root / "evals" / "prompts").mkdir(parents=True)
+    (root / "ops").mkdir()
+    for script in ("claude_shim.py", "codex_shim.py"):
+        (root / "evals" / script).write_text("# shim\n", encoding="utf-8")
+    (root / "evals" / "prompts" / "sonnet_extractor_v5.md").write_text("prompt\n", encoding="utf-8")
+    _stub_package(root, "raise ModuleNotFoundError(\"No module named 'torch'\")\n")
+    (root / "ops" / ".env").write_text(f"PSEUDOLIFE_CLAUDE_SHIM_PYTHON='{sys.executable}'\n"
+                                       f"PSEUDOLIFE_CODEX_SHIM_PYTHON='{sys.executable}'\n"
+                                       f"PSEUDOLIFE_CLAUDE_SHIM_LOG={(tmp_path / 'c.log').as_posix()}\n"
+                                       f"PSEUDOLIFE_CODEX_SHIM_LOG={(tmp_path / 'x.log').as_posix()}\n",
+                       encoding="utf-8")
+    for kind in ("claude", "codex"):
+        proc = _run_script(root, "show", kind)
+        assert proc.returncode == 0
+        assert re.search(r"(?m)^problem\s+interpreter .* cannot import pseudolife_memory\.memory\.dream", proc.stdout)
+        assert "No module named 'torch'" in proc.stdout and "shim_python.py" in proc.stdout
+        proc = _run_script(root, "run", kind, "--dry-run")
+        assert proc.returncode == 1 and "cannot import" in proc.stdout
+        proc = _run_script(root, "run", kind)
+        assert proc.returncode == 1 and "cannot import" in proc.stderr
+        assert not (tmp_path / ("c.log" if kind == "claude" else "x.log")).read_text(
+            encoding="utf-8").count("starting ")
+        proc = _run_script(root, "restart", kind, "--force")
+        assert proc.returncode == 1 and "cannot import" in proc.stderr and "restarted" not in proc.stdout
+    _stub_package(root)            # the import works: no problem
+    proc = _run_script(root, "run", "codex", "--dry-run")
+    assert proc.returncode == 0 and json.loads(proc.stdout)["problems"] == []
 
 
 # ── the installers register the runner, not a baked command line ────────────

@@ -1,0 +1,227 @@
+{
+  "status": "historical-partial-checkpoint",
+  "executed_head": "74b5998c77d69db3fe3d347697b176168c3658a2",
+  "executed_tree": "ec179a527d5058bf5f63bda77ec3e0f6b9da9889",
+  "oracle_pin": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "platform": "Linux x86_64",
+  "rust": "1.94.0",
+  "python": "3.11.15",
+  "package": "0.17.0",
+  "profile": "release/default",
+  "binary": {
+    "sha256": "8a4c295f34f3121934605a25f6a86167e5bedea1b030f7d2800259a822c47908",
+    "bytes": 16826112
+  },
+  "installer_smoke": "passed",
+  "corpus_cases": [
+    "help-long",
+    "help-short",
+    "help-mode",
+    "help-trailing",
+    "help-invalid-trailing",
+    "unknown-basic",
+    "unknown-trailing",
+    "unknown-empty",
+    "unknown-apostrophe",
+    "unknown-quotes",
+    "unknown-backslash",
+    "unknown-controls",
+    "unknown-unicode",
+    "unknown-separators",
+    "unknown-category-c",
+    "version-bare-version",
+    "version-bare-flag",
+    "version-default-commit",
+    "version-default-commit-flag-tail",
+    "version-default-requirement",
+    "version-default-checkout-no-git",
+    "version-override-commit",
+    "version-override-requirement",
+    "version-half-root",
+    "version-half-launcher",
+    "version-wrong-platform-suffix"
+  ],
+  "mutation_controls": {
+    "count": 104,
+    "all_rejected": true
+  },
+  "invalid_argv": "passed",
+  "cli": {
+    "oracle": {
+      "exit": 0,
+      "outcomes": [
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_help_lists_version",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit",
+          "outcome": "passed"
+        }
+      ]
+    },
+    "candidate": {
+      "exit": 0,
+      "outcomes": [
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[-h]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[help]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_unknown_mode_points_at_help",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_help_lists_version",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_version_prints_the_package_version[--version]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_version_prints_the_package_version[version]",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit",
+          "outcome": "passed"
+        }
+      ]
+    }
+  },
+  "stdio": {
+    "oracle": {
+      "exit": 1,
+      "outcomes": [
+        {
+          "nodeid": "tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_survives_idle_gap",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_forwards_list_changed_on_toolset_expand",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_forwards_stringified_list_param",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_surfaces_the_daemons_real_error_message",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_claude_code_session_through_the_shim_keeps_one_root_episode",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_a_call_that_gets_through_announces_the_recovery_itself",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_passes_a_tool_refusal_through_unchanged",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_forwards_the_daemons_unknown_parameter_refusal",
+          "outcome": "passed"
+        }
+      ]
+    },
+    "candidate": {
+      "exit": 1,
+      "outcomes": [
+        {
+          "nodeid": "tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_survives_idle_gap",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_forwards_list_changed_on_toolset_expand",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_forwards_stringified_list_param",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_surfaces_the_daemons_real_error_message",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_claude_code_session_through_the_shim_keeps_one_root_episode",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_a_call_that_gets_through_announces_the_recovery_itself",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_passes_a_tool_refusal_through_unchanged",
+          "outcome": "failed"
+        },
+        {
+          "nodeid": "tests/test_shim.py::test_shim_forwards_the_daemons_unknown_parameter_refusal",
+          "outcome": "passed"
+        }
+      ]
+    }
+  },
+  "stdio_diagnosis": "Pinned Python daemon could not load uncached model files while offline; both arms had identical failures.",
+  "bare_measurement_smoke": {
+    "status": "passed",
+    "repeats": 1,
+    "samples_per_repeat": 1,
+    "evidence_scope": "plumbing only; no performance finding"
+  },
+  "final_measurements": "not started; final frozen-head invocation required",
+  "final_head_recapture_required": true,
+  "ported": false
+}

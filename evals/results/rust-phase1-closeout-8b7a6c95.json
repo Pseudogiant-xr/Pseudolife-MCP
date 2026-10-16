@@ -1,0 +1,318 @@
+{
+  "schema": 1,
+  "record_kind": "phase1-implementation-acceptance",
+  "implementation_commit": "8b7a6c95afd18c4dbb42cf4aea1a771ad6208d3f",
+  "implementation_tree": "f3d325b12ab589ecb00122487d5121c43f42f166",
+  "implementation_status": "ready-for-review",
+  "pr_ready_status": "pending-current-documentation-head-gates",
+  "oracle": {
+    "commit": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
+    "product_version": "0.16.1",
+    "database_schema": 54
+  },
+  "provenance": {
+    "executed_local_judge_and_measurement_commit": "690bb8acd855250c29145d623a039ddcd4dee6cb",
+    "executed_local_judge_and_measurement_tree": "9116cc4c98e79e947322fe2772476e255b73f033",
+    "promotion_commit": "d3022bcc339a2232446763687060342e009b1e5d",
+    "source_chain": "690bb8ac to d3022bcc changes documentation/data only; d3022bcc to 8b7a6c95 changes one reviewed assertion inside the Windows doorbell cfg(test) module. Production and executable instrument bytes are unchanged.",
+    "suite_binary_identity": "Both Linux suites execute the retained native ELF built at 690bb8ac; tested checkout and build source are distinct identities.",
+    "windows_binary_sha256": "1a066bdf67937df4b0e857770dda76569fe222fff97064197683b3b0688f3264",
+    "linux_binary_sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a"
+  },
+  "acceptance_scope": {
+    "register_rows": {
+      "MCP-WIRE": "ported",
+      "MCP-TIER": "ported",
+      "SHIM-LIFECYCLE": "ported-with-substitution",
+      "SHIM-AUTH": "ported",
+      "SHIM-BOARD": "ported-with-substitution"
+    },
+    "mcp_tier_boundary": "Client forwarding, visibility observations and list_changed only. Daemon tier filtering, TTL/precedence and authorization implementation remain Phase 3 deferred.",
+    "retired_by_decision": {
+      "SHIM-SDK-PREFLIGHT": "Maintainer 2026-10-05 decision; three SDK preflight mappings have no Rust counterpart."
+    },
+    "ported_with_substitution": {
+      "SHIM-DAEMON-LAUNCH": "Configured interpreter or JSON serve argv; otherwise no-spawn wait and named explanation.",
+      "SHIM-UPDATE-SCHEDULING": "Optional updater starts only after successful first stdout-frame flush, with configured interpreter.",
+      "SHIM-WAKE-REASON": "Rust character predicates for bounded wake reason; claim normalization remains Unicode 14."
+    },
+    "channel_remainder_deferred_phase2": [
+      "tests/test_shim_board_retry.py::test_late_adapter_feeds_the_channel_inbox",
+      "tests/test_shim_channel.py::test_channel_proxy_preserves_upstream_instructions_and_tools",
+      "tests/test_shim_channel.py::test_channel_cli_is_explicit_and_leaves_ordinary_shim_default",
+      "tests/test_shim_channel.py::test_codex_channel_keeps_eager_channel_adapter"
+    ],
+    "other_internal_functions_outside_phase1": 55,
+    "frozen_pre_acceptance_mapping": {
+      "path": "rust/phase1-test-buckets.json",
+      "working_bytes_sha256": "2d31fa1599b0d6cfe4b949c5bf6febcc1a70e6555f9c395236094f37a81de759",
+      "git_blob": "a69d4ab8302b51a6f3517e097663b4feef35f0fa",
+      "acceptance_fields": "Pending acceptance fields and existing retirement/equivalent labels are preserved as frozen inventory metadata, not the final acceptance ledger"
+    },
+    "acceptance_authority": "This separate ledger and the bounded register statuses; frozen mapping acceptance labels are intentionally unchanged."
+  },
+  "local_evidence": {
+    "executed_commit": "690bb8acd855250c29145d623a039ddcd4dee6cb",
+    "artifacts": [
+      {
+        "path": "evals/results/rust-port-phase1-cli-python-linux-690bb8ac.json",
+        "sha256": "d3d7dc63ef1b12b49b047a9adfc284ab1a30d96a565936243b107a9a792d26b2",
+        "hash_representation": "committed Git blob bytes"
+      },
+      {
+        "path": "evals/results/rust-port-phase1-cli-python-windows-690bb8ac.json",
+        "sha256": "64aead3728bd15a6c1ad94fe160df902653b87fd9565929e1ac59454b4b13543",
+        "hash_representation": "committed Git blob bytes"
+      },
+      {
+        "path": "evals/results/rust-port-phase1-python-linux-690bb8ac.json",
+        "sha256": "9b31db479056a37dad6f1eec6dde67226443808dbac309e83ae863349e004455",
+        "hash_representation": "committed Git blob bytes"
+      },
+      {
+        "path": "evals/results/rust-port-phase1-python-windows-690bb8ac.json",
+        "sha256": "8f71b6778f6e199599c93bac8afab723f6cb6d78906ed9ac2f6e7384db6eaf3a",
+        "hash_representation": "committed Git blob bytes"
+      },
+      {
+        "path": "evals/results/rust-port-phase1-rust-linux-690bb8ac.json",
+        "sha256": "a373616d9cc7dd2aa3b3f5583419d2baeb8d973045d8efce32b38363026a7ba4",
+        "hash_representation": "committed Git blob bytes"
+      },
+      {
+        "path": "evals/results/rust-port-phase1-rust-windows-690bb8ac.json",
+        "sha256": "ca9a0ab9d0e4d53ab1b33fd0915687e5370e3d66552029abb26ab043fa9cbfdb",
+        "hash_representation": "committed Git blob bytes"
+      },
+      {
+        "path": "evals/results/rust-phase1-measurement-linux-690bb8ac.json",
+        "sha256": "07ac02e6d42543d81f5a98a94f04134a96ffb59d90ba1ebe54e0dcbc99dc0068",
+        "hash_representation": "committed Git blob bytes"
+      },
+      {
+        "path": "evals/results/rust-phase1-measurement-windows-690bb8ac.json",
+        "sha256": "e96f2ef569b7ff1a483d865e0bbfcb07837bd2cafbd7671208f37a7d66481b09",
+        "hash_representation": "committed Git blob bytes"
+      }
+    ],
+    "combined_receipts": 4,
+    "actual_stdio_passes_per_receipt": 8,
+    "bound_candidate_cells_per_receipt": 32,
+    "differences": 0,
+    "python_dispatcher_passes_per_platform": 5,
+    "rust_cli_coverage_claimed": false,
+    "measurement_repeats": 3,
+    "samples_per_arm_per_repeat": 10,
+    "limits": "Sampled RSS is a lower bound; executable bytes exclude Python runtime/dependencies; repeat floors are descriptive ranges. Before/after source/runtime changes do not isolate SDK retirement. Historical r5 is non-comparable."
+  },
+  "full_suites": [
+    {
+      "host_label": "linux-wsl",
+      "tested_commit": "8b7a6c95afd18c4dbb42cf4aea1a771ad6208d3f",
+      "tested_tree": "f3d325b12ab589ecb00122487d5121c43f42f166",
+      "binary_source_commit": "690bb8acd855250c29145d623a039ddcd4dee6cb",
+      "binary_source_tree": "9116cc4c98e79e947322fe2772476e255b73f033",
+      "binary_sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a",
+      "plugin_blob": "2dbc9e19954c8ae84c158f96dbb36c152b402a28",
+      "python_version": "3.11.15",
+      "product_version": "0.16.1",
+      "mcp_version": "2.1.1",
+      "exit_code": 0,
+      "passed": 17950,
+      "skipped": 81,
+      "warnings": 64,
+      "pytest_seconds": 1681.36,
+      "junit_testcases": 18031,
+      "routing": {
+        "rust": 8,
+        "python": 18023,
+        "mapped_rust_passed_once": 8,
+        "mapped_python_dispatcher_passed_once": 5
+      },
+      "started_utc": "2026-10-04T22:08:25.5435114Z",
+      "ended_utc": "2026-10-04T22:36:35.2343461Z",
+      "junit_sha256": "1be18072a1df4a916e4106fdd5f391c54ecb97f6475a9771f3da61b0f04d5fef",
+      "controller_receipt_sha256": "efba40e288a46e1a9bd53d52f53b78e12e1a05bb8838ec71bea9e16cb3590f87",
+      "native_postcheck_sha256": "d4ae35a5ec2f3e367b1ed236968da6dbbd0661331d1d4ad294def8c173e556c1",
+      "cleanup": {
+        "owned_processes_remaining": 0,
+        "owned_databases_remaining": 0,
+        "native_suite_lock_free": true,
+        "staged_candidate_copy_removed": true,
+        "native_postcheck_database_cleanup_verified": false,
+        "database_census_separately_verified": true,
+        "process_census_sha256": "1fbd7dd94f3e434655269d4d856010f7357bf860f8836a17cc2c13c8261e0ef9",
+        "database_census_sha256": "0bdb5c987c1d17e2081e73fb5e5aa4e6ca1f67219bb1bdb57ed6ad1f5eaa5989",
+        "copy_cleanup_sha256": "f14c65ce41d007ba01d6a5098a6e845f95164b067d8ae6862c6ff89f2f0f0d88"
+      }
+    },
+    {
+      "host_label": "linux-box",
+      "tested_commit": "8b7a6c95afd18c4dbb42cf4aea1a771ad6208d3f",
+      "tested_tree": "f3d325b12ab589ecb00122487d5121c43f42f166",
+      "binary_source_commit": "690bb8acd855250c29145d623a039ddcd4dee6cb",
+      "binary_source_tree": "9116cc4c98e79e947322fe2772476e255b73f033",
+      "binary_sha256": "2a0b1fa925fbb67d5ffdfdc8c081d5e362c9fe2508d8380b17f3f79f1aa3f16a",
+      "plugin_blob": "2dbc9e19954c8ae84c158f96dbb36c152b402a28",
+      "python_version": "3.11.16",
+      "product_version": "0.16.1",
+      "mcp_version": "2.1.1",
+      "exit_code": 0,
+      "passed": 17955,
+      "skipped": 76,
+      "warnings": 64,
+      "pytest_seconds": 1689.51,
+      "junit_testcases": 18031,
+      "routing": {
+        "rust": 8,
+        "python": 18023,
+        "mapped_rust_passed_once": 8,
+        "mapped_python_dispatcher_passed_once": 5
+      },
+      "started_utc": "2026-10-04T22:17:25.1285943Z",
+      "ended_utc": "2026-10-04T22:45:46.8198980Z",
+      "junit_sha256": "77569251d658b6d9e68c90a26b80b60e38a1a4bedb3e47daa7f6e234a7262ebb",
+      "controller_receipt_sha256": "e17846e33251493f7eade900c75b958ff0804c14bc019fb9a49db30f92157765",
+      "native_postcheck_sha256": "7d53cf59cfb61e44c37801c2fd4f80d28ac617e5b268de21a0fe8b891d11c9d7",
+      "cleanup": {
+        "owned_processes_remaining": 0,
+        "owned_databases_remaining": 0,
+        "native_suite_lock_free": true,
+        "staged_candidate_copy_removed": true,
+        "native_postcheck_database_cleanup_verified": false,
+        "database_census_separately_verified": true,
+        "process_census_sha256": "1fbd7dd94f3e434655269d4d856010f7357bf860f8836a17cc2c13c8261e0ef9",
+        "database_census_sha256": "0bdb5c987c1d17e2081e73fb5e5aa4e6ca1f67219bb1bdb57ed6ad1f5eaa5989",
+        "copy_cleanup_sha256": "f14c65ce41d007ba01d6a5098a6e845f95164b067d8ae6862c6ff89f2f0f0d88"
+      }
+    }
+  ],
+  "integrated_ci": {
+    "tested_commit": "8b7a6c95afd18c4dbb42cf4aea1a771ad6208d3f",
+    "run_url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052",
+    "run_attempt": 1,
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "Rust / ubuntu-latest",
+        "conclusion": "success",
+        "started_at": "2026-10-04T22:01:33Z",
+        "completed_at": "2026-10-04T22:03:45Z",
+        "html_url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052/job/111542025870"
+      },
+      {
+        "name": "Rust / windows-latest",
+        "conclusion": "success",
+        "started_at": "2026-10-04T22:01:35Z",
+        "completed_at": "2026-10-04T22:06:16Z",
+        "html_url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052/job/111542026050"
+      },
+      {
+        "name": "Parity / windows-latest",
+        "conclusion": "success",
+        "started_at": "2026-10-04T22:06:19Z",
+        "completed_at": "2026-10-04T22:16:15Z",
+        "html_url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052/job/111542924875"
+      },
+      {
+        "name": "Parity / ubuntu-latest",
+        "conclusion": "success",
+        "started_at": "2026-10-04T22:06:18Z",
+        "completed_at": "2026-10-04T22:10:23Z",
+        "html_url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052/job/111542924921"
+      }
+    ],
+    "pr_checks": [
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052/job/111542924875",
+        "name": "Parity / windows-latest",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052/job/111542924921",
+        "name": "Parity / ubuntu-latest",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/runs/111542139329",
+        "name": "CodeQL",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403083/job/111542078623",
+        "name": "test-lite-macos",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403083/job/111542078698",
+        "name": "test-lite-windows",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403083/job/111542078540",
+        "name": "test",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403083/job/111542078687",
+        "name": "frontend",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403083/job/111542078691",
+        "name": "test-lite-linux",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052/job/111542026050",
+        "name": "Rust / windows-latest",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052/job/111542025870",
+        "name": "Rust / ubuntu-latest",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238400697/job/111542020990",
+        "name": "Analyze (javascript-typescript)",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238400697/job/111542020975",
+        "name": "Analyze (python)",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238400697/job/111542020780",
+        "name": "Analyze (rust)",
+        "state": "SUCCESS"
+      },
+      {
+        "link": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238400697/job/111542020956",
+        "name": "Analyze (actions)",
+        "state": "SUCCESS"
+      }
+    ],
+    "successful_pr_check_count": 14
+  },
+  "review": {
+    "whole_closeout_review_commit": "d3022bcc339a2232446763687060342e009b1e5d",
+    "whole_closeout_verdict": "Approved substantive draft publication; no blocking findings; final acceptance not approved by that review.",
+    "fixture_delta_review": "Independent bounded review approved the sole Windows cfg(test) exit-expectation correction subsequently committed at 8b7a6c95.",
+    "retained_nonblocking_limitation": "Linux invoked/resolved Python interpreter basename alias mismatch can reject self-replay bindings; final captures used matching python3.11 identity.",
+    "final_documentation_head_review": "pending",
+    "reviewer_model": "gpt-6.1-sol",
+    "reviewer_reasoning_effort": "xhigh"
+  },
+  "remaining_ready_gates": [
+    "Candidate-routed WSL and box suites at the current committed documentation PR head.",
+    "Integrated Rust/Parity and all PR checks green at the current documentation PR head.",
+    "Fresh independent final review of the documentation/data delta and implementation evidence followup."
+  ],
+  "limitations": [
+    "No dirty documentation-head test completion is claimed.",
+    "Lease board checks were unavailable; native locks and exact owned cleanup establish resource cleanup.",
+    "No Rust daemon tier implementation, Phase 2 CLI acceptance, installation, merge or deployment is claimed."
+  ]
+}

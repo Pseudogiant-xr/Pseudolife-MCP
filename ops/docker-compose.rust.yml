@@ -1,0 +1,41 @@
+# Explicit opt-in: docker compose -p w3j-container-prep -f ops/docker-compose.rust.yml up --build -d
+# A separate project can run beside the default Python stack. State is disposable.
+name: w3j-container-prep
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: w3j
+      POSTGRES_PASSWORD: w3j-disposable
+      POSTGRES_DB: pl_cf_w3j_container
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U w3j -d pl_cf_w3j_container"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks: [offline]
+  rust-daemon:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.daemon-rust
+      args:
+        GIT_SHA: ${PSEUDOLIFE_BUILD_GIT_SHA:-unknown}
+        GIT_DIRTY: ${PSEUDOLIFE_BUILD_DIRTY:-unknown}
+        BUILD_TIME: ${PSEUDOLIFE_BUILD_TIME:-unknown}
+        BUILD_SOURCE: checkout
+    image: w3j-daemon-rust:prep
+    environment:
+      PSEUDOLIFE_MCP_DATABASE_URL: postgresql://w3j:w3j-disposable@postgres:5432/pl_cf_w3j_container
+      PSEUDOLIFE_MCP_TOKEN: ${W3J_RUST_TOKEN:?Set a disposable W3J_RUST_TOKEN}
+    ports:
+      - "127.0.0.1:${W3J_RUST_PORT:-8766}:8765"
+    tmpfs:
+      - /data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [offline]
+networks:
+  offline: {}

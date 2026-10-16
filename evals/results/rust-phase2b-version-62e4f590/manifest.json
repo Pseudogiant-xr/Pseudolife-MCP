@@ -1,0 +1,300 @@
+{
+  "schema": 1,
+  "kind": "version-local-release-evidence",
+  "measured_source_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+  "measured_source_tree": "ab2d84ec76db706b8dbc4e6252d822f4ada05600",
+  "oracle_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+  "package_version": "0.17.0",
+  "schema_version": 55,
+  "cli_version_status": "deferred",
+  "timed_arm_samples": 240,
+  "untimed_controls": 8,
+  "line_ratio": {
+    "rust_version_production_lines": 157,
+    "rust_dispatcher_added_lines": 15,
+    "rust_total": 172,
+    "python_module": "pseudolife_memory/cli.py",
+    "python_physical_lines": 223,
+    "usage_asset_lines_excluded": 98,
+    "python_denominator": 125,
+    "ratio": 1.376,
+    "python_version_function_lines": 14,
+    "method": "Physical lines including comments/blanks: Rust before cfg(test) plus added dispatcher lines; Python whole CLI mode module minus AST _USAGE asset. No dedicated Python version module."
+  },
+  "code_review": {
+    "reviewed_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+    "verdict": "approve",
+    "independent": true,
+    "scope": "code; local runtime cells and later evidence/doc head are separate gates"
+  },
+  "hosted_ci": {
+    "run_id": 37310594788,
+    "recorded_status": "failure",
+    "rust_jobs": "both passed",
+    "parity_jobs": "both failed in synthetic PYTHONPATH fixture before differential judges",
+    "fixture_tests_passed_per_os": 150,
+    "differential_judges_executed": false,
+    "accepted": false
+  },
+  "corpora": {
+    "windows": {
+      "public_receipt": "cli-corpus-windows.json",
+      "public_sha256": "ee4119a7071cc6fe767151a39a537f55f49dcd428de1c2a53c781d69257de81e",
+      "public_bytes": 25840,
+      "raw_receipt_sha256": "c302d62b52705712d33ee07483e2c4420901039763df13b01c1b46bfdcbbdf79",
+      "raw_receipt_bytes": 826981808,
+      "cases_passed": 26,
+      "candidate_controls_rejected": 104,
+      "mode_cases": {
+        "help": 5,
+        "unknown_dispatch": 10,
+        "version": 11
+      },
+      "normalizations": [],
+      "public_projection_previously_verified_against_raw": true,
+      "copied_public_bytes_unchanged": true,
+      "daemon_cleanup": {
+        "readiness_identity_verified": true,
+        "daemon_stopped": true,
+        "children_stopped": true,
+        "database_dropped": true
+      }
+    },
+    "linux": {
+      "public_receipt": "cli-corpus-linux.json",
+      "public_sha256": "8bd72ccb6bfb5abdbfa84e7a4404190b728caa352d15bf5ec22975f699f6e353",
+      "public_bytes": 25641,
+      "raw_receipt_sha256": "11683046c15c43ddcab006bd06dc8a7c4113317e52067f1525f102e7a3afd2cf",
+      "raw_receipt_bytes": 3525507611,
+      "cases_passed": 26,
+      "candidate_controls_rejected": 104,
+      "mode_cases": {
+        "help": 5,
+        "unknown_dispatch": 10,
+        "version": 11
+      },
+      "normalizations": [],
+      "public_projection_previously_verified_against_raw": true,
+      "copied_public_bytes_unchanged": true,
+      "daemon_cleanup": {
+        "readiness_identity_verified": true,
+        "daemon_stopped": true,
+        "children_stopped": true,
+        "database_dropped": true
+      }
+    }
+  },
+  "measurements": [
+    {
+      "public_receipt": "measurement-windows-bare.json",
+      "public_sha256": "51564788b1b67839c383ef4308e46f3b3b3a8b890e96f8fd7f6b56931cf193b4",
+      "public_bytes": 38906,
+      "raw_receipt_sha256": "11b9a9b92f098fd0e3760a6daf81c5a01ea4432c1e90ccbc6b8d257c3baf91b4",
+      "raw_receipt_bytes": 47551,
+      "runtime_python": "3.11.9",
+      "timed_arm_samples": 60,
+      "untimed_controls": 2,
+      "original_metrics_recomputed": true
+    },
+    {
+      "public_receipt": "measurement-windows-installed.json",
+      "public_sha256": "b387cae9201cc8db9390b3d2d306071b46ac9f0b3b4a2b670ece9cce9e1f5ed1",
+      "public_bytes": 42089,
+      "raw_receipt_sha256": "ac932e20b96a344fcf0f8a16b8e9916e580aa7c655f78ce72154908579dc8ec6",
+      "raw_receipt_bytes": 75276698,
+      "runtime_python": "3.11.9",
+      "timed_arm_samples": 60,
+      "untimed_controls": 2,
+      "original_metrics_recomputed": true
+    },
+    {
+      "public_receipt": "measurement-linux-bare.json",
+      "public_sha256": "c04b84e6f8785c9a3f5c6249d43288a600a93c6342514d9744f51b0d8e4548ed",
+      "public_bytes": 38705,
+      "raw_receipt_sha256": "a6a66a3db9af1c1933e80a2e87329e7e95eac324187baf7fd7196777986b6201",
+      "raw_receipt_bytes": 47250,
+      "runtime_python": "3.11.15",
+      "timed_arm_samples": 60,
+      "untimed_controls": 2,
+      "original_metrics_recomputed": true
+    },
+    {
+      "public_receipt": "measurement-linux-installed.json",
+      "public_sha256": "43aa3c3de06797db1313ab060ac757952415bc992d9c64f0e45c7335aceaf887",
+      "public_bytes": 41855,
+      "raw_receipt_sha256": "756f2c1416d80f6e6f7121f1ebaf2ed59ef4fff8d78c7deab628a4ebaa6856ea",
+      "raw_receipt_bytes": 320587271,
+      "runtime_python": "3.11.15",
+      "timed_arm_samples": 60,
+      "untimed_controls": 2,
+      "original_metrics_recomputed": true
+    }
+  ],
+  "hosted_ci_followup": {
+    "run_id": 37315503446,
+    "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37315503446",
+    "head": "ac0c64a1a5f2b727cde892146302feae666af086",
+    "conclusion": "failure",
+    "rust_jobs": "passed-both-platforms",
+    "cli_version_judge": "skipped",
+    "platforms": [
+      {
+        "platform": "Linux",
+        "status": "failed",
+        "sha256": "a5989508892ce0216589152277959e5e94f99629276a530c70cabff20a8f0539",
+        "process_nodes": 10,
+        "process_all_passed": true,
+        "fixture_passed": 151,
+        "differences": [
+          {
+            "case": "version-mismatch",
+            "arm": "oracle",
+            "path": "/stderr",
+            "reason": "startup_stderr_bytes"
+          },
+          {
+            "case": "version-mismatch",
+            "arm": "candidate",
+            "path": "/stderr",
+            "reason": "startup_stderr_bytes"
+          },
+          {
+            "surface": "generic",
+            "case": "register-sender",
+            "arm": 1,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-recipient",
+            "arm": 1,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-sender",
+            "arm": 2,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-recipient",
+            "arm": 2,
+            "path": "/body/name",
+            "reason": "value"
+          }
+        ],
+        "generic_cases": 25,
+        "identity_proxy_validation": "failed",
+        "raw_streams_retained": false
+      },
+      {
+        "platform": "Windows",
+        "status": "failed",
+        "sha256": "3464033bc17cb3040c5a0e2c97df543a1576ad307b4f0a5d0f8c4f7696e6c83f",
+        "process_nodes": 10,
+        "process_all_passed": true,
+        "fixture_passed": 151,
+        "differences": [
+          {
+            "case": "version-mismatch",
+            "arm": "oracle",
+            "path": "/stderr",
+            "reason": "startup_stderr_bytes"
+          },
+          {
+            "case": "version-mismatch",
+            "arm": "candidate",
+            "path": "/stderr",
+            "reason": "startup_stderr_bytes"
+          },
+          {
+            "surface": "generic",
+            "case": "register-sender",
+            "arm": 1,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-recipient",
+            "arm": 1,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-sender",
+            "arm": 2,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-recipient",
+            "arm": 2,
+            "path": "/body/name",
+            "reason": "value"
+          }
+        ],
+        "generic_cases": 25,
+        "identity_proxy_validation": "failed",
+        "raw_streams_retained": false
+      }
+    ],
+    "pending_gate": "Derived-name identity substitution is not approved; comparison policy unchanged."
+  },
+  "oracle_child_runtime_erratum": {
+    "affected_receipt": "cli-corpus-linux.json",
+    "affected_source_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+    "cause": "Fixture symlink resolution changed fifteen Linux oracle child invocations from the virtualenv executable to its base interpreter.",
+    "affected_mode_cases": {
+      "help": 5,
+      "unknown_dispatch": 10
+    },
+    "affected_oracle_child_invocations": 15,
+    "original_byte_matches_retained": 26,
+    "original_candidate_controls_rejected_retained": 104,
+    "admitted_virtualenv_parity_proven_for_affected_rows": false,
+    "capture_runtime_scope": "Capture producer identity; not a runtime probe of every child.",
+    "unaffected": {
+      "linux_version_rows": 11,
+      "windows_corpus": true,
+      "paired_measurement_cells": 4,
+      "timed_arm_samples": 240,
+      "untimed_controls": 8,
+      "current_startup_capture_sets": 2
+    },
+    "original_receipts_and_counts_preserved": true,
+    "followup": "Fixture repair and recapture of only the fifteen affected Linux rows remain pending.",
+    "derived_name_substitution_approved": false,
+    "comparison_policy_changed": false,
+    "cli_version_status": "deferred"
+  },
+  "linux_help_dispatch_recap_followup": {
+    "public_receipt": "../rust-phase2b-version-804e829e/cli-help-dispatch-linux.json",
+    "readme": "../rust-phase2b-version-804e829e/README.md",
+    "public_sha256": "5b430d5e26b695b6dbb871895d16706b9757b0e29a0cffc4f7ca749f4165d292",
+    "public_bytes": 19347,
+    "measured_instrument_head": "804e829ebb2d0f1e9c80894959420bc814aeaac3",
+    "measured_instrument_tree": "297f037211e648d69d1d5a3353750ff2369fedea",
+    "rust_binary_build_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+    "rust_sources_equivalent_to_instrument_head": true,
+    "cases_passed": 15,
+    "candidate_controls_rejected": 60,
+    "mode_cases": {
+      "help": 5,
+      "unknown_dispatch": 10,
+      "version": 0
+    },
+    "oracle_invocation_retains_admitted_venv_path_count": 15,
+    "complete_help_version_gate": false,
+    "original_receipts_and_erratum_preserved": true,
+    "derived_name_substitution_approved": false,
+    "comparison_policy_changed": false,
+    "cli_version_status": "deferred"
+  }
+}

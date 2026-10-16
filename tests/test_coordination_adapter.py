@@ -1377,6 +1377,35 @@ def _mailbox_daemon(answers):
     return daemon
 
 
+class _StaggeredRing:
+    """A ``rung`` wake whose ``ring_at`` is ``seconds`` past the heartbeat
+    that serves it. It remembers the time it named, so a test asserts "not
+    yet" only while the wall clock still proves it (``pending``) and sleeps
+    until the ring is due (``wait``) instead of guessing with fixed sleeps:
+    the windows-latest runner of PR #631 (2026-10-08) spent more than the
+    old 0.6 s stagger on the heartbeat itself, and the marker was already
+    there when the test looked."""
+
+    def __init__(self, reason, seconds=2.0):
+        self.reason, self.seconds, self.ring_at = reason, seconds, None
+
+    def __call__(self):
+        self.ring_at = time.time() + self.seconds
+        return {"decision": "rung", "reason": self.reason, "ring_at": self.ring_at}
+
+    def pending(self):
+        """The ring is at least a second away, so nothing may have rung;
+        a runner that stalled past that skips the "not yet" checks rather
+        than failing them."""
+        return time.time() < self.ring_at - 1.0
+
+    async def wait(self):
+        """Sleep past ``ring_at``. The marker's timer was scheduled before
+        this sleep and for an earlier time, so it has run when this
+        returns."""
+        await asyncio.sleep(max(0.0, self.ring_at - time.time()) + 0.3)
+
+
 def test_a_daemon_ring_becomes_a_marker_beside_the_digest(tmp_path):
     """A heartbeat carrying ``wake`` writes ``<key>.ring`` for the Stop hook
     (the digest watermark, then the decision and its reason) and offers the
@@ -1419,10 +1448,8 @@ def test_a_daemon_ring_becomes_a_marker_beside_the_digest(tmp_path):
 def test_a_staggered_ring_waits_for_its_time(tmp_path):
     """The daemon staggers a fan-out burst by setting ``ring_at`` ahead; the
     marker and the doorbell's offer both wait for it."""
-    daemon = _mailbox_daemon([(0, [], None),
-                              (1, _preview("m1"),
-                               lambda: {"decision": "rung", "reason": "anyone",
-                                       "ring_at": time.time() + 0.6})])
+    ring = _StaggeredRing("anyone")
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring)])
 
     async def drive():
         client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
@@ -1430,9 +1457,10 @@ def test_a_staggered_ring_waits_for_its_time(tmp_path):
             async with coordination:
                 await coordination._heartbeat()
                 await asyncio.sleep(0.1)
-                assert not (tmp_path / "digest.ring").exists()
-                assert coordination.ring_due() is None
-                await asyncio.sleep(0.8)
+                if ring.pending():
+                    assert not (tmp_path / "digest.ring").exists()
+                    assert coordination.ring_due() is None
+                await ring.wait()
                 assert (tmp_path / "digest.ring").read_text().endswith("\nrung anyone\n")
                 assert coordination.ring_due() == ("rung", "anyone")
 
@@ -1730,11 +1758,11 @@ def test_a_newer_ring_replaces_a_refused_one_and_keeps_its_stagger(tmp_path):
     marker is not written ahead of the newer ring's ``ring_at``, even when
     the heartbeat that brings the newer ring finds the filesystem writable
     again (review finding R1, 2026-10-02)."""
+    newer = _StaggeredRing("clearer")
     daemon = _mailbox_daemon([
         (0, [], None),
         (1, _preview("m1"), {"decision": "rung", "reason": "anyone", "ring_at": 0.0}),
-        (2, _preview("m1", "m2"),
-         lambda: {"decision": "rung", "reason": "clearer", "ring_at": time.time() + 0.6}),
+        (2, _preview("m1", "m2"), newer),
         (2, _preview("m1", "m2"), None)])
 
     async def drive():
@@ -1748,8 +1776,9 @@ def test_a_newer_ring_replaces_a_refused_one_and_keeps_its_stagger(tmp_path):
                 await coordination._heartbeat()   # the newer ring; writable again
                 await coordination._heartbeat()
                 await asyncio.sleep(0.05)
-                assert not (tmp_path / "digest.ring").exists()
-                await asyncio.sleep(0.8)
+                if newer.pending():
+                    assert not (tmp_path / "digest.ring").exists()
+                await newer.wait()
                 assert (tmp_path / "digest.ring").read_text().endswith("\nrung clearer\n")
 
     asyncio.run(drive())

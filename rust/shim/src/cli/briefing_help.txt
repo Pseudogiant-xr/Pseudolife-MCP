@@ -1,0 +1,18 @@
+usage: pseudolife-mcp briefing [-h] [--max-unsure MAX_UNSURE]
+                               [--max-lessons MAX_LESSONS]
+                               [--max-world MAX_WORLD] [--hook-json]
+                               [--coordination]
+
+options:
+  -h, --help            show this help message and exit
+  --max-unsure MAX_UNSURE
+                        cap surprises AND questions at this many EACH (default
+                        3 of each)
+  --max-lessons MAX_LESSONS
+  --max-world MAX_WORLD
+  --hook-json           emit a Claude Code/Codex SessionStart hook payload
+                        (hookSpecificOutput.additionalContext) carrying the
+                        memory core and the bounded briefing the plugin hook
+                        serves; the --max-* caps do not apply
+  --coordination        print the agent-board check-in instead, only where
+                        this bearer can use the board

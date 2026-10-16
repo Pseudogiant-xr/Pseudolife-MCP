@@ -51,10 +51,12 @@ import psycopg
 
 from pseudolife_memory.backup_cli import _default_data_dir
 from pseudolife_memory.storage import embedded_pg
+from pseudolife_memory.storage.re_evidence_schema import (
+    ensure_python_schema as ensure_schema,
+)
 from pseudolife_memory.storage.schema import (
     BENCH_RESET_TABLES,
     _backfill_trace_invalidations,
-    ensure_schema,
 )
 
 FORMAT_VERSION = 1

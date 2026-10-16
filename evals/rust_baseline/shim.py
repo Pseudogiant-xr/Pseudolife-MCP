@@ -21,6 +21,10 @@ def main():
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--samples", type=int, default=10)
+    parser.add_argument("--candidate", type=Path, help="public Rust CLI executable; capture a same-run Python/Rust pair")
+    parser.add_argument("--candidate-root", type=Path, default=ROOT, help="Rust source checkout for identity recording")
+    parser.add_argument("--candidate-sha256", help="expected executable SHA-256 supplied with the frozen binary")
+    parser.add_argument("--measurement-status", choices=("preliminary", "final"), default="preliminary")
     parser.add_argument("--board-checked-at", help="UTC time of lead's explicit board/peer resource-free verification")
     parser.add_argument("--offline-resource-checked-at",
                         help="UTC time of independent local/WSL lock and peer clearance when board unavailable")
@@ -32,6 +36,10 @@ def main():
         args.repeats = args.samples = 1
     else:
         resource = lease_gate(args.board_checked_at, offline_resource_checked_at=args.offline_resource_checked_at)
+    if args.candidate:
+        from .shim_measurement import measure_pair
+        write_result(args.out, measure_pair(args, resource))
+        return
     blocks, runs = [], []
     for repeat in range(args.repeats):
         block = []

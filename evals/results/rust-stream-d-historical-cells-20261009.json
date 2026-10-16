@@ -1,0 +1,2382 @@
+{
+  "schema": "rust-stream-d-historical-cells-v1",
+  "evidence_kind": "allowlisted projection of retained originals",
+  "observed_date": "2026-10-08",
+  "historical_only": true,
+  "current_acceptance_publication": "HELD_PENDING_COORDINATOR_ORACLE307",
+  "final_oracle307_head": null,
+  "images": {
+    "e122-windows": {
+      "source_head": "e1226d2ec30a55a6e44b09b2b12fcbd500173c41",
+      "source_tree": "7dfc5a03b0fb9d22a6d004606497ffbd4f5efa38",
+      "produced_on": "Windows",
+      "sha256": "abaf6545398de60fe4fbb2139217a6706035bc9791f690e90b5792e280a5c6a4",
+      "producing_receipt_sha256": "88117224f990ed8a83fa1e60a746dc5878f093fdfa006ce1021706cebd631ebc",
+      "producing_receipt_name": "stream-d-first-cell-build-receipt.json",
+      "producing_receipt_schema": null,
+      "producing_receipt_origin": "Stream D actual build",
+      "features": "default",
+      "profile": "debug",
+      "toolchain": "1.94.0",
+      "producing_command": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-p",
+        "pseudolife-stdio",
+        "-j",
+        "2"
+      ]
+    },
+    "e122-linux1": {
+      "source_head": "e1226d2ec30a55a6e44b09b2b12fcbd500173c41",
+      "source_tree": "7dfc5a03b0fb9d22a6d004606497ffbd4f5efa38",
+      "produced_on": "Linux1",
+      "sha256": "5dc6627dd1a6fd959ce4215e8f39266399f65e036964301f003a879d86fe995c",
+      "producing_receipt_sha256": "70e9aa2a5761ac06d008e17125067e22559b93eee4ee8d5e53036b77e47e8562",
+      "producing_receipt_name": "build-receipt.json",
+      "producing_receipt_schema": null,
+      "producing_receipt_origin": "Stream D actual build",
+      "features": "default",
+      "profile": "debug",
+      "toolchain": "1.94.0",
+      "producing_command": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-p",
+        "pseudolife-stdio",
+        "-j",
+        "2"
+      ]
+    },
+    "ec697-windows": {
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "produced_on": "Windows",
+      "sha256": "8d25904562afe7a889e775c9c8f56e004962ba91e4160fe89d02cba8807f3149",
+      "producing_receipt_sha256": "ccf8abf7394648de7f0e96a4a326db706359ee768dcdd0e660217c4f180cdf3b",
+      "producing_receipt_name": "stream-d-ec697-windows-producing-receipt-20261008T0655.json",
+      "producing_receipt_schema": "stream-d-ec697-producing-receipt-v1",
+      "producing_receipt_origin": "Stream D actual build",
+      "features": "default",
+      "profile": "debug",
+      "toolchain": "1.94.0",
+      "producing_command": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "-p",
+        "pseudolife-stdio",
+        "-j",
+        "2"
+      ]
+    },
+    "ec697-linux2": {
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "produced_on": "Linux1",
+      "sha256": "ad5b0bd3acfa610be91f41f2177d2459ddc2d04812c511d94fbd46fae20ba434",
+      "producing_receipt_sha256": "1cac78d56587d78da9add5118e6f61ae773adf62c3c380fc89d22ed21f5ec134",
+      "producing_receipt_name": "build-receipt.json",
+      "producing_receipt_schema": null,
+      "producing_receipt_origin": "Stream E actual build",
+      "features": "default (codex-delivery)",
+      "profile": "dev",
+      "toolchain": "1.94.0",
+      "producing_command": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "-p",
+        "pseudolife-stdio",
+        "--bin",
+        "pseudolife-stdio"
+      ]
+    }
+  },
+  "cells": [
+    {
+      "id": "windows-version2-positive",
+      "platform": "Windows",
+      "state": "historical PASS",
+      "source_head": "e1226d2ec30a55a6e44b09b2b12fcbd500173c41",
+      "source_tree": "7dfc5a03b0fb9d22a6d004606497ffbd4f5efa38",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "e122-windows",
+      "packet_name": "stream-d-first-cell-runtime.json",
+      "packet_sha256": "7578119f592b257094ebea75cb146dc6cd78b06c8b363ebafe0ab1b758f68f0a",
+      "raw_sha256": "87990fe00b65e250ca7d05fbd803a8b4b08276e26d195d6e4b5f828ebe58b953",
+      "completed_pairs": 1,
+      "genuine_arms": 2,
+      "original_rejected_controls": 4,
+      "control_scope": "candidate only",
+      "cells": [
+        {
+          "case": "version2-positive",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": "418d602c37591a0bf847c933018ed36924d21ed00c2f83c9c373354367979532"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "2febebd662ee521fd2937dcf6455bf4e7823d9a24651bd962061d2e3682afbf2",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "historical Windows checkout CRLF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "ce019c879629896c8526391f987110ae1091b0405d8bd5aaf070300293b8c176",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "historical Windows checkout CRLF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "13fdb567fd672390663bfcf2bb76a4ac5d098569b04c97466cd69dd84b5f12b9",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "historical Windows checkout CRLF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "e012520738be992040cd4854751235acf0d1e700d623478d38679fa72323fedc",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "historical Windows checkout CRLF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "3a0a05e3b3eb81c7921f3b3cf260d6c72706fce1a2ef9e38ab22fe6bdd1f1c99",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "historical Windows checkout CRLF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "abdb8eba8effed59d3ed5dfe9fd9e9970cad38d80a5b60b41a64b9a83441b6b1",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "historical Windows checkout CRLF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": "418d602c37591a0bf847c933018ed36924d21ed00c2f83c9c373354367979532"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "linux1-version2-positive",
+      "platform": "Linux1",
+      "state": "historical PASS",
+      "source_head": "e1226d2ec30a55a6e44b09b2b12fcbd500173c41",
+      "source_tree": "7dfc5a03b0fb9d22a6d004606497ffbd4f5efa38",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "e122-linux1",
+      "packet_name": "stream-d-linux-first-cell-runtime.json",
+      "packet_sha256": "8823130688c66a89a8d5831252161208349ffe8a0cbca9dea55442b12f353931",
+      "raw_sha256": "8915f7082a47a868685bfd692e7cbb3f381a870ff1af4f855a5ae00c885dcc36",
+      "completed_pairs": 1,
+      "genuine_arms": 2,
+      "original_rejected_controls": 4,
+      "control_scope": "candidate only",
+      "cells": [
+        {
+          "case": "version2-positive",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": "418d602c37591a0bf847c933018ed36924d21ed00c2f83c9c373354367979532"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": "418d602c37591a0bf847c933018ed36924d21ed00c2f83c9c373354367979532"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "linux2-empty-posix-home",
+      "platform": "Linux2",
+      "state": "historical PASS",
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "ec697-linux2",
+      "packet_name": "stream-d-ec697-linux2-empty-home-result.json",
+      "packet_sha256": "3ea687e239e8320e2ee41dc2600e5e891c9b8c92a7dd00e3ba0a59c04d00a04f",
+      "raw_sha256": "ae8780d976de8c9d2977ab130e28a53752b6905ef1cf4b44730fd6cda5c433f8",
+      "completed_pairs": 1,
+      "genuine_arms": 2,
+      "original_rejected_controls": 8,
+      "control_scope": "both arms",
+      "cells": [
+        {
+          "case": "empty-posix-home",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": "3b9d75e1c0f7080a21134d4c5295cb868836f96a76fa7424a5579ada66449bf2",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": "3b9d75e1c0f7080a21134d4c5295cb868836f96a76fa7424a5579ada66449bf2",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "directories_unchanged": true,
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": "3b9d75e1c0f7080a21134d4c5295cb868836f96a76fa7424a5579ada66449bf2",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-prompt-seen": "3b9d75e1c0f7080a21134d4c5295cb868836f96a76fa7424a5579ada66449bf2",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "directories_unchanged": true
+          },
+          "original_controls": {
+            "oracle": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            },
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "windows-ordinary-prompt",
+      "platform": "Windows",
+      "state": "historical PASS",
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "ec697-windows",
+      "packet_name": "stream-d-ordinary-prompt-windows-result.json",
+      "packet_sha256": "5f88ac2bbb5520998d67273afd196dc83a5b2d8ed097b3c945511d3da37d37de",
+      "raw_sha256": "5ca4e4b657146a5cb72b933549fb679a9cb5152952cc4e8298a977a74939d2a1",
+      "completed_pairs": 1,
+      "genuine_arms": 2,
+      "original_rejected_controls": 4,
+      "control_scope": "candidate only",
+      "cells": [
+        {
+          "case": "ordinary-prompt",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "linux2-ordinary-prompt",
+      "platform": "Linux2",
+      "state": "historical PASS",
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "ec697-linux2",
+      "packet_name": "stream-d-ordinary-prompt-linux2-result.json",
+      "packet_sha256": "9322af2c9e66c11b2e7d0d726facee7bd66a0ad665097f9b4d18d15a15cc3e60",
+      "raw_sha256": "631e68e5b6fd13df47ea824ff0c233362a6b0cc2e910d6cc8f0c150a49768a23",
+      "completed_pairs": 1,
+      "genuine_arms": 2,
+      "original_rejected_controls": 4,
+      "control_scope": "candidate only",
+      "cells": [
+        {
+          "case": "ordinary-prompt",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-lock": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              },
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "windows-missing-prompt",
+      "platform": "Windows",
+      "state": "historical PASS",
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "ec697-windows",
+      "packet_name": "stream-d-missing-prompt-both-os-result.json",
+      "packet_sha256": "0d742c3751191fac0f4bdb5f7268b36ce038270fd9a9dba708f7cdbd96af5b33",
+      "raw_sha256": "184345929db7bed6acee41668072ba4c0733baf32dddcab82e94057f2d1cb62a",
+      "completed_pairs": 1,
+      "genuine_arms": 2,
+      "original_rejected_controls": 4,
+      "control_scope": "candidate only",
+      "cells": [
+        {
+          "case": "missing-prompt",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "linux2-missing-prompt",
+      "platform": "Linux2",
+      "state": "historical PASS",
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "ec697-linux2",
+      "packet_name": "stream-d-missing-prompt-both-os-result.json",
+      "packet_sha256": "0d742c3751191fac0f4bdb5f7268b36ce038270fd9a9dba708f7cdbd96af5b33",
+      "raw_sha256": "122f8f9b844eb99902d6992f259508bbaed01739627efacc7e0f4a6839dd1a55",
+      "completed_pairs": 1,
+      "genuine_arms": 2,
+      "original_rejected_controls": 4,
+      "control_scope": "candidate only",
+      "cells": [
+        {
+          "case": "missing-prompt",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "windows-invalid-prompt-0-through-4",
+      "platform": "Windows",
+      "state": "historical PASS",
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "ec697-windows",
+      "packet_name": "stream-d-invalid-prompt-both-os-result.json",
+      "packet_sha256": "f2a3d662c70989d4f6cd63bf4e795310749a8c722c15d51feb0cb08d799a7d68",
+      "raw_sha256": "cae8ed03a859c94169effe47523f95696624609559aac66deed1a628d33f41ea",
+      "completed_pairs": 5,
+      "genuine_arms": 10,
+      "original_rejected_controls": 20,
+      "control_scope": "candidate only",
+      "cells": [
+        {
+          "case": "invalid-prompt-0",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        },
+        {
+          "case": "invalid-prompt-1",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        },
+        {
+          "case": "invalid-prompt-2",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        },
+        {
+          "case": "invalid-prompt-3",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        },
+        {
+          "case": "invalid-prompt-4",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o666"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "linux2-invalid-prompt-0-through-4",
+      "platform": "Linux2",
+      "state": "historical PASS",
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "ec697-linux2",
+      "packet_name": "stream-d-invalid-prompt-linux2-result.json",
+      "packet_sha256": "f44c2218eae1cfacb9737bac2bcfeb33064c1ad0c945560a3682f94165a21fc4",
+      "raw_sha256": "e625744c1ea7e2b38adda38b6d2aff2d709b3a48af1db4c07c57a209661cc9ec",
+      "completed_pairs": 5,
+      "genuine_arms": 10,
+      "original_rejected_controls": 20,
+      "control_scope": "candidate only",
+      "cells": [
+        {
+          "case": "invalid-prompt-0",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        },
+        {
+          "case": "invalid-prompt-1",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        },
+        {
+          "case": "invalid-prompt-2",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        },
+        {
+          "case": "invalid-prompt-3",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        },
+        {
+          "case": "invalid-prompt-4",
+          "raw_differences_count": 0,
+          "oracle": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            },
+            "actual_oracle_modules": {
+              "__main__": {
+                "source_path": "pseudolife_memory/cli.py",
+                "actual_child_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "canonical_git_source_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_doorbell_state": {
+                "source_path": "pseudolife_memory/codex_doorbell_state.py",
+                "actual_child_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "canonical_git_source_sha256": "6eb632400d47fc8e7c6847cce67668ee7ea3471800d4e395f7584e0c2aacf61b",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "c045c0f3034260343548589be71b47741ab2e67f",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 22
+              },
+              "pseudolife_memory.private_state": {
+                "source_path": "pseudolife_memory/private_state.py",
+                "actual_child_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "canonical_git_source_sha256": "b93c456760226c896d2eb522423700ac8895ce24fbdc88db19fa0d77d4badb22",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "d2aff5268f682b2005a1c55a5ea244afd5df2eb5",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 2
+              },
+              "pseudolife_memory.codex_coordination": {
+                "source_path": "pseudolife_memory/codex_coordination.py",
+                "actual_child_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "canonical_git_source_sha256": "a360033d668ae442c427675df122ff6b08e91182f630ae128f7454e17fa7eb7d",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "88914ef4dee7104493df3f09a72c6074ba14e401",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 20
+              },
+              "pseudolife_memory.coordination_identity": {
+                "source_path": "pseudolife_memory/coordination_identity.py",
+                "actual_child_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "canonical_git_source_sha256": "a01b6bc3673d57a943a91c398d802bfdf3d0a93c6fcfd11a3920ac98a886222e",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "34ac7c00b327968013a1170e8566fe68c9de5ce2",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 7
+              },
+              "pseudolife_memory.os_lock": {
+                "source_path": "pseudolife_memory/os_lock.py",
+                "actual_child_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "canonical_git_source_sha256": "a07597d8ef8e8eb66dcf9fcb3d5d9af060f420c058068af1fe397792d55a89a0",
+                "source_bytes_representation": "canonical LF",
+                "git_blob": "46164fa8fb008d4f17c97ccf3fa2e8820028c45a",
+                "all_bytecode_checks_true": true,
+                "bytecode_checks_count": 8
+              }
+            }
+          },
+          "candidate": {
+            "exit_code": 0,
+            "stdout_b64": "",
+            "stderr_b64": "",
+            "pre_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "post_files_sha256": {
+              "digests/7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": "72456a4e737aa494c890a079fd610e81ed0b1a9e5593b84d1476c633d51da5d1"
+            },
+            "file_metadata": {
+              "7ac1b8d7010bb6cd3a3e84e7f90136b880bbc899e428ece49333372911ab9052.bell-pending": {
+                "private": true,
+                "nlink": 1,
+                "mode": "0o600"
+              }
+            }
+          },
+          "original_controls": {
+            "candidate": {
+              "exit_code": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stdout_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "stderr_b64": {
+                "rejected": true,
+                "differences_count": 1
+              },
+              "post_files_b64": {
+                "rejected": true,
+                "differences_count": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "windows-symlink-parent",
+      "platform": "Windows",
+      "state": "capability SKIP",
+      "native_result": "RED",
+      "native_exit_code": 1,
+      "reason": "WinError1314 during directory-symlink fixture creation",
+      "source_head": "ec6971a06c2bc6adf8b2a2d0f4c46cd69b5ea8e1",
+      "source_tree": "72569327b786d997804286f62f22f6abf1ee3b2a",
+      "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+      "oracle_tree": "2665f39b7ac9a933695c540d09a40badac177815",
+      "image": "ec697-windows",
+      "packet_name": "stream-d-ec697-windows-symlink-result.json",
+      "packet_sha256": "155a30ac5a819135f5d3e8b9ddb70b7ae8ff11204fed2418edf8225daa820b86",
+      "native_result_sha256": "a8079a2556cb90b2790b87d7f652498ea7eea036c5d06ddb09d2b315ce0ec18d",
+      "completed_pairs": 0,
+      "genuine_arms": 0,
+      "original_rejected_controls": 0,
+      "raw_json_exists": false,
+      "assertions_waived": false
+    }
+  ],
+  "totals": {
+    "completed_pairs": 17,
+    "genuine_arms": 34,
+    "original_rejected_controls": 72,
+    "capability_skips": 1,
+    "retained_native_reds": 1
+  },
+  "limitations": [
+    "All observations retain historical e122 or ec697 source/image identities against immutable oracle3c; none validates a later source or image.",
+    "Historical e122 Windows actual oracle module bytes are the recorded CRLF checkout representation; later canonical exports use LF. Actual-child SHA256 and canonical Git SHA/blob identities are kept separate; no raw byte hash is relabelled.",
+    "Raw receipts and logs are retained privately; this allowlisted projection binds them by SHA256 and preserves original counts and per-case effects. It is not a raw receipt replacement.",
+    "No dedicated briefing payload or HTTP wire case, original prompt-hook routing, persistent multi-turn cursor/output ordering, real daemon or nonempty durable-state coverage is established by these cells.",
+    "Capable-host Windows absolute and relative symlink proof, distinct real/effective UID fixture, remaining producer/private-file/locking/legacy/interruption corpus, no-default-feature reconciliation and both-OS measurements remain gaps.",
+    "Windows PID/starttime sampling can miss short-lived arms; event subscription was denied. Original Job subtree accounting is separate evidence. Linux sampling retains 32 inaccessible host processes; process-group proof is separate.",
+    "Linux2 empty-HOME worker output observation was timely; lead direct observation at approximately126 seconds missed its120-second deadline.",
+    "Invalid-prompt Windows initial wrapper quoting failure dispatched zero cells. Corrected outer launch09:11:42.5959866Z and main actual-cell read09:13:00.5275474Z were timely; coordinator09:15UTC observation has minute precision and remains separate. No Windows BUSY-lock probe was captured.",
+    "Source-only origin mode preflight, observer ancestry diagnosis and disposable-HOME checker corrections are retained separately; none replayed or promoted a runtime cell.",
+    "The original candidate-only stderr mutation remains the frozen historical control; no changed comparator, normalization or newly evaluated semantic control is asserted."
+  ],
+  "publication_or_runtime_performed_by_this_packet": false
+}

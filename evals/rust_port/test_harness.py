@@ -2,7 +2,7 @@ import base64
 
 import pytest
 
-from evals.rust_port.harness import HttpClient, Policy, compare, execute, isolated_env, replay, run_cli
+from evals.rust_port.harness import capture_platform, HttpClient, Policy, compare, execute, isolated_env, replay, run_cli
 
 
 def test_scores_tolerate_only_named_fields_and_never_order():
@@ -68,11 +68,11 @@ def test_timeout_is_negative_evidence_and_not_a_valid_oracle(tmp_path):
     records = execute(cases, **options)
     assert records[0]["response"] == {"boundary_error": "TimeoutExpired"}
     with pytest.raises(ValueError, match="oracle transcript"):
-        replay({"records": records}, **options)
+        replay({"capture_platform": capture_platform(), "records": records}, **options)
 
 
 def test_failed_candidate_boundary_is_a_diff(tmp_path):
-    oracle = {"records": [{"id": "missing", "surface": "cli",
+    oracle = {"capture_platform": capture_platform(), "records": [{"id": "missing", "surface": "cli",
                            "request": {"argv": []}, "response": {"exit_code": 0}}]}
     report = replay(oracle, cli_prefix=[str(tmp_path / "absent")], base_url=None,
                     cwd=tmp_path, home=tmp_path / "home")

@@ -16,6 +16,7 @@ from . import daemon, daemon_child
 from .ci import elapsed, summarize
 from .common import child_environment, controls, distribution, lease_gate, provenance, write_result
 from .daemon import _daemon_command, corpus
+from .process_checks import assert_child_stopped
 
 
 TOY_HEALTH_SERVER = """
@@ -103,26 +104,7 @@ class BaselineTests(unittest.TestCase):
         return pid_file, [sys.executable, "-c", command]
 
     def assert_child_stopped(self, pid_file):
-        import psutil
-        self.assertTrue(pid_file.exists(), "toy child did not start")
-        try:
-            child = psutil.Process(int(pid_file.read_text()))
-        except psutil.NoSuchProcess:
-            return
-        try:
-            alive = child.is_running() and child.status() != psutil.STATUS_ZOMBIE
-        except psutil.NoSuchProcess:
-            alive = False
-        try:
-            self.assertFalse(alive, "owned descendant survived")
-        finally:
-            # A watched RED must not leave its synthetic child behind.
-            if alive:
-                try:
-                    child.kill()
-                    child.wait(timeout=5)
-                except psutil.NoSuchProcess:
-                    pass
+        assert_child_stopped(pid_file)
 
     def test_unrelated_http_200_cannot_satisfy_readiness(self):
         with launcher_directory() as directory, unrelated_listener() as port:
@@ -261,6 +243,21 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(env["CUDA_VISIBLE_DEVICES"], "-1")
         self.assertEqual(env["_PSEUDOLIFE_PRODUCTION_DB"], "live")
 
+    def test_absent_local_lock_follows_cli_free_report(self):
+        report = {"local": {"state": None}, "board": {"available": False}, "held": False}
+        stamp = "2026-10-03T01:00:00Z"
+        result = subprocess.CompletedProcess([], 0, json.dumps(report), "")
+        with patch("subprocess.run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "without independent"):
+                lease_gate()
+            resource = lease_gate(offline_resource_checked_at=stamp)
+            self.assertTrue(resource["local_lock_free"])
+            self.assertTrue(resource["offline_resource_clearance_used"])
+        report["board"]["available"] = True
+        result = subprocess.CompletedProcess([], 0, json.dumps(report), "")
+        with patch("subprocess.run", return_value=result):
+            self.assertTrue(lease_gate()["local_lock_free"])
+
     def test_offline_clearance_requires_free_local_and_no_known_holder(self):
         report = {"local": {"state": "free"}, "board": {"available": False}, "held": False}
         stamp = "2026-10-03T01:00:00Z"
@@ -276,7 +273,10 @@ class BaselineTests(unittest.TestCase):
             self.assertFalse(resource["cli_board_available"])
             self.assertTrue(lease_gate(stamp)["local_lock_free"])
         for code, local, available, held in [(1, "free", False, False), (0, "held", False, False),
-                                              (0, "free", True, True), (1, "held", True, True)]:
+                                              (0, "free", True, True), (1, "held", True, True),
+                                              (1, None, False, False), (70, None, False, False),
+                                              (0, None, True, True), (0, None, False, None),
+                                              (0, "unknown", False, False)]:
             with self.subTest(code=code, local=local, available=available, held=held):
                 payload = {"local": {"state": local}, "board": {"available": available}, "held": held}
                 with checked(payload, code), self.assertRaisesRegex(RuntimeError, "held"):
@@ -285,8 +285,12 @@ class BaselineTests(unittest.TestCase):
         with checked(report):
             self.assertFalse(lease_gate(offline_resource_checked_at=stamp)["offline_resource_clearance_used"])
             self.assertTrue(lease_gate()["cli_board_available"])
-        with checked({}), self.assertRaisesRegex(RuntimeError, "malformed"):
-            lease_gate(offline_resource_checked_at=stamp)
+        for malformed in ({}, {"local": {}, "board": {"available": False}, "held": False},
+                          {"local": None, "board": {"available": False}, "held": False},
+                          {"local": {"state": None}, "held": False}):
+            with self.subTest(payload=malformed), checked(malformed):
+                with self.assertRaisesRegex(RuntimeError, "malformed"):
+                    lease_gate(offline_resource_checked_at=stamp)
         with self.assertRaises(ValueError):
             lease_gate(stamp, offline_resource_checked_at=stamp)
 

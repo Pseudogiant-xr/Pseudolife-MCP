@@ -1,0 +1,184 @@
+{
+  "schema": 1,
+  "executed_head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+  "executed_tree": "11e7267bd7a884ace22f57ebf5afd6c77ee25f91",
+  "oracle_head": "3c01bb31abd60178e15dea99adda369b4bbf92fc",
+  "state": "CPU CLI evidence; no current stdio/full-suite/ported claim",
+  "files": [
+    {
+      "path": "windows.json",
+      "bytes": 4407,
+      "sha256": "5bb53f1441a57089f400a36414db52955bd0460dc8809dde3d06289a646a4507"
+    },
+    {
+      "path": "linux.json",
+      "bytes": 7903,
+      "sha256": "cc7debaf2dcb3f405cf92469190c24ec43248f692c3c08aa13439e8e804c0d1c"
+    },
+    {
+      "path": "source-manifest.json",
+      "bytes": 90656,
+      "sha256": "0610ecf8ade49849c4eb60829f8608bc39ff68294f00c506b4a3986e48f8203a"
+    },
+    {
+      "path": "instrument-manifest.json",
+      "bytes": 104016,
+      "sha256": "5d9466c50a7e50a29e6e289e9d57c299c118f6267cb889621ac74e0148cca02e"
+    },
+    {
+      "path": "measurement-windows-bare.json",
+      "bytes": 19327,
+      "sha256": "63ab7dcc3b9b0cf4fc9e75d85f6319f64ea367e82f0c4b9c436cceebca7783ec"
+    },
+    {
+      "path": "measurement-windows-installed.json",
+      "bytes": 22518,
+      "sha256": "25640f2e1aca26070924eaade10602ffcd51865202d9d87028c9f7d45e6bf422"
+    },
+    {
+      "path": "measurement-linux-bare.json",
+      "bytes": 19823,
+      "sha256": "b39c6221b18d798918c324bf9c1994eb8545514233a55a31da3cefc490c97247"
+    },
+    {
+      "path": "measurement-linux-installed.json",
+      "bytes": 22976,
+      "sha256": "782c423b740936813e1d784074c8feb4fcc38bcbd2425273c72a2c032ff4bc2d"
+    }
+  ],
+  "capture_helpers": {
+    "measurement_wrapper_sha256": "0b3978cfdd6d669d8e73c2e7f07e688ae363fd6cd7d7e2f5fbc7298e518c47e2",
+    "windows_controller_sha256": "5f4e889f4a2397e9040b0cc6ad247fd5e70316871517f6179b7e0a571b7557d1",
+    "linux_controller_sha256": "1305cde70c3958094972375f2817277a3ffe9a7b823291b7d964706ecdbaead2"
+  },
+  "builds": {
+    "windows": {
+      "exit": 0,
+      "started_utc": "2026-10-06T16:42:53.5829224Z",
+      "finished_utc": "2026-10-06T16:43:49.6640888Z",
+      "head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+      "tree": "11e7267bd7a884ace22f57ebf5afd6c77ee25f91",
+      "source_clean": true,
+      "command": "rustup run 1.94.0 cargo build --manifest-path rust/Cargo.toml --release --locked --offline -j 2 --bin pseudolife-stdio",
+      "cargo_incremental": "0",
+      "toolchain": [
+        "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+        "binary: rustc",
+        "commit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db",
+        "commit-date: 2026-03-02",
+        "host: x86_64-pc-windows-msvc",
+        "release: 1.94.0",
+        "LLVM version: 21.1.8"
+      ],
+      "image_sha256": "2ec6ce230d7aa06f016fbc63342ec2f5f70ebd9b7d2c28a5d43493048cb02916",
+      "image_bytes": 13267968
+    },
+    "linux": {
+      "head": "5220b5ee4cf4b7ae235ee070109b8de17fa3a1d0",
+      "tree": "11e7267bd7a884ace22f57ebf5afd6c77ee25f91",
+      "image_sha256": "0b10d4618844c7cb8b7f0194fb8cf89ce5cd0292090cca732c80f2ea72a9b4a5",
+      "image_bytes": 16826112,
+      "rust_version": "1.94.0",
+      "profile": "release",
+      "features": "default",
+      "jobs": 2,
+      "cargo_incremental": "0",
+      "build_exit": 0
+    }
+  },
+  "scope": {
+    "corpus_cases_per_os": 28,
+    "rejected_controls_per_os": 112,
+    "original_cli_nodes_per_arm_per_os": 8,
+    "linux_serial_version_contracts": {
+      "default_passed": 8,
+      "no_default_passed": 8,
+      "parallel_ETXTBSY_unresolved": true
+    },
+    "utf8_non_ascii_home": true,
+    "windows_slowdown_absent_in_warmed_observation": true,
+    "cold_copy_cause_proven": false,
+    "controlled_idle": false,
+    "stdio_proved_here": false,
+    "full_suite_proved_here": false,
+    "ported_claim": false
+  },
+  "retained_failures": {
+    "linux_initial_stale_image_metadata": "Archive mtime0 allowed stale Cargo image reuse; final rebuild produced the new image. Original failure evidence retained.",
+    "linux_parallel_contracts": {
+      "exit": 101,
+      "passed": 6,
+      "failed": 2,
+      "errno": 26,
+      "kind": "ExecutableFileBusy",
+      "failed_tests": [
+        "a_valid_manifest_above_the_installed_executable_is_the_running_identity",
+        "a_manifest_and_native_executable_without_a_console_file_do_not_claim_runtime_identity"
+      ],
+      "cause_resolved": false,
+      "serial_pass_does_not_prove_parallel_pass": true,
+      "log_sha256": "1ca887975e8467e5a8f5566303f3cfae326d35cb405c91e82226ee64d347a571"
+    },
+    "windows_private_build_metadata": "Incorrect historical-image literal corrected in private metadata; new image/source/build identities unchanged; original receipt retained.",
+    "windows_audit_selector": "An initial private audit guessed a case ID; selector corrected to the frozen case ID with original failure preserved, no case/output/source changed."
+  },
+  "audit_log_completion_qualification": {
+    "scope": "audit log output completion; original binding retained unchanged",
+    "captured_before_print": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "final_after_print": {
+      "sha256": "79dc5708e8c4d0d4900be5491cb27c6e71af62c8c7b52b4f56229aa3b6303edb",
+      "bytes": 1010
+    }
+  },
+  "historical_files_preserved": 26,
+  "historical_carrier": "95d5402d0736f6cb03741847da3ad40daae7588d",
+  "retained_input_hashes": {
+    "phase2d-version-5220-windows-result.md": {
+      "sha256": "43df2ff4c38ac73a082a929a71f9fc8aeb187958d366670db3172abbb006ab2b",
+      "bytes": 1871
+    },
+    "phase2d-version-5220-windows-public.json": {
+      "sha256": "5bb53f1441a57089f400a36414db52955bd0460dc8809dde3d06289a646a4507",
+      "bytes": 4407
+    },
+    "phase2d-version-5220-windows-binding.json": {
+      "sha256": "25a64c5738fc97796fe1c95f68da69e9ae7c4e829c4e7a38348586c790e41e17",
+      "bytes": 16064
+    },
+    "phase2d-version-5220-windows-audit.json": {
+      "sha256": "2325f5afe393ac8dd1be5c67d772bfb209175ea687753ca1355822db73dd07bd",
+      "bytes": 24481
+    },
+    "phase2d-version-5220-windows-measure-bare-compact.json": {
+      "sha256": "36c9a0c9f315dbf7419fa32b108927c63f55dff7d3b652ce94602b1587df5693",
+      "bytes": 88141
+    },
+    "phase2d-version-5220-windows-measure-installed-compact.json": {
+      "sha256": "7a12e40f6085e86789ff74e0052d3800f68d2295b98e7e67cf5d1535dedd6c5d",
+      "bytes": 223777
+    },
+    "phase2d-version-5220-linux-result.md": {
+      "sha256": "f59dec1d8972c74e44cb93a587b3a40a762989b0c8ae5e6e3a3ea7b500971e8a",
+      "bytes": 1700
+    },
+    "phase2d-version-5220-linux-public.json": {
+      "sha256": "cc7debaf2dcb3f405cf92469190c24ec43248f692c3c08aa13439e8e804c0d1c",
+      "bytes": 7903
+    },
+    "phase2d-version-5220-linux-binding.json": {
+      "sha256": "a8dc8fd8f1d656861c9f1034fc2c0c4438e67fef74ca08e34a4462f0d56ec210",
+      "bytes": 35166
+    },
+    "phase2d-version-5220-linux-audit.json": {
+      "sha256": "a8dc8fd8f1d656861c9f1034fc2c0c4438e67fef74ca08e34a4462f0d56ec210",
+      "bytes": 35166
+    },
+    "phase2d-version-5220-linux-measurements.json": {
+      "sha256": "4f39fc63d42f7f444cadf2c9527a94bb8be7eb399d1011759e82f6720517c023",
+      "bytes": 289945
+    }
+  }
+}

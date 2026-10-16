@@ -35,6 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pseudolife_memory.service import _origin_from_source  # noqa: E402
+from pseudolife_memory.storage.schema import dsn_endpoint  # noqa: E402
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 PREREG = "docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md"
@@ -59,8 +60,8 @@ def replay(rows: list[dict], trusted: set[str]) -> dict:
             out["excluded_contested"] += 1
             continue
         if r.get("src_entry_id") is None:
-            # Unbacked claim: the shipped fallback quarantines on the
-            # claim's own origin, which defaults to agent.
+            # Unbacked claim: always low-trust (agent tier; its own
+            # origin field is model output and never read).
             out["no_backing"] += 1
             out["would_park"] += 1
             continue
@@ -107,7 +108,7 @@ def main() -> int:
     result = replay(rows, trusted=set())
     payload = {
         "preregistration": PREREG,
-        "tag": args.tag, "dsn_host": args.dsn.rsplit("@", 1)[-1],
+        "tag": args.tag, "dsn_host": dsn_endpoint(args.dsn),
         "runs_examined": len(run_ids),
         "journal_rows": len(rows),
         **result,
