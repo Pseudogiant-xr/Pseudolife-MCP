@@ -82,11 +82,15 @@ def reg(title, who, token="default", **fields):
     return act(title, "register", token=token, body=fields, save=save)
 
 
-def tool(title, name, args, token="default", agent=None, extra=(), save=None, write=True):
-    """An MCP tools/call; ``args`` may be a function of the context."""
+def tool(title, name, args, token="default", agent=None, extra=(), save=None, write=True,
+         compare=True):
+    """An MCP tools/call; ``args`` may be a function of the context.
+    ``compare=False`` makes it setup only (its answer is not compared)."""
     mcp = (lambda c: (name, args(c))) if callable(args) else (name, args)
-    return Step(title, kind="mcp", token=token, agent=agent, extra=extra, save=save,
+    step = Step(title, kind="mcp", token=token, agent=agent, extra=extra, save=save,
                 write=write, mcp=mcp)
+    step.compare = compare
+    return step
 
 
 def hook(name, method, path, token="default", write=True):
@@ -623,6 +627,8 @@ class McpTools(Scenario):
     the initialized bank, so both daemons warm up first (``needs_bank``)."""
     name = "mcp-tools"
     needs_bank = True
+    # Three open sessions against a cap of two: ordering and truncation.
+    config_yaml = BASE_CONFIG + "  awareness_limit: 2\n"
 
     def steps(self):
         repo = "ab" * 32
@@ -630,7 +636,14 @@ class McpTools(Scenario):
         return [
             reg("register A", "A", token="alice", project="pl", task="porting"),
             reg("register B", "B", token="bob", project="pl", task="reviewing"),
+            *[tool(f"open session {i}", "memory_store",
+                   {"text": f"Awareness probe session {i} touched the board tools."},
+                   token="alice", extra=[("X-PL-Session", f"sess-mcp-{i}")], write=False,
+                   compare=False)
+              for i in (1, 2, 3)],
             tool("awareness: no agent header", "memory_agents", {}, token="alice", write=False),
+            tool("awareness: the caller's own session is not a peer", "memory_agents", {},
+                 token="alice", extra=[("X-PL-Session", "sess-mcp-3")], write=False),
             tool("awareness: principal not allowed", "memory_agents", {}, token="carol", write=False),
             tool("list with an agent", "memory_agents", {"project": "pl"}, token="alice", agent="A",
                  write=False),

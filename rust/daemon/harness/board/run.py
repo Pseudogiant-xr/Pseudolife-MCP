@@ -27,6 +27,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -53,9 +54,11 @@ META_KEYS = ("coordination_bank_id", "coordination_hlc_highwater")
 MUTANTS = ["board-chain-skip-seq", "board-clock-behind", "board-lease-never-expires",
            "board-canonical-unsorted", "board-urgent-cap-off", "board-no-read-event",
            "board-receipt-path-live", "board-park-default-ttl",
-           "mcp-agents-no-file-claim", "mcp-agents-no-awareness"]
+           "mcp-agents-no-file-claim", "mcp-agents-no-awareness",
+           "mcp-agents-awareness-self", "mcp-agents-awareness-order"]
 # The MCP tool mutants live in the mcp-tools scenario; the rest in the REST ones.
-MCP_MUTANTS = {"mcp-agents-no-file-claim", "mcp-agents-no-awareness"}
+MCP_MUTANTS = {"mcp-agents-no-file-claim", "mcp-agents-no-awareness",
+               "mcp-agents-awareness-self", "mcp-agents-awareness-order"}
 
 
 # ---- HTTP -----------------------------------------------------------------------
@@ -83,6 +86,9 @@ def call(port: int, method: str, path: str, headers, body: bytes | None, timeout
     return out
 
 
+GENERIC_TITLE = re.compile(r"session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+
+
 def mcp_call(port: int, headers, tool: str, args: dict, timeout=180.0) -> dict:
     """One MCP tools/call on a fresh session: the structured result, an
     error result as status 422 (the board's REST statuses never use it)."""
@@ -101,12 +107,21 @@ def mcp_call(port: int, headers, tool: str, args: dict, timeout=180.0) -> dict:
     try:
         res = json.loads(sse_data(r)[0])["result"]
     except (IndexError, KeyError, ValueError):
-        return {"status": r["status"], "headers": {}, "bytes": r["body"].decode("utf-8", "replace")}
+        # A broken session flow must not compare equal on both arms.
+        raise RuntimeError(f"{tool}: no tools/call result (HTTP {r['status']}): {r['body'][:300]!r}")
     text = res["content"][0]["text"]
-    if json.loads(text) != res.get("structuredContent"):
+    value = res.get("structuredContent")
+    if json.loads(text) != value:
         raise RuntimeError(f"{tool}: text and structuredContent differ")
+    if isinstance(value, dict) and isinstance(value.get("peers"), list):
+        # Awareness: each arm's own wall clock and minute-stamped titles.
+        for peer in value["peers"]:
+            if isinstance(peer.get("last_reported_at"), (int, float)):
+                peer["last_reported_at"] = "<time>"
+            if GENERIC_TITLE.fullmatch(peer.get("title") or ""):
+                peer["title"] = "<session - date time>"
     return {"status": 422 if res.get("isError") else 200, "headers": {"content-type": "mcp"},
-            "json": res.get("structuredContent")}
+            "json": value}
 
 
 # ---- bank state ----------------------------------------------------------------------
@@ -340,7 +355,7 @@ def run_scenario(scn: S.Scenario, binary: Path, root: Path, mode: str, record: b
         recorded = {"responses": {}, "states": {}}
         for i, step in enumerate(scn.steps()):
             out = {side: arms[side].run(step) for side in sides}
-            if step.kind not in ("http", "mcp"):
+            if step.kind not in ("http", "mcp") or not getattr(step, "compare", True):
                 continue
             py = (normalize_response(out["python"], arms["python"].norm) if "python" in out
                   else golden["responses"][str(i)])
@@ -452,6 +467,9 @@ def main() -> int:
                         "error": "unmutated_baseline_differs"}, indent=1, default=str), encoding="utf-8")
                 return 1
             only = set(args.only or [])
+            if only and "mcp-tools" in only and len(only) > 1:
+                print("mutants: mcp-tools runs alone (its mutants differ from the REST ones)")
+                return 2
             for m in MUTANTS:
                 if only and ((m in MCP_MUTANTS) != ("mcp-tools" in only)):
                     continue

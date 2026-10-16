@@ -73,7 +73,9 @@ fn tool_error(e: BoardError) -> ToolError {
     }
 }
 
-/// `coordination.dispatch` with the request's headers and principal.
+/// `coordination.dispatch` with the request's headers; the principal is
+/// `authenticated_principal`'s (a configured bearer, never open-loopback
+/// naming), as `_dispatch` resolves it when the tool passes none.
 async fn dispatch(
     app: &crate::http::App,
     call: &ToolCall<'_>,
@@ -82,7 +84,8 @@ async fn dispatch(
 ) -> Result<Value, ToolError> {
     let board = app.board.clone();
     let headers = header_dict(&call.ident.headers);
-    let (action, principal) = (action.to_string(), call.ident.principal.clone());
+    let principal = super::http::authenticated_principal(app, &headers).map_err(tool_error)?;
+    let action = action.to_string();
     tokio::spawn(async move { board.dispatch(&action, params, &headers, &principal).await })
         .await
         .map_err(|e| ToolError::Internal(anyhow::anyhow!(e)))?
@@ -315,7 +318,9 @@ async fn awareness(app: &crate::http::App, call: &ToolCall<'_>) -> Value {
     if !cfg.enabled {
         return Value::Object(result);
     }
-    if !app.board.admitted(&call.ident.principal) {
+    // `_request_principal`: None (not admitted) without an authenticated one.
+    let principal = super::http::authenticated_principal(app, &header_dict(&call.ident.headers));
+    if !principal.is_ok_and(|p| app.board.admitted(&p)) {
         result.insert("reason".into(), json!("principal_not_allowed"));
         return Value::Object(result);
     }
@@ -333,10 +338,11 @@ async fn awareness(app: &crate::http::App, call: &ToolCall<'_>) -> Value {
         .filter(|ep| {
             ep.parent_id.is_none()
                 && ep.ended_at.is_none()
-                && ep
-                    .session_key
-                    .as_deref()
-                    .is_some_and(|k| !k.is_empty() && Some(k) != session)
+                && ep.session_key.as_deref().is_some_and(|k| {
+                    !k.is_empty()
+                        && (Some(k) != session
+                            || crate::mutants::active("mcp-agents-awareness-self"))
+                })
         })
         .collect();
     roots.sort_by(|x, y| {
@@ -344,6 +350,9 @@ async fn awareness(app: &crate::http::App, call: &ToolCall<'_>) -> Value {
             .partial_cmp(&(x.started_at, &x.id))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    if crate::mutants::active("mcp-agents-awareness-order") {
+        roots.reverse();
+    }
     result.insert("truncated".into(), json!(roots.len() > cap));
     roots.truncate(cap);
     let by_id: HashMap<&str, &crate::episodes::Episode> =

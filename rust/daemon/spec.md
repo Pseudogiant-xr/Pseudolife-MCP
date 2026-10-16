@@ -401,11 +401,16 @@ projection branch; the `mcp-search-no-dedup` and
 | BT3 | `memory_agents`, in `agents()` order: `worktree` refuses `file_claim_requires_local_client`; a file selector outside claim/release is an unexpected parameter (with the per-action homes hint), beside `lease` refuses "takes one selector", else becomes `claim:file:<sha256>` (`file_claim_name`, the shim's shared `claim_name.rs`) and adds `file_claim` to the result; park fields in order, an empty `park_reason` sent as null; children, name or park outside update refuse; list refuses status, lease and expect, and without an `X-PL-Agent` (first value) answers coordination awareness, else dispatches `agents {project, task}`; update refuses lease and dispatches the present fields then the park; claim and release need a lease (`missing_parameter`) and refuse project and task; release refuses status and expect and dispatches `release {name}`; claim dispatches `lease {name, ttl, expect, purpose=status}` with ttl 86400 for `claim:` names, else 3600. | `coordination.py:841-937` |
 | BT4 | Awareness: `{enabled, available, peers, truncated}`; board disabled answers as is, an unadmitted principal adds `reason: principal_not_allowed`, an uninitialized bank `reason: not_initialized` (never initializing it); otherwise open root episodes with a session key other than the caller's `X-PL-Session`, newest `(started_at, id)` first, capped at `min(awareness_limit, 20)` with `truncated`, each with its whitespace-collapsed title (160 code points), null principal/project/task, `scope` and `capability` "unknown", and the latest touch or entry time under its subtree. | `service.py:8453-8527` |
 
-`harness/board/run.py --only mcp-tools` compares 31 MCP steps (both tools,
-every refusal above, file claims, park clearing, awareness) and the board
-tables after each write against the Python oracle; both daemons warm up
-first, so it runs where the Rust embedder model is present. The
-`mcp-agents-no-file-claim` and `mcp-agents-no-awareness` mutants must be
+`harness/board/run.py --only mcp-tools` compares 31 MCP tool calls (both
+tools, every refusal above, file claims, park clearing, and awareness over
+three open sessions against a cap of two, with and without the caller's own
+session) and the board tables after each write against the Python oracle;
+the sessions are opened by uncompared `memory_store` calls, and peer times and
+minute-stamped titles are placeholders. Both daemons warm up first, so it
+runs where the Rust embedder model is present. The tools resolve their
+principal as `authenticated_principal` does (a configured bearer only). The
+`mcp-agents-no-file-claim`, `mcp-agents-no-awareness`,
+`mcp-agents-awareness-self` and `mcp-agents-awareness-order` mutants must be
 caught.
 
 ### Tool argument binding (2026-10-16)
