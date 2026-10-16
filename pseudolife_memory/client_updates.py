@@ -438,7 +438,11 @@ def _launcher_invocation(command: str, launcher, windows: bool | None = None) ->
     if command == "pseudolife-mcp":
         return command
     path = str(launcher)
-    return "& '" + path.replace("'", "''") + "'" if windows else shlex.quote(path)
+    if not windows:
+        return shlex.quote(path)
+    # PowerShell reads the typographic single quotes as quotes too; doubling
+    # any of them inside a single-quoted string makes it literal.
+    return "& '" + re.sub("(['‘’‚‛])", r"\1\1", path) + "'"
 
 
 def _installed_release(rt, layout, source: str, notes: list[str] | None = None):

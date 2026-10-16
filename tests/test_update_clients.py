@@ -463,6 +463,9 @@ WIN_ODD = "C:\\Users\\<user>\\it's $HOME\\pseudolife-mcp.exe"
     # PowerShell: the call operator, and single quotes so `$` stays literal.
     (f'"{WIN_SPACED}"', WIN_SPACED, True, f"& '{WIN_SPACED}'"),
     (WIN_ODD, WIN_ODD, True, "& 'C:\\Users\\<user>\\it''s $HOME\\pseudolife-mcp.exe'"),
+    # PowerShell also ends a single-quoted string at a typographic quote.
+    ("C:\\App Data\\O\u2019Neil\\pseudolife-mcp.exe", "C:\\App Data\\O\u2019Neil\\pseudolife-mcp.exe", True,
+     "& 'C:\\App Data\\O\u2019\u2019Neil\\pseudolife-mcp.exe'"),
     # POSIX: quoted when the path holds shell metacharacters, bare otherwise.
     ("/opt/shim(release)/pseudolife-mcp", "/opt/shim(release)/pseudolife-mcp", False,
      "'/opt/shim(release)/pseudolife-mcp'"),
