@@ -165,6 +165,8 @@ pub struct Request {
     pub sources: Option<Vec<String>>,
     pub bands: Option<Vec<String>>,
     pub tags: Option<Vec<String>>,
+    /// Already expanded to their subtrees (`_episode_subtree`).
+    pub episodes: Option<Vec<String>>,
     pub min_score: Option<f64>,
     pub disable_recency_boost: bool,
     pub rerank: Option<bool>,
@@ -202,7 +204,10 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
         tags: tags_norm
             .as_ref()
             .map(|v| v.iter().cloned().collect::<HashSet<_>>()),
-        episodes: None,
+        episodes: req
+            .episodes
+            .as_ref()
+            .map(|v| v.iter().cloned().collect::<HashSet<_>>()),
         min_score: req.min_score,
         default_floor: s.min_score,
         bm25: Bm25Knobs {
@@ -235,7 +240,11 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
         filters_json: json!({
             "bands": req.bands,
             "sources": req.sources,
-            "episodes": null,
+            "episodes": req.episodes.as_ref().map(|v| {
+                let mut v = v.clone();
+                v.sort();
+                v
+            }),
             "tags": tags_norm,
             "min_logical_turn": null,
         }),
@@ -333,6 +342,7 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
             .fold(f64::NEG_INFINITY, f64::max);
         let low = direct_scores.is_empty() || (floor > 0.0 && best < floor);
         body.insert("low_confidence".into(), json!(low));
+        body.insert("entries".into(), Value::Array(Vec::new()));
         match chronicle::events_for(db, &req.query).await {
             Ok(Some(ev)) => {
                 body.insert("events".into(), Value::Array(ev.events));
@@ -351,7 +361,7 @@ pub async fn run(svc: &Service, ready: &Arc<Ready>, req: Request) -> anyhow::Res
         } else {
             None
         };
-        body.insert("entries".into(), Value::Array(entries_out));
+        body["entries"] = Value::Array(entries_out);
         Ok(Searched { body, event_id })
     })
     .await
@@ -413,14 +423,8 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         Err(e) => return json_response(500, &json!({"error": e})),
     };
     let bands = list(&q, "band");
-    if let Some(bands) = &bands {
-        let unknown: Vec<&String> = bands.iter().filter(|b| !cfg.bands.contains(b)).collect();
-        if !unknown.is_empty() {
-            let mut valid = cfg.bands.clone();
-            valid.sort();
-            let msg = format!("unknown band name(s) {unknown:?} — this preset has {valid:?}");
-            return json_response(400, &json!({"error": msg}));
-        }
+    if let Some(msg) = unknown_bands(cfg, bands.as_deref()) {
+        return json_response(400, &json!({"error": msg}));
     }
     // `_s(q, "q", "")`: the cortex block encodes this raw value; only the
     // entry search strips its own copy (service.py:1963).
@@ -447,6 +451,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         sources: list(&q, "source"),
         bands,
         tags: list(&q, "tag"),
+        episodes: None,
         min_score: q
             .get("min_score")
             .filter(|s| !s.is_empty())
@@ -468,16 +473,65 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
     }
 }
 
+/// `_validate_band_filter`: the refusal for band names the preset lacks,
+/// lists in Python's `repr`.
+pub fn unknown_bands(
+    cfg: &crate::config::MemoryConfig,
+    bands: Option<&[String]>,
+) -> Option<String> {
+    let unknown: Vec<&String> = bands?.iter().filter(|b| !cfg.bands.contains(b)).collect();
+    if unknown.is_empty() {
+        return None;
+    }
+    let mut valid = cfg.bands.clone();
+    valid.sort();
+    let repr = |items: &mut dyn Iterator<Item = &String>| {
+        let inner: Vec<String> = items.map(|s| crate::labels::py_repr(s)).collect();
+        format!("[{}]", inner.join(", "))
+    };
+    Some(format!(
+        "unknown band name(s) {} — this preset has {}",
+        repr(&mut unknown.into_iter()),
+        repr(&mut valid.iter())
+    ))
+}
+
 /// The search and the cortex-first block, under the service lock.
 async fn finish(svc: Arc<Service>, ready: Arc<Ready>, req: Request, raw_q: String) -> Response {
+    match search_with_facts(&svc, &ready, req, &raw_q, 5).await {
+        Ok((mut out, facts)) => {
+            if !facts.is_empty() {
+                out.body.insert("cortex".into(), Value::Array(facts));
+            }
+            json_response(200, &Value::Object(out.body))
+        }
+        Err(e) => json_response(500, &json!({"error": e.to_string()})),
+    }
+}
+
+/// `service.search` and the cortex-first block (`cortex_search` with the
+/// caller's `fact_k`, then `attach_served_facts`), under the service lock,
+/// as both the REST route and `memory_search` run them. The facts are the
+/// raw `cortex_search` entries, empty when the block did not run.
+pub async fn search_with_facts(
+    svc: &Arc<Service>,
+    ready: &Arc<Ready>,
+    req: Request,
+    raw_q: &str,
+    fact_k: usize,
+) -> anyhow::Result<(Searched, Vec<Value>)> {
     // Held across the search and the cortex block, as `service._lock` is.
     let _guard = crate::read::search_guard().lock().await;
-    let mut out = match run(&svc, &ready, req).await {
-        Ok(s) => s,
-        Err(e) => return json_response(500, &json!({"error": e.to_string()})),
-    };
+    let out = run(svc, ready, req).await?;
     let knobs = cortex_search::CortexKnobs::from_config(&svc.config);
-    if knobs.enabled && knobs.search_first && !crate::mutants::active("search-no-cortex") {
+    let raw_q = raw_q.to_string();
+    // `(query or "").strip()` gates the block in memory_search; the REST
+    // route never reaches here with a blank query.
+    if knobs.enabled
+        && knobs.search_first
+        && !py_strip(&raw_q).is_empty()
+        && !crate::mutants::active("search-no-cortex")
+    {
         let r2 = ready.clone();
         let cache_size = svc.config.embedding.cache_size;
         let q2 = if crate::mutants::active("search-cortex-stripped-q") {
@@ -496,7 +550,7 @@ async fn finish(svc: Arc<Service>, ready: Arc<Ready>, req: Request, raw_q: Strin
                     ready.storage.client(),
                     &qv,
                     &raw_q,
-                    5,
+                    fact_k,
                     knobs.guard_min_score,
                     &knobs,
                     now(),
@@ -506,21 +560,17 @@ async fn finish(svc: Arc<Service>, ready: Arc<Ready>, req: Request, raw_q: Strin
             Ok(Err(e)) => Err(e),
             Err(e) => Err(e.into()),
         };
-        match facts {
-            Ok(facts) if !facts.is_empty() => {
-                if let Some(id) = out.event_id.filter(|_| knobs.retrieval_log_enabled)
-                    && let Err(e) =
-                        cortex_search::attach_served_facts(ready.storage.client(), id, &facts).await
-                {
-                    eprintln!("attach_served_facts failed: {e}");
-                }
-                out.body.insert("cortex".into(), Value::Array(facts));
-            }
-            Ok(_) => {}
-            Err(e) => return json_response(500, &json!({"error": e.to_string()})),
+        let facts = facts?;
+        if !facts.is_empty()
+            && let Some(id) = out.event_id.filter(|_| knobs.retrieval_log_enabled)
+            && let Err(e) =
+                cortex_search::attach_served_facts(ready.storage.client(), id, &facts).await
+        {
+            eprintln!("attach_served_facts failed: {e}");
         }
+        return Ok((out, facts));
     }
-    json_response(200, &Value::Object(out.body))
+    Ok((out, Vec::new()))
 }
 
 /// The warmup probe (S17): `search("warmup probe", top_k=1, count_access=False)`.
@@ -531,6 +581,7 @@ pub async fn warmup_probe(svc: &Service, ready: &Arc<Ready>) {
         sources: None,
         bands: None,
         tags: None,
+        episodes: None,
         min_score: None,
         disable_recency_boost: false,
         rerank: None,
