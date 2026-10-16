@@ -76,6 +76,8 @@ message per batch of events:
   checks all finished with some cancelled, one line however many jobs
   were cancelled (a cancelled check is never a failure; a re-run that
   ends cancelled again is reported again, as a failing re-run is);
+  green and cancelled also wait until no workflow run on the head is
+  queued or running, since a queued run has no checks yet;
 - a master workflow (push or schedule) failing, or passing after a
   failure; cancelled runs are neither;
 - a full-suite lease going from held to free;

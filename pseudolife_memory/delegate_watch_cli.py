@@ -15,6 +15,8 @@ The events, each reported once (state persists in --state):
 - a pull request's checks all finished green (with its merge state), or a
   check failed (on that head), or they all finished with some cancelled
   (never as a failure, and once per finish, however many jobs it took);
+  green and cancelled also wait for every workflow run on the head to
+  complete, since a queued run has no checks yet;
 - a pull request newly conflicting with its base;
 - the newest completed master run of a workflow (push or schedule) failing,
   or passing again after a failure (cancelled runs are neither);
@@ -146,6 +148,16 @@ def checks_state(rollup) -> tuple[str, list[str]]:
     if cancelled:
         return "cancelled", sorted(set(cancelled))
     return ("green" if rollup else "none"), []
+
+
+def unfinished_runs(runs) -> list[str]:
+    """The workflows with a run on a head that has not completed, from
+    ``gh run list --commit``. A run waiting in its queue or concurrency
+    group has no check runs yet, so the rollup alone reads green while it
+    is still to come: "PR #781 green" went out on 2026-10-16 with its Rust
+    shim run pending."""
+    return sorted({r.get("workflowName") or "workflow" for r in runs or []
+                   if (r.get("status") or "").lower() != "completed"})
 
 
 def pr_snapshot(old, prs) -> dict:
@@ -301,7 +313,17 @@ class Watcher:
         args = ["pr", "list", "--state", "open", "--limit", str(PR_LIMIT), "--json", PR_FIELDS]
         if self.args.author:
             args += ["--author", self.args.author]
-        return pr_snapshot(old, self.gh(*args))
+        snap = pr_snapshot(old, self.gh(*args))
+        for number, p in snap.items():
+            # Only a head about to be reported green or cancelled is looked
+            # up, so a poll with nothing new costs no extra gh calls.
+            before = (old or {}).get(number)
+            if p["checks"] in {"green", "cancelled"} and not (
+                    before and before["head"] == p["head"] and before["checks"] == p["checks"]):
+                if unfinished_runs(self.gh("run", "list", "--commit", p["head"], "--limit", "100",
+                                           "--json", RUN_FIELDS)):
+                    p["checks"], p["failed"] = "pending", []
+        return snap
 
     def master(self, old):
         return master_snapshot(old, self.gh("run", "list", "--branch", "master", "--limit", "30",

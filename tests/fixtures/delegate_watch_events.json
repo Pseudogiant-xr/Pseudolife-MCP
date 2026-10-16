@@ -44,6 +44,24 @@
                 {"__typename": "CheckRun", "name": "c", "status": "QUEUED", "conclusion": ""}],
      "expected": ["failing", ["b"]]}
   ],
+  "unfinished_runs": [
+    {"name": "none", "runs": [], "expected": []},
+    {"name": "a queued run with no check runs yet holds the head (PR #781, 2026-10-16)",
+     "runs": [{"databaseId": 2, "workflowName": "Rust shim", "status": "pending", "conclusion": "", "event": "pull_request"},
+              {"databaseId": 1, "workflowName": "CI", "status": "completed", "conclusion": "success", "event": "pull_request"}],
+     "expected": ["Rust shim"]},
+    {"name": "every not-completed status counts, names sorted and unique",
+     "runs": [{"databaseId": 5, "workflowName": "b", "status": "in_progress", "conclusion": ""},
+              {"databaseId": 4, "workflowName": "a", "status": "queued", "conclusion": ""},
+              {"databaseId": 3, "workflowName": "b", "status": "waiting", "conclusion": ""},
+              {"databaseId": 2, "workflowName": "c", "status": "requested", "conclusion": ""},
+              {"databaseId": 1, "workflowName": "d", "status": "completed", "conclusion": "failure"}],
+     "expected": ["a", "b", "c"]},
+    {"name": "completed runs, whatever their conclusion, do not hold it",
+     "runs": [{"databaseId": 2, "workflowName": "CI", "status": "completed", "conclusion": "skipped"},
+              {"databaseId": 1, "workflowName": "Docs", "status": "completed", "conclusion": "cancelled"}],
+     "expected": []}
+  ],
   "pr_snapshot": [
     {"name": "fields kept and normalised", "old": null,
      "prs": [{"number": 7, "title": "fix(x): a title well over seventy characters long, which the snapshot cuts short",

@@ -39,6 +39,7 @@ class World:
     def __init__(self, tmp_path):
         self.prs = []
         self.runs = []
+        self.head_runs = {}                  # gh run list --commit <sha>, by sha
         self.leases = {"full-suite": 0, "full-suite@box": 0}
         self.board_up = True
         self.gh_timeout = False
@@ -61,6 +62,8 @@ class World:
                 return 1, "", "HTTP 502"
             if cmd[1:3] == ["pr", "list"]:
                 return 0, json.dumps(self.prs), ""
+            if cmd[1:3] == ["run", "list"] and "--commit" in cmd:
+                return 0, json.dumps(self.head_runs.get(cmd[cmd.index("--commit") + 1], [])), ""
             if cmd[1:3] == ["run", "list"]:
                 return 0, json.dumps(self.runs), ""
             if cmd[1:3] == ["pr", "view"]:
@@ -228,6 +231,11 @@ FIXTURE = json.loads(FIXTURES.read_text(encoding="utf-8"))
 def test_fixture_checks_state(case):
     state, failed = watch.checks_state(case["rollup"])
     assert [state, failed] == case["expected"]
+
+
+@pytest.mark.parametrize("case", FIXTURE["unfinished_runs"], ids=lambda c: c["name"])
+def test_fixture_unfinished_runs(case):
+    assert watch.unfinished_runs(case["runs"]) == case["expected"]
 
 
 @pytest.mark.parametrize("case", FIXTURE["pr_snapshot"], ids=lambda c: c["name"])
@@ -488,6 +496,68 @@ def test_a_failed_rerun_after_a_cancelled_report_is_reported(h):
                               checks=_cancelling(2, last=run_(CANCELLED_JOBS[2], conclusion="FAILURE")))]
     assert lines(h.main("--settle", "0", between=between)[1]) == [
         "PR #784 failing at bdab33d4: Parity / ubuntu-latest"]
+
+
+def _head_run(run_id, workflow, status="completed", conclusion="success"):
+    return {"databaseId": run_id, "workflowName": workflow, "status": status,
+            "conclusion": conclusion if status == "completed" else "", "event": "pull_request"}
+
+
+def test_a_head_is_not_green_while_a_workflow_run_has_not_started_its_checks(h):
+    # 2026-10-16: "PR #781 green at 941539fb, merge state blocked" while the
+    # head's Rust shim run waited in its concurrency queue. A run that has
+    # not started has no check runs, so the rollup held only green checks.
+    head = "941539fb" + "0" * 32
+    h.world.prs = [pr(781, head=head, state="BLOCKED",
+                      checks=[run_("scope", status="IN_PROGRESS", conclusion="")])]
+    h.world.head_runs = {head: [_head_run(2, "Rust shim", status="pending"),
+                                _head_run(1, "CI", status="in_progress")]}
+    h.main(max_age="60")                                              # baseline
+
+    def between(poll):
+        if poll == 1:                                                 # CI finishes; Rust shim still queued
+            h.world.prs = [pr(781, head=head, state="BLOCKED", checks=[run_("scope"), run_("guards")])]
+            h.world.head_runs = {head: [_head_run(2, "Rust shim", status="pending"), _head_run(1, "CI")]}
+        if poll == 4:                                                 # Rust shim starts its jobs
+            h.world.head_runs = {head: [_head_run(2, "Rust shim", status="in_progress"), _head_run(1, "CI")]}
+            h.world.prs = [pr(781, head=head, state="BLOCKED", checks=[
+                run_("scope"), run_("guards"), run_("Rust / ubuntu-latest", status="IN_PROGRESS", conclusion="")])]
+        if poll == 6:                                                 # and passes
+            h.world.head_runs = {head: [_head_run(2, "Rust shim"), _head_run(1, "CI")]}
+            h.world.prs = [pr(781, head=head, checks=[run_("scope"), run_("guards"), run_("Rust / ubuntu-latest")])]
+    code, texts, _ = h.main("--settle", "0", between=between)
+    assert code == 0
+    assert lines(texts) == ["PR #781 green at 941539fb, merge state clean"]
+    assert h.board.events()[0]["t"] >= 6 * 60                       # not before the Rust shim run passed
+
+
+def test_a_cancelled_head_waits_for_a_workflow_run_that_has_not_started(h):
+    h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(0))]
+    h.world.head_runs = {CANCELLED_HEAD: [_head_run(2, "Rust shim", status="queued"),
+                                          _head_run(1, "CI", status="in_progress")]}
+    h.main(max_age="60")
+
+    def between(poll):
+        if poll == 1:
+            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(3))]
+            h.world.head_runs = {CANCELLED_HEAD: [_head_run(2, "Rust shim", status="queued"),
+                                                  _head_run(1, "CI", conclusion="cancelled")]}
+        if poll == 3:
+            h.world.head_runs = {CANCELLED_HEAD: [_head_run(2, "Rust shim", conclusion="cancelled"),
+                                                  _head_run(1, "CI", conclusion="cancelled")]}
+    code, texts, _ = h.main("--settle", "0", between=between)
+    assert lines(texts) == ["PR #784 cancelled at bdab33d4: " + ", ".join(sorted(CANCELLED_JOBS))]
+    assert h.board.events()[0]["t"] >= 3 * 60
+
+
+def test_run_lookups_are_made_only_for_a_head_about_to_be_reported(h):
+    h.world.prs = [pr(1, checks=[run_("a")]), pr(2, checks=[run_("a", status="QUEUED", conclusion="")])]
+    h.main(max_age="60")                                              # baseline
+    h.world.calls.clear()
+    h.main(max_age="300")                                             # nothing changes
+    commits = [c for c in h.world.calls if c[1:3] == ["run", "list"] and "--commit" in c]
+    # PR #1 was green at the baseline and is not news; PR #2 is still running.
+    assert commits == []
 
 
 def test_master_runs_failing_and_recovering(h):
