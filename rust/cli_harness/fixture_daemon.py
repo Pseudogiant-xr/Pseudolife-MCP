@@ -131,6 +131,7 @@ class FixtureDaemon:
         # (always Python) saw a silent daemon; CI's first https case failed
         # that way three times. The recorded request is discarded.
         context = ssl.create_default_context(cafile=str(TLS_CA))
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         with socket.create_connection(("127.0.0.1", port), timeout=30) as raw, \
                 context.wrap_socket(raw, server_hostname="localhost") as tls:
             tls.sendall(b"GET /fixture-warm-up HTTP/1.1\r\nHost: localhost\r\n\r\n")
