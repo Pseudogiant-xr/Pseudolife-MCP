@@ -535,6 +535,30 @@ took 143 CUDA OOMs.
   run that completes on a commit containing the merge. If it fails, open a
   revert PR at once, or a fix PR when the fix is obvious, and make no more
   disjoint merges until master is green again. When in doubt, wait for CI.
+- **A tree-identical stack forward needs no fresh pre-merge CI**
+  (maintainer decision 2026-10-16, after squash-merging #771 left #772 in
+  conflict with master). Squash-merging the bottom PR of a stack gives
+  master one new commit whose content the next PR already holds. Git does
+  not see that, so the next PR conflicts with master wherever both added
+  lines in the same place. Forward it with `git merge -s ours
+  origin/master`, or by resolving every conflict to the PR's own side.
+  Then the PR may merge on the CI its earlier head already passed, when
+  all of these hold:
+  - Master's only commits since the PR's previous merge base are squashes
+    of PRs whose tested heads are ancestors of this PR, and master's tree
+    equals the tree of the last of those heads (`git diff --quiet
+    <parent's tested head> origin/master`). Otherwise use the disjoint
+    merge-forward rule or wait for fresh CI.
+  - The forwarded head's tree is byte-identical to the head that passed
+    CI: `git diff --quiet <tested head> <forwarded head>`.
+  - That tested head passed every check its gate requires. A failed,
+    cancelled or unfinished job on it means waiting for CI on the
+    forwarded head; the identical tree only means that run tests the same
+    content.
+
+  The merge comment says "tree-identical stack forward: fresh CI skipped"
+  and gives the tested head, the forwarded head and both checks. The
+  master push run is the backstop, as for a disjoint merge-forward.
 - **Review fixes after a passing local full suite need no new one** unless
   the fixes themselves fall under a class that requires one (shipping
   checklist item 3, including its platform-specific process rule). A review
