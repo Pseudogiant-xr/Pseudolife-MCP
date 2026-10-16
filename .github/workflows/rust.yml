@@ -30,10 +30,11 @@ permissions:
 # The nightly gets its own group. Sharing master's let it cancel the push run
 # a merge relies on: push run 38870639548 ended 2 s after nightly 38872655184
 # started (2026-10-16), and push 38704856443 / nightly 38705376001 match the
-# same pattern (2026-10-15); a later push then cancelled each nightly. A push
-# run is now cancelled only by a newer push.
+# same pattern (2026-10-15); a later push then cancelled each nightly. Manual
+# CI on master would do the same, so it gets its own group too. A push run is
+# now cancelled only by a newer push.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || github.event_name == 'schedule' && format('rust-nightly-{0}-{1}', github.workflow, github.ref) || format('rust-{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('rust-{0}-{1}-{2}', github.event_name, github.workflow, github.ref) || format('rust-{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 env:
@@ -71,7 +72,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          $docs = '^(?!(rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)))$'
+          $docs = '^(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)))$'
           $rust = 'true'
           if ($env:EVENT_NAME -ceq 'pull_request') {
             $files = @(git diff --no-renames --name-only HEAD^1 HEAD)
@@ -291,7 +292,9 @@ jobs:
           if-no-files-found: error
 
   parity-checks:
-    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    # Explicit: the implicit success() also checks scope, an ancestor, so a
+    # failed scope would skip these jobs even after rust and candidate ran.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
     needs: [candidate, rust]
     strategy:
@@ -982,7 +985,7 @@ jobs:
     # were cancelled by a newer push before finishing. A survivor now
     # surfaces at the next nightly (its own concurrency group, so pushes no
     # longer cancel it) instead of after the merge that caused it.
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && needs.candidate.result == 'success' }}
     name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
     # These shards compile their own source copies and consume no rust-job
     # artifact; the final Parity gate still requires both Rust jobs.

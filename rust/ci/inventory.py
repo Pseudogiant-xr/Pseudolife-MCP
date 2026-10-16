@@ -132,7 +132,8 @@ def check(workflow):
     jobs = workflow["jobs"]
     parity = jobs["parity-checks"]
     ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'"
-    assert parity['if'] == ordinary_ci, 'H5 PR event selection changed'
+    assert parity['if'] == (f"${{{{ !cancelled() && ({ordinary_ci}) && needs.candidate.result == 'success' "
+                            "&& needs.rust.result == 'success' }}"), 'H5 PR event selection changed'
     matrix = parity["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS and "exclude" not in matrix
     assert set(SUITES) <= set(matrix["suite"]), "missing H5 suite"
@@ -170,7 +171,8 @@ def check(workflow):
     assert events.get('push') == {'branches': ['master']} \
         and events.get('schedule') == [{'cron': '23 3 * * *'}], 'source events dropped or changed'
     assert 'pull_request' in events and 'workflow_dispatch' in events, 'source events dropped or changed'
-    assert source['if'] == SOURCE_EVENTS, 'source event selection changed'
+    assert source['if'] == (f"${{{{ !cancelled() && ({SOURCE_EVENTS}) "
+                            "&& needs.candidate.result == 'success' }}"), 'source event selection changed'
     gate = jobs['parity']
     assert gate['needs'] == ['scope', 'rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
     assert gate['if'] == f'always() && ({ordinary_ci})' and not gate.get('continue-on-error'), 'Parity event gate can skip failures'

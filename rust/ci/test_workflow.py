@@ -602,6 +602,8 @@ def run_scope(tmp_path, event, files, git_exit=0):
     # Stand in for `git diff`, the step's only external input.
     bootstrap = r'''
 function git {
+    # Renames must list both paths, or rust/x.md -> docs/x.md reads as docs.
+    if (($args -join ' ') -cne 'diff --no-renames --name-only HEAD^1 HEAD') { throw "unexpected git $args" }
     $global:LASTEXITCODE = [int]$env:PL_FIXTURE_GIT_EXIT
     if ($env:PL_FIXTURE_FILES) { $env:PL_FIXTURE_FILES -split "`n" }
 }
@@ -641,6 +643,9 @@ CODE_CHANGES = [
     ["docs/setup.sh"],
     ["notes.txt"],
     ["src.md.py"],
+    ["RUST/README.md"],
+    ["Rust/daemon/notes.md"],
+    ["Plugin/skills/x/SKILL.md"],
     ['"docs/caf\\303\\251.md"'],
 ]
 
@@ -698,6 +703,9 @@ def test_nightly_never_shares_a_group_with_master_pushes():
         "pull_request", "refs/pull/2/merge")
     assert concurrency_group("workflow_dispatch", mode="wait-mail") != concurrency_group(
         "workflow_dispatch", mode="wait-mail", run_id="102")
+    # Manual CI on master must not cancel the push run either.
+    assert concurrency_group("workflow_dispatch", mode="ci") not in (push, concurrency_group("schedule"))
+    assert concurrency_group("workflow_dispatch", mode="ci") == concurrency_group("workflow_dispatch", mode="ci")
     assert workflow()["concurrency"]["cancel-in-progress"] is True
 
 
@@ -705,8 +713,9 @@ def test_nightly_never_shares_a_group_with_master_pushes():
                                          ("schedule", True), ("workflow_dispatch", True)])
 def test_source_mutants_run_nightly_and_on_manual_ci_only(event, runs):
     condition = workflow()["jobs"]["source-mutants"]["if"]
-    assert condition == ("github.event_name == 'schedule' || "
-                         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')")
+    assert condition == ("${{ !cancelled() && (github.event_name == 'schedule' || "
+                         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
+                         "&& needs.candidate.result == 'success' }}")
     assert (f"'{event}'" in condition) == runs
 
 
@@ -723,8 +732,15 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
         assert jobs[name]["needs"] == "scope", name
         assert jobs[name]["if"] == gated, name
     # Parity checks and source mutants inherit the skip through their needs.
+    # Their success checks name the direct needs: the implicit success() also
+    # covers scope, so a failed scope would skip them after rust/candidate ran.
     assert jobs["parity-checks"]["needs"] == ["candidate", "rust"]
+    assert jobs["parity-checks"]["if"].startswith("${{ !cancelled() && ")
+    assert jobs["parity-checks"]["if"].endswith(
+        "&& needs.candidate.result == 'success' && needs.rust.result == 'success' }}")
     assert jobs["source-mutants"]["needs"] == ["candidate"]
+    assert jobs["source-mutants"]["if"].startswith("${{ !cancelled() && ")
+    assert jobs["source-mutants"]["if"].endswith("&& needs.candidate.result == 'success' }}")
     assert jobs["parity"]["needs"][0] == "scope"
 
 
