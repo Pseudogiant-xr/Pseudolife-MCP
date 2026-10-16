@@ -1,4 +1,4 @@
-//! Read tools over MCP (spec "Read tools over MCP"): `memory_recent`.
+//! Read tools over MCP: `memory_recent` (spec "memory_recent over MCP").
 
 use crate::bank::Bank;
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
@@ -44,6 +44,7 @@ fn mcp_memory_recent<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
             recent(&bank, n, &filters)
         })
         .await
+        .map_err(|e| ToolError::Internal(anyhow::anyhow!(e)))?
         .map_err(|e| ToolError::Internal(anyhow::anyhow!(e)))?;
         Ok(if verbose { result } else { compact(result) })
     })
@@ -57,29 +58,41 @@ struct Filters {
 
 impl Filters {
     /// OR within each filter, AND across them; episodes match exactly
-    /// (no subtree, unlike search).
-    fn admit(&self, e: &crate::bank::Entry) -> bool {
-        self.sources.as_ref().is_none_or(|s| s.contains(&e.source))
-            && self
+    /// (no subtree, unlike search). With a tag filter, an entry that passed
+    /// the others and stores a list or object tag fails as Python's
+    /// `set(entry.tags)` does (unhashable), so the call is an internal error.
+    fn admit(&self, e: &crate::bank::Entry) -> Result<bool, String> {
+        if !self.sources.as_ref().is_none_or(|s| s.contains(&e.source))
+            || !self
                 .episodes
                 .as_ref()
                 .is_none_or(|ids| e.episode_id.as_ref().is_some_and(|id| ids.contains(id)))
-            && self.tags.as_ref().is_none_or(|want| {
-                e.tags
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .any(|t| want.iter().any(|w| w == t))
-            })
+        {
+            return Ok(false);
+        }
+        let Some(want) = &self.tags else {
+            return Ok(true);
+        };
+        if e.tags.iter().any(|t| t.is_array() || t.is_object()) {
+            return Err(format!("entry {} has an unhashable tag", e.id));
+        }
+        Ok(e.tags
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|t| want.iter().any(|w| w == t)))
     }
 }
 
 /// `MemoryService.recent` (service.py:2171-2216): the admitted resident
 /// entries, newest `(timestamp, seq)` first, at most `n`, as
 /// `_entry_to_dict` (no score) with supersession annotated. No side effects.
-fn recent(bank: &Bank, n: usize, filters: &Filters) -> Value {
-    let mut order: Vec<usize> = (0..bank.entries.len())
-        .filter(|&i| filters.admit(&bank.entries[i]))
-        .collect();
+fn recent(bank: &Bank, n: usize, filters: &Filters) -> Result<Value, String> {
+    let mut order = Vec::new();
+    for (i, e) in bank.entries.iter().enumerate() {
+        if filters.admit(e)? {
+            order.push(i);
+        }
+    }
     order.sort_by(|&x, &y| {
         let (a, b) = (&bank.entries[x], &bank.entries[y]);
         b.ts.total_cmp(&a.ts).then(b.seq.cmp(&a.seq))
@@ -100,7 +113,7 @@ fn recent(bank: &Bank, n: usize, filters: &Filters) -> Value {
         .collect();
     annotate_supersession_in(bank, &mut served);
     let entries: Vec<Value> = served.into_iter().map(|(_, d)| d).collect();
-    json!({"count": entries.len(), "entries": entries})
+    Ok(json!({"count": entries.len(), "entries": entries}))
 }
 
 /// `_compact_entries` with no text budget: `count` stays as served.

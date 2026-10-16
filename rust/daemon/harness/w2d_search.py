@@ -417,21 +417,25 @@ class McpRecent(Scenario):
     name = "mcp-recent"
     mcp_extra_seed = True
     require = {"recent.responses": 11, "recent.replaced_by": 1, "recent.superseded_verbose": 1,
-               "recent.probe_present": 1, "recent.episode_hits": 1, "recent.child_excluded": 1}
+               "recent.probe_present": 1, "recent.episode_hits": 1, "recent.child_excluded": 1,
+               "recent.nonempty": 3}
 
     def cases(self):
-        recent = lambda name, args: mcp_case(name, args, tool="memory_recent")  # noqa: E731
+        def recent(name, args, nonempty=False):
+            # ``nonempty``: the oracle must answer with entries (coverage).
+            return dict(mcp_case(name, args, tool="memory_recent"), nonempty=nonempty)
         return [
             recent("defaults", {}),
             recent("n 1", {"n": 1}),
             recent("everything, compact", {"n": 500}),
             recent("everything, verbose", {"n": 500, "verbose": True}),
-            recent("source filter", {"n": 500, "sources": ["notes"]}),
-            recent("tag filter, normalised", {"n": 500, "tags": ["DEPLOY", " bug"]}),
+            recent("source filter", {"n": 500, "sources": ["notes"]}, True),
+            recent("tag filter, normalised", {"n": 500, "tags": ["DEPLOY", " bug"]}, True),
             recent("tags that normalise to nothing filter nothing", {"n": 3, "tags": ["  "]}),
             recent("episode filter is exact", {"n": 500, "episodes": ["<seed-episode>"],
                                                "verbose": True}),
-            recent("filters AND across", {"n": 500, "sources": ["conversation"], "tags": ["deploy"]}),
+            recent("filters AND across", {"n": 500, "sources": ["conversation"], "tags": ["deploy"]},
+                   True),
             recent("empty lists are no filter", {"n": 4, "sources": [], "tags": [], "episodes": []}),
             recent("n past the 64-bit range takes everything", {"n": 2 ** 64}),
         ]
@@ -631,7 +635,7 @@ def coverage(responses: list[dict], state: dict) -> dict:
            "correct_with": {"contested": 0, "aged": 0}, "truncated": 0, "replaced_by": 0,
            "episode_filter_child_hit": 0,
            "recent": {"responses": 0, "replaced_by": 0, "superseded_verbose": 0, "probe_present": 0,
-                      "episode_hits": 0, "child_excluded": 0}}
+                      "episode_hits": 0, "child_excluded": 0, "nonempty": 0}}
     for r in responses:
         body = r.get("json") or {}
         if isinstance(body, dict) and "count" in body and "query" not in body:
@@ -837,6 +841,9 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
                                                  ordered=c.get("tool") == "memory_recent")
     cov = coverage(py_seen, py_state)
+    cov["recent"]["nonempty"] = sum(
+        1 for c, r in zip(scn.cases(), py_seen)
+        if c.get("nonempty") and ((r.get("json") or {}).get("entries") or []))
     cov_fail = unmet(cov, scn.require)
     db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"])
     if record:

@@ -71,7 +71,8 @@ tool's answers by value.
 
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset` and, since their body registrations, `memory_store`,
-`memory_search`, `memory_recent`, `memory_agents` and `memory_message`. The two board tools
+`memory_search`, `memory_recent`, `memory_agents` and
+`memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
