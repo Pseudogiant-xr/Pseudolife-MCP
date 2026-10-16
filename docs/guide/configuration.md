@@ -1178,8 +1178,9 @@ and reuse the original request ID when retrying an addressed message.
 
 An active task should use `memory_agents` before shared-resource work and
 `memory_message(action="receive")` on resume and when the coordination digest
-(in the prompt hook or a tool result) shows pending mail. Receive does not
-acknowledge; use `action="ack"` after reading, with one `message_id` or
+(in the prompt hook or a tool result) shows pending mail. Receive without
+`ack` does not acknowledge; `ack=true` acknowledges what it returns in the
+same call, or use `action="ack"` after reading, with one `message_id` or
 several comma-separated (at most 50; a JSON array of strings, the form a
 host that stringifies list parameters sends, is read as that list): a batch
 returns the receipts in the order given and lists the ids that were not this
@@ -1849,8 +1850,9 @@ acknowledges mail. Optional adapter startup requests cancellation after three se
 for bounded in-flight request cleanup before falling back to ordinary memory
 service. This is not a three-second ceiling on total shim startup time.
 
-Messages have one recipient. Sending confirms durable enqueue; receiving does
-not acknowledge. The recipient explicitly acknowledges a message ID, and an
+Messages have one recipient. Sending confirms durable enqueue; receiving
+without `ack=true` does not acknowledge. The recipient explicitly acknowledges a
+message ID (or receives with `ack=true`), and an
 acknowledgment does not mean the requested work is complete. Retries reuse the
 same sender request key and content. Coordination traffic is not added to bands,
 cortex, graph, retrieval or dream input by the messaging APIs. Store a useful

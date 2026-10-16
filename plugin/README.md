@@ -238,11 +238,9 @@ listed for review and left alone. By hand:
 - **Subagent board guard** (PreToolUse, since 2026-09-30; off with the board,
   `PSEUDOLIFE_AGENT_COORDINATION=0`) — a subagent runs in its parent's shim,
   so its board calls carry the parent's identity. For a subagent's call
-  (Claude Code marks it with a top-level `agent_id` in the hook input; one
-  inside the tool's arguments does not count) the hook denies
-  `memory_agents` update, claim and release and `memory_message` send, ack
-  and receive with `ack=true` on any server name, with a reason telling it
-  to ask its parent; list,
+  (Claude Code marks it with `agent_id` in the hook input) the hook denies
+  `memory_agents` update, claim and release and `memory_message` send and
+  ack on any server name, with a reason telling it to ask its parent; list,
   receive, the read-only `memory_message` history and every other tool
   pass, and so does everything the parent calls. No daemon request. A
   payload it cannot read is let through. Codex lists this entry too; there
