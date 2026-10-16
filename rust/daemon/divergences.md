@@ -37,7 +37,7 @@ tool's answers by value.
 | `memory_agents` | W2-F | W2-F supplies the REST board context and roster; MCP adapter dispatch and binding remain unwired. |
 | `memory_message` | W2-F | W2-F supplies REST mailbox, audit and wake services; MCP dispatch remains unwired. |
 | `memory_search` | W2-D | W2-D supplies REST search, cortex and read telemetry; MCP filters, compact results and dispatch remain unwired. |
-| `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred pending eval (PARITY.md, "Graph traversal deferred pending eval"). |
+| `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred by decision (PARITY.md, "Graph traversal deferred by decision"). |
 | `memory_world_search` | W2-D | No resident world-cortex search service. |
 | `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
 | `memory_get` | W2-D | No entry lookup service with its access-count and trace effects. |
