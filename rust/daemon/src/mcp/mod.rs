@@ -22,7 +22,7 @@ use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::Response;
 use serde_json::{Map, Value, json};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tiers::{Overrides, Tier};
@@ -34,9 +34,6 @@ const HANDSHAKE_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18", 
 const LATEST_HANDSHAKE: &str = "2025-11-25";
 /// sse-starlette's keep-alive comment interval.
 const PING_EVERY: Duration = Duration::from_secs(15);
-/// Terminated session ids remembered for the "has been terminated" answer.
-/// Python keeps every terminated transport for the process lifetime.
-const TERMINATED_KEPT: usize = 10_000;
 /// `transport_security.DEFAULT_MAX_REQUEST_BODY_SIZE`, enforced by the SDK's
 /// `RequestBodyLimitMiddleware` around the whole MCP app.
 pub(crate) const BODY_LIMIT: usize = 4 * 1024 * 1024;
@@ -70,17 +67,40 @@ struct StandaloneStream {
     cancel: watch::Sender<()>,
 }
 
+/// mcp 2.2 keeps no memory of ended sessions: a DELETEd or discarded id is
+/// simply unknown (`_discard_session`).
 #[derive(Default)]
 struct Sessions {
     live: HashMap<String, Entry>,
-    terminated: HashSet<String>,
-    terminated_order: VecDeque<String>,
 }
 
 enum Lookup {
     Live,
-    Terminated,
     Unknown,
+}
+
+/// `_serve_opening_request`: a session-less request registers a session, and
+/// the session is kept only if that request answers below 400. Refused,
+/// failed or cancelled (this guard dropped before a status), it is discarded
+/// again, so its id answers 404 `Session not found`.
+struct Opening<'a> {
+    state: &'a McpState,
+    sid: String,
+    established: bool,
+}
+
+impl Opening<'_> {
+    fn settle(mut self, status: StatusCode) {
+        self.established = status.as_u16() < 400;
+    }
+}
+
+impl Drop for Opening<'_> {
+    fn drop(&mut self) {
+        if !self.established && !crate::mutants::active("mcp-keep-failed-opening") {
+            self.state.forget(&self.sid);
+        }
+    }
 }
 
 impl McpState {
@@ -140,8 +160,6 @@ impl McpState {
         let s = self.sessions.lock().expect("sessions lock");
         if s.live.contains_key(sid) {
             Lookup::Live
-        } else if s.terminated.contains(sid) {
-            Lookup::Terminated
         } else {
             Lookup::Unknown
         }
@@ -154,8 +172,8 @@ impl McpState {
         s.live.entry(sid.to_string()).or_default();
     }
 
-    /// Opens the initialization gate. A session terminated meanwhile (a
-    /// DELETE racing this request) stays terminated.
+    /// Opens the initialization gate. A session forgotten meanwhile (a
+    /// DELETE racing this request) stays forgotten.
     fn mark_ready(&self, sid: &str) {
         let mut s = self.sessions.lock().expect("sessions lock");
         if let Some(e) = s.live.get_mut(sid) {
@@ -168,18 +186,11 @@ impl McpState {
         s.live.get(sid).is_some_and(|e| e.ready)
     }
 
-    fn terminate(&self, sid: &str) {
+    /// `_discard_session`: the id is forgotten at once. Dropping the entry's
+    /// sender ends its standalone stream.
+    fn forget(&self, sid: &str) {
         let mut s = self.sessions.lock().expect("sessions lock");
-        // Dropping the sender ends the session's standalone stream.
         s.live.remove(sid);
-        if s.terminated.insert(sid.to_string()) {
-            s.terminated_order.push_back(sid.to_string());
-            while s.terminated_order.len() > TERMINATED_KEPT {
-                if let Some(old) = s.terminated_order.pop_front() {
-                    s.terminated.remove(&old);
-                }
-            }
-        }
     }
 
     /// Server-initiated message to the session's standalone stream, if open.
@@ -387,17 +398,6 @@ pub async fn handle(
     let (sid, known) = match supplied {
         Some(s) => match state.lookup(&s) {
             Lookup::Live => (s, true),
-            Lookup::Terminated => {
-                if let Some(r) = security(state, &method, &headers) {
-                    return r;
-                }
-                return rpc_http_error(
-                    404,
-                    INVALID_REQUEST,
-                    "Not Found: Session has been terminated",
-                    Some(&s),
-                );
-            }
             Lookup::Unknown => {
                 return rpc_http_error(404, INVALID_REQUEST, "Session not found", None);
             }
@@ -410,22 +410,27 @@ pub async fn handle(
             (sid, false)
         }
     };
+    let opening = (!known).then(|| Opening {
+        state,
+        sid: sid.clone(),
+        established: false,
+    });
     if let Some(r) = security(state, &method, &headers) {
         return r;
     }
-    match method {
+    let response = match method {
         Method::POST => post(app, principal, &sid, known, headers, body).await,
         Method::GET => get(state, &sid, known, &headers),
+        Method::DELETE if !known => rpc_http_error(
+            400,
+            INVALID_REQUEST,
+            "Bad Request: Missing session ID",
+            Some(&sid),
+        ),
         Method::DELETE => {
-            if !known {
-                return rpc_http_error(
-                    400,
-                    INVALID_REQUEST,
-                    "Bad Request: Missing session ID",
-                    Some(&sid),
-                );
+            if !crate::mutants::active("mcp-delete-keeps-session") {
+                state.forget(&sid);
             }
-            state.terminate(&sid);
             json_bytes(200, Vec::new(), Some(&sid))
         }
         _ => {
@@ -434,7 +439,11 @@ pub async fn handle(
                 .insert(header::ALLOW, HeaderValue::from_static("GET, POST, DELETE"));
             r
         }
+    };
+    if let Some(opening) = opening {
+        opening.settle(response.status());
     }
+    response
 }
 
 /// The modern era's answer to a legacy-shaped request with no `_meta`
@@ -1425,7 +1434,7 @@ mod sessions {
                 "an unconsumed SSE stream must backpressure notification producers"
             );
             if terminate {
-                app.mcp.terminate("s");
+                app.mcp.forget("s");
                 // Keep the body alive: DELETE itself must release the producer.
                 tokio::time::timeout(Duration::from_secs(1), &mut worker)
                     .await
@@ -1443,15 +1452,43 @@ mod sessions {
     }
 
     #[test]
-    fn a_terminated_session_is_not_reopened() {
+    fn a_forgotten_session_is_not_reopened() {
         let state = McpState::new(Tier::Core, HashMap::new(), true);
         state.register("s1");
         assert!(matches!(state.lookup("s1"), Lookup::Live));
         assert!(!state.is_ready("s1"));
-        state.terminate("s1");
+        state.forget("s1");
         // An initialize or initialized notification racing the DELETE.
         state.mark_ready("s1");
-        assert!(matches!(state.lookup("s1"), Lookup::Terminated));
+        assert!(matches!(state.lookup("s1"), Lookup::Unknown));
+    }
+
+    #[test]
+    fn an_opening_request_keeps_its_session_only_below_400() {
+        let state = McpState::new(Tier::Core, HashMap::new(), true);
+        for (sid, status, kept) in [
+            ("ok", 200, true),
+            ("accepted", 202, true),
+            ("refused", 400, false),
+            ("unacceptable", 406, false),
+        ] {
+            state.register(sid);
+            Opening {
+                state: &state,
+                sid: sid.into(),
+                established: false,
+            }
+            .settle(StatusCode::from_u16(status).unwrap());
+            assert_eq!(matches!(state.lookup(sid), Lookup::Live), kept, "{sid}");
+        }
+        // Cancelled before any status: the guard drops unsettled.
+        state.register("cancelled");
+        drop(Opening {
+            state: &state,
+            sid: "cancelled".into(),
+            established: false,
+        });
+        assert!(matches!(state.lookup("cancelled"), Lookup::Unknown));
     }
 }
 
