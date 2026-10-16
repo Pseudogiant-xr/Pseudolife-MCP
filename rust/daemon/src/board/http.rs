@@ -114,6 +114,30 @@ pub fn authenticated_principal(
     }
 }
 
+/// The `/mcp` mount's binding check (`web/api.py`, before the MCP app):
+/// optional `X-PL-Bank` / `X-PL-Principal` headers must name the bearer's own
+/// board context, else the coordination refusal answers in place of MCP.
+pub async fn mcp_binding(app: &App, h: &HeaderMap) -> Option<Response> {
+    let headers = header_dict(h);
+    let checked: Result<(), BoardError> = async {
+        let Some((bank, principal)) = super::dispatch::bound_identity(&headers)? else {
+            return Ok(());
+        };
+        // Fail closed without a bearer, as `authenticated_principal` does.
+        let caller = authenticated_principal(app, &headers)?;
+        let context = app.board.binding_context(&headers, &caller).await?;
+        let field = |key: &str| context.get(key).and_then(Value::as_str);
+        if (field("bank_id"), field("principal")) != (Some(bank.as_str()), Some(principal.as_str()))
+            && !crate::mutants::active("mcp-binding-open")
+        {
+            return Err(BoardError::code("bank_identity_mismatch"));
+        }
+        Ok(())
+    }
+    .await;
+    checked.err().map(|e| refusal(&e))
+}
+
 /// `POST /api/coordination/<action>` after W1-A's body checks; `body` is
 /// the parsed object (empty for an empty body).
 pub async fn coordination(

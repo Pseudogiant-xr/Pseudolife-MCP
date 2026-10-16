@@ -109,7 +109,7 @@ fn normalize_class(c: &str) -> &'static str {
     }
 }
 
-fn ttl(c: &str) -> Option<f64> {
+pub(crate) fn ttl(c: &str) -> Option<f64> {
     match normalize_class(c) {
         "evergreen" => None,
         "slow" => Some(270.0 * DAY),
