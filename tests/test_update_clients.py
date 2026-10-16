@@ -53,6 +53,7 @@ class FakeCli:
         # What a runtime's requirements probe answers: its installed
         # distributions that fall outside pseudolife-mcp's declared ranges.
         self.requirements_probe: tuple[int, str] = (0, json.dumps({"mismatched": []}))
+        self.requirements_probes: dict[str, tuple[int, str]] = {}   # per runtime directory name
         self.processes: list[tuple[int, int, str]] = []   # what list_processes reports
         self.marketplace_update = (0, "updated")
         self.marketplace_add: tuple[int, str] | None = None   # forces `claude plugin marketplace add`'s answer
@@ -96,7 +97,8 @@ class FakeCli:
         if rest[:3] == ["-m", "pip", "install"]:
             return self.pip_deps
         if name.startswith("python") and rest[:2] == ["-I", "-c"] and ".requires(" in rest[2]:
-            return self.requirements_probe
+            runtime = Path(argv[0]).parent.parent.name
+            return self.requirements_probes.get(runtime, self.requirements_probe)
         if name.startswith("python") and rest[:2] == ["-I", "-c"] and "importlib.metadata" in rest[2]:
             return 0, self.version + "\n"
         if name.startswith("python") and rest[:1] == ["-c"] and "ScriptMaker" in rest[1]:
@@ -417,14 +419,65 @@ def test_a_release_runtime_on_an_sdk_its_package_refuses_is_built_again(cli):
     _register_claude(cli, str(layout.launcher))
     cli.version = "0.18.2"
     assert uc.update_shim("pseudolife-mcp==0.18.2")["state"] == "installed:0.18.2"
-    cli.requirements_probe = (0, json.dumps({"mismatched": ["mcp 2.1.1 (needs <2.3,>=2.2)"]}) + "\n")
+    cli.requirements_probes["000001"] = (0, json.dumps({"mismatched": [MCP_21]}) + "\n")
     again = uc.update_shim("pseudolife-mcp==0.18.2")
     assert again["state"] == "installed:0.18.2", again
     assert _runtime_dirs(cli) == ["000002"], again
     assert ("runtime 000001 (0.18.2) has mcp 2.1.1 (needs <2.3,>=2.2), outside what "
             "pseudolife-mcp 0.18.2 requires; installing it again") in again["detail"]
-    probe = _probe_calls(cli)[-1]
-    assert Path(probe[0]).parent.parent == layout.root / "000001"
+    assert "still has" not in again["detail"]
+    probed = [Path(c[0]).parent.parent.name for c in _probe_calls(cli)]
+    assert probed[-2:] == ["000001", "000002"], probed   # the old runtime, then the rebuilt one
+
+
+MCP_21 = "mcp 2.1.1 (needs <2.3,>=2.2)"
+
+
+def test_a_rebuild_that_keeps_the_mismatch_says_so_and_names_the_fix(cli):
+    """Code older than the release it installs (a pipx copy the launcher did
+    not replace, an old checkout's helper) rebuilds with its own, older shim
+    requirements, so the mismatch survives. The update must not read as a
+    repair: it names what is still wrong and the launcher command whose
+    newer code installs the right range."""
+    layout = _layout(cli)
+    _register_claude(cli, str(layout.launcher))
+    cli.version = "0.18.2"
+    uc.update_shim("pseudolife-mcp==0.18.2")
+    cli.requirements_probe = (0, json.dumps({"mismatched": [MCP_21]}))
+    again = uc.update_shim("pseudolife-mcp==0.18.2")
+    assert again["state"] == "installed:0.18.2", again
+    assert (f"runtime 000002 (0.18.2) still has {MCP_21}: the pseudolife-mcp running this update "
+            f"installs an older dependency range; finish with: \"{layout.launcher}\" update --clients-only"
+            ) in again["detail"]
+
+
+def test_a_fresh_release_install_on_a_refused_sdk_says_so(cli):
+    """The first install of a release, made by older code, is checked the
+    same way (what 0.18.1's update would have said about 0.18.2)."""
+    layout = _layout(cli)
+    _register_claude(cli, str(layout.launcher))
+    cli.version = "0.18.2"
+    cli.requirements_probe = (0, json.dumps({"mismatched": [MCP_21]}))
+    first = uc.update_shim("pseudolife-mcp==0.18.2")
+    assert first["state"] == "installed:0.18.2", first
+    assert f"runtime 000001 (0.18.2) still has {MCP_21}" in first["detail"]
+
+
+def test_a_failed_rebuild_keeps_the_reason_it_was_tried(cli):
+    """`--clients-only` on a host that looked current: when the rebuild
+    fails, the report still says why it tried."""
+    layout = _layout(cli)
+    _register_claude(cli, str(layout.launcher))
+    cli.version = "0.18.2"
+    uc.update_shim("pseudolife-mcp==0.18.2")
+    cli.requirements_probes["000001"] = (0, json.dumps({"mismatched": [MCP_21]}))
+    cli.pip_deps = (1, "ERROR: Could not find a version that satisfies the requirement mcp<2.3,>=2.2")
+    again = uc.update_shim("pseudolife-mcp==0.18.2")
+    assert again["state"] == "failed", again
+    assert again["detail"].startswith(
+        f"runtime 000001 (0.18.2) has {MCP_21}, outside what pseudolife-mcp 0.18.2 requires; "
+        "installing it again; installing a new shim runtime from pseudolife-mcp==0.18.2 failed"), again
+    assert _runtime_dirs(cli) == ["000001"]
 
 
 def test_a_release_runtime_whose_requirements_hold_stays_current(cli):
@@ -434,11 +487,12 @@ def test_a_release_runtime_whose_requirements_hold_stays_current(cli):
     _register_claude(cli, str(layout.launcher))
     cli.version = "0.18.2"
     uc.update_shim("pseudolife-mcp==0.18.2")
+    before = len(_probe_calls(cli))
     again = uc.update_shim("pseudolife-mcp==0.18.2")
     assert again["state"] == "current:0.18.2", again
     assert _runtime_dirs(cli) == ["000001"]
-    assert "installing it again" not in again["detail"]
-    assert len(_probe_calls(cli)) == 1
+    assert "installing it again" not in again["detail"] and "still has" not in again["detail"]
+    assert len(_probe_calls(cli)) == before + 1
 
 
 @pytest.mark.parametrize("answer", [
@@ -483,6 +537,27 @@ def test_the_requirements_probe_reads_the_package_s_own_declared_ranges(monkeypa
     exec(compile(rt._REQUIREMENTS_PROBE, "<probe>", "exec"), {})
     report = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert report == {"mismatched": ["mcp 2.1.1 (needs <2.3,>=2.2)"]}
+
+
+def test_the_requirements_probe_falls_back_to_pip_s_vendored_packaging(monkeypatch, capsys):
+    """A runtime made by ``python -m venv`` may have no ``packaging`` of its
+    own; pip's vendored copy answers instead."""
+    import importlib.metadata as metadata
+    import types
+
+    from packaging.requirements import Requirement
+
+    rt = uc.runtimes_module()
+    vendored = types.ModuleType("pip._vendor.packaging.requirements")
+    vendored.Requirement = Requirement
+    monkeypatch.setitem(sys.modules, "packaging.requirements", None)   # import raises ImportError
+    monkeypatch.setitem(sys.modules, "pip._vendor.packaging.requirements", vendored)
+    for parent in ("pip", "pip._vendor", "pip._vendor.packaging"):
+        monkeypatch.setitem(sys.modules, parent, sys.modules.get(parent) or types.ModuleType(parent))
+    monkeypatch.setattr(metadata, "requires", lambda name: ["mcp>=2.2,<2.3"])
+    monkeypatch.setattr(metadata, "version", lambda name: "2.1.1")
+    exec(compile(rt._REQUIREMENTS_PROBE, "<probe>", "exec"), {})
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == {"mismatched": [MCP_21]}
 
 
 def test_the_requirements_probe_runs_in_a_real_interpreter():

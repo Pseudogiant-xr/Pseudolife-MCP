@@ -553,7 +553,7 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         detail = (f"installing a new shim runtime from {source} failed at {exc.step} ({_failure_line(exc.output, 1)}); "
                   f"registrations were not touched and the runtime that was current stays current. "
                   f"Retry: {retry}")
-        return {"state": "failed", "detail": "; ".join([detail] + [r["detail"] for r in results])}
+        return {"state": "failed", "detail": "; ".join(rebuilt + [detail] + [r["detail"] for r in results])}
     if installed is not None:
         detail = [f"runtime {runtime.name} ({runtime.version}) is already installed from {source} behind "
                   f"{layout.launcher}; nothing to install (--reinstall to install it again)"]
@@ -561,6 +561,15 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         detail = rebuilt + [f"runtime {runtime.name} ({runtime.version}"
                             + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
                             + f") installed from {source} behind {layout.launcher}"]
+        # The dependencies just installed are this code's SHIM_REQUIREMENTS,
+        # not the release's own ranges: code older than the release leaves
+        # a mismatch that the launcher's newer code repairs.
+        still = (rt.requirement_mismatches(runtime, layout, run=run_cli)
+                 if re.fullmatch(r"pseudolife-mcp==[0-9A-Za-z.+-]+", source) else None)
+        if still:
+            detail.append(f"runtime {runtime.name} ({runtime.version}) still has {', '.join(still)}: the "
+                          f"pseudolife-mcp running this update installs an older dependency range; finish "
+                          f"with: \"{layout.launcher}\" update --clients-only")
     failed = False
     for registration, kind in managed:
         if kind == "launcher":
