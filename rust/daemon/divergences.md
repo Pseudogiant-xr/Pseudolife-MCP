@@ -36,7 +36,7 @@ tool's answers by value.
 
 | Tool | Body owner | Missing service prerequisite |
 |---|---|---|
-| `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion remains deferred. |
+| `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred by decision (PARITY.md, "Graph traversal deferred by decision"). |
 | `memory_world_search` | W2-D | No resident world-cortex search service. |
 | `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
 | `memory_get` | W2-D | No entry lookup service with its access-count and trace effects. |
