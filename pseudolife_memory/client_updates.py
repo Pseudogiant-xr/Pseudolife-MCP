@@ -425,6 +425,14 @@ def _legacy_directories(rt, layout) -> list[Path]:
     return [layout.root / n for n in names if rt._sequence_of(n) is None and (layout.root / n).is_dir()]
 
 
+def _launcher_invocation(command: str, windows: bool | None = None) -> str:
+    """``runtimes.launcher_command``'s answer as a command to paste: on
+    Windows a quoted path needs PowerShell's call operator, without which
+    PowerShell stops at "Unexpected token"."""
+    windows = os.name == "nt" if windows is None else windows
+    return f"& {command}" if windows and command.startswith('"') else command
+
+
 def _installed_release(rt, layout, source: str, notes: list[str] | None = None):
     """The current runtime when it was installed from ``source`` itself, a
     pinned release (``pseudolife-mcp==0.16.0``) it reports as its version,
@@ -569,7 +577,7 @@ def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> di
         if still:
             detail.append(f"runtime {runtime.name} ({runtime.version}) still has {', '.join(still)}: the "
                           f"pseudolife-mcp running this update installs an older dependency range; finish "
-                          f"with: \"{layout.launcher}\" update --clients-only")
+                          f"with: {_launcher_invocation(rt.launcher_command(layout))} update --clients-only")
     failed = False
     for registration, kind in managed:
         if kind == "launcher":

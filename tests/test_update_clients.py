@@ -446,9 +446,22 @@ def test_a_rebuild_that_keeps_the_mismatch_says_so_and_names_the_fix(cli):
     cli.requirements_probe = (0, json.dumps({"mismatched": [MCP_21]}))
     again = uc.update_shim("pseudolife-mcp==0.18.2")
     assert again["state"] == "installed:0.18.2", again
+    command = uc._launcher_invocation(uc.runtimes_module().launcher_command(layout))
     assert (f"runtime 000002 (0.18.2) still has {MCP_21}: the pseudolife-mcp running this update "
-            f"installs an older dependency range; finish with: \"{layout.launcher}\" update --clients-only"
+            f"installs an older dependency range; finish with: {command} update --clients-only"
             ) in again["detail"]
+
+
+@pytest.mark.parametrize("command,windows,expected", [
+    ('"C:\\Users\\A B\\pseudolife-mcp.exe"', True, '& "C:\\Users\\A B\\pseudolife-mcp.exe"'),
+    ("C:\\Users\\ab\\pseudolife-mcp.exe", True, "C:\\Users\\ab\\pseudolife-mcp.exe"),
+    ("pseudolife-mcp", True, "pseudolife-mcp"),
+    ('"/home/a b/.local/bin/pseudolife-mcp"', False, '"/home/a b/.local/bin/pseudolife-mcp"'),
+])
+def test_the_named_fix_pastes_into_the_platform_shell(command, windows, expected):
+    """PowerShell refuses a quoted path followed by arguments ("Unexpected
+    token") unless it is called with ``&``; POSIX shells take it as is."""
+    assert uc._launcher_invocation(command, windows) == expected
 
 
 def test_a_fresh_release_install_on_a_refused_sdk_says_so(cli):
