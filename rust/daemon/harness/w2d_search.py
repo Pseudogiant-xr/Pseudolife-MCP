@@ -337,16 +337,22 @@ EPISODE_PROBE = "episode filter probe child step deploy health check"
 
 class McpTransportSession(Scenario):
     """PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1, no X-PL-Session and an expired
-    pointer: the retrieval event falls to the MCP transport session
-    (``_resolve_writer`` tier 4, service.py:974-985). A header still wins."""
+    pointer: the retrieval event falls to the request's mcp-session-id
+    (``_resolve_writer`` tier 4, service.py:974-985), over MCP and over REST,
+    whose headers Python binds too (web/api.py:866-885). A header still wins;
+    an empty mcp-session-id is kept as given."""
     name = "mcp-transport-session"
     env = {"PSEUDOLIFE_LEGACY_TRANSPORT_SESSION": "1", "PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS": "1"}
-    require = {"transport_sessions": 2, "events_rows": 3}
+    require = {"transport_sessions": 2, "events_rows": 5}
 
     def cases(self):
         return [*(mcp_case(f"transport session {i}", {"query": t}) for i, t in enumerate(CRAFTED[:2])),
                 mcp_case("a header outranks the transport", {"query": CRAFTED[2]},
-                         [("X-PL-Session", "sess-header-wins")])]
+                         [("X-PL-Session", "sess-header-wins")]),
+                case("REST: mcp-session-id attributes the event", q(q=CRAFTED[3]),
+                     [bearer(TOKEN), ("mcp-session-id", "rest-transport-session")]),
+                case("REST: an empty mcp-session-id is kept", q(q=CRAFTED[4]),
+                     [bearer(TOKEN), ("mcp-session-id", "")])]
 
 
 def scrub_transport(state: dict, ids: list) -> None:

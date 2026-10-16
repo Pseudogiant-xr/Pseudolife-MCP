@@ -174,8 +174,9 @@ pub struct Request {
     pub count_access: bool,
     /// `X-PL-Session` (last value), for the event's identity.
     pub header_session: Option<String>,
-    /// The legacy MCP transport session (MCP calls with the legacy hatch
-    /// set); REST never has one.
+    /// `mcp-session-id` when the legacy hatch is set: MCP calls take it from
+    /// the transport, REST from the request's headers (Python binds both,
+    /// web/api.py:866-885).
     pub transport_session: Option<String>,
 }
 
@@ -403,7 +404,9 @@ async fn log_event(
     )
     .await;
     let episode = match &session {
-        Some(s) => identity::open_leaf_episode(db, s).await,
+        // `_caller_episode_id`: no episode for an empty session id.
+        Some(s) if !s.is_empty() => identity::open_leaf_episode(db, s).await,
+        Some(_) => None,
         None => None,
     };
     let served = Value::Array(served);
@@ -445,11 +448,16 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
             &json!({"entries": [], "query": "", "count": 0, "low_confidence": true}),
         );
     }
-    let header_session = h
-        .get_all("x-pl-session")
-        .iter()
-        .next_back()
-        .map(|v| v.as_bytes().iter().map(|&b| b as char).collect::<String>());
+    let last = |name: &str| {
+        h.get_all(name)
+            .iter()
+            .next_back()
+            .map(|v| v.as_bytes().iter().map(|&b| b as char).collect::<String>())
+    };
+    let header_session = last("x-pl-session");
+    let transport_session = crate::mcp::identity::legacy_transport_session()
+        .then(|| last("mcp-session-id"))
+        .flatten();
     let req = Request {
         query,
         top_k: q
@@ -470,7 +478,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         bm25: tribool(&q, "bm25"),
         count_access: true,
         header_session,
-        transport_session: None,
+        transport_session,
     };
     // The work runs in its own task: a client that disconnects mid-search
     // must not cancel it halfway through its writes. Python finishes the
