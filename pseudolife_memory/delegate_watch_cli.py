@@ -150,7 +150,10 @@ def checks_state(rollup) -> tuple[str, list[str]]:
 
 def pr_snapshot(old, prs) -> dict:
     """The open pull requests from ``gh pr list --json``, keyed by number.
-    ``failed`` holds the names behind a ``failing`` or ``cancelled`` state."""
+    ``failed`` holds the names behind a ``failing`` or ``cancelled`` state.
+    ``cancelled_head``, present only once a head has been seen cancelled,
+    stays while that head re-runs, so cancelled -> pending -> cancelled is
+    reported once (Codex review, 2026-10-16)."""
     snap = {}
     for p in prs:
         checks, failed = checks_state(p.get("statusCheckRollup"))
@@ -161,10 +164,13 @@ def pr_snapshot(old, prs) -> dict:
             # keep the last known answer so CONFLICTING -> UNKNOWN ->
             # CONFLICTING is not news (review, 2026-10-14).
             mergeable = old[number]["mergeable"]
+        head = p.get("headRefOid") or ""
         snap[number] = {
-            "title": (p.get("title") or "")[:TITLE], "head": p.get("headRefOid") or "",
+            "title": (p.get("title") or "")[:TITLE], "head": head,
             "checks": checks, "failed": failed, "mergeable": mergeable,
             "merge_state": (p.get("mergeStateStatus") or "unknown").lower()}
+        if checks == "cancelled" or (old or {}).get(number, {}).get("cancelled_head") == head:
+            snap[number]["cancelled_head"] = head
     return snap
 
 
@@ -187,7 +193,8 @@ def pr_events(old: dict, new: dict, closed: dict) -> list[str]:
             out.append(f"PR #{number} failing at {p['head'][:8]}: {', '.join(p['failed'][:4])}")
         elif p["checks"] == "green" and not (same_head and before["checks"] == "green"):
             out.append(f"PR #{number} green at {p['head'][:8]}, merge state {p['merge_state']}")
-        elif p["checks"] == "cancelled" and not (same_head and before["checks"] == "cancelled"):
+        elif p["checks"] == "cancelled" and not (same_head and (
+                before["checks"] == "cancelled" or before.get("cancelled_head") == p["head"])):
             out.append(f"PR #{number} cancelled at {p['head'][:8]}: {', '.join(p['failed'][:4])}")
         if p["mergeable"] == "CONFLICTING" and before["mergeable"] != "CONFLICTING":
             out.append(f"PR #{number} conflicts with its base")

@@ -451,6 +451,27 @@ def test_a_real_failure_among_cancelled_checks_is_still_reported(h):
         "PR #784 failing at bdab33d4: Parity / ubuntu-latest"]
 
 
+def test_a_rerun_cancelled_again_on_the_same_head_is_not_news_again(h):
+    # Codex review, 2026-10-16: cancelled -> pending -> cancelled on one head
+    # sent the cancelled line twice; the head was reported once already.
+    h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(0))]
+    h.main(max_age="60")
+
+    def between(poll):
+        if poll == 1:
+            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(3))]
+        if poll == 3:                                                 # one job re-run
+            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(2))]
+        if poll == 5:                                                 # and cancelled again
+            h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(3))]
+    assert lines(h.main("--settle", "0", between=between)[1]) == [
+        "PR #784 cancelled at bdab33d4: " + ", ".join(sorted(CANCELLED_JOBS))]
+    # A new head is reported again.
+    h.world.prs = [pr(784, head="c" * 40, checks=_cancelling(3))]
+    assert lines(h.main("--settle", "0")[1]) == [
+        "PR #784 cancelled at cccccccc: " + ", ".join(sorted(CANCELLED_JOBS))]
+
+
 def test_a_failed_rerun_after_a_cancelled_report_is_reported(h):
     h.world.prs = [pr(784, head=CANCELLED_HEAD, checks=_cancelling(3))]
     h.main(max_age="60")                                              # baseline: already cancelled

@@ -7,7 +7,8 @@
   three times in 15 minutes. A cancelled check is no longer a failure. Once
   every check on a head has finished with some cancelled, the watcher sends
   one `PR #N cancelled at <head>: <names>` line for that head, and no more as
-  further cancelled jobs conclude. A real failure on the same head, beside
+  further cancelled jobs conclude or when a re-run of that head is cancelled
+  again. A real failure on the same head, beside
   cancelled checks or in a re-run after the cancelled line, is still reported
   as failing, and the cancelled siblings of a fail-fast matrix no longer add
   their names to that failure or report it again.
