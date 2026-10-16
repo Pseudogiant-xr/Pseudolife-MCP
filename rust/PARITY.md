@@ -273,9 +273,8 @@ plain recall eval (`graph-recall-prep-20260930`, judged 2026-09-29/30, turn 2).
 Its preregistered primary verdict was inconclusive; on the needed-evidence
 proxy over failure queries, plain search beat graph recall under both judges.
 The 2026-09-04 ablation
-(`graph-ablation-20260904.json`) adds the cost: both arms found every target
-(8/8 relational, 4/4 logged questions), while recall with the graph served 27
-times the text and took 74 times as long.
+(`graph-ablation-20260904.json`) adds the cost: graph recall was no more
+complete than plain search and far more costly in text served and latency.
 
 | Deferred by decision | Python source |
 |---|---|
