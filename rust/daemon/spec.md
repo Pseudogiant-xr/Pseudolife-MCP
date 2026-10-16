@@ -443,8 +443,8 @@ caught.
 | MG3 | The answer: `found, entry_id, text, source, reinforcements, explicit_reinforcements, access_count` (the row's plus one), `consolidated_into`; a superseded row adds `superseded` and the successor annotation over the resident entries (the row excluded by id). | `service.py:6112-6138` |
 | MG4 | The MCP layer: a superseded answer with a successor text gains `replaced_by` (as a compact search hit), and `superseded_at`, `superseded_by_text`, `superseded_by_id`, `supersession_verified`, `superseded_by_current` are removed. An internal failure carries `mutation: "unknown"` (not a read-only tool). | `mcp_server.py:1531-1539, 910` |
 
-`harness/w2d_search.py --only mcp-get` compares 8 calls on the fact-get
-template: a search in one session, then gets of the entry it served (the
+`harness/w2d_search.py --only mcp-get` compares 8 calls on its own template
+derived with the fact-get seed flags: a search in one session, then gets of the entry it served (the
 credit, then the access count showing the first bump), a superseded and a
 traced entry, a get from another session, and two faded ids, with
 `entries.access_count` and `retrieval_uses` in the compared bank state; the

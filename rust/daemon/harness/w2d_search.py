@@ -988,8 +988,14 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
                                                  ordered=c.get("tool") == "memory_recent")
     cov = coverage(py_seen, py_state)
-    uses = state_rows(py_state, "public.retrieval_uses")
-    cov["get"]["uses"] = len(uses)
+    # The credit under test: the successor entry, labelled by a get (not a
+    # stray label the warmup search's pointer session could earn).
+    uses_t = py_state["rows"].get("public.retrieval_uses") or {}
+    cols = uses_t.get("columns") or []
+    cov["get"]["uses"] = sum(
+        1 for row in state_rows(py_state, "public.retrieval_uses")
+        if ids and dict(zip(cols, row)).get("entry_id") == ids.get("<successor-entry>")
+        and dict(zip(cols, row)).get("used_via") == "get")
     cov["fact"]["checks"] = sum(
         1 for c, r in zip(scn.cases(), py_seen)
         if c.get("check") and c["check"](r.get("json") or {}))
