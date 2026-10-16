@@ -1,0 +1,2 @@
+### Changed (2026-10-17 — the Rust workflow queues fewer jobs)
+- A pull request that changes only documentation (Markdown, `llms.txt`, non-script files under `docs/`, none under `rust/`, `evals/`, `pseudolife_memory/`, `plugin/`, `ops/`, `tests/` or `.github/`) no longer runs the Rust, candidate, parity and image jobs. A new `Scope` job decides, and anything it cannot classify runs everything. The `Parity / <os>` checks still report, and pass for such a PR only when `Scope` chose the skip.

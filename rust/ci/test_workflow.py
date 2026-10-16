@@ -527,12 +527,23 @@ def test_daemon_artifact_is_built_once_and_shared_with_graph():
     assert permission["run"] == "chmod +x rust/target/release/graph-contract"
 
 
+GATE_NEEDS = ["scope", "rust", "candidate", "parity-checks", "source-mutants"]
+
+
+def run_gate(needs, event):
+    import os
+    step = workflow()["jobs"]["parity"]["steps"][0]
+    return subprocess.run(["pwsh", "-NoProfile", "-Command", step["run"]],
+                          env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
+                          capture_output=True, text=True)
+
+
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
 @pytest.mark.parametrize("dependency", ["parity-checks", "source-mutants"])
 @pytest.mark.parametrize("event", ["pull_request", "push", "schedule", "workflow_dispatch"])
 def test_required_parity_gate_fails_closed(result, dependency, event):
     gate = workflow()["jobs"]["parity"]
-    assert gate["needs"] == ["rust", "candidate", "parity-checks", "source-mutants"]
+    assert gate["needs"] == GATE_NEEDS
     assert gate["if"].startswith("always() &&")
     step = gate["steps"][0]
     assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}", "GATE_EVENT": "${{ github.event_name }}"}
@@ -544,6 +555,131 @@ def test_required_parity_gate_fails_closed(result, dependency, event):
                               capture_output=True, text=True)
     accepted = result == "success" or (event == "pull_request" and dependency == "source-mutants" and result == "skipped")
     assert executed.returncode == (0 if accepted else 1), executed.stderr
+
+
+DOCS_ONLY_SKIP = {"scope": {"result": "success", "outputs": {"rust": "false"}},
+                  "rust": {"result": "skipped"}, "candidate": {"result": "skipped"},
+                  "parity-checks": {"result": "skipped"}, "source-mutants": {"result": "skipped"}}
+
+
+def test_parity_gate_accepts_a_documentation_only_pull_request():
+    executed = run_gate(DOCS_ONLY_SKIP, "pull_request")
+    assert executed.returncode == 0, executed.stderr
+
+
+@pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
+def test_parity_gate_accepts_the_docs_skip_only_on_pull_requests(event):
+    assert run_gate(DOCS_ONLY_SKIP, event).returncode == 1
+
+
+@pytest.mark.parametrize("scope", [
+    {"result": "success", "outputs": {"rust": "true"}},
+    {"result": "success", "outputs": {}},
+    {"result": "failure", "outputs": {"rust": "false"}},
+    {"result": "skipped", "outputs": {}},
+    {"result": "cancelled", "outputs": {"rust": "false"}},
+])
+def test_parity_gate_rejects_skips_scope_did_not_choose(scope):
+    needs = copy.deepcopy(DOCS_ONLY_SKIP)
+    needs["scope"] = scope
+    assert run_gate(needs, "pull_request").returncode == 1
+
+
+@pytest.mark.parametrize("job", ["rust", "candidate", "parity-checks"])
+@pytest.mark.parametrize("result", ["failure", "cancelled", ""])
+def test_parity_gate_still_fails_a_broken_job_on_a_docs_pull_request(job, result):
+    needs = copy.deepcopy(DOCS_ONLY_SKIP)
+    needs[job]["result"] = result
+    assert run_gate(needs, "pull_request").returncode == 1
+
+
+def run_scope(tmp_path, event, files, git_exit=0):
+    import os
+    step = next(s for s in workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    # Stand in for `git diff`, the step's only external input.
+    bootstrap = r'''
+function git {
+    $global:LASTEXITCODE = [int]$env:PL_FIXTURE_GIT_EXIT
+    if ($env:PL_FIXTURE_FILES) { $env:PL_FIXTURE_FILES -split "`n" }
+}
+'''
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", bootstrap + step["run"]],
+                            env=dict(os.environ, EVENT_NAME=event, GITHUB_OUTPUT=str(output),
+                                     PL_FIXTURE_FILES="\n".join(files), PL_FIXTURE_GIT_EXIT=str(git_exit)),
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return output.read_text(encoding="utf-8-sig").split()
+
+
+DOCS_ONLY_CHANGES = [
+    ["CLAUDE.md"],
+    ["README.md", "CHANGELOG.md", "changelog.d/2026-10-17-x.md"],
+    ["docs/guide/configuration.md", "docs/atlas/atlas.json", "llms.txt", "llms-full.txt"],
+    ["examples/CLAUDE.memory.md", "frontend/README.md", "README.zh-CN.md"],
+    ["docs/images/diagram.svg"],
+]
+CODE_CHANGES = [
+    ["CLAUDE.md", "rust/README.md"],
+    ["rust/daemon/src/main.rs"],
+    ["evals/rust_port/README.md"],
+    ["evals/README.md"],
+    ["pseudolife_memory/README.md"],
+    ["plugin/README.md"],
+    ["plugin/hooks/session-start.sh"],
+    ["ops/README.md"],
+    ["tests/README.md"],
+    [".github/workflows/rust.yml"],
+    [".github/PULL_REQUEST_TEMPLATE.md"],
+    ["pyproject.toml"],
+    ["README.md", "pseudolife_memory/service.py"],
+    ["docs/helper.py"],
+    ["docs/atlas/atlas.js"],
+    ["docs/run.ps1"],
+    ["docs/setup.sh"],
+    ["notes.txt"],
+    ["src.md.py"],
+    ['"docs/caf\\303\\251.md"'],
+]
+
+
+@pytest.mark.parametrize("files", DOCS_ONLY_CHANGES)
+def test_scope_skips_a_documentation_only_pull_request(tmp_path, files):
+    assert run_scope(tmp_path, "pull_request", files) == ["rust=false"]
+
+
+@pytest.mark.parametrize("files", CODE_CHANGES)
+def test_scope_runs_everything_for_any_other_change(tmp_path, files):
+    assert run_scope(tmp_path, "pull_request", files) == ["rust=true"]
+
+
+@pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
+def test_scope_never_skips_outside_pull_requests(tmp_path, event):
+    assert run_scope(tmp_path, event, ["CLAUDE.md"]) == ["rust=true"]
+
+
+@pytest.mark.parametrize("files, git_exit", [([], 0), (["CLAUDE.md"], 128)])
+def test_scope_runs_everything_on_an_empty_or_unreadable_diff(tmp_path, files, git_exit):
+    assert run_scope(tmp_path, "pull_request", files, git_exit) == ["rust=true"]
+
+
+def test_scope_gates_every_heavy_job_and_fails_safe():
+    jobs = workflow()["jobs"]
+    scope = jobs["scope"]
+    assert scope["runs-on"] == "ubuntu-latest" and "needs" not in scope
+    assert scope["outputs"] == {"rust": "${{ steps.scope.outputs.rust }}"}
+    checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
+    assert checkout["with"]["fetch-depth"] == 2
+    gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') "
+             "&& needs.scope.outputs.rust != 'false' }}")
+    for name in ("rust", "candidate", "daemon-image"):
+        assert jobs[name]["needs"] == "scope", name
+        assert jobs[name]["if"] == gated, name
+    # Parity checks and source mutants inherit the skip through their needs.
+    assert jobs["parity-checks"]["needs"] == ["candidate", "rust"]
+    assert jobs["source-mutants"]["needs"] == ["candidate"]
+    assert jobs["parity"]["needs"][0] == "scope"
 
 
 @pytest.mark.parametrize("name", ["CLI lease differential harness", "Daemon background pruning golden"])
@@ -797,7 +933,7 @@ def test_w1c_rows_run_once_on_parallel_suites():
     step = next(s for s in jobs["parity-checks"]["steps"]
                 if s.get("name") == "CLI W1-C differential harness")
     assert step["if"] == "startsWith(matrix.suite, 'w1c-')"
-    assert jobs["parity"]["needs"] == ["rust", "candidate", "parity-checks", "source-mutants"]
+    assert jobs["parity"]["needs"] == GATE_NEEDS
     check_executable_coverage(jobs)
 
 

@@ -14,8 +14,9 @@ SYSTEMS = ["ubuntu-latest", "windows-latest"]
 SOURCE_EVENTS = "github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
 PARITY_EVENT_GATE = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
+$docsOnly = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
 foreach ($job in @('rust', 'candidate', 'parity-checks')) {
-  if ($results[$job].result -cne 'success') {
+  if ($results[$job].result -cne 'success' -and -not ($docsOnly -and $results[$job].result -ceq 'skipped')) {
     Write-Error "$job did not succeed"
     exit 1
   }
@@ -171,7 +172,7 @@ def check(workflow):
     assert 'pull_request' in events and 'workflow_dispatch' in events, 'source events dropped or changed'
     assert source['if'] == SOURCE_EVENTS, 'source event selection changed'
     gate = jobs['parity']
-    assert gate['needs'] == ['rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
+    assert gate['needs'] == ['scope', 'rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
     assert gate['if'] == f'always() && ({ordinary_ci})' and not gate.get('continue-on-error'), 'Parity event gate can skip failures'
     assert len(gate['steps']) == 1, 'Parity event gate steps changed'
     required = gate['steps'][0]
