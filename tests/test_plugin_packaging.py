@@ -454,6 +454,13 @@ def test_dream_command_asks_for_no_lesson_fold_the_tools_cannot_do():
     assert "folding anything the\n     dropped slot added into the survivor first" not in text
     assert "`memory_world_set`" in text
     assert "no tool writes lesson text" in text
+    # A world rewrite keeps only what the new call passes, and the listing
+    # truncates values: the fold must read both slots in full and re-pass
+    # the backing record's citation and freshness, or it would cut the
+    # value, drop the quote and reset the stale clock.
+    assert "`memory_world_search`" in text
+    for field in ("`source_quote`", "`freshness_class`", "`retrieved_at`"):
+        assert field in text
 
 
 def test_plugin_dream_command_matches_examples():

@@ -119,8 +119,13 @@ tool tier: if your client does not list them, call
      src="<entity>|<attribute>")`, so lean toward acting rather than
      leaving a genuine duplicate pending. When the dropped slot says
      something the survivor does not:
-     - **world**: rewrite the survivor with `memory_world_set` to carry
-       it (same source), then drop the other.
+     - **world**: the listing truncates values, and a rewrite keeps only
+       what the new call passes. Read both slots in full with
+       `memory_world_search` first. Rewrite the survivor with
+       `memory_world_set` only when one record's source backs the whole
+       merged value, re-passing that record's `source_url`,
+       `source_quote`, `freshness_class` and `retrieved_at`, then drop
+       the other. Otherwise leave the pair listed and report it.
      - **lesson**: no tool writes lesson text (lessons are distilled from
        outcomes), so retire the dropped lesson only when the survivor
        already says everything it does. Otherwise leave the pair listed
