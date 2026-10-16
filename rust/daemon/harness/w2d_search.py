@@ -1,6 +1,8 @@
-"""W2-D live differential harness for GET /api/search: the Python daemon
-(oracle) against the Rust daemon, scenario by scenario, each on its own copy
-of one seeded disposable bank.
+"""W2-D live differential harness for GET /api/search and the MCP
+memory_search tool: the Python daemon (oracle) against the Rust daemon,
+scenario by scenario, each on its own copy of one seeded disposable bank.
+MCP cases compare each daemon's tools/call structured content (an error
+result as status 422) under the same rules as the REST bodies.
 
 usage:
   python w2d_search.py live    --rust-bin PATH [--only NAME ...] [--out FILE] [--record]
@@ -74,7 +76,8 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "search-no-contiguity": "contiguity", "search-rrf-off": "rrf-pool",
            "search-no-cortex": "default", "search-rerank-unfused": "margin-gate",
            "search-neighbours-reversed": "contiguity", "search-recency-off": "continuum",
-           "search-cortex-stripped-q": "default", "w2d-cortex-skip-slot-reads": "default"}
+           "search-cortex-stripped-q": "default", "w2d-cortex-skip-slot-reads": "default",
+           "mcp-search-no-dedup": "mcp-search", "mcp-search-no-correct-with": "mcp-search"}
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
 
 
@@ -150,6 +153,28 @@ def default_cases() -> list[dict]:
 
 def case(name, path, headers=(), declared=None):
     return {"name": name, "method": "GET", "path": path, "headers": list(headers), "declared": declared}
+
+
+def mcp_case(name, args, headers=()):
+    """A memory_search tools/call; "<seed-episode>" in a list becomes the
+    seeded session's episode id."""
+    return {"name": name, "mcp": args, "headers": list(headers), "declared": None,
+            "path": f"mcp memory_search {json.dumps(args)}"}
+
+
+def mcp_call(port: int, c: dict, episode: str | None) -> dict:
+    from mcp_wire import Session, sse_data
+    args = {k: ([episode if x == "<seed-episode>" else x for x in v] if isinstance(v, list) else v)
+            for k, v in c["mcp"].items()}
+    s = Session(port, TOKEN, dict(c["headers"]))
+    r = s.tool("memory_search", args)
+    s.close()
+    try:
+        res = json.loads(sse_data(r)[0])["result"]
+    except (IndexError, KeyError, ValueError):
+        return {"status": r["status"], "headers": {"content-type": "mcp-transport"}, "bytes": r["body"]}
+    return {"status": 422 if res.get("isError") else 200, "headers": {"content-type": "mcp"},
+            "json": res.get("structuredContent")}
 
 
 class Scenario:
@@ -301,9 +326,49 @@ class ConfidenceRounding(Scenario):
                      [bearer(TOKEN)])]
 
 
+class McpSearch(Scenario):
+    """memory_search over MCP: the projection (compact, verbose, truncation,
+    replaced_by, cortex whitelist, correct_with, dedup, low_confidence),
+    fact_k narrowing and the list filters. ``explain`` is declared
+    (MCP-SEARCH-EXPLAIN) and not compared."""
+    name = "mcp-search"
+    mcp_extra_seed = True
+    require = {"with_entries": 12, "with_cortex": 8, "correct_with.contested": 1,
+               "correct_with.aged": 1, "truncated": 1, "replaced_by": 1, "episodes": 1}
+
+    def cases(self):
+        os_q = "what os does the homelab box run"
+        return [
+            mcp_case("compact, contested fact and a restated entry", {"query": os_q}),
+            mcp_case("verbose", {"query": os_q, "verbose": True}),
+            mcp_case("top_k 2 narrows the cortex block", {"query": os_q, "top_k": 2}),
+            mcp_case("top_k 1", {"query": "which port does the daemon listen on", "top_k": 1}),
+            mcp_case("aged volatile fact", {"query": "when is the deploy window"}),
+            mcp_case("superseded hit", {"query": "extractor endpoint old gpu box", "top_k": 3}),
+            mcp_case("long entries truncate", {"query": "how does dreaming consolidate memory"}),
+            mcp_case("long entries, verbose", {"query": "how does dreaming consolidate memory",
+                                               "verbose": True}),
+            mcp_case("source filter", {"query": "deploy", "sources": ["conversation"]}),
+            mcp_case("empty lists are no filter", {"query": "deploy", "sources": [], "tags": [],
+                                                   "bands": [], "episodes": []}),
+            mcp_case("tag filter", {"query": "deploy", "tags": ["DEPLOY", " bug"]}),
+            mcp_case("band flat", {"query": "deploy", "bands": ["flat"]}),
+            mcp_case("unknown band", {"query": "deploy", "bands": ["working", "flat"]}),
+            mcp_case("blank query", {"query": "   "}),
+            mcp_case("episode filter", {"query": "deploy incident", "episodes": ["<seed-episode>"]}),
+            mcp_case("session header", {"query": "deploy the daemon"}, [("X-PL-Session", "sess-mcp")]),
+            mcp_case("min_score and recency", {"query": "deploy the daemon", "min_score": 0.5,
+                                               "disable_recency_boost": True}),
+            mcp_case("rerank on, bm25 off", {"query": "how do I back up the bank", "rerank": True,
+                                             "bm25": False}),
+            mcp_case("padded query", {"query": "   what os does the homelab box run  "}),
+            mcp_case("nothing relevant", {"query": "zebra crossing quantum marmalade"}),
+        ]
+
+
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
                                   LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
-                                  PointerExpired, ConfidenceRounding)}
+                                  PointerExpired, ConfidenceRounding, McpSearch)}
 
 
 # ---- comparison ----------------------------------------------------------------------
@@ -487,7 +552,8 @@ def coverage(responses: list[dict], state: dict) -> dict:
     cov = {"with_entries": 0, "with_events": 0, "with_cortex": 0, "via": {}, "channels": {},
            "rerank_fired": 0, "rerank_skips": {}, "timeline_fired": 0, "events_rows": 0,
            "recency_boost": 0, "sessions": 0, "episodes": 0, "low_confidence_true": 0,
-           "low_confidence_false": 0, "disconnects": 0, "chronicle_over_limit": 0, "confidence_boundary": 0}
+           "low_confidence_false": 0, "disconnects": 0, "chronicle_over_limit": 0, "confidence_boundary": 0,
+           "correct_with": {"contested": 0, "aged": 0}, "truncated": 0, "replaced_by": 0}
     for r in responses:
         body = r.get("json") or {}
         if not isinstance(body, dict):
@@ -502,7 +568,15 @@ def coverage(responses: list[dict], state: dict) -> dict:
         cov["disconnects"] += bool(r.get("disconnected"))
         if "low_confidence" in body and body.get("query"):
             cov["low_confidence_true" if body["low_confidence"] else "low_confidence_false"] += 1
+        for f in body.get("cortex") or []:
+            cw = f.get("correct_with") or ""
+            if cw.startswith("memory_fact_get("):
+                cov["correct_with"]["contested"] += 1
+            elif cw.startswith("memory_fact_set("):
+                cov["correct_with"]["aged"] += 1
         for e in body.get("entries") or []:
+            cov["truncated"] += bool(e.get("truncated"))
+            cov["replaced_by"] += "replaced_by" in e
             if e.get("via"):
                 cov["via"][e["via"]] = cov["via"].get(e["via"], 0) + 1
     ev = state["rows"].get("public.retrieval_events")
@@ -557,8 +631,35 @@ def config_for(scn: Scenario) -> str:
     return head + dream + scn.config_yaml[len(head):]
 
 
+def derive_template(template: str, tag: str) -> str:
+    """The shared seed plus the MCP scenario's own facts, in a template of
+    its own so the other scenarios (and their goldens) are unchanged."""
+    name = pg.name(f"pl_cf_w2d_{tag}_t")
+    if name in pg.existing():
+        pg.drop(name)
+    dsn = pg.create(name, template=template)
+    home = daemons.make_home(daemons.scratch_root(), f"w2d-{tag}-seed", None)
+    env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
+    r = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), "--mcp-extra"],
+                       env=dict(env, PYTHONPATH=str(REPO)), capture_output=True, text=True, timeout=900)
+    if r.returncode != 0:
+        raise RuntimeError(f"mcp seeding failed: {r.stderr[-3000:]}")
+    return name
+
+
+def seed_episode(template: str) -> str | None:
+    import psycopg
+    with psycopg.connect(pg.dsn(template)) as conn:
+        row = conn.execute("SELECT id FROM episodes WHERE title = %s", ("W2-D seed session",)).fetchone()
+    return row[0] if row else None
+
+
 def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
+    derived = None
+    if getattr(scn, "mcp_extra_seed", False) and mode != "golden":
+        derived = template = derive_template(template, tag)
+    episode = seed_episode(template) if mode != "golden" else None
     dbs = {side: pg.name(f"pl_cf_w2d_{tag}_{suffix}")
            for side, suffix in (("python", "py"), ("rust", "rs"))}
     sides = ("python", "rust") if mode != "golden" else ("rust",)
@@ -592,9 +693,14 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
                 rows.append({"case": c["name"], "path": c["path"][:140], "python_status": None,
                              "rust_status": None, "diffs": [], "notes": [], "_python": None})
                 continue
-            py_r = (call(procs["python"].port, "GET", c["path"], c["headers"]) if "python" in procs
-                    else golden["responses"][i])
-            rs_r = call(procs["rust"].port, "GET", c["path"], c["headers"])
+            if "mcp" in c:
+                py_r = (mcp_call(procs["python"].port, c, episode) if "python" in procs
+                        else golden["responses"][i])
+                rs_r = mcp_call(procs["rust"].port, c, episode)
+            else:
+                py_r = (call(procs["python"].port, "GET", c["path"], c["headers"]) if "python" in procs
+                        else golden["responses"][i])
+                rs_r = call(procs["rust"].port, "GET", c["path"], c["headers"])
             py_seen.append(py_r)
             response_pairs.append((py_r, rs_r))
             rows.append({"case": c["name"], "path": c["path"][:140], "python_status": py_r["status"],
@@ -635,6 +741,8 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         r.pop("_python", None)
     for side in sides:
         pg.drop(dbs[side])
+    if derived:
+        pg.drop(derived)
     return {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs + cov_fail, "declared": declared,
             "coverage": cov}
 

@@ -4,6 +4,9 @@ write paths only (``MemoryService.store`` / ``supersede`` / ``cortex_write``
 
 usage: python w2d_seed.py [paragraphs]   (bank DSN in PSEUDOLIFE_MCP_DATABASE_URL,
 never on the command line, so it stays out of process listings)
+       python w2d_seed.py --mcp-extra  (adds the memory_search scenario's facts
+       to an already seeded bank: an aged volatile fact, a contender and an
+       entry that restates a fact)
 
 The corpus is paragraphs of this repository's public docs, plus crafted
 entries for every search channel: an assistant-sourced note, tagged notes,
@@ -78,14 +81,29 @@ def paragraphs(limit: int) -> list[str]:
     return out[:limit]
 
 
+def mcp_extra(svc) -> None:
+    """What memory_search's projection needs beyond the shared seed."""
+    import time
+    # Volatile and 30 days old: past TTL/3 (7 days), short of stale (42).
+    svc.cortex_write("deploy window", "weekday", "thursday afternoon", confidence=0.8,
+                     freshness_class="volatile", now=time.time() - 30 * 86400)
+    svc.cortex_write("homelab box", "os", "Ubuntu 24.04", confidence=0.7, force_contend=True)
+    # Restates the "Debian 13" fact: dropped when the fact is served.
+    svc.store("OS: Debian 13", source="notes")
+
+
 def main() -> int:
     dsn = os.environ["PSEUDOLIFE_MCP_DATABASE_URL"]
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else 150
+    limit = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 150
     data = Path(os.environ["PSEUDOLIFE_MCP_DATA_DIR"])
     data.mkdir(parents=True, exist_ok=True)
     from pseudolife_memory.service import MemoryService
 
     svc = MemoryService(data_dir=str(data), database_url=dsn)
+    if "--mcp-extra" in sys.argv:
+        mcp_extra(svc)
+        print("mcp extra seeded")
+        return 0
     stored = 0
     for text in paragraphs(limit):
         stored += bool(svc.store(text, source="docs").get("stored"))

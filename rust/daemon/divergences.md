@@ -38,7 +38,6 @@ tool's answers by value.
 |---|---|---|
 | `memory_agents` | W2-F | W2-F supplies the REST board context and roster; MCP adapter dispatch and binding remain unwired. |
 | `memory_message` | W2-F | W2-F supplies REST mailbox, audit and wake services; MCP dispatch remains unwired. |
-| `memory_search` | W2-D | W2-D supplies REST search, cortex and read telemetry; MCP filters, compact results and dispatch remain unwired. |
 | `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion remains deferred. |
 | `memory_world_search` | W2-D | No resident world-cortex search service. |
 | `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
@@ -74,7 +73,16 @@ tool's answers by value.
 | `memory_relation_define` | W3-H | Relation storage exists, but the public relation-definition service does not. |
 
 The integration batch retains W2-G's refusal stubs for every tool except
-`memory_toolset` and, since its body registration, `memory_store`. W2-D supplies expanded REST search, W2-E supplies the
+`memory_toolset` and, since their body registrations, `memory_store` and
+`memory_search`.
+
+**MCP-SEARCH-EXPLAIN:** `memory_search(explain=true)` answers the refusal
+envelope `{"error": "not_implemented", "message": "not_implemented: explain
+(the ranking trace) is not yet served by the Rust daemon"}` before any
+search runs, so no retrieval event or access count is written. Python runs
+the search, then `service.trace` (a second, instrumented retrieval) and
+serves verbose entries with `trace`. The trace port belongs with
+`/api/trace` (`w2d-console-projections`). W2-D supplies expanded REST search, W2-E supplies the
 harness-gated store body, and W2-F supplies the REST board. Their presence
 does not register MCP tool bodies: their projections remain the
 prerequisites listed above. Bound identity is enforced on the mount (M18).

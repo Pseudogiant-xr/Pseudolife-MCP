@@ -114,6 +114,29 @@ impl EpisodeLog {
     }
 
     /// `open_episode`: the global current leaf when it is still open.
+    /// `MemoryService._episode_subtree`: each requested id plus every
+    /// episode whose parent chain reaches one, sorted (the caller uses it
+    /// as a set, and the event log records it sorted).
+    pub fn episode_subtree(&self, ids: &[String]) -> Vec<String> {
+        let want: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let mut out: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
+        for ep in &self.episodes {
+            let mut cur = Some(ep);
+            let mut seen = std::collections::HashSet::new();
+            while let Some(c) = cur {
+                if !seen.insert(c.id.as_str()) {
+                    break;
+                }
+                if want.contains(c.id.as_str()) {
+                    out.insert(ep.id.clone());
+                    break;
+                }
+                cur = c.parent_id.as_deref().and_then(|p| self.get(p));
+            }
+        }
+        out.into_iter().collect()
+    }
+
     pub fn open_episode(&self) -> Option<usize> {
         let i = self.index(self.current_id.as_deref()?)?;
         self.episodes[i].ended_at.is_none().then_some(i)
