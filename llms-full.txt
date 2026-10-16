@@ -5218,6 +5218,34 @@ by the operator or the maintainer counts, as for its urgent mail; the daemon
 rechecks it at most once a minute per session, so a grant or a revoke shows
 within a minute, and on the next session start for the brief.
 
+**The decision watcher: `pseudolife-mcp delegate-watch`.** The brief tells
+the delegate to start this once with `pseudolife-mcp delegate-watch
+--detach`. It waits without a model and sends its owner (by default the
+session whose `.agent` file sits beside its digest; `--owner` names another)
+one board message per batch of events: a pull request opened, merged or
+closed, turning green (with its merge state), failing on its head, finishing
+with checks cancelled (reported once, never as a failure), or newly
+conflicting; the newest master run of a workflow failing or passing again; a
+new file in `~/.pseudolife-mcp/suite-results`; and a `full-suite` or
+`full-suite@box` lease freeing up (`--lease` names others). A head counts as
+green or cancelled only once every workflow run on it has completed, so a run
+still queued keeps it pending. GitHub is read through the `gh` CLI
+(`--repo OWNER/NAME`, default the current checkout's; `--author` narrows it).
+The watcher registers its own board agent and prints its id; each message
+carries `clears="decision events"`, so park with
+`park_needs="decision events"` and `park_clear_by=<that id>` and the daemon
+rings you for it, then read with `memory_message(action="receive",
+ack=true)`. After 55 quiet minutes (`--quiet-after`) it sends one quiet line,
+unless you are parked `done`. It exits 0 when the owner leaves the board,
+when `--until-lease NAME` names a lease the owner no longer holds, after 14
+days (`--max-age`), or on `--stop`; it exits 2 when `gh` is missing or fails
+five polls in a row (after telling the owner), or when the board refuses it.
+`--detach` is safe to repeat: it answers that a live watcher is already
+running. The first run records what is already true and reports nothing for
+it; its state, log and a one-line-per-message ledger live beside the
+session's digest, else under `~/.pseudolife-mcp/watch/` (`--state` moves
+them).
+
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
 a grant made under the old name reopens nothing after the upgrade, so
@@ -6471,8 +6499,9 @@ a subagent only reads the board (`memory_agents(action="list")`,
 `memory_message(action="history")`, `memory_search`), and the
 orchestrating session owns the address. The served check-in says so, and
 since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
-(`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
-puts in a subagent's hook input, and never in the parent's, and denies that
+(`plugin/hooks/subagent-board-guard.sh`) sees the top-level `agent_id`
+Claude Code puts in a subagent's hook input, and never in the parent's (an
+`agent_id` inside the tool's arguments does not count), and denies that
 subagent's `memory_agents` update, claim and release and `memory_message`
 send and ack (and receive with `ack=true`, which acknowledges what it
 returns), whatever the server's name. Its list, receive and history
