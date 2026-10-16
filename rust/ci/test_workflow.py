@@ -553,7 +553,8 @@ def test_required_parity_gate_fails_closed(result, dependency, event):
     executed = subprocess.run(["pwsh", "-NoProfile", "-Command", step["run"]],
                               env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
                               capture_output=True, text=True)
-    accepted = result == "success" or (event == "pull_request" and dependency == "source-mutants" and result == "skipped")
+    accepted = result == "success" or (event in ("pull_request", "push") and dependency == "source-mutants"
+                                       and result == "skipped")
     assert executed.returncode == (0 if accepted else 1), executed.stderr
 
 
@@ -698,6 +699,15 @@ def test_nightly_never_shares_a_group_with_master_pushes():
     assert concurrency_group("workflow_dispatch", mode="wait-mail") != concurrency_group(
         "workflow_dispatch", mode="wait-mail", run_id="102")
     assert workflow()["concurrency"]["cancel-in-progress"] is True
+
+
+@pytest.mark.parametrize("event, runs", [("pull_request", False), ("push", False),
+                                         ("schedule", True), ("workflow_dispatch", True)])
+def test_source_mutants_run_nightly_and_on_manual_ci_only(event, runs):
+    condition = workflow()["jobs"]["source-mutants"]["if"]
+    assert condition == ("github.event_name == 'schedule' || "
+                         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')")
+    assert (f"'{event}'" in condition) == runs
 
 
 def test_scope_gates_every_heavy_job_and_fails_safe():

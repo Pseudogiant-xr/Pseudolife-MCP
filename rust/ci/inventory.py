@@ -11,7 +11,7 @@ from test_workflow import commands
 
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
-SOURCE_EVENTS = "github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
+SOURCE_EVENTS = "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
 PARITY_EVENT_GATE = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
 $docsOnly = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
@@ -22,8 +22,8 @@ foreach ($job in @('rust', 'candidate', 'parity-checks')) {
   }
 }
 $sourceResult = $results['source-mutants'].result
-if ($sourceResult -cne 'success' -and -not ($env:GATE_EVENT -ceq 'pull_request' -and $sourceResult -ceq 'skipped')) {
-  Write-Error "source-mutants did not succeed outside the PR skip exception"
+if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
+  Write-Error "source-mutants did not succeed outside the PR and push skip exception"
   exit 1
 }
 """

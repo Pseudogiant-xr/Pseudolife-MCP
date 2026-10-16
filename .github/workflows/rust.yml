@@ -973,8 +973,16 @@ jobs:
   source-mutants:
     # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs
     # queued behind the 20-job concurrency cap, with a largest matrix queue
-    # of 24m25s. Catch CLI source survivors after merge on master/nightly.
-    if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')
+    # of 24m25s, so they left PRs. Since 2026-10-17 they also leave master
+    # pushes and run nightly and on manual CI. On master they were 72 of 104
+    # jobs and about 550 of 920 runner-minutes (runs 38412458284,
+    # 38775578227, 38794022446; Windows shard median 11 min, Linux 5), and
+    # all 1,170 shard jobs in the 16 readable master/nightly runs from
+    # 2026-10-12 to 2026-10-16 passed. 18 of the 27 push runs in that window
+    # were cancelled by a newer push before finishing. A survivor now
+    # surfaces at the next nightly (its own concurrency group, so pushes no
+    # longer cancel it) instead of after the merge that caused it.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')
     name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
     # These shards compile their own source copies and consume no rust-job
     # artifact; the final Parity gate still requires both Rust jobs.
@@ -1099,7 +1107,7 @@ jobs:
           docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
           python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
-    # Only a PR may skip the after-merge CLI source matrix. Master/nightly
+    # Only a PR or a master push may skip the CLI source matrix. The nightly
     # (and ordinary manual CI) require its success, never a skip or failure.
     # A PR that scope classified as documentation-only skips the Rust,
     # candidate and parity jobs; any other skip still fails.
@@ -1128,8 +1136,8 @@ jobs:
             }
           }
           $sourceResult = $results['source-mutants'].result
-          if ($sourceResult -cne 'success' -and -not ($env:GATE_EVENT -ceq 'pull_request' -and $sourceResult -ceq 'skipped')) {
-            Write-Error "source-mutants did not succeed outside the PR skip exception"
+          if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
+            Write-Error "source-mutants did not succeed outside the PR and push skip exception"
             exit 1
           }
 
