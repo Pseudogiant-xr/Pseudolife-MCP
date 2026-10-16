@@ -577,10 +577,13 @@ jobs:
       # Linux 2026-10-13: coercion baseline + four controls + disabled control 204.2s,
       # targeted tests 14.68s; seven minutes is about twice that gate. The
       # tool argument binding sweep and its 14 mutants add 9.4s (Windows
-      # release build, 2026-10-16).
+      # release build, 2026-10-16). Hosted Windows 2026-10-16 (PR #772): each
+      # live mutant run takes ~43s and the step reached its fifth of six runs
+      # at 7 minutes; the mcp-binding-open control makes six. Eleven minutes
+      # covers ~8.5 minutes with room for a slow runner.
       - name: Daemon MCP live parity and controls
         if: matrix.suite == 'cli'
-        timeout-minutes: 7
+        timeout-minutes: 11
         shell: pwsh
         env:
           PL_HARNESS_SLICE: w2g
