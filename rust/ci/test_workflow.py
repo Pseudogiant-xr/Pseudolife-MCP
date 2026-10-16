@@ -289,7 +289,8 @@ def check_executable_coverage(jobs):
     assert not any(words[0] == "cargo" for words in mcp)
     security = commands(parity["Daemon security admission parity"]["run"])
     require_command(security, ("python", "-m", "pytest"),
-                    ("rust/daemon/harness/test_security_cases.py",), PYTEST_FILTERS)
+                    ("rust/daemon/harness/test_security_cases.py",
+                     "rust/daemon/harness/test_principals_settle.py"), PYTEST_FILTERS)
     security_rows = ("security-open", "security-closed", "security-encodings",
                      "security-encoding-priority", "security-terminal-byte")
     for mode in ("live", "golden", "mutants"):

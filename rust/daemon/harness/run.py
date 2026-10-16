@@ -400,6 +400,9 @@ class Scenario:
     seed_entries = False
     settle = True          # wait until both report db + embedder
     snapshot_settle = True  # early HTTP witnesses still wait before measuring bank state
+    # Wait for the stored-principal view before the cases: required when a
+    # case's bearer matches no environment token on a reachable bank.
+    principals_settle = False
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
     loopback_bind_fixture = False
@@ -1189,6 +1192,9 @@ class Encodings(Scenario):
     name = "encodings"
     config_yaml = "coordination:\n  allowed_principals: [alice]\n"
     settle = False
+    # "matching nothing" reaches the stored-principal view; before its first
+    # read both daemons answer principals_unavailable instead of unauthorized.
+    principals_settle = True
 
     def __init__(self):
         # The singular token is UTF-8 "caf\u00e9" read as latin-1; the map's is "caf\u00e9".
@@ -1582,6 +1588,34 @@ def wait_settled(ports: list[int], timeout: float = 600.0, token: str | None = N
         raise RuntimeError(f"daemons on {sorted(pending)} did not settle within {timeout}s")
 
 
+PRINCIPAL_PROBE = b"Bearer pl-harness-principal-probe"
+
+
+def principals_ready(port: int) -> bool:
+    """The stored-principal view has loaded: a bearer no token matches is
+    refused 401, not 503 ``principals_unavailable``. Both daemons start the
+    refresher in the background (``PrincipalRefresher.start``, Rust
+    ``principals::spawn_refresher``), so requests can arrive before its first
+    read. The refusal is answered before any handler, so the probe writes
+    nothing."""
+    try:
+        r = call(port, "GET", "/api/search?q=", [("Authorization", PRINCIPAL_PROBE)], timeout=30)
+    except OSError:
+        return False
+    return not (r["status"] == 503 and (r.get("json") or {}).get("error") == "principals_unavailable")
+
+
+def wait_principals(ports: list[int], timeout: float = 60.0) -> None:
+    deadline = time.monotonic() + timeout
+    pending = set(ports)
+    while pending and time.monotonic() < deadline:
+        pending = {p for p in pending if not principals_ready(p)}
+        if pending:
+            time.sleep(0.2)
+    if pending:
+        raise RuntimeError(f"stored principals on {sorted(pending)} did not load within {timeout}s")
+
+
 def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) -> dict:
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
@@ -1725,6 +1759,8 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         if scn.settle:
             wait_settled([d.port for d in procs.values()], token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"),
                          check_db=not scn.settle_with_search)
+        if scn.principals_settle:
+            wait_principals([d.port for d in procs.values()])
         rows = []
         golden_name = scn.name
         if scn.name in {"static-build", "static-paths", "static-root-link"}:

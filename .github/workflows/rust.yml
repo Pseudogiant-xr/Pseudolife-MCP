@@ -564,7 +564,7 @@ jobs:
           if (-not $IsWindows) { chmod +x $bindFixture }
           $env:PL_SECURITY_DEFAULT_BIN = $candidate
           $env:PL_SECURITY_RELEASE_MUTANTS_BIN = $mutants
-          python -m pytest -q rust/daemon/harness/test_security_cases.py
+          python -m pytest -q rust/daemon/harness/test_security_cases.py rust/daemon/harness/test_principals_settle.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte security-refusals --out (Join-Path $env:RUNNER_TEMP 'daemon-security-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
