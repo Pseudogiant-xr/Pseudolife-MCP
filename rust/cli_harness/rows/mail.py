@@ -42,6 +42,22 @@ def _paths(home: Path, key: str = KEY) -> dict[str, Path]:
             "dir": d}
 
 
+def _remove_digest(arm) -> None:
+    """Remove the digest under a polling waiter. A Windows reader's open
+    handle refuses the unlink (WinError 32) until it closes, so retry briefly
+    rather than lose the event (CI run 37952726143, 2026-10-09)."""
+    path = _paths(arm.home)["digest"]
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            path.unlink()
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 def seed(digest_wm=7, ring=(7, "rung", "urgent"), seen=None, text=True, key=KEY,
          ring_raw: str | None = None):
     def setup(arm):
@@ -243,7 +259,7 @@ def cases() -> list[Case]:
              rules=DELIVERY))
     add(Case("digest-disappears", ["wait-mail", *SID, "--timeout", "20", *QUICK],
              setup=seed(ring=None),
-             during=armed_then(lambda arm: _paths(arm.home)["digest"].unlink())))
+             during=armed_then(_remove_digest)))
 
     # After /clear: the host record maps the new id back to the shim's key.
     def host_record(arm, confirmed=True):

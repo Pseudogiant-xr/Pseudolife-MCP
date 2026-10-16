@@ -1625,3 +1625,24 @@ def test_golden_secret_guards_scan_surrogateescape_strings(tmp_path, monkeypatch
         with pytest.raises(SystemExit, match="refusing to write"):
             runner.write_golden(tmp_path / "unsafe.json", rejected)
         assert not (tmp_path / "unsafe.json").exists()
+
+
+def test_digest_removal_waits_out_a_reader_holding_the_file(tmp_path):
+    """digest-disappears removes the digest while the Python waiter may be
+    reading it; on Windows that reader's open handle refuses the unlink
+    (WinError 32) until it closes (CI run 37952726143, 2026-10-09)."""
+    import threading  # noqa: PLC0415
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from cli_harness.rows import mail  # noqa: PLC0415
+    arm = SimpleNamespace(home=tmp_path)
+    digest = mail._paths(tmp_path)["digest"]
+    digest.parent.mkdir(parents=True, exist_ok=True)
+    digest.write_bytes(b"7\n")
+    reader = digest.open("rb")
+    threading.Timer(0.3, reader.close).start()
+    try:
+        mail._remove_digest(arm)
+    finally:
+        reader.close()
+    assert not digest.exists()
