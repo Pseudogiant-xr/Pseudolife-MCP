@@ -401,7 +401,9 @@ class Scenario:
     settle = True          # wait until both report db + embedder
     snapshot_settle = True  # early HTTP witnesses still wait before measuring bank state
     # Wait for the stored-principal view before the cases: required when a
-    # case's bearer matches no environment token on a reachable bank.
+    # case's bearer matches no environment token on a reachable bank. The
+    # readiness settle does not imply it (its search uses an environment
+    # token), and a failed first read retries only after REFRESH_EVERY.
     principals_settle = False
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
@@ -536,6 +538,7 @@ class Tokens(Scenario):
     (one paired, one revoked) written by Python's principal store."""
     name = "tokens"
     seeds_principals = True
+    principals_settle = True  # several cases' bearers resolve through the stored view
 
     def __init__(self):
         self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT,
@@ -1596,13 +1599,20 @@ def principals_ready(port: int) -> bool:
     refused 401, not 503 ``principals_unavailable``. Both daemons start the
     refresher in the background (``PrincipalRefresher.start``, Rust
     ``principals::spawn_refresher``), so requests can arrive before its first
-    read. The refusal is answered before any handler, so the probe writes
-    nothing."""
+    read. The refusal comes before any handler, so the probe writes nothing;
+    any other answer (an open daemon would run the search) is a scenario
+    misconfiguration and raises."""
     try:
         r = call(port, "GET", "/api/search?q=", [("Authorization", PRINCIPAL_PROBE)], timeout=30)
     except OSError:
         return False
-    return not (r["status"] == 503 and (r.get("json") or {}).get("error") == "principals_unavailable")
+    error = (r.get("json") or {}).get("error")
+    if r["status"] == 503 and error == "principals_unavailable":
+        return False
+    if r["status"] == 401 and error == "unauthorized":
+        return True
+    raise RuntimeError(f"principal probe on {port}: expected 401 or 503 principals_unavailable, "
+                       f"got {r['status']} {error!r}")
 
 
 def wait_principals(ports: list[int], timeout: float = 60.0) -> None:
@@ -1614,6 +1624,13 @@ def wait_principals(ports: list[int], timeout: float = 60.0) -> None:
             time.sleep(0.2)
     if pending:
         raise RuntimeError(f"stored principals on {sorted(pending)} did not load within {timeout}s")
+
+
+def settle_before_cases(scn: Scenario, ports: list[int]) -> None:
+    if scn.settle:
+        wait_settled(ports, token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"), check_db=not scn.settle_with_search)
+    if scn.principals_settle:
+        wait_principals(ports)
 
 
 def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) -> dict:
@@ -1756,11 +1773,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         scn.configure_daemons(procs)
         for d in procs.values():
             d.start(240)
-        if scn.settle:
-            wait_settled([d.port for d in procs.values()], token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"),
-                         check_db=not scn.settle_with_search)
-        if scn.principals_settle:
-            wait_principals([d.port for d in procs.values()])
+        settle_before_cases(scn, [d.port for d in procs.values()])
         rows = []
         golden_name = scn.name
         if scn.name in {"static-build", "static-paths", "static-root-link"}:

@@ -28,11 +28,14 @@ def store_bearers(scn) -> list[str]:
     return names
 
 
-def test_unsettled_scenarios_reaching_the_store_wait_for_it():
+def test_scenarios_reaching_the_store_wait_for_it():
+    # Settled scenarios too: the readiness settle searches with an environment
+    # token, which never consults the stored view. An unreachable bank's view
+    # never loads, so principals_unavailable is its recorded answer.
     reaching = {}
     for name, cls in run.SCENARIOS.items():
         scn = cls()
-        if scn.settle or scn.unreachable_database:
+        if scn.unreachable_database:
             continue
         found = store_bearers(scn)
         if found:
@@ -40,6 +43,7 @@ def test_unsettled_scenarios_reaching_the_store_wait_for_it():
             assert scn.principals_settle, f"{name}: {found} reach the stored principals unwaited"
     # The near miss that flaked on hosted runners (run 38855230133).
     assert reaching["encodings"] == ["non-ASCII bearer matching nothing"]
+    assert "stored principal" in reaching["tokens"]
 
 
 def test_wait_principals_waits_through_the_unavailable_window(monkeypatch):
@@ -57,10 +61,26 @@ def test_wait_principals_waits_through_the_unavailable_window(monkeypatch):
     assert calls[0] == (5555, "/api/search?q=", [("Authorization", run.PRINCIPAL_PROBE)])
 
 
-def test_other_refusals_count_as_loaded(monkeypatch):
-    # A 503 for another reason is the scenario's to compare, not a wait.
-    monkeypatch.setattr(run, "call", lambda *a, **k: {"status": 503, "json": {"error": "db_unavailable"}})
-    assert run.principals_ready(5555)
+@pytest.mark.parametrize("answer", [{"status": 200, "json": {"entries": []}},
+                                    {"status": 503, "json": {"error": "db_unavailable"}}])
+def test_any_other_answer_is_a_misconfigured_scenario(monkeypatch, answer):
+    # 200 means an open daemon ran the search: the probe would not be inert.
+    monkeypatch.setattr(run, "call", lambda *a, **k: answer)
+    with pytest.raises(RuntimeError, match="expected 401 or 503 principals_unavailable"):
+        run.principals_ready(5555)
+
+
+@pytest.mark.parametrize("settle,principals,expected", [
+    (False, False, []), (True, False, ["settled"]), (False, True, ["principals"]),
+    (True, True, ["settled", "principals"])])
+def test_settle_before_cases_runs_the_declared_waits(monkeypatch, settle, principals, expected):
+    waits = []
+    monkeypatch.setattr(run, "wait_settled", lambda ports, **kw: waits.append("settled"))
+    monkeypatch.setattr(run, "wait_principals", lambda ports: waits.append("principals"))
+    scn = run.Scenario()
+    scn.settle, scn.principals_settle = settle, principals
+    run.settle_before_cases(scn, [5555])
+    assert waits == expected
 
 
 def test_wait_principals_gives_up(monkeypatch):
