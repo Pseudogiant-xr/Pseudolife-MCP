@@ -183,6 +183,12 @@ impl Service {
     /// `_ensure_init`, run in its own task: a request whose client goes
     /// away mid-init drops only its wait, never the init itself (which
     /// writes to the shared writer session).
+    /// The initialized service state, without initializing it (Python's
+    /// `self._cms is None` check under the service lock).
+    pub async fn ready_if_initialized(&self) -> Option<Arc<Ready>> {
+        self.inner.lock().await.ready.clone()
+    }
+
     pub async fn ensure_init(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
         let me = self.clone();
         tokio::spawn(async move { me.ensure_init_inner().await })

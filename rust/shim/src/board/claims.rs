@@ -1,97 +1,9 @@
-use super::{identity, unicode14};
+pub use super::claim_name::{claim_name, fold, forbidden, normalize};
+use super::identity;
 use serde_json::{Map, Value, json};
 use std::{path::Path, process::Stdio, time::Duration};
-use unicode_casefold::UnicodeCaseFold;
 use unicode_normalization::UnicodeNormalization;
 
-pub fn forbidden(c: char) -> bool {
-    let point = c as u32;
-    let ranges = unicode14::CATEGORY_C;
-    let index = ranges.partition_point(|(start, _)| *start <= point);
-    index > 0 && point <= ranges[index - 1].1
-}
-pub fn fold(value: &str) -> String {
-    // Refused inputs never acquire identities. Keep the pinned unassigned scalar table stable.
-    if value.chars().any(forbidden) {
-        return value.to_owned();
-    }
-    value
-        .chars()
-        .flat_map(|c| {
-            match unicode14::FOLD_CORRECTIONS.binary_search_by_key(&c, |(source, _)| *source) {
-                Ok(index) => unicode14::FOLD_CORRECTIONS[index]
-                    .1
-                    .chars()
-                    .collect::<Vec<_>>(),
-                Err(_) => c.to_string().case_fold().collect::<Vec<_>>(),
-            }
-        })
-        .nfc()
-        .collect()
-}
-pub fn normalize(path: &str, case_sensitive: bool) -> Result<String, &'static str> {
-    let invalid = "invalid_claim_path";
-    if path.is_empty()
-        || path.chars().count() > 4096
-        || path.chars().any(forbidden)
-        || path.chars().any(|c| "*?[]{}<>|\":".contains(c))
-    {
-        return Err(invalid);
-    }
-    let path = path.replace('\\', "/");
-    if path.starts_with('/') || path.ends_with('/') {
-        return Err(invalid);
-    }
-    let parts = path
-        .split('/')
-        .filter(|part| !matches!(*part, "" | "."))
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        return Err(invalid);
-    }
-    for part in &parts {
-        let folded = fold(part);
-        let device = fold(part.split('.').next().unwrap_or("").trim_end_matches(' '));
-        let number = device
-            .strip_prefix("com")
-            .or_else(|| device.strip_prefix("lpt"));
-        if *part == ".."
-            || part.ends_with(['.', ' '])
-            || folded == ".git"
-            || matches!(device.as_str(), "con" | "prn" | "aux" | "nul")
-            || number.is_some_and(|number| {
-                matches!(
-                    number,
-                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
-                )
-            })
-        {
-            return Err(invalid);
-        }
-    }
-    let normalized = parts.join("/").nfc().collect::<String>();
-    Ok(if case_sensitive {
-        normalized
-    } else {
-        fold(&normalized)
-    })
-}
-pub fn claim_name(repository: &str, path: &str) -> Result<String, &'static str> {
-    if repository.len() != 64
-        || !repository
-            .bytes()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
-    {
-        return Err("invalid_repository_id");
-    }
-    if normalize(path, true)? != path {
-        return Err("invalid_claim_path");
-    }
-    Ok(format!(
-        "claim:file:{}",
-        identity::hex_hash(identity::ascii_json(&json!([repository, path])))
-    ))
-}
 async fn git(
     worktree: &Path,
     args: &[&std::ffi::OsStr],

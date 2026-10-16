@@ -36,8 +36,6 @@ tool's answers by value.
 
 | Tool | Body owner | Missing service prerequisite |
 |---|---|---|
-| `memory_agents` | W2-F | W2-F supplies the REST board context and roster; MCP adapter dispatch and binding remain unwired. |
-| `memory_message` | W2-F | W2-F supplies REST mailbox, audit and wake services; MCP dispatch remains unwired. |
 | `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion remains deferred. |
 | `memory_world_search` | W2-D | No resident world-cortex search service. |
 | `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
@@ -73,8 +71,10 @@ tool's answers by value.
 | `memory_relation_define` | W3-H | Relation storage exists, but the public relation-definition service does not. |
 
 The integration batch retains W2-G's refusal stubs for every tool except
-`memory_toolset` and, since their body registrations, `memory_store` and
-`memory_search`.
+`memory_toolset` and, since their body registrations, `memory_store`,
+`memory_search`, `memory_agents` and `memory_message`. The two board tools
+inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
+REST and MCP alike).
 
 **MCP-SEARCH-EXPLAIN:** `memory_search(explain=true)` answers the refusal
 envelope `{"error": "not_implemented", "message": "not_implemented: explain

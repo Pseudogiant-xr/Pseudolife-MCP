@@ -183,5 +183,21 @@ def test_mutants_require_the_control_to_differ_after_a_clean_baseline(monkeypatc
 
     monkeypatch.setattr(run, "run_scenario", scenario)
     assert run.main() == 1, "disabled controls must survive"
-    assert calls == [None, *run.MUTANTS]
+    # A REST scenario runs the REST mutants; the MCP tool mutants live in
+    # mcp-tools and run only with it.
+    assert calls == [None, *(m for m in run.MUTANTS if m not in run.MCP_MUTANTS)]
     assert run.os.environ["PSEUDOLIFE_DAEMON_MUTANT"] == "inherited-control"
+
+
+def test_mcp_tools_runs_only_its_own_mutants(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["board.run", "mutants", "--rust-bin", "unused", "--only", "mcp-tools"])
+    monkeypatch.setattr(run.daemons, "scratch_root", lambda: tmp_path)
+
+    def scenario(*args):
+        calls.append(run.os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"))
+        return {"steps": [{"diffs": []}], "state_diffs": [], "chain": []}
+
+    monkeypatch.setattr(run, "run_scenario", scenario)
+    run.main()
+    assert calls == [None, *(m for m in run.MUTANTS if m in run.MCP_MUTANTS)]
