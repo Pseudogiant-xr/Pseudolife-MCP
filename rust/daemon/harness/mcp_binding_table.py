@@ -37,7 +37,7 @@ NUMERIC_BOUNDS = ("gt", "ge", "lt", "le")
 def source_versions():
     versions = {name: importlib.metadata.version(name)
                 for name in ("mcp", "pydantic", "pydantic-core")}
-    assert versions["mcp"] == "2.1.1", versions
+    assert versions["mcp"] == "2.2.0", versions
     assert versions["pydantic-core"] == "2.50.0", versions
     return versions
 

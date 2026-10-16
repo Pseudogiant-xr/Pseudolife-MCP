@@ -1090,7 +1090,7 @@ def test_spawn_lock_is_released_after_the_daemon_is_up(monkeypatch, tmp_path):
 def test_sdk_guard_passes_on_a_v2_environment():
     from pseudolife_memory import shim
 
-    # The test venv satisfies pyproject's ``mcp>=2.1`` floor, so the guard
+    # The test venv satisfies pyproject's ``mcp>=2.2`` floor, so the guard
     # must be a silent no-op there.
     assert shim._require_mcp_sdk_v2() is None
 
@@ -1120,7 +1120,7 @@ def test_sdk_guard_names_the_fix_and_exits_before_daemon_traffic(
         shim.run_shim()
     assert exc.value.code == 1
     err = capsys.readouterr().err
-    assert "mcp>=2.1" in err
+    assert '"mcp>=2.2,<2.3"' in err
     assert sys.executable in err
 
 def test_sdk_guard_survives_a_fully_absent_mcp(monkeypatch, capsys):
@@ -1137,7 +1137,7 @@ def test_sdk_guard_survives_a_fully_absent_mcp(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc:
         shim._require_mcp_sdk_v2()
     assert exc.value.code == 1
-    assert "mcp>=2.1" in capsys.readouterr().err
+    assert '"mcp>=2.2,<2.3"' in capsys.readouterr().err
 
 
 # -- startup credential check ------------------------------------------------
@@ -1686,18 +1686,24 @@ def test_shim_mcp_dependency_stays_on_the_daemon_line():
     2.2.0 fails every tools/list against a daemon on 2.1.x (its upstream
     initialize gets an error response; the same bearer over curl succeeds).
     The 2026-09-28 remote-client dogfood hit this on a fresh pipx install.
-    pyproject caps the range at the lock's minor line; raise both together."""
+    pyproject's range is exactly the lock's minor line (floor and cap), so an
+    in-place upgrade cannot leave a shim on the previous line; raise both
+    together. The lock's mcp-types must match mcp exactly: mcp requires
+    ``mcp-types==<its own version>``, and a lock that moves only mcp (as
+    dependabot's 2.2.0 bump did) fails the image build."""
     import tomllib
     from pathlib import Path
 
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     deps = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
     mcp_spec = next(d for d in deps if re.match(r"mcp\s*(?:[<>=~!]|$)", d))
-    assert "<2.2" in mcp_spec, mcp_spec
+    assert mcp_spec == "mcp>=2.2,<2.3", mcp_spec
     lock = (Path(__file__).resolve().parents[1] / "ops" / "requirements.lock.txt"
             ).read_text(encoding="utf-8")
-    locked = re.search(r"^mcp==(\d+)\.(\d+)\.", lock, re.M)
-    assert locked and (locked.group(1), locked.group(2)) == ("2", "1"), lock
+    locked = re.search(r"^mcp==((\d+)\.(\d+)\.\S+)$", lock, re.M)
+    assert locked and (locked.group(2), locked.group(3)) == ("2", "2"), lock
+    types = re.search(r"^mcp-types==(\S+)$", lock, re.M)
+    assert types and types.group(1) == locked.group(1), (locked.group(1), types and types.group(1))
 
 
 @pytest.mark.parametrize("url,expected", [

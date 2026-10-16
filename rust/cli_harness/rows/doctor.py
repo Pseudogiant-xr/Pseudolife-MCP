@@ -18,6 +18,7 @@ substitution ``doctor-runtime-identity``).
 from __future__ import annotations
 
 import functools
+import importlib.metadata
 import json
 import os
 import re
@@ -1100,6 +1101,10 @@ def _python_identity_mutant() -> Mutant:
     resolved at run time):
     the identity rule must not tokenize another arm's identity."""
     source = (producers._SOURCE or RUST.parent) / "pseudolife_memory"
+    try:
+        sdk = importlib.metadata.version("mcp")
+    except importlib.metadata.PackageNotFoundError:
+        sdk = "0"  # any version: the native report must carry no mcp at all
     return Mutant(
         "doctor-identity-claims-python", "doctor", "shim/src/cli/doctor/mod.rs",
         '        ("interpreter", interpreter),\n        ("source", source),\n'
@@ -1107,7 +1112,7 @@ def _python_identity_mutant() -> Mutant:
         f'        ("interpreter", r"{sys.executable}".to_owned()),\n'
         f'        ("source", {{ let _ = (interpreter, source); r"{source}".to_owned() }}),\n'
         '        ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),\n'
-        '        ("mcp", "2.1.1".to_owned()),\n    ])',
+        f'        ("mcp", "{sdk}".to_owned()),\n    ])',
         ("unreachable",))
 
 

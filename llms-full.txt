@@ -1384,10 +1384,10 @@ pseudolife-mcp-daemon`).
   few seconds.
 - **Tools vanish after an upgrade / the client log says "Connection
   closed"**: the shim's registered command can live outside the repo venv,
-  and the MCP SDK v2 migration set an `mcp>=2.1` floor — an older SDK in
-  that environment crashes the shim on start. The shim detects this and
+  and the shim needs the MCP SDK v2 — an SDK older than v2 in that
+  environment crashes the shim on start. The shim detects this and
   prints the interpreter path and the exact fix on stderr: `pip install -U
-  "mcp>=2.1,<2.2"` in that interpreter, or re-run the installer (which
+  "mcp>=2.2,<2.3"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
@@ -11339,17 +11339,19 @@ finish (finish it with the commands the report and the move record list).
 ## Troubleshooting
 
 **"unhandled errors in a TaskGroup" on every `tools/list`, while `curl` with
-the same token succeeds.** This is not an auth failure. The shim's MCP client
-library must be on the same major-minor line as the daemon's: a client on
-`mcp` 2.2 against a daemon on 2.1 fails exactly this way. The project pins
-the range (`mcp>=2.1,<2.2`); a shim pipx-installed from an older release may
-need:
+the same token succeeds.** This is not an auth failure. Keep the shim's MCP
+client library on the same major-minor line as the daemon's: a remote client
+on `mcp` 2.2 against a daemon on 2.1 failed exactly this way over a tailnet
+(2026-09-28), although the same mix works on loopback. Each release pins one
+line for both (`mcp>=2.2,<2.3` since 0.18.2, `mcp>=2.1,<2.2` before), so the
+fix is a shim from the daemon's release:
 
 ```bash
-pipx runpip pseudolife-mcp install "mcp<2.2"
+pipx install --force "pseudolife-mcp==<the daemon's version>"
 ```
 
-or a reinstall of `pseudolife-mcp`.
+or, for a daemon on the 2.1 line, `pipx runpip pseudolife-mcp install
+"mcp<2.2"`.
 
 **The shim exits at startup naming the credential file.** The file is
 missing, not owner-only, or holds more than the token. Fix the file; the

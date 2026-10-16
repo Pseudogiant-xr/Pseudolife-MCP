@@ -122,7 +122,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install the Python SDK fixture dependency
-        run: python -m pip install "mcp==2.1.1"
+        run: python -m pip install "mcp==2.2.0"
       - name: Check generated daemon schema
         working-directory: .
         shell: pwsh
@@ -384,7 +384,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "setuptools>=68" wheel
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
-          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          python -m pip install -e ".[dev,lite]" "mcp==2.2.0"
       - uses: actions/download-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
@@ -1020,7 +1020,7 @@ jobs:
         run: |
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          python -m pip install -e ".[dev,lite]" "mcp==2.2.0"
           exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL for source controls
         # Linux 2026-10-11: fixture setup under 5s; network-bound floor.
@@ -1185,7 +1185,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          python -m pip install -e ".[dev,lite]" "mcp==2.2.0"
           exit $LASTEXITCODE
       - name: Bind the frozen-head Python oracle
         shell: pwsh

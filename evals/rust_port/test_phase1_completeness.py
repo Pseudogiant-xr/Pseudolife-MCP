@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -92,10 +93,20 @@ def test_regeneration_rejects_omitted_current_functions_before_writing(inventory
                                      if item["nodeid"].startswith(path + "::")
                                      and item["nodeid"] not in REFUSAL_NODES]}
         for path in SCOPED_FILES]}), encoding="utf-8")
+    # Regeneration also refuses scoped test sources that differ from the pin, so
+    # run it on a clone whose scoped sources are at the pin: the checkout's own
+    # copies may legitimately move ahead of it on master or in a PR.
+    root = tmp_path / "source"
+    subprocess.run(["git", "clone", "--shared", "--quiet", "--no-checkout",
+                    str(inventory.ROOT), str(root)], check=True)
+    subprocess.run(["git", "checkout", "--quiet", phase1_inventory.ORACLE_HEAD, "--", *SCOPED_FILES],
+                   cwd=root, check=True)
+    (root / "rust").mkdir()
+    shutil.copyfile(inventory.ROOT / "rust/phase1-test-buckets.json", root / "rust/phase1-test-buckets.json")
     monkeypatch.setattr(phase1_inventory, "require_phase1_source", lambda root: None)
     monkeypatch.setattr(Path, "write_text", lambda *args, **kwargs: pytest.fail("incomplete input wrote a manifest"))
     with pytest.raises(RuntimeError, match="function coverage"):
-        phase1_inventory.regenerate(exploration, root=inventory.ROOT)
+        phase1_inventory.regenerate(exploration, root=root)
 
 
 def test_candidate_function_classification_cannot_drift_from_adapter_mapping(inventory, monkeypatch):
