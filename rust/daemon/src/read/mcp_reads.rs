@@ -1,13 +1,17 @@
-//! Read tools over MCP: `memory_recent` (spec "memory_recent over MCP").
+//! Read tools over MCP: `memory_recent` (spec "memory_recent over MCP") and
+//! `memory_get` (spec "memory_get over MCP").
 
 use crate::bank::Bank;
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
-use crate::read::mcp_search::{compact_entry, strings};
+use crate::read::mcp_search::{compact_entry, replaced_by, strings};
 use crate::search::{annotate_supersession_in, entry_json};
 use serde_json::{Value, json};
 
 pub fn mcp_tools() -> Vec<(&'static str, ToolFn)> {
-    vec![("memory_recent", mcp_memory_recent)]
+    vec![
+        ("memory_recent", mcp_memory_recent),
+        ("memory_get", mcp_memory_get),
+    ]
 }
 
 /// `memory_recent` (mcp_server.py:1320-1343): `service.recent`, compact
@@ -141,6 +145,245 @@ fn recent(
     annotate_supersession_in(bank, &mut served);
     let entries: Vec<Value> = served.into_iter().map(|(_, d)| d).collect();
     Ok(json!({"count": entries.len(), "entries": entries}))
+}
+
+/// `_FADED_NOTE` (`mcp_server.py:718`).
+const FADED_NOTE: &str = "No entry with this id: a wrong id, a forgotten or evicted entry, or a bank without Postgres (file mode cannot read ids). Search again for a current id.";
+/// `_SUPERSESSION_SERVICE_KEYS` (`mcp_server.py:910`).
+const SUPERSESSION_SERVICE_KEYS: [&str; 5] = [
+    "superseded_at",
+    "superseded_by_text",
+    "superseded_by_id",
+    "supersession_verified",
+    "superseded_by_current",
+];
+
+fn faded() -> Value {
+    json!({"found": false, "faded": true, "note": FADED_NOTE})
+}
+
+fn now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+/// One `entries` row as `PostgresStorage.get_entry` reads it.
+struct EntryRow {
+    id: i64,
+    text: String,
+    source: String,
+    reinforcements: i32,
+    explicit_reinforcements: i32,
+    access_count: i32,
+    superseded_at: Option<f64>,
+    superseded_by_text: Option<String>,
+}
+
+/// `memory_get` (mcp_server.py:1518-1539) over `service.get_entry`
+/// (service.py:6088-6138).
+fn mcp_memory_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
+    Box::pin(async move {
+        let internal = |e: anyhow::Error| ToolError::Internal(e);
+        let ready = app
+            .service
+            .ensure_init()
+            .await
+            .map_err(|e| ToolError::Internal(anyhow::anyhow!(e)))?;
+        // An id past BIGINT reaches Python's query as numeric and matches
+        // no row: faded, as any unknown id.
+        let Some(id) = call.args.get("entry_id").and_then(Value::as_i64) else {
+            return Ok(faded());
+        };
+        let db = ready.storage.client();
+        let row = crate::txn::with_client(db, |db| async move {
+            let r = db
+                .query_opt(
+                    "SELECT id, text, source, reinforcements, explicit_reinforcements, \
+                     access_count, superseded_at, superseded_by_text FROM entries WHERE id = $1",
+                    &[&id],
+                )
+                .await?;
+            Ok::<_, anyhow::Error>(r.map(|r| EntryRow {
+                id: r.get(0),
+                text: r.get(1),
+                source: r.get(2),
+                reinforcements: r.get(3),
+                explicit_reinforcements: r.get(4),
+                access_count: r.get(5),
+                superseded_at: r.get(6),
+                superseded_by_text: r.get(7),
+            }))
+        })
+        .await
+        .map_err(internal)?;
+        let Some(row) = row else {
+            return Ok(faded());
+        };
+        // bump_access_count: its own transaction, then the resident copy.
+        if !crate::mutants::active("mcp-get-no-db-bump") {
+            crate::txn::run(db, |db| async move {
+                db.execute(
+                    "UPDATE entries SET access_count = access_count + 1 WHERE id = $1",
+                    &[&id],
+                )
+                .await?;
+                Ok::<_, anyhow::Error>(())
+            })
+            .await
+            .map_err(internal)?;
+        }
+        {
+            let bank = ready.bank.read().expect("bank lock");
+            if let Some(e) = bank.entries.iter().find(|e| e.id == id) {
+                e.access_count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let facts = crate::txn::with_client(db, |db| async move {
+            Ok::<_, anyhow::Error>(
+                db.query(
+                    "SELECT f.entity, f.attribute, f.value FROM facts f \
+                     JOIN memory_traces t ON f.entity_norm = t.entity_norm \
+                     AND f.attribute_norm = t.attribute_norm \
+                     WHERE t.entry_id = $1 AND f.status = 'current' \
+                     ORDER BY f.entity_norm, f.attribute_norm",
+                    &[&id],
+                )
+                .await?
+                .iter()
+                .map(|r| {
+                    json!({"entity": r.get::<_, String>(0), "attribute": r.get::<_, String>(1),
+                           "value": r.get::<_, String>(2)})
+                })
+                .collect::<Vec<Value>>(),
+            )
+        })
+        .await
+        .map_err(internal)?;
+        let cfg = &app.service.config.memory;
+        if cfg.retrieval_log_enabled && !crate::mutants::active("mcp-get-no-use-credit") {
+            let window = cfg.retrieval_log_use_window_seconds;
+            let (header, transport) = (
+                call.ident.header_session.clone(),
+                call.ident.transport_session.clone(),
+            );
+            // `_record_retrieval_use`: never raises.
+            if let Err(e) = crate::txn::run(db, |db| async move {
+                credit_retrieval_use(db, id, header, transport, window).await
+            })
+            .await
+            {
+                eprintln!("retrieval-use label failed: {e:#}");
+            }
+        }
+        let mut out = serde_json::Map::new();
+        out.insert("found".into(), json!(true));
+        out.insert("entry_id".into(), json!(row.id));
+        out.insert("text".into(), json!(row.text));
+        out.insert("source".into(), json!(row.source));
+        out.insert("reinforcements".into(), json!(row.reinforcements));
+        out.insert(
+            "explicit_reinforcements".into(),
+            json!(row.explicit_reinforcements),
+        );
+        // +1 for the bump just applied.
+        out.insert(
+            "access_count".into(),
+            json!(i64::from(row.access_count) + 1),
+        );
+        out.insert("consolidated_into".into(), Value::Array(facts));
+        if let Some(at) = row.superseded_at {
+            out.insert("superseded".into(), json!(true));
+            out.insert("superseded_at".into(), json!(at));
+            out.insert("superseded_by_text".into(), json!(row.superseded_by_text));
+            let bank = ready.bank.read().expect("bank lock");
+            annotate_row_supersession(&bank, id, row.superseded_by_text.as_deref(), &mut out);
+        }
+        // The MCP layer: `replaced_by` when there is a successor text, and the
+        // raw supersession keys never served.
+        let superseded = out.get("superseded") == Some(&Value::Bool(true));
+        if superseded {
+            let has_text = out
+                .get("superseded_by_text")
+                .and_then(Value::as_str)
+                .is_some_and(|t| !t.is_empty());
+            if has_text {
+                let pointer = replaced_by(&Value::Object(out.clone()));
+                out.insert("replaced_by".into(), pointer);
+            }
+            for k in SUPERSESSION_SERVICE_KEYS {
+                out.shift_remove(k);
+            }
+        }
+        Ok(Value::Object(out))
+    })
+}
+
+/// `credit_retrieval_use` (storage/postgres.py:2189) for `used_via="get"`:
+/// the most recent event in the window served `entry_id` under the caller's
+/// session (`_resolve_writer`) gains one `retrieval_uses` row.
+async fn credit_retrieval_use(
+    db: &tokio_postgres::Client,
+    entry_id: i64,
+    header: Option<String>,
+    transport: Option<String>,
+    window: f64,
+) -> anyhow::Result<()> {
+    let t = now();
+    let session =
+        crate::read::identity::session_id(db, header.as_deref(), transport.as_deref(), t).await;
+    let served = json!([{"entry_id": entry_id}]);
+    let event: Option<i64> = db
+        .query_opt(
+            "SELECT id FROM retrieval_events WHERE session_id IS NOT DISTINCT FROM $1 \
+             AND created_at >= $2 AND served @> $3 ORDER BY created_at DESC, id DESC LIMIT 1",
+            &[&session, &(t - window), &served],
+        )
+        .await?
+        .map(|r| r.get(0));
+    if let Some(event) = event {
+        db.execute(
+            "INSERT INTO retrieval_uses (event_id, entry_id, used_via, created_at) \
+             VALUES ($1, $2, 'get', $3) ON CONFLICT DO NOTHING",
+            &[&event, &entry_id, &t],
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// `_annotate_supersession` for a row the CMS may not hold: the successor is
+/// the resident entry with the replacement text (the row itself excluded by
+/// id); with several, the one still current; else none.
+fn annotate_row_supersession(
+    bank: &Bank,
+    id: i64,
+    successor_text: Option<&str>,
+    out: &mut serde_json::Map<String, Value>,
+) {
+    let mut found: Vec<&crate::bank::Entry> = match successor_text {
+        Some(t) if !t.is_empty() => bank
+            .entries
+            .iter()
+            .filter(|e| e.text == t && e.id != id)
+            .collect(),
+        _ => Vec::new(),
+    };
+    if found.len() > 1 {
+        found.retain(|e| e.superseded_at.is_none());
+    }
+    let one = (found.len() == 1).then(|| found[0]);
+    out.insert("superseded_by_id".into(), json!(one.map(|e| e.id)));
+    out.insert(
+        "supersession_verified".into(),
+        json!(one.is_some_and(|e| e.source == "correction" || e.source == "consolidation")),
+    );
+    out.insert(
+        "superseded_by_current".into(),
+        json!(one.is_some_and(|e| e.superseded_at.is_none())),
+    );
 }
 
 /// `_compact_entries` with no text budget: `count` stays as served.

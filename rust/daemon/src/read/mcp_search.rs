@@ -341,7 +341,7 @@ fn truncate(t: &str, cap: i64) -> (String, bool) {
 }
 
 /// `_replaced_by`: the pointer a superseded hit carries.
-fn replaced_by(e: &Value) -> Value {
+pub(crate) fn replaced_by(e: &Value) -> Value {
     let at = iso_seconds(e.get("superseded_at")).map(|s| s[..10].to_string());
     let text = e
         .get("superseded_by_text")

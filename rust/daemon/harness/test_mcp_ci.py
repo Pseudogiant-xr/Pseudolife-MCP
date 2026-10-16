@@ -36,7 +36,7 @@ def baseline():
     diffs = [line(f"init_gate[{i}]", NOT_FOUND, sse(text)) for i, text in follow_ups.items()]
     diffs += [line(f"body_limit[{i}]", py, rs) for i in (0, 2, 3, 4, 5)]
     diffs += [line(f"transport[{i}]", NOT_FOUND, TERMINATED) for i in (12, 13)]
-    return {"summary": {"responses": 345, "cases": 18, "diffs": 16, "unserved_checked": list(UNSERVED)},
+    return {"summary": {"responses": 344, "cases": 18, "diffs": 16, "unserved_checked": list(UNSERVED)},
             "diffs": diffs}
 
 

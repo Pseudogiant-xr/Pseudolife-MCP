@@ -58,6 +58,9 @@ pub struct MemoryConfig {
     /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
     /// whether the sweep thread starts and parses its interval.
     pub retrieval_log_enabled: bool,
+    /// `memory.retrieval_log.use_window_seconds`: how far back a dereference
+    /// credits the search that served it.
+    pub retrieval_log_use_window_seconds: f64,
     pub retrieval_retention_days: f64,
     pub compaction_enabled: bool,
     pub compaction_keep_per_slot: i64,
@@ -439,6 +442,7 @@ impl Default for MemoryConfig {
             mcp: McpConfig::default(),
             traces_enabled: true,
             retrieval_log_enabled: true,
+            retrieval_log_use_window_seconds: 3600.0,
             retrieval_retention_days: 365.0,
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
@@ -1325,6 +1329,8 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(r) = section(m, "retrieval_log", "memory.")? {
             memory.retrieval_log_enabled = want_bool(r, "enabled", "memory.retrieval_log", true)?;
+            memory.retrieval_log_use_window_seconds =
+                want_float(r, "use_window_seconds", "memory.retrieval_log", 3600.0)?;
             memory.retrieval_retention_days =
                 want_float(r, "retention_days", "memory.retrieval_log", 365.0)?;
         }
