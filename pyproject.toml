@@ -29,7 +29,7 @@ dependencies = [
     # over curl succeeds. A fresh pipx install resolved to 2.2.0 and hit
     # exactly that on the first remote client; the lock pins 2.1.0. Raise
     # both sides together, never the shim alone.
-    "mcp>=2.1,<2.2",
+    "mcp>=2.1,<2.3",
     # First-party imports of the client side (2026-09-29): the coordination
     # adapter imports httpx and anyio itself, so they are declared here and
     # in SHIM_REQUIREMENTS (pseudolife_memory/runtimes.py); mcp 2.1 depends
