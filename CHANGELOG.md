@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-16 — Console top bar shows the dreamer model)
+- The Console top bar's chip now shows the model the next dream extracts with
+  ("dreamer claude-opus-5-5"), read from `GET /api/dream/status` like the
+  Settings Dreamer card: the Settings override when set, else the primary
+  extractor's served model; the tooltip adds the effort. It used to show the
+  daemon's default writer id, which read "codex" on a daemon dreaming with
+  Claude. The writer id now shows only in the Observatory details, as
+  "Default writer"; its value and derivation are unchanged.
+
 ### Fixed (2026-10-16 — passkey panel on a tokenless daemon)
 - Settings, Your passkeys (and the Board's roles band) now say "This daemon
   has no bearer token" and name `PSEUDOLIFE_MCP_TOKEN` when the daemon runs

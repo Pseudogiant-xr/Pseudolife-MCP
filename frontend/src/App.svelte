@@ -23,7 +23,7 @@
   import Settings from "./views/Settings.svelte";
   import ReEvidence from "./views/ReEvidence.svelte";
   import { findNav, navForDigit } from "./lib/nav";
-  import { loadHealth, loadOverview, navigate, page, refresh, startRouter, ui } from "./lib/state.svelte";
+  import { loadDream, loadHealth, loadOverview, navigate, page, refresh, startRouter, ui } from "./lib/state.svelte";
 
   const VIEWS: Record<string, Component> = {
     observatory: Observatory,
@@ -49,11 +49,13 @@
 
   $effect(() => startRouter());
 
-  // Health and overview feed the sidebar (health pill, counts) on every view.
+  // Health and overview feed the sidebar (health pill, counts) on every view;
+  // the dream status feeds the top bar's model chip.
   $effect(() => {
     void ui.tick;
     void loadHealth();
     void loadOverview();
+    void loadDream();
   });
 
   const item = $derived(findNav(ui.route));
