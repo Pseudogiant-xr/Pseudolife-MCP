@@ -1,5 +1,5 @@
 //! Who a read is attributed to (spec S8c): `MemoryService._resolve_writer`
-//! tiers 1 and 3 (`service.py:970-1011`) and `_caller_episode_id`
+//! tiers 1, 3 and 4 (`service.py:974-985`) and `_caller_episode_id`
 //! (`service.py:4915-4930`, `memory/episodes.py:187-202`).
 
 // The caller holds txn::with_client for these borrowed-client helpers.
@@ -8,13 +8,31 @@ use tokio_postgres::Client;
 
 const DEFAULT_TTL_S: f64 = 21600.0;
 
-/// The `X-PL-Session` header when present, else the active-session pointer
-/// (`meta.active_session_pointer`) while younger than
-/// `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS` (0 disables the TTL).
-pub async fn session_id(db: &Client, header: Option<&str>, now: f64) -> Option<String> {
+/// `_resolve_writer`'s session: the `X-PL-Session` header when present,
+/// else the active-session pointer while live, else the legacy MCP transport
+/// session (`mcp-session-id`, only when `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION`
+/// is set; callers pass None otherwise).
+pub async fn session_id(
+    db: &Client,
+    header: Option<&str>,
+    transport: Option<&str>,
+    now: f64,
+) -> Option<String> {
     if let Some(h) = header.filter(|h| !h.is_empty()) {
         return Some(h.to_string());
     }
+    if let Some(active) = active_session(db, now).await {
+        return Some(active);
+    }
+    if crate::mutants::active("search-no-transport-session") {
+        return None;
+    }
+    transport.filter(|t| !t.is_empty()).map(str::to_string)
+}
+
+/// The active-session pointer (`meta.active_session_pointer`) while younger
+/// than `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS` (0 disables the TTL).
+async fn active_session(db: &Client, now: f64) -> Option<String> {
     let row = db
         .query_opt(
             "SELECT value FROM meta WHERE key = 'active_session_pointer'",

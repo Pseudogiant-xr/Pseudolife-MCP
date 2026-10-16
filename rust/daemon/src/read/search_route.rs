@@ -174,6 +174,9 @@ pub struct Request {
     pub count_access: bool,
     /// `X-PL-Session` (last value), for the event's identity.
     pub header_session: Option<String>,
+    /// The legacy MCP transport session (MCP calls with the legacy hatch
+    /// set); REST never has one.
+    pub transport_session: Option<String>,
 }
 
 /// `MemoryService.search` result plus the event id (never served).
@@ -392,7 +395,13 @@ async fn log_event(
             Some(row)
         })
         .collect();
-    let session = identity::session_id(db, req.header_session.as_deref(), now()).await;
+    let session = identity::session_id(
+        db,
+        req.header_session.as_deref(),
+        req.transport_session.as_deref(),
+        now(),
+    )
+    .await;
     let episode = match &session {
         Some(s) => identity::open_leaf_episode(db, s).await,
         None => None,
@@ -461,6 +470,7 @@ pub async fn route(app: &App, raw_query: Option<&str>, h: &HeaderMap) -> Respons
         bm25: tribool(&q, "bm25"),
         count_access: true,
         header_session,
+        transport_session: None,
     };
     // The work runs in its own task: a client that disconnects mid-search
     // must not cancel it halfway through its writes. Python finishes the
@@ -588,6 +598,7 @@ pub async fn warmup_probe(svc: &Service, ready: &Arc<Ready>) {
         bm25: None,
         count_access: false,
         header_session: None,
+        transport_session: None,
     };
     let _guard = crate::read::search_guard().lock().await;
     if let Err(e) = run(svc, ready, req).await {

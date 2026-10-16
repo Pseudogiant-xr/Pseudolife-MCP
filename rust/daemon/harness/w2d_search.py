@@ -78,7 +78,8 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "search-neighbours-reversed": "contiguity", "search-recency-off": "continuum",
            "search-cortex-stripped-q": "default", "w2d-cortex-skip-slot-reads": "default",
            "mcp-search-no-dedup": "mcp-search", "mcp-search-no-correct-with": "mcp-search",
-           "search-no-subtree": "mcp-search"}
+           "search-no-subtree": "mcp-search",
+           "search-no-transport-session": "mcp-transport-session"}
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
 
 
@@ -163,11 +164,15 @@ def mcp_case(name, args, headers=()):
             "path": f"mcp memory_search {json.dumps(args)}"}
 
 
-def mcp_call(port: int, c: dict, episode: str | None) -> dict:
+def mcp_call(port: int, c: dict, episode: str | None, transport: list | None = None) -> dict:
+    """``transport`` collects each call's ``mcp-session-id``, so a retrieval
+    event attributed to it can be compared across the two daemons."""
     from mcp_wire import Session, sse_data
     args = {k: ([episode if x == "<seed-episode>" else x for x in v] if isinstance(v, list) else v)
             for k, v in c["mcp"].items()}
     s = Session(port, TOKEN, dict(c["headers"]))
+    if transport is not None:
+        transport.append(s.sid)
     r = s.tool("memory_search", args)
     s.close()
     try:
@@ -330,6 +335,32 @@ class ConfidenceRounding(Scenario):
 EPISODE_PROBE = "episode filter probe child step deploy health check"
 
 
+class McpTransportSession(Scenario):
+    """PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1, no X-PL-Session and an expired
+    pointer: the retrieval event falls to the MCP transport session
+    (``_resolve_writer`` tier 4, service.py:974-985). A header still wins."""
+    name = "mcp-transport-session"
+    env = {"PSEUDOLIFE_LEGACY_TRANSPORT_SESSION": "1", "PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS": "1"}
+    require = {"transport_sessions": 2, "events_rows": 3}
+
+    def cases(self):
+        return [*(mcp_case(f"transport session {i}", {"query": t}) for i, t in enumerate(CRAFTED[:2])),
+                mcp_case("a header outranks the transport", {"query": CRAFTED[2]},
+                         [("X-PL-Session", "sess-header-wins")])]
+
+
+def scrub_transport(state: dict, ids: list) -> None:
+    """Each arm's own mcp-session-id becomes ``<transport-N>`` (call order)."""
+    names = {sid: f"<transport-{i}>" for i, sid in enumerate(ids) if sid}
+    ev = state["rows"].get("public.retrieval_events")
+    if not ev or not names:
+        return
+    col = ev["columns"].index("session_id")
+    for row in ev["rows"]:
+        if row[col] in names:
+            row[col] = names[row[col]]
+
+
 class McpSearch(Scenario):
     """memory_search over MCP: the projection (compact, verbose, truncation,
     replaced_by, cortex whitelist, correct_with, dedup, low_confidence),
@@ -374,7 +405,8 @@ class McpSearch(Scenario):
 
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
                                   LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
-                                  PointerExpired, ConfidenceRounding, McpSearch)}
+                                  PointerExpired, ConfidenceRounding, McpSearch,
+                                  McpTransportSession)}
 
 
 # ---- comparison ----------------------------------------------------------------------
@@ -557,7 +589,7 @@ def coverage(responses: list[dict], state: dict) -> dict:
     """What the oracle actually exercised, so a green run cannot be vacuous."""
     cov = {"with_entries": 0, "with_events": 0, "with_cortex": 0, "via": {}, "channels": {},
            "rerank_fired": 0, "rerank_skips": {}, "timeline_fired": 0, "events_rows": 0,
-           "recency_boost": 0, "sessions": 0, "episodes": 0, "low_confidence_true": 0,
+           "recency_boost": 0, "sessions": 0, "transport_sessions": 0, "episodes": 0, "low_confidence_true": 0,
            "low_confidence_false": 0, "disconnects": 0, "chronicle_over_limit": 0, "confidence_boundary": 0,
            "correct_with": {"contested": 0, "aged": 0}, "truncated": 0, "replaced_by": 0,
            "episode_filter_child_hit": 0}
@@ -606,6 +638,7 @@ def coverage(responses: list[dict], state: dict) -> dict:
             cov["timeline_fired"] += bool(((rec.get("params") or {}).get("timeline") or {}).get("fired"))
             cov["recency_boost"] += bool((rec.get("params") or {}).get("recency_boost"))
             cov["sessions"] += rec.get("session_id") is not None
+            cov["transport_sessions"] += str(rec.get("session_id") or "").startswith("<transport-")
             cov["episodes"] += rec.get("episode_id") is not None
     return cov
 
@@ -701,6 +734,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         rows = []
         py_seen = []
         response_pairs = []
+        transport = {side: [] for side in sides}
         for i, c in enumerate(scn.cases()):
             if c.get("disconnect"):
                 for d in procs.values():
@@ -712,9 +746,9 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
                              "rust_status": None, "diffs": [], "notes": [], "_python": None})
                 continue
             if "mcp" in c:
-                py_r = (mcp_call(procs["python"].port, c, episode) if "python" in procs
-                        else golden["responses"][i])
-                rs_r = mcp_call(procs["rust"].port, c, episode)
+                py_r = (mcp_call(procs["python"].port, c, episode, transport["python"])
+                        if "python" in procs else golden["responses"][i])
+                rs_r = mcp_call(procs["rust"].port, c, episode, transport["rust"])
             else:
                 py_r = (call(procs["python"].port, "GET", c["path"], c["headers"]) if "python" in procs
                         else golden["responses"][i])
@@ -731,6 +765,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     declared = {}
     for side in sides:
         st = dbstate.normalize(dbstate.dump(pg.dsn(dbs[side])), CLOCK_COLUMNS)
+        scrub_transport(st, transport[side])
         declared[side] = scrub(st)
         states[side] = st
     if mode == "golden":
