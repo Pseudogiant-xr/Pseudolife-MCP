@@ -80,7 +80,10 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "mcp-search-no-dedup": "mcp-search", "mcp-search-no-correct-with": "mcp-search",
            "search-no-subtree": "mcp-search",
            "search-no-transport-session": "mcp-transport-session",
-           "mcp-recent-oldest-first": "mcp-recent"}
+           "mcp-recent-oldest-first": "mcp-recent",
+           "mcp-fact-get-no-alias-retry": "mcp-fact-get",
+           "mcp-fact-get-no-candidates": "mcp-fact-get",
+           "mcp-fact-get-no-lean": "mcp-fact-get"}
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
 
 
@@ -441,10 +444,49 @@ class McpRecent(Scenario):
         ]
 
 
+class McpFactGet(Scenario):
+    """memory_fact_get over MCP (spec FG1-FG6): scalar and set slots, the
+    alias retry (a shadowed alias skipped), contenders, the correction hint,
+    candidates for an empty slot, entity_ref, re_verify and source_entries,
+    the lean projection and its verbose form; the slot_reads writes are in
+    the compared bank state."""
+    name = "mcp-fact-get"
+    mcp_extra_seed = True
+    seed_flags = ("--mcp-extra", "--fact-extra")
+    require = {"fact.records": 6, "fact.alias_hit": 1, "fact.set_removed": 1, "fact.empty_set": 1,
+               "fact.contenders": 1, "fact.correct_with": 3, "fact.candidates_same": 1,
+               "fact.candidates_similar": 1, "fact.entity_ref": 2, "fact.re_verify": 2,
+               "fact.source_entries": 1, "fact.misses": 2}
+
+    def cases(self):
+        def get(name, entity, attribute, **kw):
+            return mcp_case(name, {"entity": entity, "attribute": attribute, **kw},
+                            tool="memory_fact_get")
+        return [
+            get("scalar hit, lean", "staging database", "host"),
+            get("scalar hit, verbose", "staging database", "host", verbose=True),
+            get("key is case- and separator-insensitive", "Staging_Database", "HOST"),
+            get("labelled constraint keeps its label", "daemon", "port"),
+            get("contested slot", "homelab box", "os"),
+            get("aged volatile fact", "deploy window", "weekday"),
+            get("stale fact", "build cache", "state"),
+            get("alias retry reaches the canonical's fact", "builder", "cpu"),
+            get("alias hit, verbose (source_entries, re_verify)", "builder", "cpu", verbose=True),
+            get("a shadowed alias is not retried", "builder", "firmware"),
+            get("set slot with a removed member", "dev box", "users"),
+            get("set slot, verbose", "dev box", "users", verbose=True),
+            get("set slot under an alias", "builder", "users"),
+            get("fully emptied set reads as empty", "dev box", "groups"),
+            get("empty slot: same-entity and similar candidates", "dev box", "kernel"),
+            get("empty slot under an alias", "builder", "kernel"),
+            get("unknown entity", "quantum marmalade", "flavour"),
+        ]
+
+
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
                                   LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
                                   PointerExpired, ConfidenceRounding, McpSearch,
-                                  McpTransportSession, McpRecent)}
+                                  McpTransportSession, McpRecent, McpFactGet)}
 
 
 # ---- comparison ----------------------------------------------------------------------
@@ -635,9 +677,31 @@ def coverage(responses: list[dict], state: dict) -> dict:
            "correct_with": {"contested": 0, "aged": 0}, "truncated": 0, "replaced_by": 0,
            "episode_filter_child_hit": 0,
            "recent": {"responses": 0, "replaced_by": 0, "superseded_verbose": 0, "probe_present": 0,
-                      "episode_hits": 0, "child_excluded": 0, "nonempty": 0}}
+                      "episode_hits": 0, "child_excluded": 0, "nonempty": 0},
+           "fact": {"records": 0, "alias_hit": 0, "set_removed": 0, "empty_set": 0, "contenders": 0,
+                    "correct_with": 0, "candidates_same": 0, "candidates_similar": 0,
+                    "entity_ref": 0, "re_verify": 0, "source_entries": 0, "misses": 0}}
     for r in responses:
         body = r.get("json") or {}
+        if isinstance(body, dict) and "record" in body and "contenders" in body:
+            # A memory_fact_get answer.
+            fc = cov["fact"]
+            rec = body.get("record")
+            fc["records"] += isinstance(rec, dict)
+            fc["misses"] += rec is None
+            if isinstance(rec, dict):
+                fc["alias_hit"] += rec.get("entity") == "dev box" and rec.get("attribute") == "cpu"
+                fc["set_removed"] += bool(rec.get("kind") == "set" and rec.get("removed"))
+                fc["empty_set"] += rec.get("kind") == "set" and not rec.get("members")
+                fc["correct_with"] += "correct_with" in rec
+                fc["re_verify"] += bool(rec.get("re_verify"))
+                fc["source_entries"] += bool(rec.get("source_entries"))
+            fc["contenders"] += bool(body.get("contenders"))
+            for c in body.get("candidates") or []:
+                fc["candidates_same"] += c.get("why") == "same_entity"
+                fc["candidates_similar"] += c.get("why") == "similar_slot"
+            fc["entity_ref"] += "entity_ref" in body
+            continue
         if isinstance(body, dict) and "count" in body and "query" not in body:
             # A memory_recent answer.
             rc = cov["recent"]
@@ -735,7 +799,7 @@ def config_for(scn: Scenario) -> str:
     return head + dream + scn.config_yaml[len(head):]
 
 
-def derive_template(template: str, tag: str) -> str:
+def derive_template(template: str, tag: str, flags=("--mcp-extra",)) -> str:
     """The shared seed plus the MCP scenario's own facts, in a template of
     its own so the other scenarios (and their goldens) are unchanged."""
     name = pg.name(f"pl_cf_w2d_{tag}_t")
@@ -744,7 +808,7 @@ def derive_template(template: str, tag: str) -> str:
     dsn = pg.create(name, template=template)
     home = daemons.make_home(daemons.scratch_root(), f"w2d-{tag}-seed", None)
     env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
-    r = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), "--mcp-extra"],
+    r = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), *flags],
                        env=dict(env, PYTHONPATH=str(REPO)), capture_output=True, text=True, timeout=900)
     if r.returncode != 0:
         raise RuntimeError(f"mcp seeding failed: {r.stderr[-3000:]}")
@@ -766,7 +830,8 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             # Its template is derived through the Python daemon; a recording
             # replayed against the base template would differ by design.
             raise SystemExit(f"{scn.name} runs live only (derived template)")
-        derived = template = derive_template(template, tag)
+        derived = template = derive_template(template, tag,
+                                             getattr(scn, "seed_flags", ("--mcp-extra",)))
     episode = seed_episode(template) if mode != "golden" else None
     if any("mcp" in c and "<seed-episode>" in json.dumps(c["mcp"]) for c in scn.cases()) \
             and episode is None:

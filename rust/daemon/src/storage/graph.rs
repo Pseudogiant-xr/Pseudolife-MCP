@@ -107,7 +107,7 @@ async fn ensure_entity_body(
     Ok(id)
 }
 
-async fn find_entity_body(client: &Client, name: &str) -> anyhow::Result<Value> {
+pub(crate) async fn find_entity_body(client: &Client, name: &str) -> anyhow::Result<Value> {
     let canonical = client
         .query_opt(
             "SELECT id,canonical,display,etype,created_at FROM entities \

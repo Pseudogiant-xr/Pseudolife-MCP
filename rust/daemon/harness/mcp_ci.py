@@ -62,7 +62,7 @@ def _expected_pair(name):
 def check_baseline(report):
     """Accept exactly the declared differences; the strict report stays red."""
     summary = report["summary"]
-    assert (summary["responses"], summary["cases"], summary["diffs"]) == (346, 18, 16)
+    assert (summary["responses"], summary["cases"], summary["diffs"]) == (345, 18, 16)
     assert set(summary["unserved_checked"]) == set(UNSERVED)
     expected = (REFUSAL_CLEANUP | {f"init_gate[{index}]" for index in FAILED_FIRST_REQUEST}
                 | {f"transport[{index}]" for index in TERMINATED_SESSION_ID})

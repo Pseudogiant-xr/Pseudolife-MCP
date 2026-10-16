@@ -98,6 +98,39 @@ def mcp_extra(svc) -> None:
               source="session-notes")
 
 
+def fact_extra(svc) -> None:
+    """What memory_fact_get needs beyond mcp_extra: an aliased entity whose
+    second alias is another entity's canonical (shadowed), a set slot with a
+    removed member, a fully emptied set, a stale fact, and trace rows for
+    source_entries and the re_verify warnings."""
+    import time
+
+    import psycopg
+    now = time.time()
+    svc.cortex_write("dev box", "cpu", "Ryzen 9 7950X", confidence=0.8)
+    svc.cortex_write("printer", "firmware", "2.1.0", confidence=0.7)
+    svc.graph_alias("printer", "laser")
+    svc.graph_alias("dev box", "builder")
+    svc.graph_alias("dev box", "printer")
+    for member in ("alice", "bob"):
+        svc.set_add("dev box", "users", member)
+    svc.set_remove("dev box", "users", "bob")
+    svc.set_add("dev box", "groups", "admins")
+    svc.set_remove("dev box", "groups", "admins")
+    # Volatile and 60 days old: past twice the 21-day TTL, so stale.
+    svc.cortex_write("build cache", "state", "warm", confidence=0.6,
+                     freshness_class="volatile", now=now - 60 * 86400)
+    svc.flush()
+    with psycopg.connect(os.environ["PSEUDOLIFE_MCP_DATABASE_URL"], autocommit=True) as conn:
+        entry = conn.execute("SELECT min(id) FROM entries").fetchone()[0]
+        conn.execute("INSERT INTO memory_traces VALUES ('dev-box', 'cpu', %s, %s)", (entry, now))
+        for attribute in ("cpu", "users"):
+            # Corrected after the slot was last confirmed.
+            conn.execute("INSERT INTO memory_trace_invalidations VALUES "
+                         "('dev-box', %s, %s, %s, 'source_superseded')",
+                         (attribute, entry, now + 3600))
+
+
 def main() -> int:
     dsn = os.environ["PSEUDOLIFE_MCP_DATABASE_URL"]
     limit = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 150
@@ -108,6 +141,8 @@ def main() -> int:
     svc = MemoryService(data_dir=str(data), database_url=dsn)
     if "--mcp-extra" in sys.argv:
         mcp_extra(svc)
+        if "--fact-extra" in sys.argv:
+            fact_extra(svc)
         print("mcp extra seeded")
         return 0
     stored = 0

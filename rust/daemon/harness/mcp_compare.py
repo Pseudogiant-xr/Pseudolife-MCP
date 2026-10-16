@@ -42,7 +42,7 @@ UNSERVED = {
     "memory_recall": "W2-D", "memory_world_search": "W2-D",
     "memory_lesson_search": "W2-D", "memory_get": "W2-D",
     "memory_history": "W2-D", "memory_stats": "W2-D", "memory_graph": "W2-D",
-    "memory_fact_get": "W2-D", "document_search": "W2-D", "memory_episode_summary": "W2-D",
+    "document_search": "W2-D", "memory_episode_summary": "W2-D",
     "memory_consolidation_candidates": "W2-D",
     "memory_fact_set": "W2-E", "memory_set_add": "W2-E",
     "memory_set_remove": "W2-E", "memory_fact_resolve": "W2-E", "memory_world_set": "W2-E",
@@ -765,7 +765,7 @@ def recording_errors(data, cases=None):
                  for response in stubs.values()):
             errors.append('stub_tools: oracle call failed')
     total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
-    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 346
+    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 345
     if total != expected_total:
         errors.append(f'corpus: {total} responses, expected {expected_total}')
     if not errors:
