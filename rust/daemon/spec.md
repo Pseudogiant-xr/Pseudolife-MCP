@@ -367,6 +367,26 @@ for the MCP surface.
 | M18 | Bound identity, after the bearer gate and before the MCP layer: with neither `X-PL-Bank` nor `X-PL-Principal`, nothing happens. Otherwise `bound_identity` parses them (both non-empty; the principal is the canonical percent-encoding of 1 to 256 characters with none below U+0020), the bearer's principal is resolved as the board resolves it, the board's `context` action runs for it (dispatched directly, outside the coordination hub's admission limit, and finishing if the caller disconnects), and `(bank_id, principal)` must equal the binding. Any refusal answers the coordination error (`bank_identity_mismatch` 409, `principal_not_allowed` 403, and so on: `_send_coordination_error`) in place of MCP, on every request of a session. Tokenless installs stay 501 before this check. | `web/api.py:912-939`, `coordination.py:475-496` |
 | M17 | The writer is the named principal, else `X-PL-Writer` (non-empty), else `PSEUDOLIFE_WRITER_ID`, else `unknown`; the session is `X-PL-Session` as sent. Tool bodies receive both through `CallIdentity` (`src/mcp/dispatch.rs`). | `writer_context.py:130-205`; `service.py:893` |
 
+## W2-D: memory_search over MCP (2026-10-16)
+
+`read/mcp_search.rs`, registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py:1047-1310` (`memory_search`, `_project_search`,
+`_compact_entry`, `_replaced_by`, `_truncate`, `_restates_fact`,
+`_cortex_correct_with`, `CORRECTION_NOTE`), `service.py:1881-2112`.
+
+| # | Exact item | Source |
+|---|---|---|
+| MS1 | After binding: `explain=true` is declared (MCP-SEARCH-EXPLAIN). Unknown band names refuse as `invalid_argument` prose with Python's `repr` lists (the REST route's 400 text now uses the same lists); empty lists are no filter, as `list(x) if x else None`; episodes expand to their subtrees (`_episode_subtree`) and log sorted; a blank query answers `{"entries": [], "query": "", "count": 0, "low_confidence": true, "cortex": []}` with no event. | `service.py:1958-1970, 2091-2108, 6261-6280` |
+| MS2 | Otherwise `service.search` with `top_k`, the filters, `min_score`, recency, rerank and BM25 overrides and the caller's `X-PL-Session`, then the cortex-first block on the raw query with `fact_k = min(5, max(1, top_k))` under `memory.mcp.compact_payloads` (else 5) and `attach_served_facts`, all under the search lock (`search_route::search_with_facts`, shared with the REST route). The search result keeps Python's key order: `query, count, low_confidence, entries, [events, events_total]`. | `mcp_server.py:1122-1158` |
+| MS3 | Projection: `cortex` always present; each served fact re-selected in `_project_search`'s key order, dates through `_iso_seconds` (local time, to the second, after microsecond rounding), freshness fields off `evergreen`, contender fields when contested, `warning`, `last_known_value`, `re_verify`, labels, `pinned`, and `correct_with` (the resolve path when contested, else `memory_fact_set` when stale or older than TTL/3, slots in Python `repr`); `correction_note` when any fact has one; entries restating a fact value dropped and `count` recomputed; `low_confidence` only with no cortex fact. | `mcp_server.py:993-1029, 1171-1310`, `freshness.py:66` |
+| MS4 | Compact entries (not `verbose`): `id, text, source, tags, score`, `date` (the local write date), `superseded`, `replaced_by` (`id, at, preview` of 120 code points, `verified, current`), labels, then the text capped at `memory.mcp.entry_text_chars` code points with `"…"` and `truncated: true` (no cap when `compact_payloads` is false). Verbose entries are the service's dicts. | `mcp_server.py:858-948` |
+
+`harness/w2d_search.py --only mcp-search` compares 20 calls against the
+Python oracle on a derived template that adds an aged volatile fact, a
+contender and a restating entry, with coverage requirements for each
+projection branch; the `mcp-search-no-dedup` and
+`mcp-search-no-correct-with` mutants must be caught.
+
 ### Tool argument binding (2026-10-16)
 
 Every `tools/call` of a catalogue tool binds its arguments before anything
