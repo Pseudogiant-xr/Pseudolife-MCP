@@ -315,5 +315,433 @@
    "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"action: Field required\\\",\\n  \\\"param\\\": \\\"action\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"action: Field required\",\"param\":\"action\"}}"
   }
  ],
- "unknown_tool": "{\"content\":[{\"text\":\"Unknown tool: no_such_tool\",\"type\":\"text\"}],\"isError\":true}"
+ "unknown_tool": "{\"content\":[{\"text\":\"Unknown tool: no_such_tool\",\"type\":\"text\"}],\"isError\":true}",
+ "tool_binding": [
+  {
+   "tool": "memory_agents",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_agents. Accepted: action, project, task, status, lease, worktree, repository_id, path, expect, children, park_reason, park_needs, park_clear_by, park_resume, park_expires, name\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"action\\\",\\n    \\\"project\\\",\\n    \\\"task\\\",\\n    \\\"status\\\",\\n    \\\"lease\\\",\\n    \\\"worktree\\\",\\n    \\\"repository_id\\\",\\n    \\\"path\\\",\\n    \\\"expect\\\",\\n    \\\"children\\\",\\n    \\\"park_reason\\\",\\n    \\\"park_needs\\\",\\n    \\\"park_clear_by\\\",\\n    \\\"park_resume\\\",\\n    \\\"park_expires\\\",\\n    \\\"name\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_agents. Accepted: action, project, task, status, lease, worktree, repository_id, path, expect, children, park_reason, park_needs, park_clear_by, park_resume, park_expires, name\",\"param\":\"zzz\",\"accepted\":[\"action\",\"project\",\"task\",\"status\",\"lease\",\"worktree\",\"repository_id\",\"path\",\"expect\",\"children\",\"park_reason\",\"park_needs\",\"park_clear_by\",\"park_resume\",\"park_expires\",\"name\"]}}"
+  },
+  {
+   "tool": "memory_message",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_message. Accepted: action, to, text, request_id, reply_to, after, message_id, clears, urgent, limit, peer, ack\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"action\\\",\\n    \\\"to\\\",\\n    \\\"text\\\",\\n    \\\"request_id\\\",\\n    \\\"reply_to\\\",\\n    \\\"after\\\",\\n    \\\"message_id\\\",\\n    \\\"clears\\\",\\n    \\\"urgent\\\",\\n    \\\"limit\\\",\\n    \\\"peer\\\",\\n    \\\"ack\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_message. Accepted: action, to, text, request_id, reply_to, after, message_id, clears, urgent, limit, peer, ack\",\"param\":\"zzz\",\"accepted\":[\"action\",\"to\",\"text\",\"request_id\",\"reply_to\",\"after\",\"message_id\",\"clears\",\"urgent\",\"limit\",\"peer\",\"ack\"]}}"
+  },
+  {
+   "tool": "memory_message",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"action: Field required\\\",\\n  \\\"param\\\": \\\"action\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"action: Field required\",\"param\":\"action\"}}"
+  },
+  {
+   "tool": "memory_store",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_store. Accepted: text, source, tags, origin, episode, authority, distortion_tolerance\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"text\\\",\\n    \\\"source\\\",\\n    \\\"tags\\\",\\n    \\\"origin\\\",\\n    \\\"episode\\\",\\n    \\\"authority\\\",\\n    \\\"distortion_tolerance\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_store. Accepted: text, source, tags, origin, episode, authority, distortion_tolerance\",\"param\":\"zzz\",\"accepted\":[\"text\",\"source\",\"tags\",\"origin\",\"episode\",\"authority\",\"distortion_tolerance\"]}}"
+  },
+  {
+   "tool": "memory_store",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"text: Field required\\\",\\n  \\\"param\\\": \\\"text\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"text: Field required\",\"param\":\"text\"}}"
+  },
+  {
+   "tool": "memory_search",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_search. Accepted: query, top_k, sources, bands, episodes, tags, min_score, disable_recency_boost, rerank, bm25, explain, verbose\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"query\\\",\\n    \\\"top_k\\\",\\n    \\\"sources\\\",\\n    \\\"bands\\\",\\n    \\\"episodes\\\",\\n    \\\"tags\\\",\\n    \\\"min_score\\\",\\n    \\\"disable_recency_boost\\\",\\n    \\\"rerank\\\",\\n    \\\"bm25\\\",\\n    \\\"explain\\\",\\n    \\\"verbose\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_search. Accepted: query, top_k, sources, bands, episodes, tags, min_score, disable_recency_boost, rerank, bm25, explain, verbose\",\"param\":\"zzz\",\"accepted\":[\"query\",\"top_k\",\"sources\",\"bands\",\"episodes\",\"tags\",\"min_score\",\"disable_recency_boost\",\"rerank\",\"bm25\",\"explain\",\"verbose\"]}}"
+  },
+  {
+   "tool": "memory_search",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"query: Field required\\\",\\n  \\\"param\\\": \\\"query\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"query: Field required\",\"param\":\"query\"}}"
+  },
+  {
+   "tool": "memory_recent",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_recent. Accepted: n, sources, episodes, tags, verbose\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"n\\\",\\n    \\\"sources\\\",\\n    \\\"episodes\\\",\\n    \\\"tags\\\",\\n    \\\"verbose\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_recent. Accepted: n, sources, episodes, tags, verbose\",\"param\":\"zzz\",\"accepted\":[\"n\",\"sources\",\"episodes\",\"tags\",\"verbose\"]}}"
+  },
+  {
+   "tool": "memory_supersede",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_supersede. Accepted: old_text, new_text, entry_id\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"old_text\\\",\\n    \\\"new_text\\\",\\n    \\\"entry_id\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_supersede. Accepted: old_text, new_text, entry_id\",\"param\":\"zzz\",\"accepted\":[\"old_text\",\"new_text\",\"entry_id\"]}}"
+  },
+  {
+   "tool": "memory_supersede",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"new_text: Field required\\\",\\n  \\\"param\\\": \\\"new_text\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"new_text: Field required\",\"param\":\"new_text\"}}"
+  },
+  {
+   "tool": "memory_reinstate",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_reinstate. Accepted: entry_id, operation_id, expected_text_sha256, expected_source_sha256, expected_superseded_at, expected_superseded_by_text_sha256, evidence_packet_sha256, reviewer_ids, reason\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entry_id\\\",\\n    \\\"operation_id\\\",\\n    \\\"expected_text_sha256\\\",\\n    \\\"expected_source_sha256\\\",\\n    \\\"expected_superseded_at\\\",\\n    \\\"expected_superseded_by_text_sha256\\\",\\n    \\\"evidence_packet_sha256\\\",\\n    \\\"reviewer_ids\\\",\\n    \\\"reason\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_reinstate. Accepted: entry_id, operation_id, expected_text_sha256, expected_source_sha256, expected_superseded_at, expected_superseded_by_text_sha256, evidence_packet_sha256, reviewer_ids, reason\",\"param\":\"zzz\",\"accepted\":[\"entry_id\",\"operation_id\",\"expected_text_sha256\",\"expected_source_sha256\",\"expected_superseded_at\",\"expected_superseded_by_text_sha256\",\"evidence_packet_sha256\",\"reviewer_ids\",\"reason\"]}}"
+  },
+  {
+   "tool": "memory_reinstate",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entry_id: Field required; operation_id: Field required; expected_text_sha256: Field required; expected_source_sha256: Field required; expected_superseded_at: Field required; expected_superseded_by_text_sha256: Field required; evidence_packet_sha256: Field required; reviewer_ids: Field required; reason: Field required\\\",\\n  \\\"param\\\": \\\"entry_id\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entry_id: Field required; operation_id: Field required; expected_text_sha256: Field required; expected_source_sha256: Field required; expected_superseded_at: Field required; expected_superseded_by_text_sha256: Field required; evidence_packet_sha256: Field required; reviewer_ids: Field required; reason: Field required\",\"param\":\"entry_id\"}}"
+  },
+  {
+   "tool": "memory_stats",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_stats. Accepted: \\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": []\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_stats. Accepted: \",\"param\":\"zzz\",\"accepted\":[]}}"
+  },
+  {
+   "tool": "memory_toolset",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_toolset. Accepted: action\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"action\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_toolset. Accepted: action\",\"param\":\"zzz\",\"accepted\":[\"action\"]}}"
+  },
+  {
+   "tool": "memory_toolset",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"action: Field required\\\",\\n  \\\"param\\\": \\\"action\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"action: Field required\",\"param\":\"action\"}}"
+  },
+  {
+   "tool": "memory_get",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_get. Accepted: entry_id\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entry_id\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_get. Accepted: entry_id\",\"param\":\"zzz\",\"accepted\":[\"entry_id\"]}}"
+  },
+  {
+   "tool": "memory_get",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entry_id: Field required\\\",\\n  \\\"param\\\": \\\"entry_id\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entry_id: Field required\",\"param\":\"entry_id\"}}"
+  },
+  {
+   "tool": "memory_reinforce",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_reinforce. Accepted: entry_id\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entry_id\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_reinforce. Accepted: entry_id\",\"param\":\"zzz\",\"accepted\":[\"entry_id\"]}}"
+  },
+  {
+   "tool": "memory_reinforce",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entry_id: Field required\\\",\\n  \\\"param\\\": \\\"entry_id\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entry_id: Field required\",\"param\":\"entry_id\"}}"
+  },
+  {
+   "tool": "memory_fact_get",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_fact_get. Accepted: entity, attribute, verbose\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entity\\\",\\n    \\\"attribute\\\",\\n    \\\"verbose\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_fact_get. Accepted: entity, attribute, verbose\",\"param\":\"zzz\",\"accepted\":[\"entity\",\"attribute\",\"verbose\"]}}"
+  },
+  {
+   "tool": "memory_fact_get",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entity: Field required; attribute: Field required\\\",\\n  \\\"param\\\": \\\"entity\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entity: Field required; attribute: Field required\",\"param\":\"entity\"}}"
+  },
+  {
+   "tool": "memory_fact_set",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_fact_set. Accepted: entity, attribute, value, origin, confidence, episode, freshness_class, authority, distortion_tolerance\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entity\\\",\\n    \\\"attribute\\\",\\n    \\\"value\\\",\\n    \\\"origin\\\",\\n    \\\"confidence\\\",\\n    \\\"episode\\\",\\n    \\\"freshness_class\\\",\\n    \\\"authority\\\",\\n    \\\"distortion_tolerance\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_fact_set. Accepted: entity, attribute, value, origin, confidence, episode, freshness_class, authority, distortion_tolerance\",\"param\":\"zzz\",\"accepted\":[\"entity\",\"attribute\",\"value\",\"origin\",\"confidence\",\"episode\",\"freshness_class\",\"authority\",\"distortion_tolerance\"]}}"
+  },
+  {
+   "tool": "memory_fact_set",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entity: Field required; attribute: Field required; value: Field required\\\",\\n  \\\"param\\\": \\\"entity\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entity: Field required; attribute: Field required; value: Field required\",\"param\":\"entity\"}}"
+  },
+  {
+   "tool": "memory_set_add",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_set_add. Accepted: entity, attribute, member\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entity\\\",\\n    \\\"attribute\\\",\\n    \\\"member\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_set_add. Accepted: entity, attribute, member\",\"param\":\"zzz\",\"accepted\":[\"entity\",\"attribute\",\"member\"]}}"
+  },
+  {
+   "tool": "memory_set_add",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entity: Field required; attribute: Field required; member: Field required\\\",\\n  \\\"param\\\": \\\"entity\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entity: Field required; attribute: Field required; member: Field required\",\"param\":\"entity\"}}"
+  },
+  {
+   "tool": "memory_set_remove",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_set_remove. Accepted: entity, attribute, member\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entity\\\",\\n    \\\"attribute\\\",\\n    \\\"member\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_set_remove. Accepted: entity, attribute, member\",\"param\":\"zzz\",\"accepted\":[\"entity\",\"attribute\",\"member\"]}}"
+  },
+  {
+   "tool": "memory_set_remove",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entity: Field required; attribute: Field required; member: Field required\\\",\\n  \\\"param\\\": \\\"entity\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entity: Field required; attribute: Field required; member: Field required\",\"param\":\"entity\"}}"
+  },
+  {
+   "tool": "memory_fact_resolve",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_fact_resolve. Accepted: entity, attribute, accept\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entity\\\",\\n    \\\"attribute\\\",\\n    \\\"accept\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_fact_resolve. Accepted: entity, attribute, accept\",\"param\":\"zzz\",\"accepted\":[\"entity\",\"attribute\",\"accept\"]}}"
+  },
+  {
+   "tool": "memory_fact_resolve",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entity: Field required; attribute: Field required; accept: Field required\\\",\\n  \\\"param\\\": \\\"entity\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entity: Field required; attribute: Field required; accept: Field required\",\"param\":\"entity\"}}"
+  },
+  {
+   "tool": "memory_history",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_history. Accepted: entity, attribute, as_of\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entity\\\",\\n    \\\"attribute\\\",\\n    \\\"as_of\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_history. Accepted: entity, attribute, as_of\",\"param\":\"zzz\",\"accepted\":[\"entity\",\"attribute\",\"as_of\"]}}"
+  },
+  {
+   "tool": "memory_history",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entity: Field required\\\",\\n  \\\"param\\\": \\\"entity\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entity: Field required\",\"param\":\"entity\"}}"
+  },
+  {
+   "tool": "memory_world_set",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_world_set. Accepted: entity, attribute, value, source_url, source_quote, freshness_class, confidence, retrieved_at, content_hash\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entity\\\",\\n    \\\"attribute\\\",\\n    \\\"value\\\",\\n    \\\"source_url\\\",\\n    \\\"source_quote\\\",\\n    \\\"freshness_class\\\",\\n    \\\"confidence\\\",\\n    \\\"retrieved_at\\\",\\n    \\\"content_hash\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_world_set. Accepted: entity, attribute, value, source_url, source_quote, freshness_class, confidence, retrieved_at, content_hash\",\"param\":\"zzz\",\"accepted\":[\"entity\",\"attribute\",\"value\",\"source_url\",\"source_quote\",\"freshness_class\",\"confidence\",\"retrieved_at\",\"content_hash\"]}}"
+  },
+  {
+   "tool": "memory_world_set",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entity: Field required; attribute: Field required; value: Field required\\\",\\n  \\\"param\\\": \\\"entity\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entity: Field required; attribute: Field required; value: Field required\",\"param\":\"entity\"}}"
+  },
+  {
+   "tool": "memory_world_search",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_world_search. Accepted: query, top_k, verbose\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"query\\\",\\n    \\\"top_k\\\",\\n    \\\"verbose\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_world_search. Accepted: query, top_k, verbose\",\"param\":\"zzz\",\"accepted\":[\"query\",\"top_k\",\"verbose\"]}}"
+  },
+  {
+   "tool": "memory_world_search",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"query: Field required\\\",\\n  \\\"param\\\": \\\"query\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"query: Field required\",\"param\":\"query\"}}"
+  },
+  {
+   "tool": "memory_outcome",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_outcome. Accepted: task, outcome, about, detail, polarity, episode, used_ids\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"task\\\",\\n    \\\"outcome\\\",\\n    \\\"about\\\",\\n    \\\"detail\\\",\\n    \\\"polarity\\\",\\n    \\\"episode\\\",\\n    \\\"used_ids\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_outcome. Accepted: task, outcome, about, detail, polarity, episode, used_ids\",\"param\":\"zzz\",\"accepted\":[\"task\",\"outcome\",\"about\",\"detail\",\"polarity\",\"episode\",\"used_ids\"]}}"
+  },
+  {
+   "tool": "memory_outcome",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"task: Field required; outcome: Field required\\\",\\n  \\\"param\\\": \\\"task\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"task: Field required; outcome: Field required\",\"param\":\"task\"}}"
+  },
+  {
+   "tool": "memory_lesson_search",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_lesson_search. Accepted: query, top_k, verbose\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"query\\\",\\n    \\\"top_k\\\",\\n    \\\"verbose\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_lesson_search. Accepted: query, top_k, verbose\",\"param\":\"zzz\",\"accepted\":[\"query\",\"top_k\",\"verbose\"]}}"
+  },
+  {
+   "tool": "memory_lesson_search",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"query: Field required\\\",\\n  \\\"param\\\": \\\"query\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"query: Field required\",\"param\":\"query\"}}"
+  },
+  {
+   "tool": "memory_forget",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_forget. Accepted: scope, entity, attribute, text, substring, source, episode, tag, confirm_bulk\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"scope\\\",\\n    \\\"entity\\\",\\n    \\\"attribute\\\",\\n    \\\"text\\\",\\n    \\\"substring\\\",\\n    \\\"source\\\",\\n    \\\"episode\\\",\\n    \\\"tag\\\",\\n    \\\"confirm_bulk\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_forget. Accepted: scope, entity, attribute, text, substring, source, episode, tag, confirm_bulk\",\"param\":\"zzz\",\"accepted\":[\"scope\",\"entity\",\"attribute\",\"text\",\"substring\",\"source\",\"episode\",\"tag\",\"confirm_bulk\"]}}"
+  },
+  {
+   "tool": "memory_forget",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"scope: Field required\\\",\\n  \\\"param\\\": \\\"scope\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"scope: Field required\",\"param\":\"scope\"}}"
+  },
+  {
+   "tool": "memory_dream",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_dream. Accepted: action, limit, commit_token, cursor, apply, snippets, run_id\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"action\\\",\\n    \\\"limit\\\",\\n    \\\"commit_token\\\",\\n    \\\"cursor\\\",\\n    \\\"apply\\\",\\n    \\\"snippets\\\",\\n    \\\"run_id\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_dream. Accepted: action, limit, commit_token, cursor, apply, snippets, run_id\",\"param\":\"zzz\",\"accepted\":[\"action\",\"limit\",\"commit_token\",\"cursor\",\"apply\",\"snippets\",\"run_id\"]}}"
+  },
+  {
+   "tool": "memory_dream",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"action: Field required\\\",\\n  \\\"param\\\": \\\"action\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"action: Field required\",\"param\":\"action\"}}"
+  },
+  {
+   "tool": "memory_graph_review",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_graph_review. Accepted: action, proposal_id, proposal_ids, proposals, scope, src, dst, relation, store\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"action\\\",\\n    \\\"proposal_id\\\",\\n    \\\"proposal_ids\\\",\\n    \\\"proposals\\\",\\n    \\\"scope\\\",\\n    \\\"src\\\",\\n    \\\"dst\\\",\\n    \\\"relation\\\",\\n    \\\"store\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_graph_review. Accepted: action, proposal_id, proposal_ids, proposals, scope, src, dst, relation, store\",\"param\":\"zzz\",\"accepted\":[\"action\",\"proposal_id\",\"proposal_ids\",\"proposals\",\"scope\",\"src\",\"dst\",\"relation\",\"store\"]}}"
+  },
+  {
+   "tool": "memory_episode_start",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_episode_start. Accepted: title, hint, episode\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"title\\\",\\n    \\\"hint\\\",\\n    \\\"episode\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_episode_start. Accepted: title, hint, episode\",\"param\":\"zzz\",\"accepted\":[\"title\",\"hint\",\"episode\"]}}"
+  },
+  {
+   "tool": "memory_episode_start",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"title: Field required\\\",\\n  \\\"param\\\": \\\"title\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"title: Field required\",\"param\":\"title\"}}"
+  },
+  {
+   "tool": "memory_episode_end",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_episode_end. Accepted: episode\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"episode\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_episode_end. Accepted: episode\",\"param\":\"zzz\",\"accepted\":[\"episode\"]}}"
+  },
+  {
+   "tool": "memory_session_title",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_session_title. Accepted: title, episode\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"title\\\",\\n    \\\"episode\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_session_title. Accepted: title, episode\",\"param\":\"zzz\",\"accepted\":[\"title\",\"episode\"]}}"
+  },
+  {
+   "tool": "memory_session_title",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"title: Field required\\\",\\n  \\\"param\\\": \\\"title\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"title: Field required\",\"param\":\"title\"}}"
+  },
+  {
+   "tool": "memory_episode_summary",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_episode_summary. Accepted: id\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"id\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_episode_summary. Accepted: id\",\"param\":\"zzz\",\"accepted\":[\"id\"]}}"
+  },
+  {
+   "tool": "memory_episode_summary",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"id: Field required\\\",\\n  \\\"param\\\": \\\"id\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"id: Field required\",\"param\":\"id\"}}"
+  },
+  {
+   "tool": "memory_consolidation_candidates",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_consolidation_candidates. Accepted: query, episode, sources, tags, top_k, min_cohesion, min_cluster_size, max_clusters\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"query\\\",\\n    \\\"episode\\\",\\n    \\\"sources\\\",\\n    \\\"tags\\\",\\n    \\\"top_k\\\",\\n    \\\"min_cohesion\\\",\\n    \\\"min_cluster_size\\\",\\n    \\\"max_clusters\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_consolidation_candidates. Accepted: query, episode, sources, tags, top_k, min_cohesion, min_cluster_size, max_clusters\",\"param\":\"zzz\",\"accepted\":[\"query\",\"episode\",\"sources\",\"tags\",\"top_k\",\"min_cohesion\",\"min_cluster_size\",\"max_clusters\"]}}"
+  },
+  {
+   "tool": "memory_consolidate",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_consolidate. Accepted: replaces, new_text, source, tags, entry_ids\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"replaces\\\",\\n    \\\"new_text\\\",\\n    \\\"source\\\",\\n    \\\"tags\\\",\\n    \\\"entry_ids\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_consolidate. Accepted: replaces, new_text, source, tags, entry_ids\",\"param\":\"zzz\",\"accepted\":[\"replaces\",\"new_text\",\"source\",\"tags\",\"entry_ids\"]}}"
+  },
+  {
+   "tool": "memory_consolidate",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"new_text: Field required\\\",\\n  \\\"param\\\": \\\"new_text\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"new_text: Field required\",\"param\":\"new_text\"}}"
+  },
+  {
+   "tool": "memory_graph_relate",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_graph_relate. Accepted: src, relation, dst, origin, confidence, src_type, dst_type\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"src\\\",\\n    \\\"relation\\\",\\n    \\\"dst\\\",\\n    \\\"origin\\\",\\n    \\\"confidence\\\",\\n    \\\"src_type\\\",\\n    \\\"dst_type\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_graph_relate. Accepted: src, relation, dst, origin, confidence, src_type, dst_type\",\"param\":\"zzz\",\"accepted\":[\"src\",\"relation\",\"dst\",\"origin\",\"confidence\",\"src_type\",\"dst_type\"]}}"
+  },
+  {
+   "tool": "memory_graph_relate",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"src: Field required; relation: Field required; dst: Field required\\\",\\n  \\\"param\\\": \\\"src\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"src: Field required; relation: Field required; dst: Field required\",\"param\":\"src\"}}"
+  },
+  {
+   "tool": "memory_graph_unrelate",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_graph_unrelate. Accepted: src, relation, dst\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"src\\\",\\n    \\\"relation\\\",\\n    \\\"dst\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_graph_unrelate. Accepted: src, relation, dst\",\"param\":\"zzz\",\"accepted\":[\"src\",\"relation\",\"dst\"]}}"
+  },
+  {
+   "tool": "memory_graph_unrelate",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"src: Field required; relation: Field required; dst: Field required\\\",\\n  \\\"param\\\": \\\"src\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"src: Field required; relation: Field required; dst: Field required\",\"param\":\"src\"}}"
+  },
+  {
+   "tool": "memory_alias",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_alias. Accepted: entity, alias\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entity\\\",\\n    \\\"alias\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_alias. Accepted: entity, alias\",\"param\":\"zzz\",\"accepted\":[\"entity\",\"alias\"]}}"
+  },
+  {
+   "tool": "memory_alias",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entity: Field required; alias: Field required\\\",\\n  \\\"param\\\": \\\"entity\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entity: Field required; alias: Field required\",\"param\":\"entity\"}}"
+  },
+  {
+   "tool": "memory_graph",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_graph. Accepted: entity, depth, include_facts, to, relation_filter\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"entity\\\",\\n    \\\"depth\\\",\\n    \\\"include_facts\\\",\\n    \\\"to\\\",\\n    \\\"relation_filter\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_graph. Accepted: entity, depth, include_facts, to, relation_filter\",\"param\":\"zzz\",\"accepted\":[\"entity\",\"depth\",\"include_facts\",\"to\",\"relation_filter\"]}}"
+  },
+  {
+   "tool": "memory_graph",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"entity: Field required\\\",\\n  \\\"param\\\": \\\"entity\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"entity: Field required\",\"param\":\"entity\"}}"
+  },
+  {
+   "tool": "memory_recall",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_recall. Accepted: query, hops, top_k, verbose\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"query\\\",\\n    \\\"hops\\\",\\n    \\\"top_k\\\",\\n    \\\"verbose\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_recall. Accepted: query, hops, top_k, verbose\",\"param\":\"zzz\",\"accepted\":[\"query\",\"hops\",\"top_k\",\"verbose\"]}}"
+  },
+  {
+   "tool": "memory_recall",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"query: Field required\\\",\\n  \\\"param\\\": \\\"query\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"query: Field required\",\"param\":\"query\"}}"
+  },
+  {
+   "tool": "memory_relation_define",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for memory_relation_define. Accepted: name, description, transitive, inverse_of, src_type, dst_type\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"name\\\",\\n    \\\"description\\\",\\n    \\\"transitive\\\",\\n    \\\"inverse_of\\\",\\n    \\\"src_type\\\",\\n    \\\"dst_type\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for memory_relation_define. Accepted: name, description, transitive, inverse_of, src_type, dst_type\",\"param\":\"zzz\",\"accepted\":[\"name\",\"description\",\"transitive\",\"inverse_of\",\"src_type\",\"dst_type\"]}}"
+  },
+  {
+   "tool": "memory_relation_define",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"name: Field required; description: Field required\\\",\\n  \\\"param\\\": \\\"name\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"name: Field required; description: Field required\",\"param\":\"name\"}}"
+  },
+  {
+   "tool": "document_ingest",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for document_ingest. Accepted: path, source\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"path\\\",\\n    \\\"source\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for document_ingest. Accepted: path, source\",\"param\":\"zzz\",\"accepted\":[\"path\",\"source\"]}}"
+  },
+  {
+   "tool": "document_ingest",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"path: Field required\\\",\\n  \\\"param\\\": \\\"path\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"path: Field required\",\"param\":\"path\"}}"
+  },
+  {
+   "tool": "document_search",
+   "args": {
+    "zzz": 1
+   },
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"unknown_parameter\\\",\\n  \\\"message\\\": \\\"unknown parameter 'zzz' for document_search. Accepted: query, top_k\\\",\\n  \\\"param\\\": \\\"zzz\\\",\\n  \\\"accepted\\\": [\\n    \\\"query\\\",\\n    \\\"top_k\\\"\\n  ]\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"unknown_parameter\",\"message\":\"unknown parameter 'zzz' for document_search. Accepted: query, top_k\",\"param\":\"zzz\",\"accepted\":[\"query\",\"top_k\"]}}"
+  },
+  {
+   "tool": "document_search",
+   "args": {},
+   "result": "{\"content\":[{\"text\":\"{\\n  \\\"error\\\": \\\"invalid_argument\\\",\\n  \\\"message\\\": \\\"query: Field required\\\",\\n  \\\"param\\\": \\\"query\\\"\\n}\",\"type\":\"text\"}],\"isError\":true,\"structuredContent\":{\"error\":\"invalid_argument\",\"message\":\"query: Field required\",\"param\":\"query\"}}"
+  }
+ ]
 }

@@ -575,7 +575,9 @@ jobs:
           python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')
           exit $LASTEXITCODE
       # Linux 2026-10-13: coercion baseline + four controls + disabled control 204.2s,
-      # targeted tests 14.68s; seven minutes is about twice that gate.
+      # targeted tests 14.68s; Linux's seven minutes is about twice that gate.
+      # The tool argument binding sweep and its 14 mutants add 9.4s (Windows
+      # release build, 2026-10-16).
       - name: Daemon MCP live parity and controls
         if: matrix.suite == 'cli'
         # Windows master 2026-10-15: 6m28s and 6m49s (runs 38689105018,
@@ -594,7 +596,14 @@ jobs:
           # Scalar coercions are not fully described by the SDK JSON schemas.
           python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py
+          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py rust/daemon/harness/test_mcp_binding.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Tool argument binding: the table is current, then every generated
+          # case matches Python in process and every binder mutant is caught.
+          python rust/daemon/harness/mcp_binding_table.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $mcpOut = New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'daemon-mcp')
+          python rust/daemon/harness/mcp_binding_sweep.py --rust-bin $mutants --mutants --show 10 --out (Join-Path $mcpOut 'binding-sweep.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/mcp_ci.py --default-bin $candidate --mutant-bin $mutants --out (Join-Path $env:RUNNER_TEMP 'daemon-mcp')
           exit $LASTEXITCODE
