@@ -1646,3 +1646,29 @@ def test_digest_removal_waits_out_a_reader_holding_the_file(tmp_path):
     finally:
         reader.close()
     assert not digest.exists()
+
+
+@pytest.mark.parametrize("held", ["digest", "ring"])
+def test_digest_advance_waits_out_a_reader_holding_the_file(tmp_path, monkeypatch, held):
+    """digest-advances-later replaces the digest and ring while the Python
+    waiter may be reading them; on Windows an open handle refuses the
+    replace (WinError 5) and the producer reports it as a failed write."""
+    import threading  # noqa: PLC0415
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from cli_harness import producers as p  # noqa: PLC0415
+    from cli_harness.rows import mail  # noqa: PLC0415
+    monkeypatch.setattr(mail, "_body", lambda: "1 new message")
+    arm = SimpleNamespace(home=tmp_path)
+    paths = mail._paths(tmp_path)
+    paths["dir"].mkdir(parents=True, exist_ok=True)
+    p.write_digest(paths["digest"], 3, "")
+    p.write_ring(paths["ring"], 3, "rung", "urgent")
+    reader = paths[held].open("rb")
+    threading.Timer(0.3, reader.close).start()
+    try:
+        mail._advance_digest(arm)
+    finally:
+        reader.close()
+    assert paths["digest"].read_bytes().startswith(b"8\n")
+    assert paths["ring"].read_bytes() == b"8\nrung urgent\n"
