@@ -31,6 +31,14 @@
 # instead (tracked-tree identifiers and control bytes, CHANGELOG and release
 # pins, committed eval evidence). The Rust workflow is that PR's gate. The
 # full suite still runs on every master push and nightly.
+#
+# Console-only pull requests (maintainer decision 2026-10-16): a PR that
+# touches frontend/ and whose every other changed file is the committed build
+# under pseudolife_memory/web/static/, CHANGELOG.md or a changelog.d/
+# fragment changes no daemon Python either. The four suite lanes are skipped
+# for it as above; `guards` runs, and `console-guards` runs the Python tests
+# that pin the Console source and its committed bundle against embedded PG.
+# The `frontend` job (vitest, svelte-check, build) is that PR's gate.
 name: CI
 
 on:
@@ -57,14 +65,15 @@ concurrency:
 jobs:
   scope:
     # Decides whether this run needs the Python suite lanes. Only a pull
-    # request whose net change (merge commit vs its base parent) is entirely
-    # under rust/, or is .github/workflows/rust.yml, CHANGELOG.md or a
-    # changelog.d/ fragment, skips them; an empty or unreadable diff runs
-    # everything.
+    # request whose net change (merge commit vs its base parent) is a
+    # Rust-only or a Console-only change (see the header) skips them; an
+    # empty or unreadable diff runs everything. `lane` names which:
+    # full, rust or console.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
       python: ${{ steps.scope.outputs.python }}
+      lane: ${{ steps.scope.outputs.lane }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,22 +86,29 @@ jobs:
         shell: bash
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "python=true" >> "$GITHUB_OUTPUT"; exit 0
+            printf 'python=true\nlane=full\n' >> "$GITHUB_OUTPUT"; exit 0
           fi
           if ! files=$(git diff --no-renames --name-only HEAD^1 HEAD) || [ -z "$files" ]; then
-            echo "python=true" >> "$GITHUB_OUTPUT"; exit 0
+            printf 'python=true\nlane=full\n' >> "$GITHUB_OUTPUT"; exit 0
           fi
           printf '%s\n' "$files"
-          # Skip only when nothing falls outside the allowlist AND the PR
-          # touches rust/ (a CHANGELOG-only docs PR keeps the full suite).
+          # A lane skips the suite only when nothing falls outside its
+          # allowlist AND the PR touches its own tree (a CHANGELOG-only docs
+          # PR, or a hand-edited bundle with no frontend/ source change,
+          # keeps the full suite).
           # Here-strings, not pipes: under pipefail an early-exiting grep -q
           # can SIGPIPE the writer and flip the result on a long file list.
-          if grep -qvE '^(rust/|\.github/workflows/rust\.yml$|CHANGELOG\.md$|changelog\.d/)' <<<"$files" \
-             || ! grep -qE '^rust/' <<<"$files"; then
-            echo "python=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "python=false" >> "$GITHUB_OUTPUT"
+          lane=full
+          if ! grep -qvE '^(rust/|\.github/workflows/rust\.yml$|CHANGELOG\.md$|changelog\.d/)' <<<"$files" \
+             && grep -qE '^rust/' <<<"$files"; then
+            lane=rust
+          elif ! grep -qvE '^(frontend/|pseudolife_memory/web/static/|CHANGELOG\.md$|changelog\.d/)' <<<"$files" \
+             && grep -qE '^frontend/' <<<"$files"; then
+            lane=console
           fi
+          if [ "$lane" = full ]; then python=true; else python=false; fi
+          echo "lane: $lane"
+          printf 'python=%s\nlane=%s\n' "$python" "$lane" >> "$GITHUB_OUTPUT"
 
   guards:
     # Runs only when `scope` skips the Python lanes: the guards that scan
@@ -134,6 +150,57 @@ jobs:
           tests/test_rescore_strict_mc.py tests/test_schema_version.py
           tests/test_changelog_fragments.py
           "tests/test_disposable_database_guard.py::test_every_reap_and_full_bank_truncate_is_guarded_first"
+
+  console-guards:
+    # Runs only for a Console-only PR (scope lane `console`): every Python
+    # test file that reads frontend/ source or the committed bundle under
+    # pseudolife_memory/web/static/ (source pins, the build guards, the
+    # Dreamer model lists). tests/test_ci_scope.py keeps this list complete.
+    # Two of them also hold daemon tests that need a bank, so this starts the
+    # [lite] extra's embedded PostgreSQL as test-lite-linux does. Tests
+    # marked real_model or slow are left to the master push and nightly
+    # runs: they need the embedding weights or a built image.
+    needs: scope
+    if: needs.scope.outputs.lane == 'console'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (CPU torch first, plus the lite extra)
+        run: |
+          python -m pip install -U pip
+          pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          pip install -e .[dev,lite]
+
+      - name: Start embedded PostgreSQL
+        # Same as test-lite-linux: attach_or_start keeps the server up after
+        # this helper exits; the runner VM is discarded at job end.
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from pseudolife_memory.storage.embedded_pg import attach_or_start
+
+          dsn, _ = attach_or_start(Path.home() / "pl-ci-console-bank")
+          base = dsn.rsplit("/", 1)[0]
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              fh.write(f"PSEUDOLIFE_TEST_DATABASE_URL={base}/pseudolife_memory_test\n")
+          print("embedded PG up:", base)
+          PY
+
+      - name: Console guards
+        run: >-
+          python -m pytest -q -m "not real_model and not slow"
+          tests/test_console_build.py tests/test_console_source_guards.py
+          tests/test_extractor_model_lists.py tests/test_web.py
+          tests/test_retract_traversal.py tests/test_ci_scope.py
 
   test:
     needs: scope
