@@ -83,7 +83,7 @@ DETACH_POLL = 0.2
 MAX_TEXT_BYTES = 8192
 DEFAULT_LEASES = ("full-suite", "full-suite@box")
 PR_FIELDS = "number,title,headRefOid,mergeable,mergeStateStatus,isDraft,statusCheckRollup"
-RUN_FIELDS = "attempt,databaseId,workflowName,status,conclusion,headSha,event"
+RUN_FIELDS = "attempt,databaseId,workflowDatabaseId,workflowName,status,conclusion,headSha,event"
 # CANCELLED is not a failure: a cancelled run is usually one the delegate
 # stopped itself, and each of its jobs concluding woke it again as "failing"
 # (2026-10-16, three wakes in 15 minutes for one head of PR #784).
@@ -161,21 +161,23 @@ def runs_state(runs) -> tuple[str, list[str]]:
     Rust shim run pending. A run cancelled, or failing to start, before it
     created any check run never shows in the rollup at all (review,
     2026-10-16). Only the newest run of each workflow counts (re-runs keep
-    the run's id)."""
-    newest: dict[str, dict] = {}
+    the run's id), keyed by workflow id: two workflow files may share a
+    display name (Codex review, 2026-10-16)."""
+    newest: dict = {}
     for r in runs or []:
+        key = r.get("workflowDatabaseId") or r.get("workflowName") or "workflow"
+        if key not in newest or (r.get("databaseId") or 0) > (newest[key].get("databaseId") or 0):
+            newest[key] = r
+    by_state: dict[str, set[str]] = {"pending": set(), "failing": set(), "cancelled": set()}
+    for r in newest.values():
         name = r.get("workflowName") or "workflow"
-        if name not in newest or (r.get("databaseId") or 0) > (newest[name].get("databaseId") or 0):
-            newest[name] = r
-    by_state: dict[str, list[str]] = {"pending": [], "failing": [], "cancelled": []}
-    for name, r in newest.items():
         conclusion = (r.get("conclusion") or "").upper()
         if (r.get("status") or "").lower() != "completed":
-            by_state["pending"].append(name)
+            by_state["pending"].add(name)
         elif conclusion in FAILED_CONCLUSIONS:
-            by_state["failing"].append(name)
+            by_state["failing"].add(name)
         elif conclusion == "CANCELLED":
-            by_state["cancelled"].append(name)
+            by_state["cancelled"].add(name)
     for state in ("pending", "failing", "cancelled"):
         if by_state[state]:
             return state, sorted(by_state[state])
