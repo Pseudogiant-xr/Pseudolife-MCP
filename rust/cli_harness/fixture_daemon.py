@@ -11,6 +11,7 @@ from __future__ import annotations
 import http
 import http.server
 import json
+import socket
 import ssl
 import threading
 import time
@@ -119,6 +120,24 @@ class FixtureDaemon:
             self.url = f"http://127.0.0.1:{port}"
         self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self._thread.start()
+        if tls:
+            self._warm_tls(port)
+
+    def _warm_tls(self, port: int) -> None:
+        # One full exchange before any arm runs. On a cold machine the
+        # first server-side handshake pages in OpenSSL's server code: after
+        # a standby-list purge on the Windows dev VM (2026-10-16) it took
+        # 0.28-1.0 s, past the CLI's 0.25 s health probe, so the first arm
+        # (always Python) saw a silent daemon; CI's first https case failed
+        # that way three times. The recorded request is discarded.
+        context = ssl.create_default_context(cafile=str(TLS_CA))
+        with socket.create_connection(("127.0.0.1", port), timeout=30) as raw, \
+                context.wrap_socket(raw, server_hostname="localhost") as tls:
+            tls.sendall(b"GET /fixture-warm-up HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            while tls.recv(65536):
+                pass
+        with self._lock:
+            self._requests.clear()
 
     def requests(self) -> list[dict]:
         with self._lock:

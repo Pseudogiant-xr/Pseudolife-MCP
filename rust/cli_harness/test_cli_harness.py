@@ -1672,3 +1672,28 @@ def test_digest_advance_waits_out_a_reader_holding_the_file(tmp_path, monkeypatc
         reader.close()
     assert paths["digest"].read_bytes().startswith(b"8\n")
     assert paths["ring"].read_bytes() == b"8\nrung urgent\n"
+
+
+def test_tls_fixture_is_warm_before_an_arm_connects(monkeypatch):
+    """The first server-side TLS handshake on a cold machine pages in
+    OpenSSL's server code and outran the CLI's 0.25 s health probe, so the
+    first https case's first arm saw no daemon (CI, 2026-10-12/13/15). The
+    fixture completes one exchange itself before returning, and forgets it."""
+    import ssl  # noqa: PLC0415
+
+    from cli_harness.fixture_daemon import FixtureDaemon  # noqa: PLC0415
+    server_handshakes = []
+    original = ssl.SSLSocket.do_handshake
+
+    def spy(self, *args, **kwargs):
+        if self.server_side:
+            server_handshakes.append(self)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(ssl.SSLSocket, "do_handshake", spy)
+    daemon = FixtureDaemon({}, tls=True)
+    try:
+        assert server_handshakes, "no server-side handshake before the first arm"
+        assert daemon.requests() == []
+    finally:
+        daemon.close()
