@@ -1,0 +1,3 @@
+### Added (2026-10-17 — the Rust daemon serves memory_fact_set)
+
+- The Rust daemon's MCP endpoint now answers `memory_fact_set` as the Python daemon does, with the same database changes: a new value inserts, a restatement confirms and reinforces, a shorter echo of the standing value confirms it, a newer equal-or-stronger value supersedes (a user correction also records a correction signal), and a weaker or less confident one is parked as a contender. The subject gets its graph node unless the name looks like an extraction artifact, and `"auto"` freshness follows the entity's kind. `memory.cortex.protect_provenance`, `supersede_confidence_margin`, `reinforce_rate` and `memory.lessons.enabled` are read.

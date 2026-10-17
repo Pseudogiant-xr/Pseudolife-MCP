@@ -62,6 +62,9 @@ pub struct MemoryConfig {
     /// credits the search that served it.
     pub retrieval_log_use_window_seconds: f64,
     pub retrieval_retention_days: f64,
+    /// `memory.lessons.enabled` (default on): gates the correction signal a
+    /// user-origin supersession records (`service.py:4961`).
+    pub lessons_enabled: bool,
     pub compaction_enabled: bool,
     pub compaction_keep_per_slot: i64,
     pub compaction_min_age_days: f64,
@@ -97,7 +100,9 @@ impl Default for RerankerConfig {
     }
 }
 
-/// `CortexConfig` (utils/config.py:692-743), the keys the reads use.
+/// `CortexConfig` (utils/config.py:692-743), the keys the reads and the
+/// fact writer use. The writer's three are read once when the store is built
+/// (`service.py:1568-1573`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CortexConfig {
     pub enabled: bool,
@@ -105,6 +110,11 @@ pub struct CortexConfig {
     pub guard_min_score: f64,
     pub read_tracking: bool,
     pub pin_constraints: bool,
+    /// A weaker-tier or below-margin conflicting write parks as a contender
+    /// instead of superseding; off is pure newer-wins.
+    pub protect_provenance: bool,
+    pub supersede_confidence_margin: f64,
+    pub reinforce_rate: f64,
 }
 
 impl Default for CortexConfig {
@@ -115,6 +125,9 @@ impl Default for CortexConfig {
             guard_min_score: 0.2,
             read_tracking: true,
             pin_constraints: true,
+            protect_provenance: true,
+            supersede_confidence_margin: 0.15,
+            reinforce_rate: 0.34,
         }
     }
 }
@@ -448,6 +461,7 @@ impl Default for MemoryConfig {
             retrieval_log_enabled: true,
             retrieval_log_use_window_seconds: 3600.0,
             retrieval_retention_days: 365.0,
+            lessons_enabled: true,
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
             compaction_min_age_days: 30.0,
@@ -1363,6 +1377,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.retrieval_retention_days =
                 want_float(r, "retention_days", "memory.retrieval_log", 365.0)?;
         }
+        if let Some(l) = section(m, "lessons", "memory.")? {
+            memory.lessons_enabled = want_bool(l, "enabled", "memory.lessons", true)?;
+        }
         if let Some(r) = section(m, "compaction", "memory.")? {
             memory.compaction_enabled = want_bool(r, "enabled", "memory.compaction", true)?;
             memory.compaction_keep_per_slot = want_int(r, "keep_per_slot", "memory.compaction", 3)?;
@@ -1389,6 +1406,14 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 guard_min_score: want_float(c, "guard_min_score", p, d.guard_min_score)?,
                 read_tracking: want_bool(c, "read_tracking", p, d.read_tracking)?,
                 pin_constraints: want_bool(c, "pin_constraints", p, d.pin_constraints)?,
+                protect_provenance: want_bool(c, "protect_provenance", p, d.protect_provenance)?,
+                supersede_confidence_margin: want_float(
+                    c,
+                    "supersede_confidence_margin",
+                    p,
+                    d.supersede_confidence_margin,
+                )?,
+                reinforce_rate: want_float(c, "reinforce_rate", p, d.reinforce_rate)?,
             };
         }
         if let Some(c) = section(m, "mcp", "memory.")? {

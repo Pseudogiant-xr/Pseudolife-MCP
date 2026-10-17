@@ -1,0 +1,410 @@
+[
+ [
+  "",
+  "empty"
+ ],
+ [
+  "   ",
+  "empty"
+ ],
+ [
+  "\u001c\u001f",
+  "empty"
+ ],
+ [
+  "\t\n",
+  "empty"
+ ],
+ [
+  "memory_recall<->recall.py",
+  "concat-artifact"
+ ],
+ [
+  "a -> b",
+  "concat-artifact"
+ ],
+ [
+  "a→b",
+  "concat-artifact"
+ ],
+ [
+  "a ↔ b",
+  "concat-artifact"
+ ],
+ [
+  "a <--> b",
+  "concat-artifact"
+ ],
+ [
+  "->tail",
+  null
+ ],
+ [
+  "head->",
+  null
+ ],
+ [
+  "a<>b",
+  null
+ ],
+ [
+  "->",
+  null
+ ],
+ [
+  "x <- y",
+  null
+ ],
+ [
+  "42",
+  "bare-number"
+ ],
+ [
+  " 007 ",
+  "bare-number"
+ ],
+ [
+  "٤٢",
+  "bare-number"
+ ],
+ [
+  "12a",
+  null
+ ],
+ [
+  "2026-07-02",
+  "bare-date"
+ ],
+ [
+  "2026-07-02 review roadmap",
+  null
+ ],
+ [
+  "2026-7-2",
+  null
+ ],
+ [
+  "Live",
+  "status-word"
+ ],
+ [
+  "DONE",
+  "status-word"
+ ],
+ [
+  "n/a",
+  "status-word"
+ ],
+ [
+  "None",
+  "status-word"
+ ],
+ [
+  "null",
+  "status-word"
+ ],
+ [
+  "ok",
+  "status-word"
+ ],
+ [
+  "okay",
+  null
+ ],
+ [
+  "wip",
+  "status-word"
+ ],
+ [
+  "TODO",
+  "status-word"
+ ],
+ [
+  "pending ",
+  "status-word"
+ ],
+ [
+  "236 memories",
+  "count-prefix"
+ ],
+ [
+  "8-band continuum",
+  null
+ ],
+ [
+  "3\u001cthings",
+  "count-prefix"
+ ],
+ [
+  "12\tfiles",
+  "count-prefix"
+ ],
+ [
+  "bank.sql",
+  "dump-file"
+ ],
+ [
+  "BANK.SQL.GZ",
+  "dump-file"
+ ],
+ [
+  "bank.sql.bak",
+  null
+ ],
+ [
+  "sql",
+  null
+ ],
+ [
+  "postgres:16.4.1",
+  "image-tag"
+ ],
+ [
+  "arXiv:2606.22844",
+  null
+ ],
+ [
+  "img:1.2",
+  null
+ ],
+ [
+  "docker compose up",
+  "command-string"
+ ],
+ [
+  "docker compose",
+  null
+ ],
+ [
+  "Git commit -m",
+  "command-string"
+ ],
+ [
+  "pytest -q tests",
+  "command-string"
+ ],
+ [
+  "pip install",
+  null
+ ],
+ [
+  "npm run build",
+  "command-string"
+ ],
+ [
+  "curl\u001c-s\u001cx",
+  "command-string"
+ ],
+ [
+  "LOCAL master = 8e2b992",
+  "hash-status"
+ ],
+ [
+  "master=8e2b992ab",
+  "hash-status"
+ ],
+ [
+  "x = 8e2b99",
+  null
+ ],
+ [
+  "x = 8E2B992A",
+  null
+ ],
+ [
+  "action: deploy",
+  "action-prefix"
+ ],
+ [
+  "Action:\tfix",
+  "action-prefix"
+ ],
+ [
+  "action:deploy",
+  null
+ ],
+ [
+  "reaction: x",
+  null
+ ],
+ [
+  "P3 SURFACE POLISH",
+  "status-shard"
+ ],
+ [
+  "P12_task",
+  "status-shard"
+ ],
+ [
+  "p3 polish",
+  null
+ ],
+ [
+  "P3-polish",
+  null
+ ],
+ [
+  "PX thing",
+  null
+ ],
+ [
+  "stale 0.8",
+  "metric-reading"
+ ],
+ [
+  "score 0.7-0.8",
+  "metric-reading"
+ ],
+ [
+  "recall at 0.95",
+  "metric-reading"
+ ],
+ [
+  "CUDA Toolkit 13.1",
+  null
+ ],
+ [
+  "python 3.12",
+  "metric-reading"
+ ],
+ [
+  "a b c 0.5",
+  null
+ ],
+ [
+  "stale 1",
+  null
+ ],
+ [
+  "stale_ratio 0.8-1",
+  "metric-reading"
+ ],
+ [
+  "data/, ops/.env, *.pt",
+  "list-artifact"
+ ],
+ [
+  "User (jdoe, a@b)",
+  null
+ ],
+ [
+  "a, b",
+  "list-artifact"
+ ],
+ [
+  "a,",
+  null
+ ],
+ [
+  ",b",
+  null
+ ],
+ [
+  "[x, y], z",
+  "list-artifact"
+ ],
+ [
+  "a, ,",
+  null
+ ],
+ [
+  "this is a fairly long status phrase here",
+  "sentence"
+ ],
+ [
+  "six tokens are not a sentence",
+  null
+ ],
+ [
+  "seven tokens\u001cmake up a sentence for sure",
+  "sentence"
+ ],
+ [
+  "Payments DB",
+  null
+ ],
+ [
+  "Go",
+  null
+ ],
+ [
+  "uv",
+  null
+ ],
+ [
+  "dev box",
+  null
+ ],
+ [
+  "ops/backup.ps1",
+  null
+ ],
+ [
+  "origin/master",
+  null
+ ],
+ [
+  "codex-cli / installer",
+  null
+ ],
+ [
+  "pg+extractor",
+  null
+ ],
+ [
+  "Qwen3-8B",
+  null
+ ],
+ [
+  "gpt-5.6-luna",
+  null
+ ],
+ [
+  "Straße",
+  null
+ ],
+ [
+  "gıt commit -m x",
+  "command-string"
+ ],
+ [
+  "pİp install foo",
+  "command-string"
+ ],
+ [
+  "actıon: x",
+  "action-prefix"
+ ],
+ [
+  "İction: x",
+  null
+ ],
+ [
+  "build = abcdef12́",
+  "hash-status"
+ ],
+ [
+  "x = abcdef1‿z",
+  "hash-status"
+ ],
+ [
+  "build = abcdef1²",
+  null
+ ],
+ [
+  "build = abcdef1_",
+  null
+ ],
+ [
+  "build = abcdef1-",
+  "hash-status"
+ ],
+ [
+  "build = abcdef1é",
+  null
+ ],
+ [
+  "build = abcdef1١",
+  null
+ ]
+]

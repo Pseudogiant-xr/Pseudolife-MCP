@@ -234,7 +234,13 @@ pub async fn payload(svc: &Service) -> Value {
     p.insert("storage".into(), json!("postgres"));
     p.insert("auth".into(), json!(svc.auth_configured));
     p.insert("bank".into(), Value::Null);
-    p.insert("persist_errors".into(), json!(0));
+    p.insert(
+        "persist_errors".into(),
+        json!(
+            svc.persist_errors
+                .load(std::sync::atomic::Ordering::Relaxed)
+        ),
+    );
     if let Some(b) = &svc.env.build {
         p.insert("build".into(), build_json(b));
     }
