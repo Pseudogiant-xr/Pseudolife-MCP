@@ -7,12 +7,20 @@ expect/ttl/purpose/worktree/no-board options, `lease break NAME`,
 `docs/guide/configuration.md`, and `evals/qwen_server.ps1`'s lease helpers.
 The core check/list/run row keeps its own acceptance.
 
-The operator corpus has 32 Windows and 31 Linux cases. It covers missing,
+The operator corpus has 36 Windows and 35 Linux cases. It covers missing,
 free and held leases; FIFO handoff; preservation of a separately held OS
 lock; delegate replacement and coordinator-role handoff; unique/ambiguous
 prefixes and unknown recipients; default/day durations and Unicode project
 names; active listeners/rings and warnings; alias/help/refusal/output
-behavior; PID lifetime, local contention and mirror renewal. Three owned
+behavior; PID lifetime, local contention and mirror renewal. Four failure
+cases install a trigger in each arm's own bank after seeding: an audit
+INSERT the server refuses inside the block (a FIFO break), a COMMIT the
+server refuses (a FIFO break), and a COMMIT whose own backend is terminated
+so the client gets FATAL and no answer (a held break, and a coordinator
+handoff by delegate). Each oracle arm must exit 1 with every coordination
+row exactly as seeded; sequences may only advance, because a FIFO grant's
+fence `nextval` is not rolled back. The candidate's rows and exact
+sequence positions are compared with the oracle's. Three owned
 fake-Docker executables check inspect/exec argv, inherited binary streams,
 stdin and container exit status. One Windows-only CPU launcher case invokes
 the shipped PowerShell helpers against the actual arm's CLI and verifies
@@ -37,18 +45,37 @@ Named rules extend the shared core rules:
   recomputed only after raw-chain verification. Invalid paths remain raw.
 - `lease-fixture-pid` associates the actual watched fixture PID in streams,
   requests and state, verifying raw chains before recalculating hashes.
+- `lease-native-pg-diagnostics` (the `native-pg-diagnostics` rule) maps
+  only the oracle arm's single whole stderr line `<break|delegate> failed
+  (<class>); nothing was changed`, with exit 1 and the class the case
+  expects (`RaiseException` or `AdminShutdown`), to the candidate's
+  `(PostgreSQL transaction failed)`. Any other line, class, exit or arm
+  stays raw.
 - `lease-launcher-owned` associates only a validated bound executable/leading
   argv and owned process IDs in its route records. Every other route field,
   stream and file stays compared; immutable fixture inputs are verified
   before removal.
 
-Four new real source mutants cover hold status, break holder removal,
-delegate duration and designate deprecation. Pure CPU controls reject clock,
+Six real source mutants cover hold status, break holder removal,
+delegate duration, designate deprecation, a swallowed audit-insert failure
+(break then reports success on a rolled-back bank) and an ignored COMMIT
+result (delegate then reports a grant that never committed). Pure CPU controls reject clock,
 duration, audit-prefix/hash and PID tampering.
 
 External DSNs and retained container transport are admitted. Native embedded
 PostgreSQL remains the named `phase4-embedded-pg-deferred` refusal (blocker:
 native `embedded_pg`); native operator admission tests exercise it. Safe
 native PostgreSQL diagnostic classes replace interpreter exception names.
-Noncanonical argparse/path shapes remain excluded. There is no per-row
+Noncanonical argparse/path shapes remain excluded.
+
+Declared scope of the failure outcomes. Both implementations print
+`nothing was changed` for every database failure, including a COMMIT whose
+answer was lost; in the lost-answer fixture the server rolls back, so the
+line is true there, but neither client can know it in general. That wording
+is the oracle's (`lease_cli.py` `_operator`), so a change follows Python
+first. A transport cut after the server commits and before its answer
+arrives is not reproduced. Cancelling the host CLI while a retained
+container transport runs is not exercised: the transaction then runs in the
+container's own Python oracle, and the native side only relays argv,
+streams and exit status, which the fake-Docker cases compare. There is no per-row
 performance or installed-candidate claim.

@@ -1056,8 +1056,10 @@ fields. Subsequent mutations require the identical clock seam in both arms,
 all-row/byte comparison and rejecting controls. Delegate/designate were then
 unimplemented; subsequent implementation
 and scoped execution are recorded in [PARITY](PARITY.md#phase-4-delegate-source-preparation).
-Container cancellation, ambiguous COMMIT and full mode acceptance remain
-pending; prior transport measurements retain their original runtime identities.
+The [operator closure](PARITY.md#cli-lease-operator-closure-2026-10-10) since
+accepts full mode with refused/lost-COMMIT rollback controls, and declares
+container cancellation and a commit-then-cut ambiguous COMMIT as unexercised;
+prior transport measurements retain their original runtime identities.
 
 ## Maintainer sent JSONB read domain
 

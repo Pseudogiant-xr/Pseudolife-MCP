@@ -236,3 +236,54 @@ def test_pid_association_checks_raw_audit_before_rehashing(platform):
     store(final, "coordination_events", rows)
     with pytest.raises(AssertionError):
         normalize.apply(bad, PID_RULES, None)
+
+
+def _failure(arm, stderr, exit_code=1, failure_class="RaiseException"):
+    return {"arm": arm, "exit": exit_code, "failure_class": failure_class,
+            "stderr": base64.b64encode(stderr).decode()}
+
+
+NATIVE_FAILURE = b"break failed (PostgreSQL transaction failed); nothing was changed"
+
+
+@pytest.mark.parametrize("eol", [b"\n", b"\r\n"])
+@pytest.mark.parametrize("verb", [b"break", b"delegate"])
+def test_only_the_expected_oracle_failure_class_maps_to_the_native_diagnostic(verb, eol):
+    rule = normalize.RULES["lease-native-pg-diagnostics"]
+    obs = _failure("python", verb + b" failed (RaiseException); nothing was changed" + eol)
+    rule(obs)
+    expected = verb + b" failed (PostgreSQL transaction failed); nothing was changed" + eol
+    assert base64.b64decode(obs["stderr"]) == expected
+
+
+@pytest.mark.parametrize("obs", [
+    # The candidate's own line is never rewritten, whatever it says.
+    _failure("rust", b"break failed (RaiseException); nothing was changed\n"),
+    # A class the case did not expect stays raw.
+    _failure("python", b"break failed (AdminShutdown); nothing was changed\n"),
+    # Any other exit, extra line, refusal or changed wording stays raw.
+    _failure("python", b"break failed (RaiseException); nothing was changed\n", exit_code=0),
+    _failure("python", b"warning\nbreak failed (RaiseException); nothing was changed\n"),
+    _failure("python", b"break failed (RaiseException); nothing was changed\nmore\n"),
+    _failure("python", b"break refused: invalid_lease\n"),
+    _failure("python", b"break failed (RaiseException); it may have changed\n"),
+    _failure("python", b"hold failed (RaiseException); nothing was changed\n"),
+], ids=["candidate", "other-class", "exit-0", "prefix", "suffix", "refusal", "wording", "verb"])
+def test_near_miss_failure_lines_keep_the_raw_stream(obs):
+    before = copy.deepcopy(obs)
+    normalize.RULES["lease-native-pg-diagnostics"](obs)
+    assert obs == before
+
+
+def test_a_mapped_oracle_failure_still_differs_from_a_candidate_that_succeeded():
+    python = {"exit": 1, "stdout": "", "stderr": base64.b64encode(
+        b"break failed (RaiseException); nothing was changed\n").decode(),
+        "arm": "python", "failure_class": "RaiseException", "db": {"final": 1}}
+    rust = {"exit": 0, "stdout": base64.b64encode(b'{"name": "fixture"}\n').decode(),
+            "stderr": "", "arm": "rust", "db": {"final": 2}}
+    lines = compare.diff(python, rust, ("lease-native-pg-diagnostics",))
+    assert any(line.startswith("exit:") for line in lines)
+    assert any(line.startswith("db differ") for line in lines)
+    same = dict(rust, exit=1, stdout="", db={"final": 1},
+                stderr=base64.b64encode(NATIVE_FAILURE + b"\n").decode())
+    assert compare.diff(python, same, ("lease-native-pg-diagnostics",)) == []

@@ -255,7 +255,47 @@ def _operator_clock(obs):
     obs["stdout"] = base64.b64encode(raw).decode()
 
 
-def operator_case(identifier, argv, scenario="missing", events=(), local=False, stdout_closed=False):
+_FAULTS = {
+    # An audit INSERT the server refuses inside the block: the lease vacate
+    # that ran before it must roll back with it.
+    "audit-insert": ("BEFORE INSERT ON coordination_events FOR EACH ROW",
+                     "RAISE EXCEPTION 'harness: audit insert refused';"),
+    # The server refuses the COMMIT itself (an ERROR at COMMIT: rolled back).
+    "commit-refused": ("AFTER INSERT ON coordination_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW",
+                       "RAISE EXCEPTION 'harness: refused at commit';"),
+    # The CLI's own backend ends at COMMIT: its client gets FATAL and no
+    # answer. The server never commits, so the bank must be unchanged.
+    "commit-lost": ("AFTER INSERT ON coordination_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW",
+                    "PERFORM pg_terminate_backend(pg_backend_pid()); PERFORM pg_sleep(5);"),
+}
+_FAILED = re.compile(rb"^(break|delegate) failed \(([A-Za-z]+)\); nothing was changed(\r?\n)\Z")
+
+
+def _install_fault(conn, fault):
+    timing, body = _FAULTS[fault]
+    kind = "CONSTRAINT TRIGGER" if "DEFERRED" in timing else "TRIGGER"
+    conn.execute("CREATE FUNCTION pl_cf_lease_fault() RETURNS trigger LANGUAGE plpgsql "
+                 f"AS $$ BEGIN {body} RETURN NULL; END $$")
+    conn.execute(f"CREATE {kind} pl_cf_lease_fault {timing} EXECUTE FUNCTION pl_cf_lease_fault()")
+
+
+@normalize.rule("lease-native-pg-diagnostics")
+def native_pg_diagnostics(obs):
+    """Declared native-pg-diagnostics: the oracle names the psycopg class in
+    its failure line; the candidate names the safe native class. Only the
+    oracle arm's single whole failure line maps, and only for the class the
+    case expects; exit, stdout and every coordination row stay compared."""
+    if obs.get("arm") != "python":
+        return
+    match = _FAILED.match(base64.b64decode(obs["stderr"]))
+    if obs["exit"] != 1 or not match or match.group(2).decode() != obs.get("failure_class"):
+        return
+    line = match.group(1) + b" failed (PostgreSQL transaction failed); nothing was changed" + match.group(3)
+    obs["stderr"] = base64.b64encode(line).decode()
+
+
+def operator_case(identifier, argv, scenario="missing", events=(), local=False, stdout_closed=False,
+                  fault=None, failure_class=None):
     from pseudolife_memory.lease_cli import parse_duration
     hold = parse_duration(argv[argv.index("--for") + 1]) if "--for" in argv else 86400
     env = {"PSEUDOLIFE_DAEMON_EXEC": "1", "PYTHONUTF8": "1",
@@ -295,6 +335,9 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
                                     attachment_id="fixture-listener", wake_enabled=True,
                                     ring=scenario == "ring", ring_armed_until=stamp + 600 if scenario == "ring" else None)
         case.argv[:] = ["lease", *(target["agent_id"] if arg == "{AGENT}" else arg for arg in argv)]
+        if fault:
+            # After seeding, so only the CLI's own transaction meets it.
+            _install_fault(arm.daemon.conn, fault)
         arm.state["before"] = coordination_state(_bank.dump(arm.daemon.name))
         arm.state["seed_window"] = [start, time.time()]
 
@@ -305,6 +348,23 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
             if arm.name == "python":
                 assert obs["listener"]["local_still_held"]
         _after(arm, obs)
+        if fault:
+            obs["arm"] = arm.name
+            obs["failure_class"] = failure_class
+            if arm.name == "python":
+                # The fixture must do what it claims on the oracle: exit 1
+                # and every coordination row exactly the seeded state. A
+                # sequence may only advance: nextval (a FIFO grant's fence)
+                # is not rolled back. The candidate's bank, and the exact
+                # sequence positions, are left to the comparison.
+                final, seeded = obs["db"]["final"], arm.state["before"]
+                assert obs["exit"] == 1, obs["exit"]
+                assert final["tables"] == seeded["tables"], f"oracle: {fault} changed coordination rows"
+                assert final["sequences"].keys() == seeded["sequences"].keys()
+                assert all(seeded["sequences"][key] is None
+                           or (final["sequences"][key] is not None
+                               and seeded["sequences"][key] <= final["sequences"][key])
+                           for key in seeded["sequences"]), f"oracle: {fault} moved a sequence back"
         obs["db"]["before"] = arm.state["before"]
         obs["seed_stamp"] = arm.state["seed_stamp"]
         obs["seed_window"] = arm.state["seed_window"]
@@ -317,7 +377,8 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
 
     case = Case(identifier, ["lease", *argv], env=env, setup=setup, after=after,
                 daemon=OperatorBoard, stdout_closed=stdout_closed,
-                rules=("lease-http-json", "lease-operator-clock", *(('lease-native-stdout',) if stdout_closed else ())))
+                rules=("lease-http-json", "lease-operator-clock", *(('lease-native-stdout',) if stdout_closed else ()),
+                       *(("lease-native-pg-diagnostics",) if fault else ())))
     return case
 
 
@@ -349,6 +410,15 @@ def cases():
         operator_case("break-preserves-local-holder", ["break", "fixture"], "held", ("lease_break",), local=True),
         operator_case("break-closed-stdout", ["break", "fixture"], "held", ("lease_break",), stdout_closed=True),
         operator_case("break-refused-credential-name", ["break", "sk-" + "Ab9_" * 10]),
+        # Failure outcomes: each must leave every coordination row as seeded.
+        operator_case("break-audit-insert-fails", ["break", "fixture"], "queue",
+                      fault="audit-insert", failure_class="RaiseException"),
+        operator_case("break-commit-refused", ["break", "fixture"], "queue",
+                      fault="commit-refused", failure_class="RaiseException"),
+        operator_case("break-commit-lost", ["break", "fixture"], "held",
+                      fault="commit-lost", failure_class="AdminShutdown"),
+        operator_case("delegate-commit-lost", ["delegate", "fixture", "{AGENT}", "--for", "2m"], "coordinator",
+                      fault="commit-lost", failure_class="AdminShutdown"),
     ])
     for action in ("hold", "break", "delegate", "designate"):
         result.append(Case("help-" + action, ["lease", action, "--help"],
@@ -370,4 +440,14 @@ MUTANTS = [
     Mutant("lease-designate-warning", "lease_operator", "shim/src/cli/lease/args.rs",
            "pseudolife-mcp lease designate is deprecated: use pseudolife-mcp lease delegate",
            "pseudolife-mcp lease designate is deprecated: changed alias warning", ("designate-normal",)),
+    # A swallowed audit failure leaves an aborted block whose COMMIT the
+    # server answers with ROLLBACK, so break would report success.
+    Mutant("lease-break-audit-swallowed", "lease_operator", "shim/src/cli/lease/operator/store.rs",
+           "settle(&tx, name, now, &mut events).await?;\n        append(&tx, events, now).await?;",
+           "settle(&tx, name, now, &mut events).await?;\n        let _ = append(&tx, events, now).await;",
+           ("break-audit-insert-fails",)),
+    # A COMMIT whose answer never came must not be reported as a grant.
+    Mutant("lease-delegate-commit-ignored", "lease_operator", "shim/src/cli/lease/operator/store/delegate.rs",
+           "    tx.commit().await?;\n    Ok(Granted {", "    let _ = tx.commit().await;\n    Ok(Granted {",
+           ("delegate-commit-lost",)),
 ]
