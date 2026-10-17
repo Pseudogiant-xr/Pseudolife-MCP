@@ -40,9 +40,10 @@ Normalizers (declared, spec "Free for W1 and W2"):
   same embedding tolerances (both sides rewrite a slot's rows in the same
   order, so the ids match);
 * the world cortex clocks: ``world_facts`` ``asserted_at``,
-  ``last_confirmed``, ``superseded_at``, ``tx_time``, ``valid_time``,
-  ``hlc_phys`` and ``retrieved_at`` keep only null-or-not (a write without a
-  ``retrieved_at`` takes the clock);
+  ``last_confirmed``, ``superseded_at``, ``tx_time``, ``valid_time`` and
+  ``hlc_phys`` keep only null-or-not; ``retrieved_at`` (column and answer)
+  does only when it lies within a day of now (a write without one takes the
+  clock), and an explicit past value compares exactly;
 * a search ``score`` in a response compares within 1.5e-4: the two embedders
   agree to the measured tolerance, and the score is rounded to 4 places;
 * the canonical-fact clocks: ``facts`` ``asserted_at``, ``last_confirmed``,
@@ -111,11 +112,15 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("retrieval_uses", "created_at"),
          ("world_facts", "asserted_at"), ("world_facts", "last_confirmed"),
          ("world_facts", "superseded_at"), ("world_facts", "tx_time"),
-         ("world_facts", "valid_time"), ("world_facts", "hlc_phys"),
-         ("world_facts", "retrieved_at")}
+         ("world_facts", "valid_time"), ("world_facts", "hlc_phys")}
+# Columns that are wall-clock only when written from the clock: a value
+# within RECENT_S of now keeps null-or-not, anything else compares exactly.
+RECENT_CLOCK = {("world_facts", "retrieved_at")}
+RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
-                  "started_at", "ended_at", "retrieved_at"}
+                  "started_at", "ended_at"}
+RESPONSE_RECENT_CLOCK = {"retrieved_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
 SCORE_TOLERANCE = 1.5e-4
@@ -911,7 +916,9 @@ WORLD_SEED = [
 SCENARIOS.update({
     "world-facts": {
         "config": None,
-        "seed": WORLD_SEED,
+        # A non-finite retrieved_at: Python stores and reloads it, so the
+        # Rust daemon must start on a bank that holds one.
+        "seed": WORLD_SEED + [world_set("Clock", "skew", "unknown", retrieved_at="inf")],
         "ops": [
             # compact entries; the stale one carries correct_with and the note
             world_search("what is the newest Rust release"),
@@ -923,13 +930,15 @@ SCENARIOS.update({
                       content_hash="sha256:abc"),
             # a different value supersedes, with a session header
             world_set("Rust", "latest stable version", "1.91.0", [sess("sess-w")],
-                      source_url="https://blog.rust-lang.org/2026/", retrieved_at=1790000000.0),
+                      source_url="https://blog.rust-lang.org/2026/", retrieved_at=1600000000.0),
             # unsafe schemes are refused before anything runs
             world_set("Evil", "link", "x", source_url="javascript:alert(1)"),
             world_set("Evil", "link", "x", source_url="\tJaVaScRiPt:alert(1)"),
             # a scheme-less citation is inert and allowed
             world_set("Example", "home page", "example.com/page", source_url="example.com/page"),
             world_search("rust release", top_k=10),
+            # the non-finite retrieved_at: never stale, undecayed, echoed null
+            world_search("clock skew", top_k=1, verbose=True),
             history("Rust", "latest stable version"),
         ],
     },
@@ -1188,6 +1197,13 @@ def _clock(v):
     return None if v is None else "<clock>"
 
 
+def _recent_clock(v):
+    """A clock-written value keeps null-or-not; an explicit past one stays."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)             and abs(v - time.time()) < RECENT_S:
+        return "<clock>"
+    return v
+
+
 HEX_RUN = re.compile(r"[0-9a-f]{8,32}")
 
 
@@ -1218,6 +1234,9 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
             if (name, col) in CLOCK:
                 for row in t["rows"]:
                     row[idx] = _clock(row[idx])
+            elif (name, col) in RECENT_CLOCK:
+                for row in t["rows"]:
+                    row[idx] = _recent_clock(row[idx])
         if name == "meta":
             for row in t["rows"]:
                 key, value = row
@@ -1320,6 +1339,8 @@ def normalize_records(a, b, stats=None):
         for k in set(a) & set(b):
             if k in RESPONSE_CLOCK:
                 a[k], b[k] = _clock(a[k]), _clock(b[k])
+            elif k in RESPONSE_RECENT_CLOCK:
+                a[k], b[k] = _recent_clock(a[k]), _recent_clock(b[k])
             elif (k == "score" and isinstance(a[k], (int, float))
                   and isinstance(b[k], (int, float)) and not isinstance(a[k], bool)):
                 d = abs(a[k] - b[k])

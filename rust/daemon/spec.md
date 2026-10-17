@@ -201,7 +201,9 @@ Free for W1 and W2: log lines; the exact float bits of `entries.embedding`
 and `entries.surprise` within the measured tolerance (but never a different
 admission decision or reason); wall-clock values (`ts`, `started_at`,
 `capacity_true_drops.last_at`) and episode ids, which the harness normalizes
-by rule.
+by rule; and a search `score` in an answer within 1.5e-4 (the two
+embedders agree to the measured tolerance, and scores are rounded to four
+places).
 
 ## W3. Shared episode ownership
 
@@ -803,7 +805,10 @@ a wide search; and the personal slot history of the world slot (empty: the
 stores are apart). Under `demote` the stale entry sorts last with its
 warning; under `quarantine` its value moves to `last_known_value` in both
 projections. World embeddings compare within the measured tolerance and a
-response `score` within one rounding unit. The `mcp-world-set-no-confirm`,
+response `score` within one rounding unit; the world clocks keep only
+null-or-not, except that `retrieved_at` does so only within a day of now (a
+write without one takes the clock) and an explicit past value compares
+exactly. The `mcp-world-set-no-confirm`,
 `mcp-world-set-unsafe-allowed`, `mcp-world-set-no-save` and
 `mcp-world-search-no-correct-with` mutants must be caught.
 

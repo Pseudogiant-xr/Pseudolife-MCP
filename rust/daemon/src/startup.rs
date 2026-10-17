@@ -230,6 +230,15 @@ async fn canonical_rows(client: &Client, table: &str) -> Result<Vec<Value>> {
             "retrieved_at",
         ] {
             if let Some(value) = data.get(field).filter(|v| !v.is_null()) {
+                // `to_jsonb` spells a non-finite double as a string; Python
+                // reads it back as a float (a world fact's `retrieved_at`
+                // may be one), so the spelling is kept, not refused.
+                if value
+                    .as_str()
+                    .is_some_and(|s| matches!(s, "Infinity" | "-Infinity" | "NaN"))
+                {
+                    continue;
+                }
                 let number = value.as_f64().context("invalid canonical timestamp")?;
                 data[field] = Value::from(number);
             }
