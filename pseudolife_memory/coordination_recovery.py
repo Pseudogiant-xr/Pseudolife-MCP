@@ -13,9 +13,6 @@ import sys
 
 import psycopg
 
-from pseudolife_memory.coordination_adapter import (
-    CoordinationAdapter, _StateReservation, _open_state,
-)
 from pseudolife_memory.storage.coordination import CoordinationError, CoordinationStore
 from pseudolife_memory.utils.config import load_config
 
@@ -99,6 +96,10 @@ def _perform(args):
     if any((parent / ".git").exists() for parent in state_path.parents):
         raise RecoveryError("private state must be outside a Git repository")
     # Constructing the adapter validates the bank URL; no network client is opened.
+    from pseudolife_memory.coordination_adapter import (
+        CoordinationAdapter, _StateReservation, _open_state,
+    )
+
     adapter = CoordinationAdapter(args.bank_url, "offline-recovery", state_path=args.state)
     try:
         fd = _open_state(adapter.state_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
