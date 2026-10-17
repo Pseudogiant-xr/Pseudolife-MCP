@@ -213,8 +213,8 @@ def _associate_routes(raw, binding):
     five times; anything else refuses."""
     for name, value, marker in (('File', binding['File'], '<bound-cli>'),
                                  ('Lead', binding['Lead'], ['<bound-prefix>'])):
-        spans = {('"' + name + '":' + json.dumps(value, separators=(',', ':'), ensure_ascii=ascii)
-                  ).encode() for ascii in (False, True)}
+        spans = {('"' + name + '":' + json.dumps(value, separators=(',', ':'), ensure_ascii=escaped)
+                  ).encode() for escaped in (False, True)}
         found = [span for span in spans if raw.count(span) == 5]
         assert len(found) == 1 and sum(raw.count(span) for span in spans) == 5, name
         new = ('"' + name + '":' + json.dumps(marker, separators=(',', ':'))).encode()
