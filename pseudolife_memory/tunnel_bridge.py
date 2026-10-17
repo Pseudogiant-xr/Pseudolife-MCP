@@ -13,9 +13,6 @@ import threading
 import time
 import uuid
 
-from mcp.types import CallToolResult
-from pydantic import ValidationError
-
 from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, TunnelError, private_read, private_write
 
 TOOLS = ('memory_search', 'memory_agents')
@@ -113,6 +110,9 @@ def _identifier(message):
 def _successful_result(result):
     if not isinstance(result, dict):
         return False
+    from mcp.types import CallToolResult
+    from pydantic import ValidationError
+
     try:
         CallToolResult.model_validate(result, strict=True)
     except (ValidationError, TypeError, ValueError):

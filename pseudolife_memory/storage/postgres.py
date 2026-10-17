@@ -34,12 +34,23 @@ from typing import Any, Sequence
 # through storage.coordination (the board's constants) and must not need
 # numpy, which a shim runtime does not install (2026-09-29).
 import psycopg
-from pgvector.psycopg import register_vector
 from psycopg.types.json import Jsonb
 
 from pseudolife_memory.storage.schema import ensure_schema
 
 logger = logging.getLogger(__name__)
+
+
+def register_vector(*args, **kwargs):
+    """Load vector adapters when a storage connection needs them.
+
+    pgvector 0.4.2 imports numpy eagerly; the CLI import guard on that
+    version (2026-10-12) requires keeping it off the board-only paths.
+    """
+    from pgvector.psycopg import register_vector as register
+
+    return register(*args, **kwargs)
+
 
 # meta row holding the durable record of capacity-eviction true drops:
 # {"count", "last_at", "last_entry_id", "last_source", "last_superseded"}.

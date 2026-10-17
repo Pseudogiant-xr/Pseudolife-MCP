@@ -280,6 +280,7 @@ async fn cms_store(
     };
     if let Some(idx) = victim {
         let gone = ready.bank.write().expect("bank lock").remove(idx);
+        crate::read::stats::record_true_drop();
         // Only the last band's overflow is a true drop; a deeper band would
         // take the entry (not ported: see divergences).
         if let Err(e) = delete_evicted(client, &gone).await {

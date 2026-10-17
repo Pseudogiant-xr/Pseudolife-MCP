@@ -1,9 +1,8 @@
 """Tests for the Cortex Console web layer — config_io, routes, ASGI.
 
 These use the lightweight ``FixtureService`` (no Postgres, no warm-service
-fixture or database). Note: ``FixtureService`` constructs ``AppConfig``, which
-transitively imports torch (``preset_bands`` -> the memory package -> ``cms``),
-so these tests require torch installed and run under ``.venv``.
+fixture or database). ``FixtureService`` constructs ``AppConfig``, whose
+presets live in ``utils.miras_presets`` and do not import the memory package.
 """
 
 from __future__ import annotations
