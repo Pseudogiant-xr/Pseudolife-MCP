@@ -11,6 +11,9 @@ ACCEPTED_BLOBS = {
     "pseudolife_memory/cli.py": (
         "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
         "4226b8a3fe003ab05406309c44a57ec471cfbc55",
+        # The --help entry for delegate-watch (the PR that also defers it in
+        # the native shim).
+        "8342dc8cc7775d43641703299689e9a3dc5d2295",
     ),
     "pseudolife_memory/wait_mail_cli.py": ("236636957e2f5affbe2eec21d9e125c35ffae5f2",),
 }

@@ -44,10 +44,6 @@ tool's answers by value.
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_episode_summary` | W2-D | No episode summary service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
-| `memory_fact_set` | W2-E | No canonical fact mutation service or resident-store synchronization. |
-| `memory_set_add` | W2-E | No set-valued slot mutation service. |
-| `memory_set_remove` | W2-E | No set-valued slot removal service. |
-| `memory_fact_resolve` | W2-E | No contender promotion service. |
 | `memory_world_set` | W2-E | No world-fact mutation service. |
 | `memory_outcome` | W2-E | No outcome/lesson mutation service. |
 | `memory_episode_start` | W2-E | Store-driven episode start/resume and attribution exist; the standalone episode API and MCP dispatch remain unwired. |
@@ -69,7 +65,8 @@ tool's answers by value.
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset` and, since their body registrations, `memory_store`,
 `memory_search`, `memory_recent`, `memory_fact_get`, `memory_get`,
-`memory_stats`, `memory_agents` and `memory_message`. The two board tools
+`memory_fact_set`, `memory_set_add`, `memory_set_remove`,
+`memory_fact_resolve`, `memory_stats`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -284,11 +281,11 @@ The remaining write work is deliberately split into subsequent increments:
 
 | Item | Remaining behavior | Owner / reason |
 |---|---|---|
-| Canonical writes | Fact set, HLC ticking, contenders, supersession, set-valued slots and world facts remain unimplemented; slot extraction here is a pure text operation, not a canonical write | W2-E cortex increment; scalar and set history require their own response and post-state proof |
+| Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save), `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) and `memory_fact_resolve` (spec FR1-FR8: contender promotion and retirement) are served; world facts remain unimplemented; slot extraction here is a pure text operation, not a canonical write | W2-E world-fact increment (`memory_world_set`) |
 | Outcomes and lessons | Outcome attribution, lesson updates and their persistence remain unimplemented | W2-E outcomes increment |
 | Episode APIs and titles | Standalone episode operations, session-title tools and automatic content titles on idle close remain unimplemented; store-driven open/resume and empty-root reaping share state | W2-E episode increment; content titles also rewrite entry stamps |
 | Autosave and clean-exit flush | Background scheduling exists, but changed-state saving and exit flush remain no-ops; store rows write through, while counters, surprise history and band weights do not survive restart via `weights.pt` | W2-E persistence increment; the Python tensor format and recovery contract need a separate proof |
-| Resident cortex refresh | No canonical write path updates resident canonical stores; auto-promotion stays disabled in this increment | W2-E cortex increment, coordinated with W2-D read-store ownership |
+| Resident cortex refresh | `memory_fact_set`, `memory_set_add`, `memory_set_remove` and `memory_fact_resolve` update the resident cortex in place (readers take snapshots); the world and lesson stores have no write path, and auto-promotion stays disabled | W2-E world, lesson and auto-promotion increments |
 | Frozen store catalog snapshots | Original store recordings predate the catalog instrument's `column_types`, owner/comment and sequence-bound representations; replay retains and reports initialization differences | Historical recordings are retained unchanged; live Python comparison is the current-source proof, not a waiver of frozen replay differences |
 | New reaper recording's startup state | The live fixture inherits Python-seeded relation timestamps, curation metadata and dream acknowledgement state; a fresh Rust-only replay does not reproduce that seed state | W3-H startup/dream integration; the new recording is retained unchanged and its replay differences are reported separately from the matching live reaper behavior |
 | Unicode runtime | Label, meta-filter and slot regexes retain the existing Unicode-14 assigned-character contract; newer assigned characters may follow Rust's newer tables | Explicitly retained runtime substitution; no comparator or frozen expectation is weakened |
@@ -296,6 +293,31 @@ The remaining write work is deliberately split into subsequent increments:
 | Shutdown deadline | Admitted stores drain without a timeout; a store stuck on an unresponsive PostgreSQL connection can block graceful exit indefinitely | W2-E lifecycle follow-up; a deadline and cancellation recovery need proof that eviction and subsequent insert cannot be torn apart |
 | Exact-duplicate boundary | The fixed-order Rust dot product and Python BLAS reduction are not proven identical at the exact `1.0` duplicate threshold; a numerically near-boundary value may change the rejection reason | W2-E numeric-boundary follow-up; measured vector tolerances do not waive exact admission/reason equality |
 | Hosted write-path execution | Both CI operating systems compile the `harness,mutants` feature combination, but the W2-E live, shutdown, full-docs slot corpus and store replay/control runs remain local evidence | W2-E harness follow-up; hosted parity needs the real-model oracle fixture and explicit handling of the reported frozen startup differences, without suppressing them |
+
+### memory_fact_set (2026-10-17)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `write_fact` with `force_contend=True` (consolidation quarantine), `dream=True` (the dream's claim writes: direct-write guard, echo tier cap, `dream:<tier>` marks on insert and park) or `support="assistant"` (assistant-origin park) | ported in `memory/cortex.py` | not ported; `stores/cortex_write.rs` takes no such inputs | unreachable over MCP (`memory_fact_set` passes user/action/agent, no stance, no provenance); the consolidation and dream slices (W3-H) add them with their callers |
+| `stance` and `provenance` on a fact write | written by the dream and consolidation | always none (a confirm still clears a stored stance, as Python's does) | same |
+| A read concurrent with a fact write | waits for the service lock, so it sees the write or none of it | reads the snapshot it took: it may predate a write still in progress, or show the written record before that write has persisted or answered its caller | readers never hold a lock across an await; each read is internally consistent, and a read that starts after a write returns sees it |
+| `_entity_kind_cache` reset when a changed writer lease rehydrates the service (`service.py:1416`) | the next `"auto"` fact write rereads `entity_kinds` | kept for the process | the rehydrate path is the per-call `_ensure_init` row above (W2-E writer-session work) |
+| Fact embeddings | torch fp32 | ONNX Runtime fp32 | compared within the store tolerances per fact id (`harness/w2e.py`); a routing decision never depends on them |
+| `memory.cortex.protect_provenance`, `supersede_confidence_margin`, `reinforce_rate`, `memory.lessons.enabled` of the wrong type | `bool()` / `float()` at store build (a string `"false"` is truthy) | refused at config load, like every other typed key (`wrong_types_python_accepts_refuse_here`) | the existing config-type substitution |
+
+### memory_set_add and memory_set_remove (2026-10-17)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `add_member` with `support="assistant"` (the conversion guard and the join park, `cortex.py:891, 995`), a support tier under `protect_provenance` (the conversion tier guard, `:897`) or `dream=True` (the direct-write guard and the `dream:<tier>` mark, `:901, 1029`); provenance on a member write | ported in `memory/cortex.py` | not ported; `stores/cortex_members.rs` takes no such inputs | unreachable over MCP (`service.set_add` passes `origin=None`, no provenance, `dream=False`); the dream and rollback slices (W3-H) add them with their callers |
+| `remove_member` refusal (`member_remove_refused`: an assistant, lower-tier or dream retraction, `cortex.py:1121-1128`) | ported | not ported; the note text is served for parity | unreachable over MCP (`service.set_remove` passes `origin=None`, `dream=False`) |
+| The member dedup cosine at exactly 0.9 | torch float32 `dot` and `norm` (BLAS / vectorized reduction order) | float32 products summed in f64, rounded once to f32 | within one f32 step of torch (measured on 2,000 unit 1024-vectors: at most 4.5e-8 apart); a cosine that close to 0.9 may decide `member_confirmed` against `member_added` differently, as may the ONNX/torch embedding gap (about 1e-6) itself; the harness members sit at least 0.08 from the line |
+
+### memory_fact_resolve (2026-10-17)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `resolve` with `expect_value` (`refused_changed`, `cortex.py:1477-1479`; the service's `contender_changed` answer, `service.py:4513-4516`) or `dream=True` (`refused_direct` against a direct-backed current, `:1480-1485`, the `direct_write` answer, `:4509-4512`, and the `dream:<tier>` mark on the promoted contender) | ported | not ported; `stores/cortex_resolve.rs` takes no such inputs | unreachable over MCP (`service.cortex_resolve` gets `support="user"`, `dream=False`, `expect_value=None`); the consolidation quarantine (W3-H) adds them with its caller |
 
 The WRITE-CMS, WRITE-CORTEX and CONTRADICTION parity rows remain deferred;
 this increment does not claim the complete write boundary or cutover readiness.
@@ -308,7 +330,7 @@ this increment does not claim the complete write boundary or cutover readiness.
 | W2F-CONSOLE-STARTUP | Both implementations return `available: false, reason: not_initialized` before storage exists. Golden replay previously started after the first HTTP health response while only the live Python arm waited for warmup. The runner now waits for `db: ok` on both arms, and for Python's embedding warmup before the scenario; Console remains read-only and does not initialize the bank. | Runner regression covers both modes; the original Console recording is retained in the completion evidence. Cold-start Console behavior remains unchanged. |
 | W2F-PAIRING-HTTP | The authenticated valid-body `/api/pair` route remains a deliberate 501 refusal. The SQL redemption primitive exists, but the HTTP two-slot non-queueing gate, attempt refunds, disconnect ownership and immediate principal-cache publication are not integrated. Wiring only the SQL call would expose an incomplete credential-enrolment path. This slice retains the refusal rather than treating store-level coverage as endpoint coverage. | **Cutover blocker:** HTTP-SECURITY / CLI-PAIRING must cover success, same-token retry, conflicts, expiry/revocation, environment-name exclusion, saturation, failure budgets and cancellation before enabling BK4 at HTTP. |
 | W2F-CLOCK-RETRY | After a send detects an epoch change, Python clears the cached session-probe timestamp and calls `_ensure_init()` under the service lock before retrying. Rust only marks the board clock unseeded, reloads its high-water value and retries with the existing storage lease epoch. The database epoch check still refuses the stale write, but the retry cannot heal the writer session. | **Cutover blocker:** integrate W2-E writer-session refresh and prove a changed-epoch send either recovers once or refuses without a partial write. |
-| W2F-SHARED-HLC | Python board and memory writes use the service clock. Rust currently owns a separate board clock; board-only and mixed Python/Rust board audit checks do not establish ordering across Rust board and memory writes. | **Cutover blocker:** adopt W2-E's shared service clock, then test interleaved board/memory writes, restart reseeding and lease-epoch changes. |
+| W2F-SHARED-HLC | Python board and memory writes use the service clock. Rust currently owns a separate board clock; the service clock now exists for fact writes (`hlc.rs`, `Ready::tick_hlc`, spec FS6) but the board has not adopted it, so board-only and mixed Python/Rust board audit checks do not establish ordering across Rust board and memory writes. | **Cutover blocker:** move the board onto `Ready::tick_hlc`, then test interleaved board/memory writes, restart reseeding and lease-epoch changes. |
 
 The board transaction boundary is independent of the shared writer adapter:
 `Board::conn` serializes the dedicated client, driver transactions roll back

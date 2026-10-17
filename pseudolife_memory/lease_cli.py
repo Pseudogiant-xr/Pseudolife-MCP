@@ -1653,7 +1653,8 @@ def _operator(verb, act) -> int:
         if not dsn:
             raise NoBank
         from pseudolife_memory.storage.coordination import (
-            CoordinationConnection, CoordinationError, CoordinationStore)
+            CommitOutcomeUnknown, CoordinationConnection, CoordinationError,
+            CoordinationStore)
         try:
             storage = CoordinationConnection(dsn)
         except Exception as exc:  # noqa: BLE001 — a DSN in a driver message stays unprinted
@@ -1663,6 +1664,11 @@ def _operator(verb, act) -> int:
             result = act(CoordinationStore(storage))
         except CoordinationError as exc:
             _say(f"{verb} refused: {exc.code}")
+            return 1
+        except CommitOutcomeUnknown as exc:
+            _say(f"{verb} lost the answer to its COMMIT ({type(exc.__cause__).__name__}); "
+                 "it may have been committed: run `pseudolife-mcp lease list` before "
+                 "retrying")
             return 1
         except Exception as exc:  # noqa: BLE001
             _say(f"{verb} failed ({type(exc).__name__}); nothing was changed")
