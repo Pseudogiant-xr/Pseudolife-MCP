@@ -9,7 +9,7 @@ use crate::mcp::dispatch::{ToolCall, ToolError, ToolFn, ToolFuture};
 use serde_json::{Map, Value, json};
 
 /// `CORRECTION_NOTE` (`mcp_server.py:984-990`).
-const CORRECTION_NOTE: &str = "Facts flagged correct_with above are aged or contested. If an aged fact contradicts what you observe, run its call NOW with the verified value (re-assert the same value if it checks out) \u{2014} noticing without writing leaves the error for the next session. For a contested fact, read the contenders; resolve only once the human decides.";
+pub(crate) const CORRECTION_NOTE: &str = "Facts flagged correct_with above are aged or contested. If an aged fact contradicts what you observe, run its call NOW with the verified value (re-assert the same value if it checks out) \u{2014} noticing without writing leaves the error for the next session. For a contested fact, read the contenders; resolve only once the human decides.";
 
 /// `_REPLACED_BY_PREVIEW_CHARS`.
 const REPLACED_BY_PREVIEW_CHARS: i64 = 120;
@@ -266,7 +266,7 @@ fn number(v: Option<&Value>) -> Option<f64> {
 
 /// `_cortex_correct_with`: the resolve path for a contested fact, else the
 /// re-assert call for a stale or aged one.
-fn correct_with(f: &Value) -> Option<String> {
+pub(crate) fn correct_with(f: &Value) -> Option<String> {
     let repr = |k: &str| crate::labels::py_repr(f.get(k).and_then(Value::as_str).unwrap_or(""));
     if truthy(f.get("contested")) {
         let slot = format!("entity={}, attribute={}", repr("entity"), repr("attribute"));

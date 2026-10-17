@@ -404,6 +404,31 @@ template, with coverage for the compact `replaced_by`, the verbose
 supersession keys and an exact episode filter that leaves the child
 episode's entry out; the `mcp-recent-oldest-first` mutant must be caught.
 
+### memory_fact_get over MCP (2026-10-17)
+
+`read/fact_get.rs`, registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py:1561-1689`; `service.py` `cortex_lookup` (4157-4287),
+`_annotate_set_slot_evidence` (4346), `cortex_contenders` (4419),
+`cortex_candidates` (4432), `entity_ref` (7556); `memory/cortex.py`
+`lookup`, `slot_kind`, `members`, `candidates_for`.
+
+| # | Exact item | Source |
+|---|---|---|
+| FG1 | The record: the slot's current scalar (keys normalised by `_norm_key`). On a miss, the graph node `find_entity(norm_name(entity))` gives retry names: its canonical, then its aliases in `find_entity`'s order, minus any alias that is another entity's canonical, deduplicated on the cortex key; the first name with a scalar wins, and the record keeps its own slot. Still nothing: the first of those names whose `slot_kind` is "set" serves `{kind: "set", entity: <that name>, attribute, members, removed}` (current members, then removed member rows, in record order). Else null. | `service.py:4157-4268`; `cortex.py:1182-1216, 1519` |
+| FG2 | A scalar is `_cortex_record_to_dict` with `time.relative_age` (no `age` when false) and the stale policy, then `source_entries` (the slot's `memory_traces` entry ids) and the trace-invalidation `re_verify`; a set's members and removed rows are record dicts without those, and a set with members carries the slot-wide `re_verify`, seen at the latest member's `last_confirmed or asserted_at`. Serving a scalar, or a set with members, writes one `slot_reads` upsert when `memory.cortex.read_tracking` is on; a failure is logged and swallowed. | `service.py:4141, 4237-4287, 4300-4357` |
+| FG3 | `contenders`: the slot's contested records as full record dicts (always with `age`), with no alias handling and no projection. | `service.py:4419-4430` |
+| FG4 | Only when the record is null or a set without members and there are no contenders: `candidates`, under the queried name and, when its graph node's canonical differs by `norm_name`, that canonical. Per name, same-entity current records at other attributes (most recently asserted or confirmed first, `score` null, `why` "same_entity") then embedding-similar slots (the query `"{entity} {attribute}"` embedded without the query prefix; cosine at least 0.35, assistant facts penalised; `score` to four places, `why` "similar_slot"), five each; merged, deduplicated on the lower-cased slot, same-entity first then by score (a null or zero score sorting as 1.0), five in all. | `service.py:4432-4463`; `cortex.py:1701-1737` |
+| FG5 | A non-empty record gets `correct_with` from `_cortex_correct_with` with `contested` = whether there are contenders, and then the answer carries `correction_note`. `entity_ref` (`entity_id, canonical, etype, aliases`) when the queried name has a graph node. Keys in order: `record, contenders, candidates, correction_note, entity_ref`. | `mcp_server.py:1588-1617` |
+| FG6 | Not `verbose` and `memory.mcp.compact_payloads`: the record through `_lean_fact_record` (the allow-list in its order, then `effective_confidence` when the class decays; set members and removed rows projected the same way). | `mcp_server.py:1618-1689` |
+
+`harness/w2d_search.py --only mcp-fact-get` compares 17 calls on a template
+derived with `w2d_seed.py --mcp-extra --fact-extra` (an aliased entity with
+a shadowed alias, a set with a removed member, an emptied set, a stale
+fact, trace rows), with the `slot_reads` writes in the compared bank state
+and coverage for each branch; the `mcp-fact-get-no-alias-retry`,
+`mcp-fact-get-no-candidates` and `mcp-fact-get-no-lean` mutants must be
+caught.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
