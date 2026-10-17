@@ -1329,7 +1329,7 @@ mistaken for a real bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use; the offline daemon image does not include it); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v55 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v56 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -3945,8 +3945,51 @@ other disagreement (an accept or a leave against a reject or relate, or an
 accept against a leave) stamps `split` on the note and leaves the row for a
 human. `judge_mode: auto` goes one step further and folds a pair when two
 independent accepts from different models agree on a row that is not
-`low_differential` at mean >= `judge_accept_min_confidence` — the only path
-that ever auto-applies an accept. "Different" is decided on what the
+`low_differential` at mean >= `judge_accept_min_confidence` — with the
+tiebreak's 2-of-3 accept below, the only paths that ever auto-apply an
+accept. A `split` row gets a **third opinion** (schema v56,
+`judge_tiebreak_mode`, default `shadow`) on a later sweep, in a fresh batch,
+from `judge_third_model` — on the first opinion's endpoint unless
+`judge_third_url` points it at its own, whose bearer key is env-only
+(`PSEUDOLIFE_JUDGE_THIRD_API_KEY`). It is asked only when a third model is
+set (else the result counts `third_opinion_skipped_unconfigured`) and that
+name is neither the first's nor the second's (else
+`third_opinion_skipped_same_model`, no call). The note gains a
+`| 3rd (<model>): <verdict> <conf> [2-1 reject | 2-1 accept | no majority]`
+tail and the review payloads a `judge3` block. In `auto` a 2-of-3 majority
+applies through the two-vote gates: two reject-class votes at mean >=
+`judge_reject_min_confidence_2` reject (filing a relate vote's link as
+above, under `auto-reject` or `auto`), and two accepts at mean >=
+`judge_accept_min_confidence` fold only under `judge_mode: auto` on a row
+that is not `low_differential`, behind the same guards as the two-vote
+accept (dismissed pairs, analyzer rows, name vetoes, snapshot first). Both
+need the third vote served by a model other than both earlier ones
+(`tiebreak_refused_same_model` counts the refusals), and the second vote's
+served model known: a second endpoint that named no model leaves only the
+configured name, so the tiebreak is refused with the vote kept
+(`tiebreak_refused_unknown_second`; split rows recorded before v56 carry no
+served model and need a `review_rejudge`). Each later vote keeps the
+endpoint it came from on the row (`judgeN_served_model`, `judgeN_policy`),
+and a tiebreak decision records both, so reconsideration reopens it when
+either endpoint later reports serving another model. `tiebreak_applied`
+counts what it applied (also inside `auto_rejected` / `auto_accepted`). No
+ladder has measured the third vote yet, which is why it ships in shadow.
+**Promoting a mode keeps the votes.** `judge_tiebreak_mode` and
+`link_judge_two_vote` decide what applies, not what a judge says, so they
+are not part of the judging policy: switching either from `shadow` to
+`auto` keeps every recorded vote, and the next tick applies the gates to
+those votes with no model call. A row the gate refused for a lasting reason
+(no distinct model, an unknown second served model, a name veto, a variant
+conflict, an analyzer-filed row) is left for a human; a graph-snapshot
+failure instead sends the row back to its first opinion next tick. A
+recorded second or third vote whose endpoint has since reported serving
+another model is cleared and asked again, never applied (a cleared second
+vote takes the merge third with it).
+Switching back to `shadow` reopens none of the decisions `auto` took.
+Setting `judge_third_model` or `judge_third_url`, or changing
+`link_two_vote_min_confidence`, does change the policy: every queue's
+recorded verdicts are re-judged once and automatic decisions reconsidered.
+"Different" is decided on what the
 endpoints *served*, not the names they were asked for: a CLI shim answers a
 name outside its own family (a `claude-*` name on the Codex shim) with its
 launch default, which on 2026-09-03 turned a configured `claude-fable-5`
@@ -3966,13 +4009,31 @@ it, the rows keep waiting, and the result counts them
 2 of 129 verdicts on the 2026-08-16 ladder, so little is lost. The sweep logs the merge judge's
 result whenever a tick judged, reconsidered, took second opinions,
 refused a same-model reject, saw a served-model mismatch or lost its
-second endpoint. Since 2026-09-02 the other queues have judges too, each riding the
+second endpoint, and (v56) whenever it took third opinions, refused one or
+lost the third endpoint. Since 2026-09-02 the other queues have judges too, each riding the
 same sweep as a bounded batch, all but one defaulting to `shadow`: the
 **link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
 edges and applies rejects, each at its own gate — a *retype* is only
 recorded, with its corrected relation on the row, for a reviewer to apply,
 because the first ladder scored the judge's relation choice at 0/1; edges
-are reversible, which is why this queue may run auto), the **junk judge**
+are reversible, which is why this queue may run auto). Since schema v56 a
+link row whose first accept or reject sat below its 0.8 gate (none of the
+435 pending link rows on the live bank reached it on 2026-10-17) also gets
+a **second opinion** in a fresh batch from the merge judge's second model
+and endpoint (`link_judge_two_vote`, default `shadow`; asked only while
+`judge_second_opinion` is on, and skipped with no call when the
+configuration makes it the first model again). In `auto`, and only while
+`link_judge_mode` is `auto`, two agreeing accepts or rejects from different
+models at mean >= `link_two_vote_min_confidence` (0.7) apply; a retype never
+does. Rescoring the 2026-09-29 ladder's 37 link rows at that gate gave 7/7
+and 8/8 correct accepts and 6/6 and 7/7 correct rejects per replicate
+(`evals/results/queue-judge-ladder-20260929-{opus55,sonnet55}.json`), against
+3 accepts and 5 rejects at the single 0.8 gate; the panel is small and
+predates the current inflow, hence shadow. The row's `judge2` block (with
+`relation` for a retype) and a `| 2nd (<model>): … [agree|split]` note tail
+show it; the result counts `second_opinions`, `two_vote_applied` and
+`two_vote_refused_same_model`. While first opinions wait, these second
+opinions take at most half of each batch. Then the **junk judge**
 (`junk_judge_mode`; `auto` deletes only under an evidence bar), the
 **store-curation judge** (`curation_judge_mode`; `auto-distinct` applies
 the reversible dismissal, `auto` also retires — never deletes — a losing
@@ -4511,7 +4572,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v55). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v56). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -8548,7 +8609,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v55**; migrations are additive
+The current Postgres meta version is **v56**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -8609,6 +8670,7 @@ The milestones:
 | v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
 | v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry, which credential redeemed it, and `failed_attempts`, the wrong-code guesses that burn it at five) and `maintainer_nonces` (spent challenge nonces, kept 7 days past their payload's expiry so a clock step back cannot reopen one). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
 | v55 | Board session names (2026-10-05). `coordination_agents` gains `name` (what the board shows for the row), `name_source` (who set it: `agent` — `memory_agents(action="update", name=...)` — over `harness` — the shim, from the title Claude Code or Codex already shows for the session — over `title` — a `memory_session_title` rename of the row's session; `''` means unnamed), `name_set_at` and `harness_name` (the newest harness title, kept while an agent name outranks it), plus a partial index on `episode` for the retitle path. An unnamed row reads as its label and the first 8 characters of its id. Additive/idempotent: the columns are added only when missing. |
+| v56 | Review-queue judge votes (2026-10-17). `edge_proposals` gains `judge2_verdict`, `judge2_confidence`, `judge2_model`, `judged2_at`, `judge2_relation`, `judge2_served_model` and `judge2_policy`: the link judge's second opinion beside its first (`link_judge_two_vote`, shadow by default). `entity_proposals` gains `judge2_served_model`, `judge2_policy`, `judge3_verdict`, `judge3_confidence`, `judge3_model`, `judged3_at`, `judge3_served_model` and `judge3_policy`: the merge judge's third opinion on a row whose first two disagree (`judge_tiebreak_mode`, shadow by default), and for each later vote the model its endpoint reported serving and that endpoint's judging-policy fingerprint. Both proposal tables gain `judge_served_model`: the model the first opinion's endpoint reported serving (`judge_model` is the configured name; the served name lived only in the judging memo, which every refresh prunes to pending rows). `merge_decisions` gains `votes` (JSONB): room for the judge votes a merge or junk proposal carried when it was decided, kept on the FK-free audit row because an accepted merge CASCADE-deletes the proposal with its votes; nothing writes it yet. All nullable; NULL = not asked (or, for a served model, not reported; for `votes`, no snapshot), the pre-v56 behaviour. Additive/idempotent (`ADD COLUMN IF NOT EXISTS`). |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

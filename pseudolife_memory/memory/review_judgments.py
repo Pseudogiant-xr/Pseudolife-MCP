@@ -32,16 +32,34 @@ def fingerprint(value) -> str:
 # fingerprinted over the deep_dream config, so a new knob signed at its
 # unset default would change every fingerprint: the first tick after the
 # deploy would clear every recorded verdict and reopen every automatic
-# reject. Setting one changes the policy, as any other knob does.
-_SIGNED_WHEN_SET = ("judge_second_url",)
+# reject. Setting one changes the policy, as any other knob does. Each
+# maps to the values that mean "unset": its shipped default, and for a
+# string knob the Console's clear (None) too.
+_SIGNED_WHEN_SET = {
+    "judge_second_url": ("", None),
+    # v56 (2026-10-17): the link two-vote gate and the merge tiebreak's
+    # third model and endpoint.
+    "link_two_vote_min_confidence": (0.7,),
+    "judge_third_model": ("", None),
+    "judge_third_url": ("", None),
+}
+# v56 MODE knobs, never signed in any value. A mode decides what applies,
+# not what a judge says: signing one would make promoting it from shadow to
+# auto clear every queue's recorded votes, the very shadow evidence the
+# promotion rests on. The judge re-applies its gates to the recorded votes
+# instead. The flip side: going back from auto to shadow reopens none of
+# the decisions auto took.
+_NEVER_SIGNED = ("link_judge_two_vote", "judge_tiebreak_mode")
 
 
 def signed_deep_dream(deep_dream) -> dict:
     """The deep_dream config as review fingerprints sign it."""
     view = dataclasses.asdict(deep_dream)
-    for key in _SIGNED_WHEN_SET:
-        if not view.get(key):
-            view.pop(key, None)
+    for key, unset in _SIGNED_WHEN_SET.items():
+        if key in view and view[key] in unset:
+            view.pop(key)
+    for key in _NEVER_SIGNED:
+        view.pop(key, None)
     return view
 
 
@@ -83,6 +101,38 @@ def last_response_identity(service, queue, policy_fingerprint):
     """Historical observation for invalidation only; caller holds the lock."""
     saved = service._storage.get_meta("review_response_identity_v1_" + queue) or {}
     return saved.get("model") if saved.get("policy") == policy_fingerprint else None
+
+
+def vote_endpoint_moved(service, kind, row, opinion, cache=None) -> bool:
+    """Whether a later vote's endpoint (``opinion`` second or third, v56)
+    has since reported serving a model other than the one it served for
+    the vote: the last response identity recorded under the vote's policy
+    differs from its stored served model. Such a vote is not that
+    endpoint's opinion any more. Caller holds the lock; ``cache`` keeps
+    one meta read per (opinion, policy) across a queue."""
+    n = {"second": 2, "third": 3}[opinion]
+    policy = row.get(f"judge{n}_policy")
+    if not policy:
+        return False
+    key = (opinion, policy)
+    if cache is None or key not in (cache or {}):
+        now = last_response_identity(service, f"{kind}_{opinion}", policy)
+        if cache is not None:
+            cache[key] = now
+    else:
+        now = cache[key]
+    # Both names must be known: a reply that named no model leaves the
+    # vote's served model empty, and calling that moved would clear and
+    # re-ask it every tick; the unknown-identity refusal handles it instead.
+    stored = row.get(f"judge{n}_served_model")
+    return bool(now and stored and now != stored)
+
+
+def _without_tail(note, marker):
+    """``note`` cut before the structured ``| 2nd (`` / ``| 3rd (`` tail."""
+    note = note or ""
+    cut = note.find(" " + marker)
+    return note[:cut] if cut != -1 else note
 
 
 def candidate_inputs(service):
@@ -292,34 +342,94 @@ class ReviewJudgments:
                     self.storage.conn.execute(
                         "UPDATE edge_proposals SET judge_verdict=NULL, "
                         "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                        "judged_at=NULL, judge_relation=NULL "
+                        "judged_at=NULL, judge_relation=NULL, judge_served_model=NULL, "
+                        "judge2_verdict=NULL, judge2_confidence=NULL, "
+                        "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL, "
+                        "judge2_served_model=NULL, judge2_policy=NULL "
                         "WHERE id=%s AND status='pending'", (p["id"],))
                 else:
                     self.storage.conn.execute(
                         "UPDATE entity_proposals SET judge_verdict=NULL, "
                         "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                        "judged_at=NULL, judge2_verdict=NULL, judge2_confidence=NULL, "
-                        "judge2_model=NULL, judged2_at=NULL "
+                        "judged_at=NULL, judge_served_model=NULL, "
+                        "judge2_verdict=NULL, judge2_confidence=NULL, "
+                        "judge2_model=NULL, judged2_at=NULL, judge3_verdict=NULL, "
+                        "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL, "
+                        "judge2_served_model=NULL, judge2_policy=NULL, "
+                        "judge3_served_model=NULL, judge3_policy=NULL "
                         "WHERE id=%s AND status='pending'", (p["id"],))
                 for key in p:
                     if key.startswith("judge"):
                         p[key] = None
                 memo.pop(str(p["id"]), None)
             self.storage.set_meta(self.key, memo)
+            self._clear_moved_votes()
         return self.pending
 
-    def validate(self, batch, *, response_extractor=None, expected_model=None):
-        """Refresh one projection after inference; caller keeps the lock to apply."""
+    def _clear_moved_votes(self):
+        """Caller holds the lock, inside refresh(). Clears each later vote
+        (v56) whose endpoint has since served another model
+        (:func:`vote_endpoint_moved`), so it is asked again instead of
+        applied: a moved second vote takes the merge third with it, since
+        the third broke a tie between the first and that second vote. The
+        note loses the cleared votes' tails."""
+        cache = {}
+        for p in self.pending:
+            if not p.get("judge_verdict") or not p.get("judge2_verdict"):
+                continue
+            if vote_endpoint_moved(self.service, self.kind, p, "second", cache):
+                note = _without_tail(p.get("judge_note"), "| 2nd (")
+                if self.kind == "link":
+                    self.storage.conn.execute(
+                        "UPDATE edge_proposals SET judge2_verdict=NULL, "
+                        "judge2_confidence=NULL, judge2_model=NULL, judged2_at=NULL, "
+                        "judge2_relation=NULL, judge2_served_model=NULL, "
+                        "judge2_policy=NULL, judge_note=%s "
+                        "WHERE id=%s AND status='pending'", (note, p["id"]))
+                else:
+                    self.storage.conn.execute(
+                        "UPDATE entity_proposals SET judge2_verdict=NULL, "
+                        "judge2_confidence=NULL, judge2_model=NULL, judged2_at=NULL, "
+                        "judge2_served_model=NULL, judge2_policy=NULL, "
+                        "judge3_verdict=NULL, judge3_confidence=NULL, "
+                        "judge3_model=NULL, judged3_at=NULL, "
+                        "judge3_served_model=NULL, judge3_policy=NULL, judge_note=%s "
+                        "WHERE id=%s AND status='pending'", (note, p["id"]))
+                for key in list(p):
+                    if key.startswith(("judge2", "judged2", "judge3", "judged3")):
+                        p[key] = None
+                p["judge_note"] = note
+            elif (self.kind != "link" and p.get("judge3_verdict")
+                    and vote_endpoint_moved(self.service, self.kind, p, "third", cache)):
+                note = _without_tail(p.get("judge_note"), "| 3rd (")
+                self.storage.conn.execute(
+                    "UPDATE entity_proposals SET judge3_verdict=NULL, "
+                    "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL, "
+                    "judge3_served_model=NULL, judge3_policy=NULL, judge_note=%s "
+                    "WHERE id=%s AND status='pending'", (note, p["id"]))
+                for key in list(p):
+                    if key.startswith(("judge3", "judged3")):
+                        p[key] = None
+                p["judge_note"] = note
+
+    def validate(self, batch, *, response_extractor=None, expected_model=None,
+                 opinion="second"):
+        """Refresh one projection after inference; caller keeps the lock to apply.
+        ``opinion`` names a ``response_extractor``'s vote: ``second``, or
+        ``third`` for the merge tiebreak (v56). Each keeps its own response
+        identity, so reconsideration sees either endpoint change models."""
+        if opinion not in ("second", "third"):
+            raise ValueError("unsupported opinion")
         response = response_extractor or self.extractor
         response_policy = fingerprint(judging_policy(
             self.service, response, self.policy()["prompt"])) if response_extractor else self.request_policy
-        record_response_identity(self.service, self.kind + ("_second" if response_extractor else ""),
+        record_response_identity(self.service, self.kind + (f"_{opinion}" if response_extractor else ""),
                                  response_policy, getattr(response, "served_model", None))
+        self.second_policy = self.second_model = None
+        self.third_policy = self.third_model = None
         if response_extractor is not None:
-            self.second_policy = response_policy
-            self.second_model = getattr(response, "served_model", None)
-        else:
-            self.second_policy = self.second_model = None
+            setattr(self, opinion + "_policy", response_policy)
+            setattr(self, opinion + "_model", getattr(response, "served_model", None))
         expected_model = self.current_model if response_extractor is None else expected_model
         if expected_model and getattr(response, "served_model", None) != expected_model:
             self.valid, self.batch = set(), {}
@@ -333,11 +443,28 @@ class ReviewJudgments:
                       if signatures[str(p["id"])] == self.expected.get(str(p["id"]))}
         self.batch = {p["id"]: p for p in live}
 
-    def current(self, proposal, *, first_opinion=False):
+    def validate_recorded(self, batch):
+        """Re-sign ``batch`` for a decision taken from votes already on the
+        rows (v56: a mode promoted after the votes were recorded), with no
+        model call: only the evidence check, no response identity. Caller
+        keeps the lock to apply."""
+        self.second_policy = self.second_model = None
+        self.third_policy = self.third_model = None
+        ids = {p["id"] for p in batch}
+        pending = (self.storage.pending_proposals() if self.kind == "link"
+                   else self.storage.pending_entity_proposals())
+        live = [p for p in pending if p["id"] in ids]
+        signatures = self.signatures(live)
+        self.valid = {p["id"] for p in live
+                      if signatures[str(p["id"])] == self.expected.get(str(p["id"]))}
+        self.batch = {p["id"]: p for p in live}
+
+    def current(self, proposal, *, first_opinion=False, second_opinion=False):
         """``first_opinion``: a second vote pairs with the first verdict
         ``proposal`` was read with, so the live row must still carry it.
         The signatures strip every judge* key and cannot see requeue()
-        clear it during the second model call."""
+        clear it during the second model call. ``second_opinion``: a third
+        vote (v56) pairs with the second verdict too."""
         if proposal["id"] not in self.valid:
             return False
         if self.kind == "link":
@@ -348,6 +475,9 @@ class ReviewJudgments:
             return False
         if first_opinion and any(row.get(key) != proposal.get(key)
                                  for key in ("judge_verdict", "judge_confidence")):
+            return False
+        if second_opinion and any(row.get(key) != proposal.get(key)
+                                  for key in ("judge2_verdict", "judge2_confidence")):
             return False
         return True
 
@@ -447,14 +577,21 @@ def requeue(service, queue="all", limit=32):
                             storage.conn.execute(
                                 "UPDATE edge_proposals SET judge_verdict=NULL, "
                                 "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                                "judged_at=NULL, judge_relation=NULL "
+                                "judged_at=NULL, judge_relation=NULL, judge_served_model=NULL, "
+                                "judge2_verdict=NULL, judge2_confidence=NULL, "
+                                "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL, "
+                                "judge2_served_model=NULL, judge2_policy=NULL "
                                 "WHERE id=%s AND status='pending'", (p["id"],))
                         else:
                             storage.conn.execute(
                                 "UPDATE entity_proposals SET judge_verdict=NULL, "
                                 "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                                "judged_at=NULL, judge2_verdict=NULL, judge2_confidence=NULL, "
-                                "judge2_model=NULL, judged2_at=NULL "
+                                "judged_at=NULL, judge_served_model=NULL, "
+                                "judge2_verdict=NULL, judge2_confidence=NULL, "
+                                "judge2_model=NULL, judged2_at=NULL, judge3_verdict=NULL, "
+                                "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL, "
+                                "judge2_served_model=NULL, judge2_policy=NULL, "
+                                "judge3_served_model=NULL, judge3_policy=NULL "
                                 "WHERE id=%s AND status='pending'", (p["id"],))
                         memo.pop(str(p["id"]), None)
                     storage.set_meta(memo_key, memo)

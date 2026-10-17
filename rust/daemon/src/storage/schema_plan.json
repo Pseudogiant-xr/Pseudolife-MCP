@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "source_sha256": "66f71c0168f07c0cdfdada2033d3fb4b425f47d7a00500284a87ff9fcfa4ba2c",
-  "schema_version": 55,
+  "source_sha256": "d63be66143afb3ad9d4d83efee17be0913129917fc02fc3234a3a96e29d17f63",
+  "schema_version": 56,
   "embedding_dimension": 1024,
   "embedding_probe": "SELECT atttypmod FROM pg_attribute WHERE attrelid = to_regclass('public.entries') AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",
   "embedding_refusal": "Refusing to start: entries.embedding is vector({live_dim}) but this build's schema expects vector(1024). ensure_schema is additive-only and will NOT alter vector dimensions in place -- that would either half-migrate four tables at startup or write 1024-d vectors into a {live_dim}-d column, corrupting the bank. Run the human-gated migration first: `python ops/migrate_embeddings.py` (backs up, requires the daemon stopped, re-embeds every row through the real embedder, and moves all four embedding columns from vector({live_dim}) to vector(1024)). Never run the daemon against a bank you have not migrated.",
@@ -395,6 +395,96 @@
     },
     {
       "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge_served_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_verdict TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_confidence REAL",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judged2_at DOUBLE PRECISION",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_relation TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_served_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_policy TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge_served_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge2_served_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge2_policy TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge3_verdict TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge3_confidence REAL",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge3_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judged3_at DOUBLE PRECISION",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge3_served_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge3_policy TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE merge_decisions ADD COLUMN IF NOT EXISTS votes JSONB",
+      "parameters": []
+    },
+    {
+      "op": "sql",
       "sql": "\n            CREATE TABLE IF NOT EXISTS curation_judgments (\n              store      TEXT NOT NULL,\n              a_key      TEXT NOT NULL,\n              b_key      TEXT NOT NULL,\n              verdict    TEXT NOT NULL,\n              keep       TEXT,\n              fold       TEXT,\n              confidence REAL,\n              note       TEXT,\n              model      TEXT,\n              judged_at  DOUBLE PRECISION NOT NULL,\n              PRIMARY KEY (store, a_key, b_key)\n            )\n            ",
       "parameters": []
     },
@@ -422,7 +512,7 @@
       "op": "sql",
       "sql": "\n            INSERT INTO meta (key, value) VALUES ('schema_version', $1::jsonb)\n            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value\n            ",
       "parameters": [
-        "55"
+        "56"
       ]
     }
   ]
