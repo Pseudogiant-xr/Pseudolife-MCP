@@ -4,7 +4,7 @@ Python oracle: `pseudolife_memory/transfer_cli.py` (line numbers below), plus
 `backup_cli._default_data_dir` (180-188), `storage/embedded_pg.py`
 `available` (65-71) and `default_lite_data_dir` (74-96), and
 `storage/schema.py` `ensure_schema` (1145), `_backfill_trace_invalidations`
-(1072-1088), `_EXPECTED_EMBEDDING_DIM` (1069), `SCHEMA_META_VERSION` (20, = 55).
+(1072-1088), `_EXPECTED_EMBEDDING_DIM` (1069), `SCHEMA_META_VERSION` (20, = 56).
 Native leaf: `rust/shim/src/cli/transfer.rs` and `transfer/{export,import,json,sql}.rs`.
 
 ## Exact contract
@@ -76,7 +76,7 @@ Export (`perform_export` 205-244, `_export_table` 247-276):
 
 Import (`perform_import` 290-360). `ensure_schema` (316) is not run; it
 changes nothing only when all of these hold, and the leaf defers otherwise:
-`meta.schema_version` is 55 and every rostered table exists; `entries.embedding`
+`meta.schema_version` is 56 and every rostered table exists; `entries.embedding`
 is vector(1024) or undimensioned; the role owns (or has USAGE in the owner of)
 every public table and has CREATE on `public` (its ALTER/CREATE INDEX need
 ownership); and no `facts`/`world_facts`/`lessons`/`edges` row has a NULL
@@ -149,10 +149,10 @@ rows) and the deferral for a non-empty bank holding daemon-written edges.
 ## Deferrals and named substitutions
 
 - Roster guard: export defers before any effect when `meta.schema_version`
-  is not this build's (55), or when any public table is in neither
+  is not this build's (56), or when any public table is in neither
   `EXPORTED_TABLES` nor `EXCLUDED_TABLES`. Python exports whatever its own
-  build's roster names, so a native build paired with a newer bank (schema
-  v56 adds `reference_chunks`) would otherwise drop a table without a word.
+  build's roster names, so a native build paired with a newer bank (one
+  whose schema adds a table) would otherwise drop a table without a word.
   Cases `export-other-schema-defers`, `export-unknown-table-defers` (watched
   RED on the unguarded binary); mutants `transfer-schema-guard`,
   `transfer-roster-guard`.
@@ -169,9 +169,9 @@ rows) and the deferral for a non-empty bank holding daemon-written edges.
   import into a non-UTF8 server, a bank whose tables the role does not own,
   or a bank with NULL v11 stamps; DSN not understood or connection failure; an
   ensure_schema lock that the probe cannot take.
-- `import into a bank not at this build's schema (55) is deferred ... (needs
+- `import into a bank not at this build's schema (56) is deferred ... (needs
   native ensure_schema)`: target without the rostered tables, or with
-  schema_version other than 55 (older or newer).
+  schema_version other than 56 (older or newer).
 - `mode '<m>' on the embedded lite tier is deferred ... (needs native
   embedded_pg)`.
 - `import lost the answer to its COMMIT (native-pg-diagnostics); it may
