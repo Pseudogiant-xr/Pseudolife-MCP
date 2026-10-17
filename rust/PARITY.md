@@ -520,7 +520,7 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_reinstate | full | 4 | deferred |
 | memory_stats | core | 3 | ported |
 | memory_get | core | 3 | ported |
-| memory_reinforce | full | 4 | deferred |
+| memory_reinforce | full | 4 | ported |
 | memory_fact_get | minimal | 3 | ported |
 | memory_fact_set | minimal | 4 | ported |
 | memory_set_add | minimal | 4 | ported |
@@ -529,7 +529,7 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_history | full | 3 | deferred |
 | memory_world_set | core | 4 | deferred |
 | memory_world_search | core | 3 | deferred |
-| memory_outcome | minimal | 4 | deferred |
+| memory_outcome | minimal | 4 | ported |
 | memory_lesson_search | minimal | 3 | deferred |
 | memory_forget | full | 4 | deferred |
 | memory_dream | full | 4 | deferred |
