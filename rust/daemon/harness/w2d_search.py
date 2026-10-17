@@ -367,6 +367,30 @@ class McpTransportSession(Scenario):
                      [bearer(TOKEN), ("mcp-session-id", "")])]
 
 
+def normalize_stores(state: dict) -> dict:
+    """For a scenario that stores, w2e.py's rules: embeddings and surprises
+    leave the rows for a numeric comparison by entry id (returned), wall-clock
+    columns and meta keys become tokens, and episode ids are renamed by start
+    order (each daemon mints its own)."""
+    import w2e
+    numeric = w2e.extract_numeric(state)
+    emap = w2e.episode_map(state)
+    for qualified, t in state["rows"].items():
+        name = qualified.split(".", 1)[1]
+        for idx, col in enumerate(t["columns"]):
+            if (name, col) in w2e.CLOCK:
+                for row in t["rows"]:
+                    row[idx] = w2e._clock(row[idx])
+        if name == "meta":
+            for row in t["rows"]:
+                key, value = row
+                if key in w2e.META_CLOCK and isinstance(value, dict):
+                    row[1] = {k: (w2e._clock(x) if k in w2e.META_CLOCK[key] else x)
+                              for k, x in value.items()}
+        t["rows"] = [w2e._rename(r, emap) for r in t["rows"]]
+    return numeric
+
+
 def scrub_meta_clock(state: dict) -> None:
     """META_CLOCK keys inside meta values: a number becomes a token."""
     meta = state["rows"].get("public.meta") or {}
@@ -552,6 +576,7 @@ class McpStats(Scenario):
     searches that hit and miss, a get (a database read) and a store, with
     seeded graduation candidates, a community and a graph digest."""
     name = "mcp-stats"
+    stores = True
     mcp_extra_seed = True
     seed_flags = ("--mcp-extra", "--fact-extra", "--stats-extra")
     entry_ids = True
@@ -598,6 +623,7 @@ class McpStatsCapacity(Scenario):
     second store evicts a true drop (the counter, the durable record and
     last_true_drop)."""
     name = "mcp-stats-capacity"
+    stores = True
     require = {"stats.responses": 3, "stats.capacity_warning": 3, "stats.true_drops": 1,
                "stats.last_true_drop": 1}
 
@@ -1128,7 +1154,14 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         1 for c, r in zip(scn.cases(), py_seen)
         if c.get("nonempty") and ((r.get("json") or {}).get("entries") or []))
     cov_fail = unmet(cov, scn.require)
-    db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"])
+    numeric_diffs = []
+    if getattr(scn, "stores", False):
+        import w2e
+        tol = json.loads(w2e.TOLERANCE_FILE.read_text(encoding="utf-8"))
+        nums = {side: normalize_stores(states[side]) for side in sides}
+        if "python" in nums:
+            numeric_diffs = w2e.compare_numeric(nums["python"], nums["rust"], tol, {})
+    db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"]) + numeric_diffs
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
         (GOLDENS / f"{scn.name}.json").write_text(json.dumps({
