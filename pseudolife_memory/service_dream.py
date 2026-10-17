@@ -4047,20 +4047,26 @@ class DreamOps:
         """After an APPLIED automatic merge reject, file the relate vote's
         relation as a link proposal: a pending row the link judge settles
         through its own gates, never an edge. ``votes`` are the applying
-        ``(verdict, relation, confidence)``; of two relate votes the more
-        confident wins (the first on a tie). The relation reads FROM ->
+        ``(verdict, relation, confidence)``; of two typed relate votes the
+        more confident wins (the first on a tie). The relation reads FROM ->
         INTO as the judge was shown them (``e``, the signed pack, whose
         sides are oriented by current evidence), so the link is filed with
         that orientation, by entity id. Caller holds the lock.
 
         Files nothing when the relation is not a registered one (the filing
-        gate would silently file it as related-to), or when an edge or any
+        gate would silently file it as related-to), when it is the untyped
+        related-to itself, or when an edge or any
         link proposal already joins the pair: an accepted link changes both
         sides' evidence, so reconsideration reopens the reject and the
         judge sees the pair again — without this the loop would stack one
         edge per relation it names."""
+        # related-to names no relationship. Measured 2026-10-17 on the live
+        # bank: 274 of the 381 links this path had filed were related-to, and
+        # the link judge reached its 0.8 gate on none of them, so they only
+        # piled up in the review queue. It is dropped before choosing, so a
+        # typed vote still files even when a related-to vote was surer.
         relates = [(conf, rel) for verdict, rel, conf in votes
-                   if verdict == "relate" and rel]
+                   if verdict == "relate" and rel and rel != "related-to"]
         if not relates:
             return
         conf, relation = max(relates, key=lambda item: item[0])
