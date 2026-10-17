@@ -2396,8 +2396,10 @@ def memory_graph_review(
         return _noted(fn(ent, attr or None, decided_by="agent"),
                       _REVIEW_NOTES)
     handlers = {
-        "accept_link": service.graph_accept_proposal,
-        "reject_link": service.graph_reject_proposal,
+        "accept_link": lambda pid: service.graph_accept_proposal(
+            pid, decided_by="agent"),
+        "reject_link": lambda pid: service.graph_reject_proposal(
+            pid, decided_by="agent"),
         "accept_merge": lambda pid: service.graph_accept_entity_merge(
             pid, decided_by="agent"),
         "accept_junk": lambda pid: service.graph_accept_entity_junk(
