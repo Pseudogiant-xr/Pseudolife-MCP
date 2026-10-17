@@ -5,4 +5,5 @@
   untyped `related-to`, and the link judge reached its 0.8 gate on none of
   the 435, so they only accumulated in the review queue. The path now files
   typed relations only (`part-of`, `implements`, `uses` and the rest);
-  a `related-to` vote still rejects the merge but files nothing.
+  a `related-to` vote still rejects the merge but files nothing, and
+  when the other opinion named a typed relation, that one is filed.

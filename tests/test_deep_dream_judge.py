@@ -806,8 +806,9 @@ def test_an_untyped_related_to_relate_files_no_link(svc):
     """``related-to`` names no relationship: on the live bank (2026-10-17)
     274 of the 381 links the relate path had filed were related-to, and the
     link judge reached its 0.8 gate on none of them, so they only piled up
-    in the review queue. The merge is still rejected; a typed relation on
-    the other vote is still filed."""
+    in the review queue. The merge is still rejected, and a typed relation
+    on another proposal still files (the two-opinion mixed case is in
+    test_queue_judges_service.py)."""
     svc.config.memory.deep_dream.judge_mode = "auto-reject"
     plain = _propose(svc, "phi a", "phi b")
     typed = _propose(svc, "chi module", "chi concept")

@@ -4047,8 +4047,8 @@ class DreamOps:
         """After an APPLIED automatic merge reject, file the relate vote's
         relation as a link proposal: a pending row the link judge settles
         through its own gates, never an edge. ``votes`` are the applying
-        ``(verdict, relation, confidence)``; of two relate votes the more
-        confident wins (the first on a tie). The relation reads FROM ->
+        ``(verdict, relation, confidence)``; of two typed relate votes the
+        more confident wins (the first on a tie). The relation reads FROM ->
         INTO as the judge was shown them (``e``, the signed pack, whose
         sides are oriented by current evidence), so the link is filed with
         that orientation, by entity id. Caller holds the lock.
@@ -4060,18 +4060,17 @@ class DreamOps:
         sides' evidence, so reconsideration reopens the reject and the
         judge sees the pair again — without this the loop would stack one
         edge per relation it names."""
+        # related-to names no relationship. Measured 2026-10-17 on the live
+        # bank: 274 of the 381 links this path had filed were related-to, and
+        # the link judge reached its 0.8 gate on none of them, so they only
+        # piled up in the review queue. It is dropped before choosing, so a
+        # typed vote still files even when a related-to vote was surer.
         relates = [(conf, rel) for verdict, rel, conf in votes
-                   if verdict == "relate" and rel]
+                   if verdict == "relate" and rel and rel != "related-to"]
         if not relates:
             return
         conf, relation = max(relates, key=lambda item: item[0])
         if relation not in {r["name"] for r in self._graph.load_relations()}:
-            return
-        # related-to names no relationship. Measured 2026-10-17 on the live
-        # bank: 274 of the 381 links this path had filed were related-to, and
-        # the link judge reached its 0.8 gate on none of them, so they only
-        # piled up in the review queue. Typed relations still file.
-        if relation == "related-to":
             return
         g = self._storage.load_graph()
         disp = {ent["id"]: ent["display"] for ent in g["entities"]}
