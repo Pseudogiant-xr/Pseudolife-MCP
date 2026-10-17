@@ -68,6 +68,7 @@ CLOCK_COLUMNS = {
     ("relations", "created_at"): "clock: wall clock per row (storage/postgres.py:765)",
     ("slot_reads", "last_read_at"): "clock: wall clock per read",
     ("slot_reads", "first_read_at"): "clock: wall clock per read",
+    ("retrieval_uses", "created_at"): "clock: wall clock per use label (storage/postgres.py:2199)",
 }
 # Each deliberate break (rust/daemon/src/mutants.rs, `--features mutants`)
 # and the scenario that must catch it.
@@ -80,7 +81,11 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "mcp-search-no-dedup": "mcp-search", "mcp-search-no-correct-with": "mcp-search",
            "search-no-subtree": "mcp-search",
            "search-no-transport-session": "mcp-transport-session",
-           "mcp-recent-oldest-first": "mcp-recent"}
+           "mcp-recent-oldest-first": "mcp-recent",
+           "mcp-fact-get-no-alias-retry": "mcp-fact-get",
+           "mcp-fact-get-no-candidates": "mcp-fact-get",
+           "mcp-fact-get-no-lean": "mcp-fact-get",
+           "mcp-get-no-db-bump": "mcp-get", "mcp-get-no-use-credit": "mcp-get"}
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
 
 
@@ -165,11 +170,15 @@ def mcp_case(name, args, headers=(), tool="memory_search"):
             "path": f"mcp {tool} {json.dumps(args)}"}
 
 
-def mcp_call(port: int, c: dict, episode: str | None, transport: list | None = None) -> dict:
+def mcp_call(port: int, c: dict, episode: str | None, transport: list | None = None,
+             ids: dict | None = None) -> dict:
     """``transport`` collects each call's ``mcp-session-id``, so a retrieval
-    event attributed to it can be compared across the two daemons."""
+    event attributed to it can be compared across the two daemons. ``ids``
+    resolves entry-id placeholders such as "<traced-entry>"."""
     from mcp_wire import Session, sse_data
-    args = {k: ([episode if x == "<seed-episode>" else x for x in v] if isinstance(v, list) else v)
+    ids = ids or {}
+    args = {k: ([episode if x == "<seed-episode>" else x for x in v] if isinstance(v, list)
+                else ids.get(v, v) if isinstance(v, str) else v)
             for k, v in c["mcp"].items()}
     s = Session(port, TOKEN, dict(c["headers"]))
     if transport is not None:
@@ -441,10 +450,90 @@ class McpRecent(Scenario):
         ]
 
 
+class McpFactGet(Scenario):
+    """memory_fact_get over MCP (spec FG1-FG6): scalar and set slots, the
+    alias retry (a shadowed alias skipped), contenders, the correction hint,
+    candidates for an empty slot, entity_ref, re_verify and source_entries,
+    the lean projection and its verbose form; the slot_reads writes are in
+    the compared bank state."""
+    name = "mcp-fact-get"
+    mcp_extra_seed = True
+    seed_flags = ("--mcp-extra", "--fact-extra")
+    require = {"fact.records": 6, "fact.alias_hit": 1, "fact.set_removed": 1, "fact.empty_set": 1,
+               "fact.contenders": 1, "fact.correct_with": 3, "fact.candidates_same": 1,
+               "fact.candidates_similar": 1, "fact.entity_ref": 2, "fact.re_verify": 2,
+               "fact.source_entries": 1, "fact.misses": 2, "fact.checks": 4}
+
+    def cases(self):
+        def get(name, entity, attribute, check=None, **kw):
+            # ``check``: a predicate the oracle's answer must satisfy (coverage).
+            return dict(mcp_case(name, {"entity": entity, "attribute": attribute, **kw},
+                                 tool="memory_fact_get"), check=check)
+        return [
+            get("scalar hit, lean", "staging database", "host"),
+            get("scalar hit, verbose", "staging database", "host", verbose=True),
+            get("key is case- and separator-insensitive", "Staging_Database", "HOST"),
+            get("labelled constraint keeps its label", "daemon", "port"),
+            get("contested slot", "homelab box", "os"),
+            get("aged volatile fact", "deploy window", "weekday"),
+            get("stale fact", "build cache", "state"),
+            get("alias retry reaches the canonical's fact", "builder", "cpu"),
+            get("alias hit, verbose (source_entries, re_verify)", "builder", "cpu", verbose=True),
+            # Retried, the shadowed alias would serve the printer's firmware
+            # record; it may still be offered as a similar-slot candidate.
+            get("a shadowed alias is not retried", "builder", "firmware",
+                check=lambda b: b.get("record") is None),
+            get("set slot with a removed member", "dev box", "users"),
+            get("set slot, verbose", "dev box", "users", verbose=True,
+                check=lambda b: (b.get("record") or {}).get("re_verify") is True),
+            get("set slot under an alias", "builder", "users",
+                check=lambda b: (b.get("record") or {}).get("entity") == "dev-box"),
+            get("fully emptied set reads as empty", "dev box", "groups",
+                check=lambda b: (b.get("record") or {}).get("members") == []
+                and bool(b.get("candidates"))),
+            get("empty slot: same-entity and similar candidates", "dev box", "kernel"),
+            get("empty slot under an alias", "builder", "kernel"),
+            get("unknown entity", "quantum marmalade", "flavour"),
+        ]
+
+
+class McpGet(Scenario):
+    """memory_get over MCP (spec MG1-MG4): a found entry with the facts it
+    formed, the access-count bump (in the database and the next answer), a
+    superseded entry's replaced_by, faded ids, and the retrieval-use credit
+    for the search that served it in the same session."""
+    name = "mcp-get"
+    mcp_extra_seed = True
+    seed_flags = ("--mcp-extra", "--fact-extra")
+    entry_ids = True
+    require = {"get.found": 5, "get.faded": 2, "get.replaced_by": 1, "get.consolidated": 1,
+               "get.uses": 1}
+
+    def cases(self):
+        session = [("X-PL-Session", "sess-get")]
+
+        def get(name, entry_id, headers=()):
+            return mcp_case(name, {"entry_id": entry_id}, headers, tool="memory_get")
+        return [
+            mcp_case("search serves the successor in sess-get",
+                     {"query": "the extractor endpoint moved to the new GPU box", "top_k": 3},
+                     session),
+            get("get in the same session credits that search", "<successor-entry>", session),
+            get("again: the access count shows the first bump, no second credit",
+                "<successor-entry>", session),
+            get("superseded entry: replaced_by", "<superseded-entry>"),
+            get("traced entry: the facts it formed", "<traced-entry>"),
+            get("another session credits nothing", "<traced-entry>",
+                [("X-PL-Session", "sess-other")]),
+            get("unknown id", 987654321),
+            get("id past BIGINT", 2 ** 64),
+        ]
+
+
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
                                   LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
                                   PointerExpired, ConfidenceRounding, McpSearch,
-                                  McpTransportSession, McpRecent)}
+                                  McpTransportSession, McpRecent, McpFactGet, McpGet)}
 
 
 # ---- comparison ----------------------------------------------------------------------
@@ -479,6 +568,8 @@ def diff(a, b, path="", tol_keys=("score",)) -> list[str]:
             return [f"{path}: length python {len(a)} vs rust {len(b)}"]
         return [d for i, (x, y) in enumerate(zip(a, b)) for d in diff(x, y, f"{path}[{i}]", tol_keys)]
     if path.endswith(".age") and isinstance(a, str) and isinstance(b, str) and a != b:
+        if {a, b} == {"just now", "1 minute ago"}:
+            return []
         ma, mb = AGE_RE.fullmatch(a), AGE_RE.fullmatch(b)
         if ma and mb and ma.group(2) == mb.group(2) and abs(int(ma.group(1)) - int(mb.group(1))) <= 1:
             return []
@@ -508,7 +599,9 @@ def align_ties(py_list: list, rs_list: list, key: str = "id", *, ordered=False) 
         if j is None:
             continue
         span = [x.get("score", 0.0) for x in rs[i:j + 1]]
-        if max(span) - min(span) <= SCORE_TOL:
+        # A null score (a same-entity fact_get candidate) is an exact order,
+        # never a tie.
+        if all(isinstance(x, (int, float)) for x in span) and max(span) - min(span) <= SCORE_TOL:
             rs.insert(i, rs.pop(j))
             notes.append(f"tie swap at {i}: {want.get(key)}")
     return rs, notes
@@ -529,7 +622,7 @@ def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False) -> tuple
         a = dict(a, error="<free>")
         b = dict(b, error="<free>")
     if isinstance(a, dict) and isinstance(b, dict):
-        for k in ("entries", "cortex"):
+        for k in ("entries", "cortex", "candidates"):
             if isinstance(a.get(k), list) and isinstance(b.get(k), list):
                 key = "id" if k == "entries" else "value"
                 b = dict(b)
@@ -635,9 +728,41 @@ def coverage(responses: list[dict], state: dict) -> dict:
            "correct_with": {"contested": 0, "aged": 0}, "truncated": 0, "replaced_by": 0,
            "episode_filter_child_hit": 0,
            "recent": {"responses": 0, "replaced_by": 0, "superseded_verbose": 0, "probe_present": 0,
-                      "episode_hits": 0, "child_excluded": 0, "nonempty": 0}}
+                      "episode_hits": 0, "child_excluded": 0, "nonempty": 0},
+           "fact": {"records": 0, "alias_hit": 0, "set_removed": 0, "empty_set": 0, "contenders": 0,
+                    "correct_with": 0, "candidates_same": 0, "candidates_similar": 0,
+                    "entity_ref": 0, "re_verify": 0, "source_entries": 0, "misses": 0,
+                    "checks": 0},
+           "get": {"found": 0, "faded": 0, "replaced_by": 0, "consolidated": 0, "uses": 0}}
     for r in responses:
         body = r.get("json") or {}
+        if isinstance(body, dict) and ("found" in body or "faded" in body):
+            # A memory_get answer.
+            gc = cov["get"]
+            gc["found"] += body.get("found") is True
+            gc["faded"] += body.get("faded") is True
+            gc["replaced_by"] += "replaced_by" in body
+            gc["consolidated"] += bool(body.get("consolidated_into"))
+            continue
+        if isinstance(body, dict) and "record" in body and "contenders" in body:
+            # A memory_fact_get answer.
+            fc = cov["fact"]
+            rec = body.get("record")
+            fc["records"] += isinstance(rec, dict)
+            fc["misses"] += rec is None
+            if isinstance(rec, dict):
+                fc["alias_hit"] += rec.get("entity") == "dev box" and rec.get("attribute") == "cpu"
+                fc["set_removed"] += bool(rec.get("kind") == "set" and rec.get("removed"))
+                fc["empty_set"] += rec.get("kind") == "set" and not rec.get("members")
+                fc["correct_with"] += "correct_with" in rec
+                fc["re_verify"] += bool(rec.get("re_verify"))
+                fc["source_entries"] += bool(rec.get("source_entries"))
+            fc["contenders"] += bool(body.get("contenders"))
+            for c in body.get("candidates") or []:
+                fc["candidates_same"] += c.get("why") == "same_entity"
+                fc["candidates_similar"] += c.get("why") == "similar_slot"
+            fc["entity_ref"] += "entity_ref" in body
+            continue
         if isinstance(body, dict) and "count" in body and "query" not in body:
             # A memory_recent answer.
             rc = cov["recent"]
@@ -703,6 +828,11 @@ def coverage(responses: list[dict], state: dict) -> dict:
     return cov
 
 
+def state_rows(state: dict, table: str) -> list:
+    t = state["rows"].get(table) or {}
+    return t.get("rows") or []
+
+
 def unmet(cov: dict, require: dict[str, int]) -> list[str]:
     out = []
     for path, minimum in require.items():
@@ -735,7 +865,7 @@ def config_for(scn: Scenario) -> str:
     return head + dream + scn.config_yaml[len(head):]
 
 
-def derive_template(template: str, tag: str) -> str:
+def derive_template(template: str, tag: str, flags=("--mcp-extra",)) -> str:
     """The shared seed plus the MCP scenario's own facts, in a template of
     its own so the other scenarios (and their goldens) are unchanged."""
     name = pg.name(f"pl_cf_w2d_{tag}_t")
@@ -744,11 +874,24 @@ def derive_template(template: str, tag: str) -> str:
     dsn = pg.create(name, template=template)
     home = daemons.make_home(daemons.scratch_root(), f"w2d-{tag}-seed", None)
     env = daemons.base_env(home, {"PSEUDOLIFE_MCP_DATABASE_URL": dsn})
-    r = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), "--mcp-extra"],
+    r = subprocess.run([sys.executable, str(HERE / "w2d_seed.py"), *flags],
                        env=dict(env, PYTHONPATH=str(REPO)), capture_output=True, text=True, timeout=900)
     if r.returncode != 0:
         raise RuntimeError(f"mcp seeding failed: {r.stderr[-3000:]}")
     return name
+
+
+def entry_placeholders(template: str) -> dict:
+    """Entry ids memory_get cases name, read from the template both arms
+    copy: a traced entry, the superseded seed entry and its successor."""
+    import psycopg
+
+    from w2d_seed import SUPERSEDED
+    with psycopg.connect(pg.dsn(template)) as conn:
+        one = lambda sql, *a: (conn.execute(sql, a).fetchone() or [None])[0]  # noqa: E731
+        return {"<traced-entry>": one("SELECT min(entry_id) FROM memory_traces"),
+                "<superseded-entry>": one("SELECT id FROM entries WHERE text = %s", SUPERSEDED[0]),
+                "<successor-entry>": one("SELECT id FROM entries WHERE text = %s", SUPERSEDED[1])}
 
 
 def seed_episode(template: str) -> str | None:
@@ -766,8 +909,12 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             # Its template is derived through the Python daemon; a recording
             # replayed against the base template would differ by design.
             raise SystemExit(f"{scn.name} runs live only (derived template)")
-        derived = template = derive_template(template, tag)
+        derived = template = derive_template(template, tag,
+                                             getattr(scn, "seed_flags", ("--mcp-extra",)))
     episode = seed_episode(template) if mode != "golden" else None
+    ids = entry_placeholders(template) if getattr(scn, "entry_ids", False) else {}
+    if ids and None in ids.values():
+        raise RuntimeError(f"entry placeholders missing from the template: {ids}")
     if any("mcp" in c and "<seed-episode>" in json.dumps(c["mcp"]) for c in scn.cases()) \
             and episode is None:
         raise RuntimeError("the seeded session episode is missing from the template")
@@ -806,9 +953,9 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
                              "rust_status": None, "diffs": [], "notes": [], "_python": None})
                 continue
             if "mcp" in c:
-                py_r = (mcp_call(procs["python"].port, c, episode, transport["python"])
+                py_r = (mcp_call(procs["python"].port, c, episode, transport["python"], ids)
                         if "python" in procs else golden["responses"][i])
-                rs_r = mcp_call(procs["rust"].port, c, episode, transport["rust"])
+                rs_r = mcp_call(procs["rust"].port, c, episode, transport["rust"], ids)
             else:
                 py_r = (call(procs["python"].port, "GET", c["path"], c["headers"]) if "python" in procs
                         else golden["responses"][i])
@@ -841,6 +988,17 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
                                                  ordered=c.get("tool") == "memory_recent")
     cov = coverage(py_seen, py_state)
+    # The credit under test: the successor entry, labelled by a get (not a
+    # stray label the warmup search's pointer session could earn).
+    uses_t = py_state["rows"].get("public.retrieval_uses") or {}
+    cols = uses_t.get("columns") or []
+    cov["get"]["uses"] = sum(
+        1 for row in state_rows(py_state, "public.retrieval_uses")
+        if ids and dict(zip(cols, row)).get("entry_id") == ids.get("<successor-entry>")
+        and dict(zip(cols, row)).get("used_via") == "get")
+    cov["fact"]["checks"] = sum(
+        1 for c, r in zip(scn.cases(), py_seen)
+        if c.get("check") and c["check"](r.get("json") or {}))
     cov["recent"]["nonempty"] = sum(
         1 for c, r in zip(scn.cases(), py_seen)
         if c.get("nonempty") and ((r.get("json") or {}).get("entries") or []))

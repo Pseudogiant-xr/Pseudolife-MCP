@@ -27,6 +27,7 @@ use yaml_rust2::scanner::{Marker, TScalarStyle};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub memory: MemoryConfig,
+    pub time: TimeConfig,
     pub embedding: EmbeddingConfig,
     pub coordination: CoordinationConfig,
     pub updates: UpdatesConfig,
@@ -57,6 +58,9 @@ pub struct MemoryConfig {
     /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
     /// whether the sweep thread starts and parses its interval.
     pub retrieval_log_enabled: bool,
+    /// `memory.retrieval_log.use_window_seconds`: how far back a dereference
+    /// credits the search that served it.
+    pub retrieval_log_use_window_seconds: f64,
     pub retrieval_retention_days: f64,
     pub compaction_enabled: bool,
     pub compaction_keep_per_slot: i64,
@@ -109,6 +113,19 @@ impl Default for CortexConfig {
             read_tracking: true,
             pin_constraints: true,
         }
+    }
+}
+
+/// `TimeConfig` (utils/config.py:1308): `relative_age` adds the human `age`
+/// to served canonical facts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimeConfig {
+    pub relative_age: bool,
+}
+
+impl Default for TimeConfig {
+    fn default() -> Self {
+        TimeConfig { relative_age: true }
     }
 }
 
@@ -425,6 +442,7 @@ impl Default for MemoryConfig {
             mcp: McpConfig::default(),
             traces_enabled: true,
             retrieval_log_enabled: true,
+            retrieval_log_use_window_seconds: 3600.0,
             retrieval_retention_days: 365.0,
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
@@ -517,6 +535,7 @@ impl Default for Config {
             coordination: CoordinationConfig::default(),
             updates: UpdatesConfig::default(),
             dream: DreamConfig::default(),
+            time: TimeConfig::default(),
         }
     }
 }
@@ -1310,6 +1329,8 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(r) = section(m, "retrieval_log", "memory.")? {
             memory.retrieval_log_enabled = want_bool(r, "enabled", "memory.retrieval_log", true)?;
+            memory.retrieval_log_use_window_seconds =
+                want_float(r, "use_window_seconds", "memory.retrieval_log", 3600.0)?;
             memory.retrieval_retention_days =
                 want_float(r, "retention_days", "memory.retrieval_log", 365.0)?;
         }
@@ -1384,6 +1405,13 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     }
     if let Some(u) = section(entries, "updates", "")? {
         config.updates = read_updates(u)?;
+    }
+    // `_dict_to_dataclass(TimeConfig, raw["time"])`: no type check, so the
+    // value counts by Python truthiness where it is read.
+    if let Some(t) = section(entries, "time", "")?
+        && let Some(v) = lookup(t, "relative_age")
+    {
+        config.time.relative_age = v.truthy();
     }
     Ok(config)
 }
@@ -1806,6 +1834,14 @@ mod tests {
     //! through `MemoryService(data_dir=..., config_path=...)` at master
     //! 35b8f5d2 (load_config + the reference write + the MCP overlay).
     use super::*;
+
+    #[test]
+    fn relative_age_is_read_by_python_truthiness() {
+        assert!(cfg("").time.relative_age);
+        assert!(!cfg("time:\n  relative_age: false\n").time.relative_age);
+        assert!(!cfg("time:\n  relative_age: null\n").time.relative_age);
+        assert!(cfg("time:\n  relative_age: yes please\n").time.relative_age);
+    }
 
     fn cfg(text: &str) -> Config {
         match load_str(text) {
