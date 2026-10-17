@@ -271,6 +271,104 @@ impl CortexStore {
             .unwrap_or_default()
     }
 
+    /// `lookup(entity, attribute)` (`memory/cortex.py:1519`): the slot's one
+    /// current scalar record.
+    pub fn lookup(&self, entity: &str, attribute: &str) -> Option<&CortexRecord> {
+        let i = *self.current.get(&slot_key(entity, attribute))?;
+        let r = &self.records[i];
+        (r.status == "current").then_some(r)
+    }
+
+    /// `slot_kind` (`memory/cortex.py:1193`): `"scalar"` with a current
+    /// scalar, `"set"` with current members or any historical member row,
+    /// else None.
+    pub fn slot_kind(&self, entity: &str, attribute: &str) -> Option<&'static str> {
+        let key = slot_key(entity, attribute);
+        if self.current.contains_key(&key) {
+            return Some("scalar");
+        }
+        let has_members = self.members.get(&key).is_some_and(|v| !v.is_empty());
+        if has_members
+            || self
+                .records
+                .iter()
+                .any(|r| r.key == key && r.kind == "member")
+        {
+            return Some("set");
+        }
+        None
+    }
+
+    /// `members(entity, attribute, include_removed=True)`: every member row
+    /// at the slot, in record order.
+    pub fn member_rows(&self, entity: &str, attribute: &str) -> Vec<&CortexRecord> {
+        let key = slot_key(entity, attribute);
+        self.records
+            .iter()
+            .filter(|r| r.key == key && r.kind == "member")
+            .collect()
+    }
+
+    /// `candidates_for` (`memory/cortex.py:1701-1737`): nearby slots for an
+    /// empty lookup. Same-entity current records at other attributes, most
+    /// recently asserted or confirmed first (`score` null, `why`
+    /// "same_entity"), then embedding-similar slots above `min_score`
+    /// (`score` the cosine to four places, `why` "similar_slot"), at most
+    /// `top_k`; never the queried slot.
+    pub fn candidates_for(
+        &self,
+        entity: &str,
+        attribute: &str,
+        query: Option<&[f32]>,
+        top_k: usize,
+        min_score: f64,
+    ) -> Vec<serde_json::Value> {
+        let (key_ent, key_attr) = slot_key(entity, attribute);
+        let mut same: Vec<&CortexRecord> = self
+            .current_records()
+            .filter(|r| r.key.0 == key_ent && r.key.1 != key_attr)
+            .collect();
+        // Stable, by -max(asserted_at, last_confirmed).
+        same.sort_by(|a, b| {
+            let (x, y) = (
+                a.asserted_at.max(a.last_confirmed),
+                b.asserted_at.max(b.last_confirmed),
+            );
+            y.total_cmp(&x)
+        });
+        let mut out: Vec<serde_json::Value> = same
+            .iter()
+            .take(top_k)
+            .map(|r| {
+                serde_json::json!({"entity": r.entity, "attribute": r.attribute, "value": r.value,
+                                   "score": null, "why": "same_entity"})
+            })
+            .collect();
+        if let Some(q) = query
+            && out.len() < top_k
+        {
+            let mut seen: std::collections::HashSet<SlotKey> =
+                same.iter().map(|r| r.key.clone()).collect();
+            seen.insert((key_ent, key_attr));
+            for (i, s) in self.search(q, top_k * 2, min_score) {
+                let r = &self.records[i];
+                if !seen.insert(r.key.clone()) {
+                    continue;
+                }
+                out.push(
+                    serde_json::json!({"entity": r.entity, "attribute": r.attribute,
+                                            "value": r.value,
+                                            "score": crate::search::round4(s),
+                                            "why": "similar_slot"}),
+                );
+                if out.len() >= top_k {
+                    break;
+                }
+            }
+        }
+        out
+    }
+
     /// `contenders_for(entity, attribute)`: active (`contested`) records at
     /// the slot, in record order.
     pub fn contenders_for(&self, entity: &str, attribute: &str) -> Vec<&CortexRecord> {
@@ -431,6 +529,92 @@ async fn hydrate_locked(client: &Client, dim: usize) -> Result<CortexStore> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    fn indexed(records: Vec<CortexRecord>) -> CortexStore {
+        let mut s = CortexStore {
+            records,
+            ..Default::default()
+        };
+        s.reindex();
+        s
+    }
+
+    fn member(entity: &str, attribute: &str, value: &str, status: &str) -> CortexRecord {
+        let mut r = rec(entity, attribute, value);
+        r.kind = "member".into();
+        r.status = status.into();
+        r
+    }
+
+    #[test]
+    fn lookup_is_case_and_separator_insensitive_and_current_only() {
+        let mut old = rec("Dev Box", "OS", "Debian 12");
+        old.status = "superseded".into();
+        let s = indexed(vec![old, rec("Dev Box", "OS", "Debian 13")]);
+        assert_eq!(
+            s.lookup("dev_box", "os").map(|r| r.value.as_str()),
+            Some("Debian 13")
+        );
+        assert!(s.lookup("dev box", "kernel").is_none());
+    }
+
+    #[test]
+    fn slot_kind_follows_python() {
+        let s = indexed(vec![
+            rec("box", "os", "debian"),
+            member("box", "users", "alice", "current"),
+            member("box", "groups", "admins", "removed"),
+        ]);
+        assert_eq!(s.slot_kind("box", "os"), Some("scalar"));
+        assert_eq!(s.slot_kind("box", "users"), Some("set"));
+        // Only a removed member row: still a set slot (historical members).
+        assert_eq!(s.slot_kind("box", "groups"), Some("set"));
+        assert_eq!(s.slot_kind("box", "kernel"), None);
+        let rows: Vec<&str> = s
+            .member_rows("box", "groups")
+            .iter()
+            .map(|r| r.value.as_str())
+            .collect();
+        assert_eq!(rows, ["admins"]);
+        assert!(s.members("box", "groups").is_empty());
+    }
+
+    #[test]
+    fn candidates_put_same_entity_first_then_similar_slots() {
+        let mut older = rec("box", "kernel", "6.1");
+        older.last_confirmed = 500.0;
+        older.asserted_at = 500.0;
+        let mut newer = rec("box", "shell", "zsh");
+        newer.last_confirmed = 2000.0;
+        let mut similar = rec("laptop", "os", "macOS");
+        similar.embedding = Some(vec![1.0, 0.0]);
+        similar.refresh_derived();
+        let mut far = rec("printer", "toner", "low");
+        far.embedding = Some(vec![0.0, 1.0]);
+        far.refresh_derived();
+        let s = indexed(vec![older, newer, rec("box", "os", "debian"), similar, far]);
+        let got = s.candidates_for("box", "os", Some(&[1.0, 0.0]), 5, 0.35);
+        let slots: Vec<(String, String)> = got
+            .iter()
+            .map(|c| {
+                (
+                    c["attribute"].as_str().unwrap().into(),
+                    c["why"].as_str().unwrap().into(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            slots,
+            [
+                ("shell".to_string(), "same_entity".to_string()),
+                ("kernel".to_string(), "same_entity".to_string()),
+                ("os".to_string(), "similar_slot".to_string()),
+            ]
+        );
+        assert_eq!(got[0]["score"], serde_json::Value::Null);
+        assert_eq!(got[2]["entity"], "laptop");
+        assert_eq!(got[2]["score"], serde_json::json!(1.0));
+    }
 
     pub(crate) fn rec(entity: &str, attribute: &str, value: &str) -> CortexRecord {
         let mut r = CortexRecord {

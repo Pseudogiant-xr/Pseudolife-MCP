@@ -228,6 +228,17 @@ fn opt_f64(x: Option<f64>) -> Value {
 /// `_cortex_record_to_dict(rec, relative_age=True, stale_policy)`
 /// (`service.py:297`).
 pub fn record_to_dict(r: &CortexRecord, stale_policy: &str, now: f64) -> Map<String, Value> {
+    record_to_dict_age(r, stale_policy, now, true)
+}
+
+/// `_cortex_record_to_dict` with `relative_age` as given: lookup and
+/// history pass `config.time.relative_age`; search always serves `age`.
+pub fn record_to_dict_age(
+    r: &CortexRecord,
+    stale_policy: &str,
+    now: f64,
+    relative_age: bool,
+) -> Map<String, Value> {
     let mut d = Map::new();
     d.insert("entity".into(), json!(r.entity));
     d.insert("attribute".into(), json!(r.attribute));
@@ -266,8 +277,10 @@ pub fn record_to_dict(r: &CortexRecord, stale_policy: &str, now: f64) -> Map<Str
             d.insert(k.into(), json!(s));
         }
     }
-    let age_anchor = r.tx_time.filter(|&t| t != 0.0).unwrap_or(r.asserted_at);
-    d.insert("age".into(), json!(relative_time(age_anchor, now)));
+    if relative_age {
+        let age_anchor = r.tx_time.filter(|&t| t != 0.0).unwrap_or(r.asserted_at);
+        d.insert("age".into(), json!(relative_time(age_anchor, now)));
+    }
     apply_stale_policy(&mut d, stale_policy);
     d
 }
@@ -289,7 +302,7 @@ fn contender_fields(d: &mut Map<String, Value>, conts: &[&CortexRecord]) {
 // ---- storage reads and writes (storage/postgres.py) ----
 
 /// `traces_for_slot` (`storage/postgres.py:3951`).
-async fn traces_for_slot(db: &Client, key: &SlotKey) -> Result<Vec<i64>> {
+pub(crate) async fn traces_for_slot(db: &Client, key: &SlotKey) -> Result<Vec<i64>> {
     Ok(db
         .query(
             "SELECT entry_id FROM memory_traces \
@@ -302,14 +315,14 @@ async fn traces_for_slot(db: &Client, key: &SlotKey) -> Result<Vec<i64>> {
         .collect())
 }
 
-struct Invalidation {
-    source_entry_id: i64,
-    invalidated_at: f64,
-    cause: String,
+pub(crate) struct Invalidation {
+    pub(crate) source_entry_id: i64,
+    pub(crate) invalidated_at: f64,
+    pub(crate) cause: String,
 }
 
 /// `trace_invalidations_for_slots` (`storage/postgres.py:3987`).
-async fn trace_invalidations_for_slots(
+pub(crate) async fn trace_invalidations_for_slots(
     db: &Client,
     slots: &[SlotKey],
 ) -> Result<HashMap<SlotKey, Vec<Invalidation>>> {
@@ -344,7 +357,7 @@ async fn trace_invalidations_for_slots(
 
 /// `bump_slot_reads` (`storage/postgres.py:4253`): every slot upserted
 /// together, stamped `now`.
-async fn bump_slot_reads(db: &Client, slots: &[SlotKey], now: f64) -> Result<()> {
+pub(crate) async fn bump_slot_reads(db: &Client, slots: &[SlotKey], now: f64) -> Result<()> {
     if slots.is_empty() {
         return Ok(());
     }
@@ -740,7 +753,7 @@ async fn pin_constraint_facts(
 /// `_annotate_evidence_supersession` -> `_annotate_trace_invalidations`
 /// (`service.py:4282, 4312`): flag a served fact whose source memory was
 /// corrected after the fact was last confirmed.
-async fn annotate_evidence_supersession(
+pub(crate) async fn annotate_evidence_supersession(
     db: &Client,
     rows: &mut [Map<String, Value>],
     knobs: &CortexKnobs,
