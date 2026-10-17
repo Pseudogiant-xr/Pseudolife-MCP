@@ -107,9 +107,11 @@ def compute_judge_agreement(merge_rows: Iterable[dict], link_rows: Iterable[dict
     proposal, a name veto and a variant conflict are left for a human
     whatever the votes say, so they are never counted as what ``auto``
     would have applied. Not replayed: the merge ``low_differential``
-    exclusion and the dismissed-pair check (both computed from the live
-    graph at judging time), so ``agreed_two.accept`` and
-    ``majority_three.accept`` still count a few rows ``auto`` would skip;
+    exclusion (computed from the evidence at judging time), so
+    ``agreed_two.accept`` and ``majority_three.accept`` still count a few
+    rows ``auto`` would skip; and the dismissed-pair check (``auto``
+    closes such a row as a reject, and a human reject dismisses the pair
+    itself, so it cannot be told apart afterwards);
     and a decided link row goes with either endpoint when a later merge or
     junk delete takes it (``edge_proposals`` cascades), so links are scored
     while both endpoints exist."""

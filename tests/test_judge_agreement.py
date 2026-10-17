@@ -232,6 +232,15 @@ def test_accept_pairs_replay_the_live_gates_row_refusals():
     as what ``auto`` would have applied. The audit row carries the reason
     and both names, so the report replays those three; the opinions are
     still scored, and the reject side is untouched."""
+    from pseudolife_memory.memory.graph_consolidation import variant_conflict
+    from pseudolife_memory.memory.graph_review import merge_veto
+    # Each guard on its own: the veto pair carries no variant tokens and
+    # the variant pair is not vetoed, so dropping either guard shows.
+    assert merge_veto("Tri-Serpent", "tri-serpent-overnight-build-20260807")
+    assert not variant_conflict("Tri-Serpent",
+                                "tri-serpent-overnight-build-20260807")
+    assert merge_veto("model-Q4_K_M", "model-Q4_K_XL") is None
+    assert variant_conflict("model-Q4_K_M", "model-Q4_K_XL")
     two = {"judge": _v("accept", 0.9, "m1", served="s1"),
            "judge2": _v("accept", 0.9, "m2", served="s2")}
     three = {**two, "judge3": _v("accept", 0.9, "m3", served="s3")}
@@ -240,9 +249,8 @@ def test_accept_pairs_replay_the_live_gates_row_refusals():
         _merge("accepted", "human", two, reason="analyzer-duplicate:name"),
         _merge("accepted", "human", three, entity="Tri-Serpent",
                into="tri-serpent-overnight-build-20260807"),    # event-slug veto
-        _merge("accepted", "human", three,
-               entity="gemma-4-E2B-it-qat-UD-Q4_K_XL",
-               into="gemma-4-E4B-it-qat-UD-Q4_K_XL"),           # variant conflict
+        _merge("accepted", "human", three, entity="model-Q4_K_M",
+               into="model-Q4_K_XL"),                           # variant conflict
         # Reject pairs are not gated by the row's shape.
         _merge("rejected", "human", {"judge": _v("reject", 0.9, "m1", served="s1"),
                                      "judge2": _v("reject", 0.9, "m2", served="s2")},

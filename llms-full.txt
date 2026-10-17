@@ -4151,9 +4151,11 @@ re-asks it. The accept side also replays, from the audit row, the
 refusals the live accept path applies whatever the votes say: an
 analyzer-filed proposal, a name veto and a variant conflict are left for
 a human, so they never count as what `auto` would have applied. Not
-replayed: the `low_differential` exclusion and the dismissed-pair check
-(both computed from the live graph at judging time), so the accept side
-still counts a few rows `auto` would skip; and a decided link row goes
+replayed: the `low_differential` exclusion (computed from the evidence
+at judging time), so the accept side still counts a few rows `auto`
+would skip; the dismissed-pair check (`auto` closes such a row as a
+reject, and a human reject dismisses the pair itself, so it cannot be
+told apart afterwards); and a decided link row goes
 with either endpoint when a later merge or junk delete takes it, so
 links are scored while both endpoints exist. `scored` counts the decisions read, `labels` who
 took them; decisions the judges applied themselves (`dream-judge`,
