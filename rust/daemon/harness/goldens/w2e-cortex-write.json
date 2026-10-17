@@ -470,7 +470,11 @@
      "user"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "pipeline",
@@ -501,7 +505,11 @@
      "user"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "pipeline",
@@ -530,7 +538,11 @@
      "action"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -559,7 +571,11 @@
      "user"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -589,7 +605,11 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -618,7 +638,11 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -648,7 +672,11 @@
      "user"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -677,7 +705,11 @@
      "user"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -706,7 +738,11 @@
      "action"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -735,7 +771,11 @@
      "action"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -764,7 +804,11 @@
      "action"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -793,7 +837,11 @@
      "action"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "svc",
@@ -822,7 +870,11 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "svc",
@@ -851,7 +903,11 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "printer",
@@ -880,9 +936,58 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    }
   ],
+  "current": [
+   [
+    [
+     "db",
+     "host"
+    ],
+    7
+   ],
+   [
+    [
+     "db",
+     "port"
+    ],
+    11
+   ],
+   [
+    [
+     "dev-box",
+     "os"
+    ],
+    0
+   ],
+   [
+    [
+     "pipeline",
+     "schedule"
+    ],
+    1
+   ],
+   [
+    [
+     "printer",
+     "toner"
+    ],
+    14
+   ],
+   [
+    [
+     "svc",
+     "state"
+    ],
+    13
+   ]
+  ],
+  "members": [],
   "log": [
    {
     "entity": "pipeline",
@@ -1191,7 +1296,11 @@
      "user"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -1220,9 +1329,23 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    }
   ],
+  "current": [
+   [
+    [
+     "db",
+     "host"
+    ],
+    1
+   ]
+  ],
+  "members": [],
   "log": [
    {
     "entity": "db",
@@ -1412,7 +1535,11 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -1441,7 +1568,11 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -1470,7 +1601,11 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    },
    {
     "entity": "db",
@@ -1499,9 +1634,23 @@
      "agent"
     ],
     "provenance": [],
-    "slot_embedding": true
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
    }
   ],
+  "current": [
+   [
+    [
+     "db",
+     "host"
+    ],
+    3
+   ]
+  ],
+  "members": [],
   "log": [
    {
     "entity": "db",
@@ -1544,6 +1693,7720 @@
    [
     "db",
     "host"
+   ]
+  ],
+  "meta_dirty": true
+ },
+ "members": {
+  "config": {
+   "protect_provenance": true,
+   "supersede_confidence_margin": 0.15,
+   "reinforce_rate": 0.34
+  },
+  "writes": [
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Jellyfin",
+    "support": "user",
+    "confidence": 0.9,
+    "now": 400.0,
+    "hlc": [
+     400000,
+     0
+    ],
+    "authority": {
+     "set": "directive"
+    },
+    "distortion_tolerance": {
+     "set": "constraint"
+    },
+    "freshness_class": "volatile",
+    "writer_id": "writer-a",
+    "session_id": "s0",
+    "embedding": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Pi-hole",
+    "support": "agent",
+    "confidence": 0.8,
+    "now": 401.0,
+    "hlc": [
+     401000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null,
+    "embedding": [
+     0.0,
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "op": "add",
+    "entity": "home lab",
+    "attribute": "Services",
+    "value": "Pi-hole",
+    "embedding": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 402.0,
+    "hlc": [
+     402000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": "s1"
+   },
+   {
+    "op": "add",
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": " JELLYFIN ",
+    "embedding": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 403.0,
+    "hlc": [
+     403000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Jellyfin streaming",
+    "embedding": [
+     0.95,
+     0.3122499,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 404.0,
+    "hlc": [
+     404000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Nextcloud",
+    "embedding": [
+     0.6,
+     0.0,
+     0.8
+    ],
+    "confidence": 0.7,
+    "now": 405.0,
+    "hlc": [
+     405000,
+     0
+    ],
+    "writer_id": null,
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "   ",
+    "embedding": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 406.0,
+    "hlc": [
+     406000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "",
+    "embedding": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 406.5,
+    "hlc": [
+     406500,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "remove",
+    "entity": "HOME LAB",
+    "attribute": "services",
+    "value": "nextcloud ",
+    "now": 407.0
+   },
+   {
+    "op": "remove",
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Nextcloud",
+    "now": 408.0
+   },
+   {
+    "op": "remove",
+    "entity": "nobody",
+    "attribute": "things",
+    "value": "x",
+    "now": 409.0
+   },
+   {
+    "op": "add",
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Nextcloud",
+    "embedding": [
+     0.6,
+     0.0,
+     0.8
+    ],
+    "confidence": 0.7,
+    "now": 410.0,
+    "hlc": [
+     410000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Zero",
+    "embedding": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 411.0,
+    "hlc": [
+     411000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "garage",
+    "attribute": "tools",
+    "value": "drill",
+    "support": "agent",
+    "confidence": 0.6,
+    "now": 412.0,
+    "hlc": [
+     412000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null,
+    "embedding": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "op": "add",
+    "entity": "Garage",
+    "attribute": "Tools",
+    "value": "Drill",
+    "embedding": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 413.0,
+    "hlc": [
+     413000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "remove",
+    "entity": "garage",
+    "attribute": "tools",
+    "value": "drill",
+    "now": 414.0
+   },
+   {
+    "entity": "garage",
+    "attribute": "tools",
+    "value": "saw",
+    "support": "agent",
+    "confidence": 0.6,
+    "now": 415.0,
+    "hlc": [
+     415000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "results": [
+   {
+    "action": "inserted",
+    "record": 0
+   },
+   {
+    "action": "contested",
+    "record": 1
+   },
+   {
+    "action": "member_added",
+    "record": 3,
+    "members_count": 2
+   },
+   {
+    "action": "member_confirmed",
+    "record": 2,
+    "members_count": 2
+   },
+   {
+    "action": "member_confirmed",
+    "record": 2,
+    "members_count": 2
+   },
+   {
+    "action": "member_added",
+    "record": 4,
+    "members_count": 3
+   },
+   {
+    "action": "member_invalid",
+    "record": null,
+    "members_count": 3
+   },
+   {
+    "action": "member_invalid",
+    "record": null,
+    "members_count": 3
+   },
+   {
+    "action": "member_removed",
+    "record": 4,
+    "members_count": 2
+   },
+   {
+    "action": "member_not_found",
+    "record": null,
+    "members_count": 2
+   },
+   {
+    "action": "member_not_found",
+    "record": null,
+    "members_count": 0
+   },
+   {
+    "action": "member_added",
+    "record": 5,
+    "members_count": 3
+   },
+   {
+    "action": "member_added",
+    "record": 6,
+    "members_count": 4
+   },
+   {
+    "action": "inserted",
+    "record": 7
+   },
+   {
+    "action": "member_confirmed",
+    "record": 8,
+    "members_count": 1
+   },
+   {
+    "action": "member_removed",
+    "record": 8,
+    "members_count": 0
+   },
+   {
+    "action": "inserted",
+    "record": 9
+   }
+  ],
+  "records": [
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Jellyfin",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.9,
+    "asserted_at": 400.0,
+    "last_confirmed": 400.0,
+    "supersedes_value": null,
+    "superseded_by_value": "(converted to set)",
+    "superseded_at": 402.0,
+    "tx_time": 400.0,
+    "valid_time": 400.0,
+    "hlc_phys": 400000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": "s0",
+    "freshness_class": "volatile",
+    "stance": null,
+    "authority": "directive",
+    "distortion_tolerance": "constraint",
+    "support": [
+     "user"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Pi-hole",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.8,
+    "asserted_at": 401.0,
+    "last_confirmed": 401.0,
+    "supersedes_value": null,
+    "superseded_by_value": "Pi-hole",
+    "superseded_at": 402.0,
+    "tx_time": 401.0,
+    "valid_time": 401.0,
+    "hlc_phys": 401000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": "directive",
+    "distortion_tolerance": "constraint",
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     0.0,
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Jellyfin",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.9,
+    "asserted_at": 400.0,
+    "last_confirmed": 404.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 400.0,
+    "valid_time": 400.0,
+    "hlc_phys": 402000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": "s0",
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "user"
+    ],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "home lab",
+    "attribute": "Services",
+    "value": "Pi-hole",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 402.0,
+    "last_confirmed": 402.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 402.0,
+    "valid_time": 402.0,
+    "hlc_phys": 402000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": "s1",
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Nextcloud",
+    "polarity": "+",
+    "status": "removed",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 405.0,
+    "last_confirmed": 405.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": 407.0,
+    "tx_time": 405.0,
+    "valid_time": 405.0,
+    "hlc_phys": 405000,
+    "hlc_logical": 0,
+    "writer_id": null,
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.6000000238418579,
+     0.0,
+     0.800000011920929
+    ]
+   },
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Nextcloud",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 410.0,
+    "last_confirmed": 410.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 410.0,
+    "valid_time": 410.0,
+    "hlc_phys": 410000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.6000000238418579,
+     0.0,
+     0.800000011920929
+    ]
+   },
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "value": "Zero",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 411.0,
+    "last_confirmed": 411.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 411.0,
+    "valid_time": 411.0,
+    "hlc_phys": 411000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "garage",
+    "attribute": "tools",
+    "value": "drill",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.6,
+    "asserted_at": 412.0,
+    "last_confirmed": 412.0,
+    "supersedes_value": null,
+    "superseded_by_value": "(converted to set)",
+    "superseded_at": 413.0,
+    "tx_time": 412.0,
+    "valid_time": 412.0,
+    "hlc_phys": 412000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "garage",
+    "attribute": "tools",
+    "value": "drill",
+    "polarity": "+",
+    "status": "removed",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 412.0,
+    "last_confirmed": 413.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": 414.0,
+    "tx_time": 412.0,
+    "valid_time": 412.0,
+    "hlc_phys": 413000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "garage",
+    "attribute": "tools",
+    "value": "saw",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.6,
+    "asserted_at": 415.0,
+    "last_confirmed": 415.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 415.0,
+    "valid_time": 415.0,
+    "hlc_phys": 415000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   }
+  ],
+  "current": [
+   [
+    [
+     "garage",
+     "tools"
+    ],
+    9
+   ]
+  ],
+  "members": [
+   [
+    [
+     "garage",
+     "tools"
+    ],
+    []
+   ],
+   [
+    [
+     "home-lab",
+     "services"
+    ],
+    [
+     2,
+     3,
+     5,
+     6
+    ]
+   ]
+  ],
+  "log": [
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "old_value": "Jellyfin",
+    "new_value": "Pi-hole",
+    "decision": "contested",
+    "reason": "tier_downgrade",
+    "confidence_delta": -0.1,
+    "timestamp": 401.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "old_value": "Jellyfin",
+    "new_value": "Pi-hole",
+    "decision": "convert_to_set",
+    "reason": "member_add_to_scalar",
+    "confidence_delta": -0.2,
+    "timestamp": 402.0,
+    "writer_id": "writer-a",
+    "session_id": "s1",
+    "dropped_freshness_class": "volatile",
+    "dropped_authority": "directive",
+    "dropped_distortion_tolerance": "constraint"
+   },
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "old_value": "Pi-hole",
+    "new_value": "Pi-hole",
+    "decision": "resolved",
+    "reason": "contender_value_now_current",
+    "confidence_delta": -0.1,
+    "timestamp": 402.0,
+    "writer_id": "writer-a",
+    "session_id": "s1"
+   },
+   {
+    "entity": "Home Lab",
+    "attribute": "services",
+    "old_value": "Nextcloud",
+    "new_value": "nextcloud ",
+    "decision": "member_removed",
+    "reason": "user_removed",
+    "confidence_delta": 0.0,
+    "timestamp": 407.0,
+    "writer_id": null,
+    "session_id": null
+   },
+   {
+    "entity": "garage",
+    "attribute": "tools",
+    "old_value": "drill",
+    "new_value": "Drill",
+    "decision": "convert_to_set",
+    "reason": "member_add_to_scalar",
+    "confidence_delta": 0.1,
+    "timestamp": 413.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "garage",
+    "attribute": "tools",
+    "old_value": "drill",
+    "new_value": "drill",
+    "decision": "member_removed",
+    "reason": "user_removed",
+    "confidence_delta": 0.0,
+    "timestamp": 414.0,
+    "writer_id": null,
+    "session_id": null
+   }
+  ],
+  "dirty_slots": [
+   [
+    "garage",
+    "tools"
+   ],
+   [
+    "home-lab",
+    "services"
+   ]
+  ],
+  "meta_dirty": true
+ },
+ "aggregate": {
+  "config": {
+   "protect_provenance": true,
+   "supersede_confidence_margin": 0.15,
+   "reinforce_rate": 0.34
+  },
+  "writes": [
+   {
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "value": "32",
+    "support": "user",
+    "confidence": 0.8,
+    "now": 500.0,
+    "hlc": [
+     500000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "aquarium",
+    "attribute": "Fish Count",
+    "value": " 32 ",
+    "embedding": [
+     1.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 501.0,
+    "hlc": [
+     501000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "value": "neon tetra",
+    "embedding": [
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 502.0,
+    "hlc": [
+     502000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": "s1"
+   },
+   {
+    "op": "add",
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "value": "Neon Tetra ",
+    "embedding": [
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 503.0,
+    "hlc": [
+     503000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "value": "guppy",
+    "embedding": [
+     0.6,
+     0.8
+    ],
+    "confidence": 0.7,
+    "now": 504.0,
+    "hlc": [
+     504000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "budget",
+    "value": "$1,500",
+    "support": "agent",
+    "confidence": 0.7,
+    "now": 505.0,
+    "hlc": [
+     505000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Aquarium",
+    "attribute": "budget",
+    "value": "new filter",
+    "embedding": [
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 506.0,
+    "hlc": [
+     506000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "offset",
+    "value": "-2 degrees",
+    "support": "agent",
+    "confidence": 0.7,
+    "now": 507.0,
+    "hlc": [
+     507000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Aquarium",
+    "attribute": "offset",
+    "value": "heater",
+    "embedding": [
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 508.0,
+    "hlc": [
+     508000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "arabic",
+    "value": "٣٢",
+    "support": "agent",
+    "confidence": 0.7,
+    "now": 509.0,
+    "hlc": [
+     509000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Aquarium",
+    "attribute": "arabic",
+    "value": "x",
+    "embedding": [
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 510.0,
+    "hlc": [
+     510000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "superscript",
+    "value": "²5",
+    "support": "agent",
+    "confidence": 0.7,
+    "now": 511.0,
+    "hlc": [
+     511000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Aquarium",
+    "attribute": "superscript",
+    "value": "x",
+    "embedding": [
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 512.0,
+    "hlc": [
+     512000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "name",
+    "value": "Reef 32",
+    "support": "agent",
+    "confidence": 0.7,
+    "now": 513.0,
+    "hlc": [
+     513000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Aquarium",
+    "attribute": "name",
+    "value": "Reef 33",
+    "embedding": [
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 514.0,
+    "hlc": [
+     514000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "results": [
+   {
+    "action": "inserted",
+    "record": 0
+   },
+   {
+    "action": "confirmed",
+    "record": 0,
+    "members_count": 0
+   },
+   {
+    "action": "contested",
+    "record": 1,
+    "members_count": 0
+   },
+   {
+    "action": "contested",
+    "record": 1,
+    "members_count": 0
+   },
+   {
+    "action": "contested",
+    "record": 2,
+    "members_count": 0
+   },
+   {
+    "action": "inserted",
+    "record": 3
+   },
+   {
+    "action": "contested",
+    "record": 4,
+    "members_count": 0
+   },
+   {
+    "action": "inserted",
+    "record": 5
+   },
+   {
+    "action": "contested",
+    "record": 6,
+    "members_count": 0
+   },
+   {
+    "action": "inserted",
+    "record": 7
+   },
+   {
+    "action": "contested",
+    "record": 8,
+    "members_count": 0
+   },
+   {
+    "action": "inserted",
+    "record": 9
+   },
+   {
+    "action": "member_added",
+    "record": 11,
+    "members_count": 2
+   },
+   {
+    "action": "inserted",
+    "record": 12
+   },
+   {
+    "action": "member_added",
+    "record": 14,
+    "members_count": 2
+   }
+  ],
+  "records": [
+   {
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "value": "32",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.868,
+    "asserted_at": 500.0,
+    "last_confirmed": 501.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 500.0,
+    "valid_time": 500.0,
+    "hlc_phys": 500000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "user"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "value": "neon tetra",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.8019999999999999,
+    "asserted_at": 502.0,
+    "last_confirmed": 503.0,
+    "supersedes_value": null,
+    "superseded_by_value": "guppy",
+    "superseded_at": 504.0,
+    "tx_time": 503.0,
+    "valid_time": 502.0,
+    "hlc_phys": 503000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": "s1",
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "value": "guppy",
+    "polarity": "+",
+    "status": "contested",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 504.0,
+    "last_confirmed": 504.0,
+    "supersedes_value": "neon tetra",
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 504.0,
+    "valid_time": 504.0,
+    "hlc_phys": 504000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     0.6000000238418579,
+     0.800000011920929
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "budget",
+    "value": "$1,500",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 505.0,
+    "last_confirmed": 505.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 505.0,
+    "valid_time": 505.0,
+    "hlc_phys": 505000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "budget",
+    "value": "new filter",
+    "polarity": "+",
+    "status": "contested",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 506.0,
+    "last_confirmed": 506.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 506.0,
+    "valid_time": 506.0,
+    "hlc_phys": 506000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "offset",
+    "value": "-2 degrees",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 507.0,
+    "last_confirmed": 507.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 507.0,
+    "valid_time": 507.0,
+    "hlc_phys": 507000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "offset",
+    "value": "heater",
+    "polarity": "+",
+    "status": "contested",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 508.0,
+    "last_confirmed": 508.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 508.0,
+    "valid_time": 508.0,
+    "hlc_phys": 508000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "arabic",
+    "value": "٣٢",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 509.0,
+    "last_confirmed": 509.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 509.0,
+    "valid_time": 509.0,
+    "hlc_phys": 509000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "arabic",
+    "value": "x",
+    "polarity": "+",
+    "status": "contested",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 510.0,
+    "last_confirmed": 510.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 510.0,
+    "valid_time": 510.0,
+    "hlc_phys": 510000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "superscript",
+    "value": "²5",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 511.0,
+    "last_confirmed": 511.0,
+    "supersedes_value": null,
+    "superseded_by_value": "(converted to set)",
+    "superseded_at": 512.0,
+    "tx_time": 511.0,
+    "valid_time": 511.0,
+    "hlc_phys": 511000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "superscript",
+    "value": "²5",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 511.0,
+    "last_confirmed": 511.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 511.0,
+    "valid_time": 511.0,
+    "hlc_phys": 512000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "superscript",
+    "value": "x",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 512.0,
+    "last_confirmed": 512.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 512.0,
+    "valid_time": 512.0,
+    "hlc_phys": 512000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "name",
+    "value": "Reef 32",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 513.0,
+    "last_confirmed": 513.0,
+    "supersedes_value": null,
+    "superseded_by_value": "(converted to set)",
+    "superseded_at": 514.0,
+    "tx_time": 513.0,
+    "valid_time": 513.0,
+    "hlc_phys": 513000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "name",
+    "value": "Reef 32",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 513.0,
+    "last_confirmed": 513.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 513.0,
+    "valid_time": 513.0,
+    "hlc_phys": 514000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "name",
+    "value": "Reef 33",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 514.0,
+    "last_confirmed": 514.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 514.0,
+    "valid_time": 514.0,
+    "hlc_phys": 514000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     1.0
+    ]
+   }
+  ],
+  "current": [
+   [
+    [
+     "aquarium",
+     "arabic"
+    ],
+    7
+   ],
+   [
+    [
+     "aquarium",
+     "budget"
+    ],
+    3
+   ],
+   [
+    [
+     "aquarium",
+     "fish-count"
+    ],
+    0
+   ],
+   [
+    [
+     "aquarium",
+     "offset"
+    ],
+    5
+   ]
+  ],
+  "members": [
+   [
+    [
+     "aquarium",
+     "name"
+    ],
+    [
+     13,
+     14
+    ]
+   ],
+   [
+    [
+     "aquarium",
+     "superscript"
+    ],
+    [
+     10,
+     11
+    ]
+   ]
+  ],
+  "log": [
+   {
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "old_value": "32",
+    "new_value": "neon tetra",
+    "decision": "contested",
+    "reason": "member_add_blocked_aggregate",
+    "confidence_delta": -0.168,
+    "timestamp": 502.0,
+    "writer_id": "writer-a",
+    "session_id": "s1"
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "old_value": "32",
+    "new_value": "Neon Tetra ",
+    "decision": "contested",
+    "reason": "contender_confirmed",
+    "confidence_delta": -0.168,
+    "timestamp": 503.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "fish count",
+    "old_value": "32",
+    "new_value": "guppy",
+    "decision": "contested",
+    "reason": "member_add_blocked_aggregate",
+    "confidence_delta": -0.168,
+    "timestamp": 504.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "budget",
+    "old_value": "$1,500",
+    "new_value": "new filter",
+    "decision": "contested",
+    "reason": "member_add_blocked_aggregate",
+    "confidence_delta": 0.0,
+    "timestamp": 506.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "offset",
+    "old_value": "-2 degrees",
+    "new_value": "heater",
+    "decision": "contested",
+    "reason": "member_add_blocked_aggregate",
+    "confidence_delta": 0.0,
+    "timestamp": 508.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "arabic",
+    "old_value": "٣٢",
+    "new_value": "x",
+    "decision": "contested",
+    "reason": "member_add_blocked_aggregate",
+    "confidence_delta": 0.0,
+    "timestamp": 510.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "superscript",
+    "old_value": "²5",
+    "new_value": "x",
+    "decision": "convert_to_set",
+    "reason": "member_add_to_scalar",
+    "confidence_delta": 0.0,
+    "timestamp": 512.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Aquarium",
+    "attribute": "name",
+    "old_value": "Reef 32",
+    "new_value": "Reef 33",
+    "decision": "convert_to_set",
+    "reason": "member_add_to_scalar",
+    "confidence_delta": 0.0,
+    "timestamp": 514.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "dirty_slots": [
+   [
+    "aquarium",
+    "arabic"
+   ],
+   [
+    "aquarium",
+    "budget"
+   ],
+   [
+    "aquarium",
+    "fish-count"
+   ],
+   [
+    "aquarium",
+    "name"
+   ],
+   [
+    "aquarium",
+    "offset"
+   ],
+   [
+    "aquarium",
+    "superscript"
+   ]
+  ],
+  "meta_dirty": true
+ },
+ "aggregate_newer_wins": {
+  "config": {
+   "protect_provenance": false,
+   "supersede_confidence_margin": 0.15,
+   "reinforce_rate": 0.5
+  },
+  "writes": [
+   {
+    "entity": "tank",
+    "attribute": "volume",
+    "value": "120 litres",
+    "support": "agent",
+    "confidence": 0.6,
+    "now": 600.0,
+    "hlc": [
+     600000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "tank",
+    "attribute": "volume",
+    "value": "big",
+    "embedding": [
+     0.0,
+     1.0
+    ],
+    "confidence": 0.7,
+    "now": 601.0,
+    "hlc": [
+     601000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Tank",
+    "attribute": "Volume",
+    "value": "120 LITRES",
+    "embedding": [
+     1.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 602.0,
+    "hlc": [
+     602000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "results": [
+   {
+    "action": "inserted",
+    "record": 0
+   },
+   {
+    "action": "contested",
+    "record": 1,
+    "members_count": 0
+   },
+   {
+    "action": "confirmed",
+    "record": 0,
+    "members_count": 0
+   }
+  ],
+  "records": [
+   {
+    "entity": "tank",
+    "attribute": "volume",
+    "value": "120 litres",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.8,
+    "asserted_at": 600.0,
+    "last_confirmed": 602.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 600.0,
+    "valid_time": 600.0,
+    "hlc_phys": 600000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "tank",
+    "attribute": "volume",
+    "value": "big",
+    "polarity": "+",
+    "status": "contested",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 601.0,
+    "last_confirmed": 601.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 601.0,
+    "valid_time": 601.0,
+    "hlc_phys": 601000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": true,
+    "embedding": [
+     0.0,
+     1.0
+    ]
+   }
+  ],
+  "current": [
+   [
+    [
+     "tank",
+     "volume"
+    ],
+    0
+   ]
+  ],
+  "members": [],
+  "log": [
+   {
+    "entity": "tank",
+    "attribute": "volume",
+    "old_value": "120 litres",
+    "new_value": "big",
+    "decision": "contested",
+    "reason": "member_add_blocked_aggregate",
+    "confidence_delta": 0.1,
+    "timestamp": 601.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "dirty_slots": [
+   [
+    "tank",
+    "volume"
+   ]
+  ],
+  "meta_dirty": true
+ },
+ "cap": {
+  "config": {
+   "protect_provenance": true,
+   "supersede_confidence_margin": 0.15,
+   "reinforce_rate": 0.34
+  },
+  "writes": [
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-000",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 700.0,
+    "hlc": [
+     700000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-001",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 701.0,
+    "hlc": [
+     701000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-002",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 702.0,
+    "hlc": [
+     702000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-003",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 703.0,
+    "hlc": [
+     703000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-004",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 704.0,
+    "hlc": [
+     704000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-005",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 705.0,
+    "hlc": [
+     705000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-006",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 706.0,
+    "hlc": [
+     706000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-007",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 707.0,
+    "hlc": [
+     707000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-008",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 708.0,
+    "hlc": [
+     708000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-009",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 709.0,
+    "hlc": [
+     709000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-010",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 710.0,
+    "hlc": [
+     710000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-011",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 711.0,
+    "hlc": [
+     711000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-012",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 712.0,
+    "hlc": [
+     712000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-013",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 713.0,
+    "hlc": [
+     713000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-014",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 714.0,
+    "hlc": [
+     714000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-015",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 715.0,
+    "hlc": [
+     715000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-016",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 716.0,
+    "hlc": [
+     716000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-017",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 717.0,
+    "hlc": [
+     717000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-018",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 718.0,
+    "hlc": [
+     718000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-019",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 719.0,
+    "hlc": [
+     719000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-020",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 720.0,
+    "hlc": [
+     720000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-021",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 721.0,
+    "hlc": [
+     721000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-022",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 722.0,
+    "hlc": [
+     722000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-023",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 723.0,
+    "hlc": [
+     723000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-024",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 724.0,
+    "hlc": [
+     724000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-025",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 725.0,
+    "hlc": [
+     725000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-026",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 726.0,
+    "hlc": [
+     726000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-027",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 727.0,
+    "hlc": [
+     727000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-028",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 728.0,
+    "hlc": [
+     728000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-029",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 729.0,
+    "hlc": [
+     729000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-030",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 730.0,
+    "hlc": [
+     730000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-031",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 731.0,
+    "hlc": [
+     731000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-032",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 732.0,
+    "hlc": [
+     732000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-033",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 733.0,
+    "hlc": [
+     733000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-034",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 734.0,
+    "hlc": [
+     734000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-035",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 735.0,
+    "hlc": [
+     735000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-036",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 736.0,
+    "hlc": [
+     736000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-037",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 737.0,
+    "hlc": [
+     737000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-038",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 738.0,
+    "hlc": [
+     738000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-039",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 739.0,
+    "hlc": [
+     739000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-040",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 740.0,
+    "hlc": [
+     740000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-041",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 741.0,
+    "hlc": [
+     741000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-042",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 742.0,
+    "hlc": [
+     742000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-043",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 743.0,
+    "hlc": [
+     743000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-044",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 744.0,
+    "hlc": [
+     744000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-045",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 745.0,
+    "hlc": [
+     745000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-046",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 746.0,
+    "hlc": [
+     746000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-047",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 747.0,
+    "hlc": [
+     747000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-048",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 748.0,
+    "hlc": [
+     748000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-049",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 749.0,
+    "hlc": [
+     749000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-050",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 750.0,
+    "hlc": [
+     750000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-051",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 751.0,
+    "hlc": [
+     751000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-052",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 752.0,
+    "hlc": [
+     752000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-053",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 753.0,
+    "hlc": [
+     753000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-054",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 754.0,
+    "hlc": [
+     754000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-055",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 755.0,
+    "hlc": [
+     755000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-056",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 756.0,
+    "hlc": [
+     756000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-057",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 757.0,
+    "hlc": [
+     757000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-058",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 758.0,
+    "hlc": [
+     758000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-059",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 759.0,
+    "hlc": [
+     759000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-060",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 760.0,
+    "hlc": [
+     760000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-061",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 761.0,
+    "hlc": [
+     761000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-062",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 762.0,
+    "hlc": [
+     762000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-063",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 763.0,
+    "hlc": [
+     763000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-064",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 764.0,
+    "hlc": [
+     764000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-065",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 765.0,
+    "hlc": [
+     765000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-066",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 766.0,
+    "hlc": [
+     766000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-067",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 767.0,
+    "hlc": [
+     767000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-068",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 768.0,
+    "hlc": [
+     768000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-069",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 769.0,
+    "hlc": [
+     769000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-070",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 770.0,
+    "hlc": [
+     770000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-071",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 771.0,
+    "hlc": [
+     771000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-072",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 772.0,
+    "hlc": [
+     772000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-073",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 773.0,
+    "hlc": [
+     773000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-074",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 774.0,
+    "hlc": [
+     774000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-075",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 775.0,
+    "hlc": [
+     775000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-076",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 776.0,
+    "hlc": [
+     776000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-077",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 777.0,
+    "hlc": [
+     777000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-078",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 778.0,
+    "hlc": [
+     778000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-079",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 779.0,
+    "hlc": [
+     779000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-080",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 780.0,
+    "hlc": [
+     780000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-081",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 781.0,
+    "hlc": [
+     781000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-082",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 782.0,
+    "hlc": [
+     782000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-083",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 783.0,
+    "hlc": [
+     783000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-084",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 784.0,
+    "hlc": [
+     784000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-085",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 785.0,
+    "hlc": [
+     785000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-086",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 786.0,
+    "hlc": [
+     786000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-087",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 787.0,
+    "hlc": [
+     787000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-088",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 788.0,
+    "hlc": [
+     788000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-089",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 789.0,
+    "hlc": [
+     789000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-090",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 790.0,
+    "hlc": [
+     790000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-091",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 791.0,
+    "hlc": [
+     791000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-092",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 792.0,
+    "hlc": [
+     792000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-093",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 793.0,
+    "hlc": [
+     793000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-094",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 794.0,
+    "hlc": [
+     794000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-095",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 795.0,
+    "hlc": [
+     795000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-096",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 796.0,
+    "hlc": [
+     796000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-097",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 797.0,
+    "hlc": [
+     797000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-098",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 798.0,
+    "hlc": [
+     798000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-099",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 799.0,
+    "hlc": [
+     799000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "cap box",
+    "attribute": "tags",
+    "value": "tag-100",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 800.0,
+    "hlc": [
+     800000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "cap box",
+    "attribute": "tags",
+    "value": "TAG-007",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 801.0,
+    "hlc": [
+     801000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "remove",
+    "entity": "cap box",
+    "attribute": "tags",
+    "value": "tag-000",
+    "now": 802.0
+   },
+   {
+    "op": "add",
+    "entity": "cap box",
+    "attribute": "tags",
+    "value": "tag-100",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 803.0,
+    "hlc": [
+     803000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "op": "add",
+    "entity": "cap box",
+    "attribute": "tags",
+    "value": "tag-101",
+    "embedding": [
+     0.0,
+     0.0
+    ],
+    "confidence": 0.7,
+    "now": 804.0,
+    "hlc": [
+     804000,
+     0
+    ],
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "results": [
+   {
+    "action": "member_added",
+    "record": 0,
+    "members_count": 1
+   },
+   {
+    "action": "member_added",
+    "record": 1,
+    "members_count": 2
+   },
+   {
+    "action": "member_added",
+    "record": 2,
+    "members_count": 3
+   },
+   {
+    "action": "member_added",
+    "record": 3,
+    "members_count": 4
+   },
+   {
+    "action": "member_added",
+    "record": 4,
+    "members_count": 5
+   },
+   {
+    "action": "member_added",
+    "record": 5,
+    "members_count": 6
+   },
+   {
+    "action": "member_added",
+    "record": 6,
+    "members_count": 7
+   },
+   {
+    "action": "member_added",
+    "record": 7,
+    "members_count": 8
+   },
+   {
+    "action": "member_added",
+    "record": 8,
+    "members_count": 9
+   },
+   {
+    "action": "member_added",
+    "record": 9,
+    "members_count": 10
+   },
+   {
+    "action": "member_added",
+    "record": 10,
+    "members_count": 11
+   },
+   {
+    "action": "member_added",
+    "record": 11,
+    "members_count": 12
+   },
+   {
+    "action": "member_added",
+    "record": 12,
+    "members_count": 13
+   },
+   {
+    "action": "member_added",
+    "record": 13,
+    "members_count": 14
+   },
+   {
+    "action": "member_added",
+    "record": 14,
+    "members_count": 15
+   },
+   {
+    "action": "member_added",
+    "record": 15,
+    "members_count": 16
+   },
+   {
+    "action": "member_added",
+    "record": 16,
+    "members_count": 17
+   },
+   {
+    "action": "member_added",
+    "record": 17,
+    "members_count": 18
+   },
+   {
+    "action": "member_added",
+    "record": 18,
+    "members_count": 19
+   },
+   {
+    "action": "member_added",
+    "record": 19,
+    "members_count": 20
+   },
+   {
+    "action": "member_added",
+    "record": 20,
+    "members_count": 21
+   },
+   {
+    "action": "member_added",
+    "record": 21,
+    "members_count": 22
+   },
+   {
+    "action": "member_added",
+    "record": 22,
+    "members_count": 23
+   },
+   {
+    "action": "member_added",
+    "record": 23,
+    "members_count": 24
+   },
+   {
+    "action": "member_added",
+    "record": 24,
+    "members_count": 25
+   },
+   {
+    "action": "member_added",
+    "record": 25,
+    "members_count": 26
+   },
+   {
+    "action": "member_added",
+    "record": 26,
+    "members_count": 27
+   },
+   {
+    "action": "member_added",
+    "record": 27,
+    "members_count": 28
+   },
+   {
+    "action": "member_added",
+    "record": 28,
+    "members_count": 29
+   },
+   {
+    "action": "member_added",
+    "record": 29,
+    "members_count": 30
+   },
+   {
+    "action": "member_added",
+    "record": 30,
+    "members_count": 31
+   },
+   {
+    "action": "member_added",
+    "record": 31,
+    "members_count": 32
+   },
+   {
+    "action": "member_added",
+    "record": 32,
+    "members_count": 33
+   },
+   {
+    "action": "member_added",
+    "record": 33,
+    "members_count": 34
+   },
+   {
+    "action": "member_added",
+    "record": 34,
+    "members_count": 35
+   },
+   {
+    "action": "member_added",
+    "record": 35,
+    "members_count": 36
+   },
+   {
+    "action": "member_added",
+    "record": 36,
+    "members_count": 37
+   },
+   {
+    "action": "member_added",
+    "record": 37,
+    "members_count": 38
+   },
+   {
+    "action": "member_added",
+    "record": 38,
+    "members_count": 39
+   },
+   {
+    "action": "member_added",
+    "record": 39,
+    "members_count": 40
+   },
+   {
+    "action": "member_added",
+    "record": 40,
+    "members_count": 41
+   },
+   {
+    "action": "member_added",
+    "record": 41,
+    "members_count": 42
+   },
+   {
+    "action": "member_added",
+    "record": 42,
+    "members_count": 43
+   },
+   {
+    "action": "member_added",
+    "record": 43,
+    "members_count": 44
+   },
+   {
+    "action": "member_added",
+    "record": 44,
+    "members_count": 45
+   },
+   {
+    "action": "member_added",
+    "record": 45,
+    "members_count": 46
+   },
+   {
+    "action": "member_added",
+    "record": 46,
+    "members_count": 47
+   },
+   {
+    "action": "member_added",
+    "record": 47,
+    "members_count": 48
+   },
+   {
+    "action": "member_added",
+    "record": 48,
+    "members_count": 49
+   },
+   {
+    "action": "member_added",
+    "record": 49,
+    "members_count": 50
+   },
+   {
+    "action": "member_added",
+    "record": 50,
+    "members_count": 51
+   },
+   {
+    "action": "member_added",
+    "record": 51,
+    "members_count": 52
+   },
+   {
+    "action": "member_added",
+    "record": 52,
+    "members_count": 53
+   },
+   {
+    "action": "member_added",
+    "record": 53,
+    "members_count": 54
+   },
+   {
+    "action": "member_added",
+    "record": 54,
+    "members_count": 55
+   },
+   {
+    "action": "member_added",
+    "record": 55,
+    "members_count": 56
+   },
+   {
+    "action": "member_added",
+    "record": 56,
+    "members_count": 57
+   },
+   {
+    "action": "member_added",
+    "record": 57,
+    "members_count": 58
+   },
+   {
+    "action": "member_added",
+    "record": 58,
+    "members_count": 59
+   },
+   {
+    "action": "member_added",
+    "record": 59,
+    "members_count": 60
+   },
+   {
+    "action": "member_added",
+    "record": 60,
+    "members_count": 61
+   },
+   {
+    "action": "member_added",
+    "record": 61,
+    "members_count": 62
+   },
+   {
+    "action": "member_added",
+    "record": 62,
+    "members_count": 63
+   },
+   {
+    "action": "member_added",
+    "record": 63,
+    "members_count": 64
+   },
+   {
+    "action": "member_added",
+    "record": 64,
+    "members_count": 65
+   },
+   {
+    "action": "member_added",
+    "record": 65,
+    "members_count": 66
+   },
+   {
+    "action": "member_added",
+    "record": 66,
+    "members_count": 67
+   },
+   {
+    "action": "member_added",
+    "record": 67,
+    "members_count": 68
+   },
+   {
+    "action": "member_added",
+    "record": 68,
+    "members_count": 69
+   },
+   {
+    "action": "member_added",
+    "record": 69,
+    "members_count": 70
+   },
+   {
+    "action": "member_added",
+    "record": 70,
+    "members_count": 71
+   },
+   {
+    "action": "member_added",
+    "record": 71,
+    "members_count": 72
+   },
+   {
+    "action": "member_added",
+    "record": 72,
+    "members_count": 73
+   },
+   {
+    "action": "member_added",
+    "record": 73,
+    "members_count": 74
+   },
+   {
+    "action": "member_added",
+    "record": 74,
+    "members_count": 75
+   },
+   {
+    "action": "member_added",
+    "record": 75,
+    "members_count": 76
+   },
+   {
+    "action": "member_added",
+    "record": 76,
+    "members_count": 77
+   },
+   {
+    "action": "member_added",
+    "record": 77,
+    "members_count": 78
+   },
+   {
+    "action": "member_added",
+    "record": 78,
+    "members_count": 79
+   },
+   {
+    "action": "member_added",
+    "record": 79,
+    "members_count": 80
+   },
+   {
+    "action": "member_added",
+    "record": 80,
+    "members_count": 81
+   },
+   {
+    "action": "member_added",
+    "record": 81,
+    "members_count": 82
+   },
+   {
+    "action": "member_added",
+    "record": 82,
+    "members_count": 83
+   },
+   {
+    "action": "member_added",
+    "record": 83,
+    "members_count": 84
+   },
+   {
+    "action": "member_added",
+    "record": 84,
+    "members_count": 85
+   },
+   {
+    "action": "member_added",
+    "record": 85,
+    "members_count": 86
+   },
+   {
+    "action": "member_added",
+    "record": 86,
+    "members_count": 87
+   },
+   {
+    "action": "member_added",
+    "record": 87,
+    "members_count": 88
+   },
+   {
+    "action": "member_added",
+    "record": 88,
+    "members_count": 89
+   },
+   {
+    "action": "member_added",
+    "record": 89,
+    "members_count": 90
+   },
+   {
+    "action": "member_added",
+    "record": 90,
+    "members_count": 91
+   },
+   {
+    "action": "member_added",
+    "record": 91,
+    "members_count": 92
+   },
+   {
+    "action": "member_added",
+    "record": 92,
+    "members_count": 93
+   },
+   {
+    "action": "member_added",
+    "record": 93,
+    "members_count": 94
+   },
+   {
+    "action": "member_added",
+    "record": 94,
+    "members_count": 95
+   },
+   {
+    "action": "member_added",
+    "record": 95,
+    "members_count": 96
+   },
+   {
+    "action": "member_added",
+    "record": 96,
+    "members_count": 97
+   },
+   {
+    "action": "member_added",
+    "record": 97,
+    "members_count": 98
+   },
+   {
+    "action": "member_added",
+    "record": 98,
+    "members_count": 99
+   },
+   {
+    "action": "member_added",
+    "record": 99,
+    "members_count": 100
+   },
+   {
+    "action": "member_capped",
+    "record": null,
+    "members_count": 100
+   },
+   {
+    "action": "member_confirmed",
+    "record": 7,
+    "members_count": 100
+   },
+   {
+    "action": "member_removed",
+    "record": 0,
+    "members_count": 99
+   },
+   {
+    "action": "member_added",
+    "record": 100,
+    "members_count": 100
+   },
+   {
+    "action": "member_capped",
+    "record": null,
+    "members_count": 100
+   }
+  ],
+  "records": [
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-000",
+    "polarity": "+",
+    "status": "removed",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 700.0,
+    "last_confirmed": 700.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": 802.0,
+    "tx_time": 700.0,
+    "valid_time": 700.0,
+    "hlc_phys": 700000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-001",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 701.0,
+    "last_confirmed": 701.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 701.0,
+    "valid_time": 701.0,
+    "hlc_phys": 701000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-002",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 702.0,
+    "last_confirmed": 702.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 702.0,
+    "valid_time": 702.0,
+    "hlc_phys": 702000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-003",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 703.0,
+    "last_confirmed": 703.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 703.0,
+    "valid_time": 703.0,
+    "hlc_phys": 703000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-004",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 704.0,
+    "last_confirmed": 704.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 704.0,
+    "valid_time": 704.0,
+    "hlc_phys": 704000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-005",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 705.0,
+    "last_confirmed": 705.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 705.0,
+    "valid_time": 705.0,
+    "hlc_phys": 705000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-006",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 706.0,
+    "last_confirmed": 706.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 706.0,
+    "valid_time": 706.0,
+    "hlc_phys": 706000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-007",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 707.0,
+    "last_confirmed": 801.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 707.0,
+    "valid_time": 707.0,
+    "hlc_phys": 707000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-008",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 708.0,
+    "last_confirmed": 708.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 708.0,
+    "valid_time": 708.0,
+    "hlc_phys": 708000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-009",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 709.0,
+    "last_confirmed": 709.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 709.0,
+    "valid_time": 709.0,
+    "hlc_phys": 709000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-010",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 710.0,
+    "last_confirmed": 710.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 710.0,
+    "valid_time": 710.0,
+    "hlc_phys": 710000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-011",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 711.0,
+    "last_confirmed": 711.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 711.0,
+    "valid_time": 711.0,
+    "hlc_phys": 711000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-012",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 712.0,
+    "last_confirmed": 712.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 712.0,
+    "valid_time": 712.0,
+    "hlc_phys": 712000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-013",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 713.0,
+    "last_confirmed": 713.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 713.0,
+    "valid_time": 713.0,
+    "hlc_phys": 713000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-014",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 714.0,
+    "last_confirmed": 714.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 714.0,
+    "valid_time": 714.0,
+    "hlc_phys": 714000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-015",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 715.0,
+    "last_confirmed": 715.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 715.0,
+    "valid_time": 715.0,
+    "hlc_phys": 715000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-016",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 716.0,
+    "last_confirmed": 716.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 716.0,
+    "valid_time": 716.0,
+    "hlc_phys": 716000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-017",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 717.0,
+    "last_confirmed": 717.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 717.0,
+    "valid_time": 717.0,
+    "hlc_phys": 717000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-018",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 718.0,
+    "last_confirmed": 718.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 718.0,
+    "valid_time": 718.0,
+    "hlc_phys": 718000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-019",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 719.0,
+    "last_confirmed": 719.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 719.0,
+    "valid_time": 719.0,
+    "hlc_phys": 719000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-020",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 720.0,
+    "last_confirmed": 720.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 720.0,
+    "valid_time": 720.0,
+    "hlc_phys": 720000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-021",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 721.0,
+    "last_confirmed": 721.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 721.0,
+    "valid_time": 721.0,
+    "hlc_phys": 721000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-022",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 722.0,
+    "last_confirmed": 722.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 722.0,
+    "valid_time": 722.0,
+    "hlc_phys": 722000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-023",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 723.0,
+    "last_confirmed": 723.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 723.0,
+    "valid_time": 723.0,
+    "hlc_phys": 723000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-024",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 724.0,
+    "last_confirmed": 724.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 724.0,
+    "valid_time": 724.0,
+    "hlc_phys": 724000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-025",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 725.0,
+    "last_confirmed": 725.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 725.0,
+    "valid_time": 725.0,
+    "hlc_phys": 725000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-026",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 726.0,
+    "last_confirmed": 726.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 726.0,
+    "valid_time": 726.0,
+    "hlc_phys": 726000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-027",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 727.0,
+    "last_confirmed": 727.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 727.0,
+    "valid_time": 727.0,
+    "hlc_phys": 727000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-028",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 728.0,
+    "last_confirmed": 728.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 728.0,
+    "valid_time": 728.0,
+    "hlc_phys": 728000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-029",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 729.0,
+    "last_confirmed": 729.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 729.0,
+    "valid_time": 729.0,
+    "hlc_phys": 729000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-030",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 730.0,
+    "last_confirmed": 730.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 730.0,
+    "valid_time": 730.0,
+    "hlc_phys": 730000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-031",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 731.0,
+    "last_confirmed": 731.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 731.0,
+    "valid_time": 731.0,
+    "hlc_phys": 731000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-032",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 732.0,
+    "last_confirmed": 732.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 732.0,
+    "valid_time": 732.0,
+    "hlc_phys": 732000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-033",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 733.0,
+    "last_confirmed": 733.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 733.0,
+    "valid_time": 733.0,
+    "hlc_phys": 733000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-034",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 734.0,
+    "last_confirmed": 734.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 734.0,
+    "valid_time": 734.0,
+    "hlc_phys": 734000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-035",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 735.0,
+    "last_confirmed": 735.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 735.0,
+    "valid_time": 735.0,
+    "hlc_phys": 735000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-036",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 736.0,
+    "last_confirmed": 736.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 736.0,
+    "valid_time": 736.0,
+    "hlc_phys": 736000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-037",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 737.0,
+    "last_confirmed": 737.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 737.0,
+    "valid_time": 737.0,
+    "hlc_phys": 737000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-038",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 738.0,
+    "last_confirmed": 738.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 738.0,
+    "valid_time": 738.0,
+    "hlc_phys": 738000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-039",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 739.0,
+    "last_confirmed": 739.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 739.0,
+    "valid_time": 739.0,
+    "hlc_phys": 739000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-040",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 740.0,
+    "last_confirmed": 740.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 740.0,
+    "valid_time": 740.0,
+    "hlc_phys": 740000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-041",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 741.0,
+    "last_confirmed": 741.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 741.0,
+    "valid_time": 741.0,
+    "hlc_phys": 741000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-042",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 742.0,
+    "last_confirmed": 742.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 742.0,
+    "valid_time": 742.0,
+    "hlc_phys": 742000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-043",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 743.0,
+    "last_confirmed": 743.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 743.0,
+    "valid_time": 743.0,
+    "hlc_phys": 743000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-044",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 744.0,
+    "last_confirmed": 744.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 744.0,
+    "valid_time": 744.0,
+    "hlc_phys": 744000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-045",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 745.0,
+    "last_confirmed": 745.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 745.0,
+    "valid_time": 745.0,
+    "hlc_phys": 745000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-046",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 746.0,
+    "last_confirmed": 746.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 746.0,
+    "valid_time": 746.0,
+    "hlc_phys": 746000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-047",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 747.0,
+    "last_confirmed": 747.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 747.0,
+    "valid_time": 747.0,
+    "hlc_phys": 747000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-048",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 748.0,
+    "last_confirmed": 748.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 748.0,
+    "valid_time": 748.0,
+    "hlc_phys": 748000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-049",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 749.0,
+    "last_confirmed": 749.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 749.0,
+    "valid_time": 749.0,
+    "hlc_phys": 749000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-050",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 750.0,
+    "last_confirmed": 750.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 750.0,
+    "valid_time": 750.0,
+    "hlc_phys": 750000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-051",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 751.0,
+    "last_confirmed": 751.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 751.0,
+    "valid_time": 751.0,
+    "hlc_phys": 751000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-052",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 752.0,
+    "last_confirmed": 752.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 752.0,
+    "valid_time": 752.0,
+    "hlc_phys": 752000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-053",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 753.0,
+    "last_confirmed": 753.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 753.0,
+    "valid_time": 753.0,
+    "hlc_phys": 753000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-054",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 754.0,
+    "last_confirmed": 754.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 754.0,
+    "valid_time": 754.0,
+    "hlc_phys": 754000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-055",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 755.0,
+    "last_confirmed": 755.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 755.0,
+    "valid_time": 755.0,
+    "hlc_phys": 755000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-056",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 756.0,
+    "last_confirmed": 756.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 756.0,
+    "valid_time": 756.0,
+    "hlc_phys": 756000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-057",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 757.0,
+    "last_confirmed": 757.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 757.0,
+    "valid_time": 757.0,
+    "hlc_phys": 757000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-058",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 758.0,
+    "last_confirmed": 758.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 758.0,
+    "valid_time": 758.0,
+    "hlc_phys": 758000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-059",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 759.0,
+    "last_confirmed": 759.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 759.0,
+    "valid_time": 759.0,
+    "hlc_phys": 759000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-060",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 760.0,
+    "last_confirmed": 760.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 760.0,
+    "valid_time": 760.0,
+    "hlc_phys": 760000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-061",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 761.0,
+    "last_confirmed": 761.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 761.0,
+    "valid_time": 761.0,
+    "hlc_phys": 761000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-062",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 762.0,
+    "last_confirmed": 762.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 762.0,
+    "valid_time": 762.0,
+    "hlc_phys": 762000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-063",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 763.0,
+    "last_confirmed": 763.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 763.0,
+    "valid_time": 763.0,
+    "hlc_phys": 763000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-064",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 764.0,
+    "last_confirmed": 764.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 764.0,
+    "valid_time": 764.0,
+    "hlc_phys": 764000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-065",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 765.0,
+    "last_confirmed": 765.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 765.0,
+    "valid_time": 765.0,
+    "hlc_phys": 765000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-066",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 766.0,
+    "last_confirmed": 766.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 766.0,
+    "valid_time": 766.0,
+    "hlc_phys": 766000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-067",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 767.0,
+    "last_confirmed": 767.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 767.0,
+    "valid_time": 767.0,
+    "hlc_phys": 767000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-068",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 768.0,
+    "last_confirmed": 768.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 768.0,
+    "valid_time": 768.0,
+    "hlc_phys": 768000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-069",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 769.0,
+    "last_confirmed": 769.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 769.0,
+    "valid_time": 769.0,
+    "hlc_phys": 769000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-070",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 770.0,
+    "last_confirmed": 770.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 770.0,
+    "valid_time": 770.0,
+    "hlc_phys": 770000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-071",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 771.0,
+    "last_confirmed": 771.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 771.0,
+    "valid_time": 771.0,
+    "hlc_phys": 771000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-072",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 772.0,
+    "last_confirmed": 772.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 772.0,
+    "valid_time": 772.0,
+    "hlc_phys": 772000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-073",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 773.0,
+    "last_confirmed": 773.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 773.0,
+    "valid_time": 773.0,
+    "hlc_phys": 773000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-074",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 774.0,
+    "last_confirmed": 774.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 774.0,
+    "valid_time": 774.0,
+    "hlc_phys": 774000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-075",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 775.0,
+    "last_confirmed": 775.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 775.0,
+    "valid_time": 775.0,
+    "hlc_phys": 775000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-076",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 776.0,
+    "last_confirmed": 776.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 776.0,
+    "valid_time": 776.0,
+    "hlc_phys": 776000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-077",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 777.0,
+    "last_confirmed": 777.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 777.0,
+    "valid_time": 777.0,
+    "hlc_phys": 777000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-078",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 778.0,
+    "last_confirmed": 778.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 778.0,
+    "valid_time": 778.0,
+    "hlc_phys": 778000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-079",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 779.0,
+    "last_confirmed": 779.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 779.0,
+    "valid_time": 779.0,
+    "hlc_phys": 779000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-080",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 780.0,
+    "last_confirmed": 780.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 780.0,
+    "valid_time": 780.0,
+    "hlc_phys": 780000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-081",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 781.0,
+    "last_confirmed": 781.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 781.0,
+    "valid_time": 781.0,
+    "hlc_phys": 781000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-082",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 782.0,
+    "last_confirmed": 782.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 782.0,
+    "valid_time": 782.0,
+    "hlc_phys": 782000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-083",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 783.0,
+    "last_confirmed": 783.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 783.0,
+    "valid_time": 783.0,
+    "hlc_phys": 783000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-084",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 784.0,
+    "last_confirmed": 784.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 784.0,
+    "valid_time": 784.0,
+    "hlc_phys": 784000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-085",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 785.0,
+    "last_confirmed": 785.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 785.0,
+    "valid_time": 785.0,
+    "hlc_phys": 785000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-086",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 786.0,
+    "last_confirmed": 786.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 786.0,
+    "valid_time": 786.0,
+    "hlc_phys": 786000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-087",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 787.0,
+    "last_confirmed": 787.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 787.0,
+    "valid_time": 787.0,
+    "hlc_phys": 787000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-088",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 788.0,
+    "last_confirmed": 788.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 788.0,
+    "valid_time": 788.0,
+    "hlc_phys": 788000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-089",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 789.0,
+    "last_confirmed": 789.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 789.0,
+    "valid_time": 789.0,
+    "hlc_phys": 789000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-090",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 790.0,
+    "last_confirmed": 790.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 790.0,
+    "valid_time": 790.0,
+    "hlc_phys": 790000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-091",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 791.0,
+    "last_confirmed": 791.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 791.0,
+    "valid_time": 791.0,
+    "hlc_phys": 791000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-092",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 792.0,
+    "last_confirmed": 792.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 792.0,
+    "valid_time": 792.0,
+    "hlc_phys": 792000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-093",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 793.0,
+    "last_confirmed": 793.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 793.0,
+    "valid_time": 793.0,
+    "hlc_phys": 793000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-094",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 794.0,
+    "last_confirmed": 794.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 794.0,
+    "valid_time": 794.0,
+    "hlc_phys": 794000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-095",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 795.0,
+    "last_confirmed": 795.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 795.0,
+    "valid_time": 795.0,
+    "hlc_phys": 795000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-096",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 796.0,
+    "last_confirmed": 796.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 796.0,
+    "valid_time": 796.0,
+    "hlc_phys": 796000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-097",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 797.0,
+    "last_confirmed": 797.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 797.0,
+    "valid_time": 797.0,
+    "hlc_phys": 797000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-098",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 798.0,
+    "last_confirmed": 798.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 798.0,
+    "valid_time": 798.0,
+    "hlc_phys": 798000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "value": "tag-099",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 799.0,
+    "last_confirmed": 799.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 799.0,
+    "valid_time": 799.0,
+    "hlc_phys": 799000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "entity": "cap box",
+    "attribute": "tags",
+    "value": "tag-100",
+    "polarity": "+",
+    "status": "current",
+    "kind": "member",
+    "confidence": 0.7,
+    "asserted_at": 803.0,
+    "last_confirmed": 803.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 803.0,
+    "valid_time": 803.0,
+    "hlc_phys": 803000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [],
+    "provenance": [],
+    "slot_embedding": false,
+    "embedding": [
+     0.0,
+     0.0
+    ]
+   }
+  ],
+  "current": [],
+  "members": [
+   [
+    [
+     "cap-box",
+     "tags"
+    ],
+    [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17,
+     18,
+     19,
+     20,
+     21,
+     22,
+     23,
+     24,
+     25,
+     26,
+     27,
+     28,
+     29,
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63,
+     64,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     81,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     90,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100
+    ]
+   ]
+  ],
+  "log": [
+   {
+    "entity": "cap box",
+    "attribute": "tags",
+    "old_value": "tag-100",
+    "new_value": "tag-100",
+    "decision": "member_capped",
+    "reason": "max_current_members",
+    "confidence_delta": 0.0,
+    "timestamp": 800.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Cap Box",
+    "attribute": "tags",
+    "old_value": "tag-000",
+    "new_value": "tag-000",
+    "decision": "member_removed",
+    "reason": "user_removed",
+    "confidence_delta": 0.0,
+    "timestamp": 802.0,
+    "writer_id": null,
+    "session_id": null
+   },
+   {
+    "entity": "cap box",
+    "attribute": "tags",
+    "old_value": "tag-101",
+    "new_value": "tag-101",
+    "decision": "member_capped",
+    "reason": "max_current_members",
+    "confidence_delta": 0.0,
+    "timestamp": 804.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "dirty_slots": [
+   [
+    "cap-box",
+    "tags"
    ]
   ],
   "meta_dirty": true

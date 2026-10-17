@@ -41,6 +41,7 @@ mod release_check;
 mod routes;
 mod search;
 mod service;
+mod set_members;
 mod slots;
 mod startup;
 mod static_files;

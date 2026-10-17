@@ -110,10 +110,10 @@ fn pick(label: &Resolved, inherit: Option<&Option<String>>) -> Option<String> {
 
 /// Python `max(a, b)` / `min(a, b)` on floats: the first unless the second
 /// is strictly greater / smaller.
-fn py_max(a: f64, b: f64) -> f64 {
+pub(super) fn py_max(a: f64, b: f64) -> f64 {
     if b > a { b } else { a }
 }
-fn py_min(a: f64, b: f64) -> f64 {
+pub(super) fn py_min(a: f64, b: f64) -> f64 {
     if b < a { b } else { a }
 }
 
@@ -153,6 +153,37 @@ pub struct FactWrite<'a> {
     pub distortion_tolerance: Resolved,
 }
 
+/// The record a `_log` row is written against: its slot, its value
+/// (`old_value`) and its confidence (the base of `confidence_delta`).
+pub(crate) struct LogAnchor {
+    pub entity: String,
+    pub attribute: String,
+    pub value: String,
+    pub confidence: f64,
+}
+
+impl LogAnchor {
+    pub(super) fn of(r: &CortexRecord) -> LogAnchor {
+        LogAnchor {
+            entity: r.entity.clone(),
+            attribute: r.attribute.clone(),
+            value: r.value.clone(),
+            confidence: r.confidence,
+        }
+    }
+}
+
+/// The rest of a `_log` call.
+pub(crate) struct LogRow<'a> {
+    pub new_value: &'a str,
+    pub new_conf: f64,
+    pub t: f64,
+    pub decision: &'a str,
+    pub reason: &'a str,
+    pub writer_id: Option<&'a str>,
+    pub session_id: Option<&'a str>,
+}
+
 /// `WriteResult`: the action and the record it names (an index into
 /// `records`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,7 +221,7 @@ impl CortexStore {
     }
 
     /// `_reinforce` then `min(1, max(.., confidence))`, as confirm does.
-    fn confirmed_confidence(&self, old: f64, confidence: f64) -> f64 {
+    pub(super) fn confirmed_confidence(&self, old: f64, confidence: f64) -> f64 {
         if crate::mutants::active("mcp-fact-set-no-confirm-reinforce") {
             return py_max(old, confidence);
         }
@@ -225,20 +256,36 @@ impl CortexStore {
         reason: &str,
         w: &FactWrite<'_>,
     ) {
+        let anchor = LogAnchor::of(&self.records[anchor]);
+        let row = LogRow {
+            new_value,
+            new_conf,
+            t,
+            decision,
+            reason,
+            writer_id: w.writer_id.as_deref(),
+            session_id: w.session_id.as_deref(),
+        };
+        self.log_row(&anchor, &row);
+    }
+
+    /// `_log` against an explicit anchor: a record that may not be in
+    /// `records` (the cap's rejected member) or a write without a writer
+    /// (`remove_member`).
+    pub(crate) fn log_row(&mut self, anchor: &LogAnchor, w: &LogRow<'_>) {
         self.meta_dirty = true;
-        let cur = &self.records[anchor];
         let mut row = Map::new();
-        row.insert("entity".into(), json!(cur.entity));
-        row.insert("attribute".into(), json!(cur.attribute));
-        row.insert("old_value".into(), json!(cur.value));
-        row.insert("new_value".into(), json!(new_value));
-        row.insert("decision".into(), json!(decision));
-        row.insert("reason".into(), json!(reason));
+        row.insert("entity".into(), json!(anchor.entity));
+        row.insert("attribute".into(), json!(anchor.attribute));
+        row.insert("old_value".into(), json!(anchor.value));
+        row.insert("new_value".into(), json!(w.new_value));
+        row.insert("decision".into(), json!(w.decision));
+        row.insert("reason".into(), json!(w.reason));
         row.insert(
             "confidence_delta".into(),
-            json!(crate::store::round4(new_conf - cur.confidence)),
+            json!(crate::store::round4(w.new_conf - anchor.confidence)),
         );
-        row.insert("timestamp".into(), json!(t));
+        row.insert("timestamp".into(), json!(w.t));
         row.insert("writer_id".into(), json!(w.writer_id));
         row.insert("session_id".into(), json!(w.session_id));
         self.supersession_log.push(Value::Object(row));
@@ -351,7 +398,12 @@ impl CortexStore {
     /// `_settle_matching_contender` (`cortex.py:1331`): a write that made the
     /// parked contender's value current supersedes the contender and keeps
     /// every non-assistant tier that backed it.
-    fn settle_matching_contender(&mut self, key: &SlotKey, new: usize, w: &FactWrite<'_>) {
+    pub(super) fn settle_matching_contender(
+        &mut self,
+        key: &SlotKey,
+        new: usize,
+        w: &FactWrite<'_>,
+    ) {
         let Some(c) = self.active_contender(key) else {
             return;
         };
@@ -405,7 +457,7 @@ impl CortexStore {
 
     /// `_contend` (`cortex.py:1238`) at a slot with a current record: park
     /// the write as the slot's one contender (or confirm the matching one).
-    fn contend(&mut self, cur: usize, w: &FactWrite<'_>, reason: &str) -> WriteOutcome {
+    pub(super) fn contend(&mut self, cur: usize, w: &FactWrite<'_>, reason: &str) -> WriteOutcome {
         let key = self.records[cur].key.clone();
         if let Some(e) = self.active_contender(&key)
             && norm_value(&self.records[e].value) == norm_value(w.value)
@@ -836,7 +888,9 @@ mod tests {
 
     /// Write sequences recorded from `memory/cortex.py` on CPython 3.11
     /// (`harness/gen_w2e_cortex_write_goldens.py`): every action, record,
-    /// final record field and audit row must match.
+    /// final record field, slot index and audit row must match. Ops `add`
+    /// and `remove` replay `add_member` / `remove_member`
+    /// (`cortex_members.rs`).
     const GOLDEN: &str = include_str!("../../harness/goldens/w2e-cortex-write.json");
 
     fn label(v: &Value) -> Resolved {
@@ -866,7 +920,72 @@ mod tests {
             "distortion_tolerance": r.distortion_tolerance,
             "support": sorted(&r.support), "provenance": sorted(&r.provenance),
             "slot_embedding": r.slot_embedding.is_some(),
+            "embedding": r.embedding.as_deref().map(|e| e.iter().map(|&x| f64::from(x)).collect::<Vec<_>>()),
         })
+    }
+
+    fn embedding(v: &Value) -> Arc<[f32]> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_f64().unwrap() as f32)
+            .collect::<Vec<_>>()
+            .into()
+    }
+
+    /// One golden write: `(action, record, members_count)`.
+    fn replay(s: &mut CortexStore, x: &Value) -> (&'static str, Option<usize>, Option<usize>) {
+        use crate::stores::cortex_members::MemberWrite;
+        let text = |k: &str| x[k].as_str().unwrap().to_string();
+        let (e, a, v) = (text("entity"), text("attribute"), text("value"));
+        let now = x["now"].as_f64().unwrap();
+        let count = |s: &CortexStore| Some(s.members(&e, &a).len());
+        match x["op"].as_str().unwrap_or("fact") {
+            "add" => {
+                let mw = MemberWrite {
+                    entity: &e,
+                    attribute: &a,
+                    member: &v,
+                    embedding: embedding(&x["embedding"]),
+                    confidence: x["confidence"].as_f64().unwrap(),
+                    now,
+                    hlc: (x["hlc"][0].as_i64().unwrap(), x["hlc"][1].as_i64().unwrap()),
+                    writer_id: x["writer_id"].as_str().map(str::to_string),
+                    session_id: x["session_id"].as_str().map(str::to_string),
+                };
+                let got = s.add_member(&mw);
+                (got.action, got.record, count(s))
+            }
+            "remove" => {
+                let got = s.remove_member(&e, &a, &v, now);
+                (got.action, got.record, count(s))
+            }
+            _ => {
+                let emb = if x["embedding"].is_null() {
+                    vec![1.0, 0.0].into()
+                } else {
+                    embedding(&x["embedding"])
+                };
+                let fw = FactWrite {
+                    entity: &e,
+                    attribute: &a,
+                    value: &v,
+                    embedding: emb,
+                    slot_embedding: Some(vec![0.0, 1.0].into()),
+                    confidence: x["confidence"].as_f64().unwrap(),
+                    support: norm_support(x["support"].as_str()),
+                    now,
+                    hlc: (x["hlc"][0].as_i64().unwrap(), x["hlc"][1].as_i64().unwrap()),
+                    writer_id: x["writer_id"].as_str().map(str::to_string),
+                    session_id: x["session_id"].as_str().map(str::to_string),
+                    freshness_class: text("freshness_class"),
+                    authority: label(&x["authority"]),
+                    distortion_tolerance: label(&x["distortion_tolerance"]),
+                };
+                let got = s.write_fact(&fw).unwrap();
+                (got.action, Some(got.record), None)
+            }
+        }
     }
 
     #[test]
@@ -883,30 +1002,17 @@ mod tests {
                 ..CortexStore::default()
             };
             for (i, x) in seq["writes"].as_array().unwrap().iter().enumerate() {
-                let text = |k: &str| x[k].as_str().unwrap().to_string();
-                let (e, a, v) = (text("entity"), text("attribute"), text("value"));
-                let fw = FactWrite {
-                    entity: &e,
-                    attribute: &a,
-                    value: &v,
-                    embedding: vec![1.0, 0.0].into(),
-                    slot_embedding: Some(vec![0.0, 1.0].into()),
-                    confidence: x["confidence"].as_f64().unwrap(),
-                    support: norm_support(x["support"].as_str()),
-                    now: x["now"].as_f64().unwrap(),
-                    hlc: (x["hlc"][0].as_i64().unwrap(), x["hlc"][1].as_i64().unwrap()),
-                    writer_id: x["writer_id"].as_str().map(str::to_string),
-                    session_id: x["session_id"].as_str().map(str::to_string),
-                    freshness_class: text("freshness_class"),
-                    authority: label(&x["authority"]),
-                    distortion_tolerance: label(&x["distortion_tolerance"]),
-                };
-                let got = s.write_fact(&fw).unwrap();
+                let (action, record, count) = replay(&mut s, x);
                 let want = &seq["results"][i];
-                assert_eq!(got.action, want["action"], "{name} write {i}");
+                assert_eq!(action, want["action"], "{name} write {i}");
                 assert_eq!(
-                    got.record as u64,
-                    want["record"].as_u64().unwrap(),
+                    record.map(|r| r as u64),
+                    want["record"].as_u64(),
+                    "{name} write {i}"
+                );
+                assert_eq!(
+                    count.map(|c| c as u64),
+                    want["members_count"].as_u64(),
                     "{name} write {i}"
                 );
             }
@@ -928,6 +1034,20 @@ mod tests {
                 "{name} dirty slots"
             );
             assert_eq!(json!(s.meta_dirty), seq["meta_dirty"], "{name}");
+            let mut current: Vec<_> = s.current.iter().collect();
+            current.sort();
+            let current: Vec<Value> = current
+                .into_iter()
+                .map(|(k, i)| json!([[k.0, k.1], i]))
+                .collect();
+            assert_eq!(Value::Array(current), seq["current"], "{name} current");
+            let mut members: Vec<_> = s.members.iter().collect();
+            members.sort();
+            let members: Vec<Value> = members
+                .into_iter()
+                .map(|(k, v)| json!([[k.0, k.1], v]))
+                .collect();
+            assert_eq!(Value::Array(members), seq["members"], "{name} members");
         }
     }
 }

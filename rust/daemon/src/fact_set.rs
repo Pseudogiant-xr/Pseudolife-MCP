@@ -27,7 +27,7 @@ pub fn mcp_tools() -> Vec<(&'static str, ToolFn)> {
     vec![("memory_fact_set", mcp_memory_fact_set)]
 }
 
-fn internal(e: impl std::fmt::Display) -> ToolError {
+pub(crate) fn internal(e: impl std::fmt::Display) -> ToolError {
     ToolError::Internal(anyhow::anyhow!(e.to_string()))
 }
 
@@ -109,7 +109,7 @@ async fn entity_kind(
         .and_then(|m| m.get(&norm_key(entity)).cloned()))
 }
 
-async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, ToolError> {
+pub(crate) async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, ToolError> {
     let embedder = ready.embedder.clone();
     let row = tokio::task::spawn_blocking(move || embedder.embed(&text))
         .await
@@ -216,7 +216,7 @@ async fn cortex_write(
 
 /// `_ensure_subject_entity` (`service.py:1859`): mint the subject's graph
 /// node unless its name is junk-shaped or it already resolves.
-async fn ensure_subject_entity(db: &Client, entity: &str) -> anyhow::Result<()> {
+pub(crate) async fn ensure_subject_entity(db: &Client, entity: &str) -> anyhow::Result<()> {
     if crate::junk_names::junk_name_reason(entity).is_some() {
         return Ok(());
     }
@@ -233,7 +233,7 @@ async fn ensure_subject_entity(db: &Client, entity: &str) -> anyhow::Result<()> 
 /// `_save_cortex` (`service.py:3746`): the per-slot sync. A failure counts
 /// in `persist_errors` and surfaces as an internal error (Python's
 /// `PersistenceError`); marks persisted before it are cleared, the rest kept.
-async fn save_cortex(svc: &Service, ready: &Ready) -> Result<(), ToolError> {
+pub(crate) async fn save_cortex(svc: &Service, ready: &Ready) -> Result<(), ToolError> {
     let db = ready.storage.client();
     let fail = |e: anyhow::Error| {
         svc.persist_errors
