@@ -429,6 +429,27 @@ and coverage for each branch; the `mcp-fact-get-no-alias-retry`,
 `mcp-fact-get-no-candidates` and `mcp-fact-get-no-lean` mutants must be
 caught.
 
+### memory_get over MCP (2026-10-17)
+
+`read/mcp_reads.rs`. Python: `mcp_server.py:1518-1539, 718, 910`;
+`service.py` `get_entry` (6088-6138), `_record_retrieval_use` (6043);
+`storage/postgres.py` `get_entry` (4217), `facts_for_entry` (4205),
+`bump_access_count` (4286), `credit_retrieval_use` (2189).
+
+| # | Exact item | Source |
+|---|---|---|
+| MG1 | The `entries` row by id; none (an unknown id, or one past BIGINT, which Python's query compares as numeric and matches nothing) answers `{found: false, faded: true, note: _FADED_NOTE}`. | `service.py:6100-6106`; `mcp_server.py:1529-1530` |
+| MG2 | A found row: `access_count + 1` in the database (Python reads, then bumps in a transaction of its own, both under the service lock, so concurrent gets each answer the count after their own bump; Rust gets the same by reading and bumping in one transaction with the row locked), and on the resident entry if held; then `consolidated_into`, the current facts traced to the entry (`entity, attribute, value`, by slot key); then, with `memory.retrieval_log.enabled`, one `retrieval_uses` row (`used_via` "get") for the most recent event within `use_window_seconds` (default 3600) that served the entry under the caller's session (header, active pointer, legacy transport); a failure there is logged and swallowed. | `service.py:6043-6070, 6107-6111`; `postgres.py:2189-2215, 4205-4215, 4286-4290` |
+| MG3 | The answer: `found, entry_id, text, source, reinforcements, explicit_reinforcements, access_count` (the row's plus one), `consolidated_into`; a superseded row adds `superseded` and the successor annotation over the resident entries (the row excluded by id). | `service.py:6112-6138` |
+| MG4 | The MCP layer: a superseded answer with a successor text gains `replaced_by` (as a compact search hit), and `superseded_at`, `superseded_by_text`, `superseded_by_id`, `supersession_verified`, `superseded_by_current` are removed. An internal failure carries `mutation: "unknown"` (not a read-only tool). | `mcp_server.py:1531-1539, 910` |
+
+`harness/w2d_search.py --only mcp-get` compares 8 calls on its own template
+derived with the fact-get seed flags: a search in one session, then gets of the entry it served (the
+credit, then the access count showing the first bump), a superseded and a
+traced entry, a get from another session, and two faded ids, with
+`entries.access_count` and `retrieval_uses` in the compared bank state; the
+`mcp-get-no-db-bump` and `mcp-get-no-use-credit` mutants must be caught.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
