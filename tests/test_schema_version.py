@@ -19,6 +19,11 @@ check).
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
+import pytest
+
 from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 # Bump this literal in the same commit that bumps SCHEMA_META_VERSION.
@@ -45,6 +50,12 @@ change:
      literal pins.
   6. `python ops/gen_llms_txt.py` after any README/docs/guide edit
      (tests/test_llms_txt.py pins the generated llms-full.txt).
+  7. The Rust side: `python rust/daemon/harness/gen_schema_sql.py` (then
+     `--check`), the shim's transfer schema literals (pinned below by
+     test_rust_shim_transfer_pins_the_same_schema_version), the schema
+     startup golden, and every parity golden that digests the catalog
+     (dream cursors, daemon run.py rows, graph store, principals),
+     re-recorded on both OSes — rust/PARITY.md names the pin.
 
 And test the behaviour the bump added BESIDE ITS CONSUMER — or, if it is
 pure DDL shape and nothing reads it yet, add a row to
@@ -55,3 +66,27 @@ tests/test_schema_ddl_shape.py. Do not add a new tests/test_schema_vNN.py.
 def test_schema_meta_version_is_pinned():
     assert SCHEMA_META_VERSION == CURRENT_SCHEMA, _CHECKLIST.format(
         actual=SCHEMA_META_VERSION, pinned=CURRENT_SCHEMA)
+
+
+# The native shim's transfer path carries the schema version as literals:
+# the export writes it, the import refuses any other, and the refusal names
+# it. gen_schema_sql.py generates the daemon's copy, not these. The v56 bump
+# (2026-10-17) left them at 55 and every Parity export/import row refused
+# the bank; this pins them so the next bump fails here first.
+_SHIM = Path(__file__).resolve().parents[1] / "rust" / "shim" / "src" / "cli"
+_SHIM_SCHEMA_LITERALS = (
+    (_SHIM / "transfer" / "export.rs", r'const BUILD_SCHEMA: &str = "(\d+)";'),
+    (_SHIM / "transfer" / "import.rs", r'const CURRENT_SCHEMA: &str = "(\d+)";'),
+    (_SHIM / "transfer.rs",
+     r"import into a bank not at this build's schema \((\d+)\) is deferred"),
+)
+
+
+@pytest.mark.parametrize("path,pattern", _SHIM_SCHEMA_LITERALS,
+                         ids=[p.name for p, _ in _SHIM_SCHEMA_LITERALS])
+def test_rust_shim_transfer_pins_the_same_schema_version(path, pattern):
+    found = re.findall(pattern, path.read_text(encoding="utf-8"))
+    assert found, f"{path.name}: schema literal {pattern!r} not found"
+    assert {int(v) for v in found} == {SCHEMA_META_VERSION}, (
+        f"{path.name} says schema {found}, SCHEMA_META_VERSION is "
+        f"{SCHEMA_META_VERSION}: bump the literal with the schema")

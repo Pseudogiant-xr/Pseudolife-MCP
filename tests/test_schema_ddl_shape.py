@@ -202,6 +202,7 @@ _NULLABLE_COLUMNS = [
     ("entity_proposals", "judged3_at"),
     ("entity_proposals", "judge3_served_model"),
     ("entity_proposals", "judge3_policy"),
+    ("merge_decisions", "votes"),                 # v56: NULL = no vote snapshot
     ("dream_run_slots", "chronicle_event_id"),    # v28: NULL on non-event rows
     ("entries", "authority"),                     # v35: NULL = observation
     ("entries", "distortion_tolerance"),          # v35: NULL = unlabelled

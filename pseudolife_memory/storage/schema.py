@@ -1622,6 +1622,15 @@ def ensure_schema(conn) -> dict:
                     "judge3_served_model TEXT", "judge3_policy TEXT"):
             cur.execute(
                 f"ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS {ddl}")
+        # (6) The judge votes a merge or junk proposal carried when it was
+        # decided, snapshotted onto its audit row. An accepted merge
+        # CASCADE-deletes the proposal row with the votes on it, so this is
+        # the only place a shadow judge's accepts can later be scored
+        # against the decisions a human or agent took (the judge-agreement
+        # report). NULL = decided before this column existed, or on a row
+        # no judge had seen. Nothing writes it in this build.
+        cur.execute(
+            "ALTER TABLE merge_decisions ADD COLUMN IF NOT EXISTS votes JSONB")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS curation_judgments (

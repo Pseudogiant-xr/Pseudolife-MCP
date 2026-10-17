@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "source_sha256": "c5489b906120e520da2b01fa79d5c908d86fbf5691f55093994de8cfaf5828a0",
+  "source_sha256": "f16503940abc298fae9233ca7054b739977edfff230bb7b899c1f521fad4cfce",
   "schema_version": 56,
   "embedding_dimension": 1024,
   "embedding_probe": "SELECT atttypmod FROM pg_attribute WHERE attrelid = to_regclass('public.entries') AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",
@@ -466,6 +466,11 @@
     {
       "op": "sql",
       "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge3_policy TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE merge_decisions ADD COLUMN IF NOT EXISTS votes JSONB",
       "parameters": []
     },
     {
