@@ -18,7 +18,7 @@ pub fn mcp_tools() -> Vec<(&'static str, ToolFn)> {
     vec![("memory_search", mcp_memory_search)]
 }
 
-fn strings(v: Option<&Value>) -> Option<Vec<String>> {
+pub(crate) fn strings(v: Option<&Value>) -> Option<Vec<String>> {
     // `list(x) if x else None`: an empty list is no filter.
     let items = v?.as_array().filter(|a| !a.is_empty())?;
     Some(
@@ -357,7 +357,7 @@ fn replaced_by(e: &Value) -> Value {
 }
 
 /// `_compact_entry`.
-fn compact_entry(e: &Value, text_chars: Option<i64>) -> Value {
+pub(crate) fn compact_entry(e: &Value, text_chars: Option<i64>) -> Value {
     let mut out = Map::new();
     for k in ["id", "text", "source", "tags", "score"] {
         if let Some(v) = e.get(k) {
