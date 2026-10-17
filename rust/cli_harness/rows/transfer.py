@@ -554,7 +554,7 @@ def _seed_target(conn) -> None:
 
 
 def _seed_null_stamps(conn) -> None:
-    """A non-empty schema-55 bank holding an edge as the daemon writes it
+    """A non-empty bank at the oracle's schema holding an edge as the daemon writes it
     (``PostgresStorage.upsert_edge``: tx_time, valid_time, writer_id NULL),
     which the oracle's ensure_schema backfills before refusing the import."""
     from pseudolife_memory.storage.postgres import PostgresStorage  # noqa: PLC0415
