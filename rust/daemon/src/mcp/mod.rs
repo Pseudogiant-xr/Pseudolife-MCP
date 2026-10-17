@@ -6,7 +6,7 @@
 //! app once the bearer gate has passed; `handle` answers for that app: the
 //! body-size limit, the trailing-slash redirect, the plain 404 and `/mcp`.
 
-mod as_of;
+pub(crate) mod as_of;
 pub mod binding;
 mod catalogue;
 mod difflib;

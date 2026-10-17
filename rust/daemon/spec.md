@@ -726,6 +726,38 @@ disabled (the note, with junk and with ids); and the retrieval log disabled
 `mcp-reinforce-no-use-credit` mutants must be caught. The `used_ids` parser
 is checked natively against cases whose Python answers were recorded.
 
+### memory_history over MCP, slot mode (2026-10-18)
+
+`read/history.rs` (the tool and `service.history`), on the resident cortex
+snapshot and `read/cortex_search.rs`'s `record_to_dict_age`, with the
+`as_of` epoch from `mcp/as_of.rs` (`epoch`, beside the binder's
+`_check_as_of`); registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py:1804-1828`; `service.py` `_parse_as_of` (5746-5756) and
+`history` (5758-5831); `memory/cortex.py` `members` (1182-1191),
+`slot_kind` (1193-1216), `records_for` (1526-1528).
+
+| # | Exact item | Source |
+|---|---|---|
+| HI1 | Bound arguments: `entity` (a plain string), `attribute` (a nullable string; omitted or null is chain mode) and `as_of` (a string, a float or none, refused at binding unless `_parse_as_of` can read it). Read-only: an internal failure carries no `mutation`. | `mcp_server.py:1804-1828, 769-782` |
+| HI2 | `_parse_as_of`, before the lock: none passes; else `float(value)` (Python's spelling: whitespace, single underscores, `inf`/`nan`), else `datetime.fromisoformat(value).timestamp()`: an aware value at its offset, a naive one in the daemon's local time (`fold=0` at an ambiguous instant), as microseconds since the epoch over 10**6. | `service.py:5746-5756` |
+| HI3 | A set slot (`slot_kind` is `set`: no current scalar, and current members or any member row): every member row in record order adds `{"value", "event": "added", "at": asserted_at}` and, when its status is `removed` with a `superseded_at`, `{"value", "event": "removed", "at": superseded_at}`; with a cutoff only events at or before it remain; they sort by `at`, then adds before removes, then member row order. The answer is `{"kind": "set", "entity", "attribute", "count", "versions"}` with the raw arguments. | `service.py:5779-5812`; `cortex.py:1182-1216` |
+| HI4 | Otherwise every record at the slot key (`_norm_key` of both parts), in record order, filtered to `tx_time` (or `asserted_at` when it is unset or zero) at or before a cutoff, stably sorted by that time. The answer is `{"entity", "attribute", "count", "versions"}`, each version `_cortex_record_to_dict` with `config.time.relative_age` and the default `annotate` stale policy (never policy-rendered: the audit surface shows what was stored). | `service.py:5813-5831`; `cortex.py:1526-1528` |
+| HI5 | With a cutoff, `as_of` is appended (the epoch seconds; a NaN or infinite cutoff serializes as null, as pydantic serializes them). | `service.py:5810-5811, 5829-5830` |
+| HI6 | Chain mode (`service.chain`) is not served: it answers the declared stub (`divergences.md`, the `memory_history` row) until the lesson store lands. | `service.py:5833-5927` |
+| HI7 | Not reproduced: a naive `as_of` inside a spring-forward gap (declared with MCP-BIND-AS-OF-PYTHON; the harness and CI run in UTC). | `mcp/as_of.rs` |
+
+`harness/w2e.py live --only history-slot` compares every answer and the full
+bank after each call, on a template whose scalar chain (three user writes)
+and set slot (two adds, a removal, a later add) the Python daemon's own fact
+tools wrote: the chain, under a differently spelled key, with a cutoff
+between the first two versions (read from the bank's `tx_time`), with an
+offset ISO time, a naive date, epoch zero, NaN and infinity; the set
+slot's events, with far-future and early cutoffs; an empty slot; and a
+relative word refused at binding. The `mcp-history-ignore-as-of`,
+`mcp-history-set-unsorted` and `mcp-history-set-no-removed` mutants must be
+caught. The epoch is checked natively against `_parse_as_of` answers
+recorded from CPython 3.11.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

@@ -39,7 +39,7 @@ tool's answers by value.
 | `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred by decision (PARITY.md, "Graph traversal deferred by decision"). |
 | `memory_world_search` | W2-D | No resident world-cortex search service. |
 | `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
-| `memory_history` | W2-D | No canonical history service. |
+| `memory_history` | W2-D | Slot mode (`attribute` given) is served (spec HI1-HI7); chain mode (`attribute` omitted) answers this stub: it merges the lesson store, which has no Rust port yet, with the graph's entity, alias and entry reads. It lands with the lesson store (task H). |
 | `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
@@ -62,7 +62,8 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_fact_set`, `memory_set_add`, `memory_set_remove`,
 `memory_fact_resolve`, `memory_stats`, `memory_episode_start`,
 `memory_episode_end`, `memory_session_title`, `memory_episode_summary`,
-`memory_outcome`, `memory_reinforce`, `memory_agents` and `memory_message`. The two board tools
+`memory_outcome`, `memory_reinforce`, `memory_history` in slot mode (its
+chain mode keeps the stub, row above), `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
