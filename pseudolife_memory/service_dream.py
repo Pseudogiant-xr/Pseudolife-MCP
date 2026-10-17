@@ -4860,7 +4860,8 @@ class DreamOps:
                             ok = self._storage.set_entity_proposal_judgment(
                                 e["id"], verdict=v["verdict"],
                                 confidence=v["confidence"], note=note,
-                                model=model, at=now)
+                                model=model, at=now,
+                                served_model=getattr(ex, "served_model", None))
                             if ok:
                                 review.record(row)
                             if not ok:
@@ -5161,7 +5162,8 @@ class DreamOps:
                             ok = self._storage.set_proposal_judgment(
                                 p["id"], verdict=v["verdict"], confidence=v["confidence"],
                                 note=v.get("note"), model=model,
-                                relation=v.get("relation"), at=now)
+                                relation=v.get("relation"), at=now,
+                                served_model=getattr(ex, "served_model", None))
                             if ok:
                                 review.record(p)
                             if not ok:
@@ -5340,7 +5342,8 @@ class DreamOps:
                             continue
                         ok = self._storage.set_entity_proposal_judgment(
                             p["id"], verdict=v["verdict"], confidence=v["confidence"],
-                            note=v.get("note"), model=model, at=now)
+                            note=v.get("note"), model=model, at=now,
+                            served_model=getattr(ex, "served_model", None))
                         if ok:
                             review.record(p)
                         if not ok:

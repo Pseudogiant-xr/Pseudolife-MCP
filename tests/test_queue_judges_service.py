@@ -1511,6 +1511,34 @@ def test_first_opinion_relation_is_recovered_for_the_link(svc):
     assert _merge_links(svc) == [("phi module", "part-of", "phi concept", "merge-judge-relate")]
 
 
+# ── v56: the first opinion stamps the model its endpoint served ──────────
+
+def _served_stamp(svc, table, pid):
+    return svc._storage.conn.execute(
+        f"SELECT judge_served_model FROM {table} WHERE id=%s", (pid,)).fetchone()[0]
+
+
+def test_a_first_opinion_stamps_the_model_its_endpoint_served(svc):
+    """judge_model is the configured name; the model the endpoint reported
+    serving used to live only in the judging memo, which every refresh
+    prunes to pending rows, so a decided row lost it. The row keeps it now
+    (schema v56), for the judge-agreement report's distinct-model rule."""
+    pair = ("stamp module", "stamp concept")
+    pid = _propose(svc, *pair)
+    svc.deep_dream_judge(_MergeJudge({pair: ("accept", 0.9)}))
+    assert _served_stamp(svc, "entity_proposals", pid) == "stub-merge-judge"
+    key = ("stamp-a", "uses", "stamp-b")
+    lid = _link(svc, *key)
+    svc.deep_dream_judge_links(_ServedLinkJudge({key: ("accept", 0.7, None)}))
+    assert _served_stamp(svc, "edge_proposals", lid) == "stub-link-judge"
+    # An endpoint that names no model leaves the stamp NULL: unknown, as
+    # the memo recorded it.
+    key2 = ("stamp-c", "uses", "stamp-d")
+    lid2 = _link(svc, *key2)
+    svc.deep_dream_judge_links(_LinkJudge({key2: ("accept", 0.7, None)}))
+    assert _served_stamp(svc, "edge_proposals", lid2) is None
+
+
 # ── merge judge: third opinion on a split (schema v56) ────────────────────
 
 class _ThirdJudge(_MergeJudge):

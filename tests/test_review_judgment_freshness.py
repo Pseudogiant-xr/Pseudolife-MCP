@@ -667,6 +667,15 @@ def test_requeue_clears_a_link_rows_second_opinion_with_its_first(svc):
     assert row['judge2_model'] is None and row['judged2_at'] is None
 
 
+def test_requeue_clears_the_first_opinions_served_stamp_with_its_verdict(svc):
+    pid, _first, _second, _out = _link_second_opinion(svc, 'accept', .7, .8)
+    stamp = lambda: svc._storage.conn.execute(  # noqa: E731
+        'SELECT judge_served_model FROM edge_proposals WHERE id=%s', (pid,)).fetchone()[0]
+    assert stamp() == 'stub-link-judge'
+    assert svc.review_rejudge('link', limit=1)['requeued'] == 1
+    assert stamp() is None
+
+
 def test_a_stale_first_link_verdict_takes_its_second_opinion_with_it(svc):
     pid, first, _second, _out = _link_second_opinion(svc, 'accept', .7, .8)
     svc.graph_relate('alpha-tool', 'uses', 'gamma-lib')    # the evidence moves

@@ -3459,7 +3459,7 @@ class PostgresStorage:
     def set_proposal_judgment(self, proposal_id: int, *, verdict: str,
                               confidence: float | None, note: str | None,
                               model: str | None, relation: str | None,
-                              at: float) -> bool:
+                              at: float, served_model: str | None = None) -> bool:
         """Record the link judge's verdict on a PENDING edge proposal (an
         opinion, not a decision — schema v35 mirrors the v30 merge
         contract). ``relation`` is the corrected relation of a retype."""
@@ -3467,9 +3467,9 @@ class PostgresStorage:
             cur = self.conn.execute(
                 "UPDATE edge_proposals SET judge_verdict=%s, "
                 "judge_confidence=%s, judge_note=%s, judge_model=%s, "
-                "judged_at=%s, judge_relation=%s "
+                "judged_at=%s, judge_relation=%s, judge_served_model=%s "
                 "WHERE id=%s AND status='pending'",
-                (verdict, confidence, note, model, at, relation, proposal_id))
+                (verdict, confidence, note, model, at, relation, served_model, proposal_id))
         return cur.rowcount > 0
 
     def set_proposal_second_judgment(self, proposal_id: int, *, verdict: str,
@@ -3895,15 +3895,18 @@ class PostgresStorage:
     def set_entity_proposal_judgment(self, proposal_id: int, *,
                                      verdict: str, confidence: float | None,
                                      note: str | None, model: str | None,
-                                     at: float) -> bool:
+                                     at: float, served_model: str | None = None) -> bool:
         """Record the autonomous judge's shadow verdict on a pending
-        proposal (an opinion, not a decision — see schema v30)."""
+        proposal (an opinion, not a decision — see schema v30).
+        ``served_model`` (v56) is the model the endpoint reported serving,
+        NULL when it named none; a fresh first opinion replaces it."""
         with self._txn():
             cur = self.conn.execute(
                 "UPDATE entity_proposals SET judge_verdict=%s, "
                 "judge_confidence=%s, judge_note=%s, judge_model=%s, "
-                "judged_at=%s WHERE id=%s AND status='pending'",
-                (verdict, confidence, note, model, at, proposal_id))
+                "judged_at=%s, judge_served_model=%s "
+                "WHERE id=%s AND status='pending'",
+                (verdict, confidence, note, model, at, served_model, proposal_id))
         return cur.rowcount > 0
 
     def get_entity_proposal(self, proposal_id: int) -> dict | None:

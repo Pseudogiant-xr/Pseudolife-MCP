@@ -342,7 +342,7 @@ class ReviewJudgments:
                     self.storage.conn.execute(
                         "UPDATE edge_proposals SET judge_verdict=NULL, "
                         "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                        "judged_at=NULL, judge_relation=NULL, "
+                        "judged_at=NULL, judge_relation=NULL, judge_served_model=NULL, "
                         "judge2_verdict=NULL, judge2_confidence=NULL, "
                         "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL, "
                         "judge2_served_model=NULL, judge2_policy=NULL "
@@ -351,7 +351,8 @@ class ReviewJudgments:
                     self.storage.conn.execute(
                         "UPDATE entity_proposals SET judge_verdict=NULL, "
                         "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                        "judged_at=NULL, judge2_verdict=NULL, judge2_confidence=NULL, "
+                        "judged_at=NULL, judge_served_model=NULL, "
+                        "judge2_verdict=NULL, judge2_confidence=NULL, "
                         "judge2_model=NULL, judged2_at=NULL, judge3_verdict=NULL, "
                         "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL, "
                         "judge2_served_model=NULL, judge2_policy=NULL, "
@@ -576,7 +577,7 @@ def requeue(service, queue="all", limit=32):
                             storage.conn.execute(
                                 "UPDATE edge_proposals SET judge_verdict=NULL, "
                                 "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                                "judged_at=NULL, judge_relation=NULL, "
+                                "judged_at=NULL, judge_relation=NULL, judge_served_model=NULL, "
                                 "judge2_verdict=NULL, judge2_confidence=NULL, "
                                 "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL, "
                                 "judge2_served_model=NULL, judge2_policy=NULL "
@@ -585,7 +586,8 @@ def requeue(service, queue="all", limit=32):
                             storage.conn.execute(
                                 "UPDATE entity_proposals SET judge_verdict=NULL, "
                                 "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                                "judged_at=NULL, judge2_verdict=NULL, judge2_confidence=NULL, "
+                                "judged_at=NULL, judge_served_model=NULL, "
+                                "judge2_verdict=NULL, judge2_confidence=NULL, "
                                 "judge2_model=NULL, judged2_at=NULL, judge3_verdict=NULL, "
                                 "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL, "
                                 "judge2_served_model=NULL, judge2_policy=NULL, "

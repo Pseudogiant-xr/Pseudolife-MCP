@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "source_sha256": "f16503940abc298fae9233ca7054b739977edfff230bb7b899c1f521fad4cfce",
+  "source_sha256": "d63be66143afb3ad9d4d83efee17be0913129917fc02fc3234a3a96e29d17f63",
   "schema_version": 56,
   "embedding_dimension": 1024,
   "embedding_probe": "SELECT atttypmod FROM pg_attribute WHERE attrelid = to_regclass('public.entries') AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",
@@ -395,6 +395,11 @@
     },
     {
       "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge_served_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
       "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_verdict TEXT",
       "parameters": []
     },
@@ -426,6 +431,11 @@
     {
       "op": "sql",
       "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_policy TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge_served_model TEXT",
       "parameters": []
     },
     {

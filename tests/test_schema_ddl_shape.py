@@ -187,6 +187,8 @@ _NULLABLE_COLUMNS = [
     ("coordination_agents", "parent_agent_id"),   # v50: NULL = no parent (yet)
     ("coordination_agents", "parent_thread"),     # v50: NULL = not a subagent
     ("coordination_agents", "name_set_at"),       # v55: NULL = never named
+    ("edge_proposals", "judge_served_model"),     # v56: NULL = endpoint named none
+    ("entity_proposals", "judge_served_model"),
     ("edge_proposals", "judge2_verdict"),         # v56: the link second opinion
     ("edge_proposals", "judge2_confidence"),
     ("edge_proposals", "judge2_model"),

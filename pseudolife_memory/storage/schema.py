@@ -1610,13 +1610,20 @@ def ensure_schema(conn) -> dict:
         # name), judgeN_policy the fingerprint of that endpoint's judging
         # policy, so a decision taken on a later tick from votes recorded
         # earlier can still be checked and reconsidered against them.
-        for ddl in ("judge2_verdict TEXT", "judge2_confidence REAL",
+        # judge_served_model (both tables): the model the FIRST opinion's
+        # endpoint reported serving. judge_model is the configured name, and
+        # the served name lived only in the judging memo, which every
+        # refresh prunes to pending rows, so a decided row lost it; the
+        # judge-agreement report's distinct-model rule needs it on the row.
+        for ddl in ("judge_served_model TEXT",
+                    "judge2_verdict TEXT", "judge2_confidence REAL",
                     "judge2_model TEXT", "judged2_at DOUBLE PRECISION",
                     "judge2_relation TEXT", "judge2_served_model TEXT",
                     "judge2_policy TEXT"):
             cur.execute(
                 f"ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS {ddl}")
-        for ddl in ("judge2_served_model TEXT", "judge2_policy TEXT",
+        for ddl in ("judge_served_model TEXT",
+                    "judge2_served_model TEXT", "judge2_policy TEXT",
                     "judge3_verdict TEXT", "judge3_confidence REAL",
                     "judge3_model TEXT", "judged3_at DOUBLE PRECISION",
                     "judge3_served_model TEXT", "judge3_policy TEXT"):
