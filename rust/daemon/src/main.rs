@@ -28,6 +28,7 @@ mod hlc;
 mod http;
 mod junk_names;
 mod labels;
+mod lesson_tools;
 mod maintenance;
 mod mcp;
 mod meta_filter;

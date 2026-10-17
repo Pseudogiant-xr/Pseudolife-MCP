@@ -12,8 +12,8 @@ Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_set_add``, ``memory_set_remove``, ``memory_fact_resolve``,
 ``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
 ``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce``,
-``memory_history`` (slot mode), ``memory_world_set`` and
-``memory_world_search`` on ``/mcp`` (``--features mutants`` adds the
+``memory_history``, ``memory_world_set``, ``memory_world_search`` and
+``memory_lesson_search`` on ``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -112,7 +112,8 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("retrieval_uses", "created_at"),
          ("world_facts", "asserted_at"), ("world_facts", "last_confirmed"),
          ("world_facts", "superseded_at"), ("world_facts", "tx_time"),
-         ("world_facts", "valid_time"), ("world_facts", "hlc_phys")}
+         ("world_facts", "valid_time"), ("world_facts", "hlc_phys"),
+         ("lesson_search_events", "created_at")}
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
 RECENT_CLOCK = {("world_facts", "retrieved_at")}
@@ -157,7 +158,11 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-history-set-no-removed", "mcp-history-asserted-order",
            # the world cortex (spec WD1-WD12): caught by the world-* scenarios.
            "mcp-world-set-no-confirm", "mcp-world-set-unsafe-allowed",
-           "mcp-world-set-no-save", "mcp-world-search-no-correct-with"]
+           "mcp-world-set-no-save", "mcp-world-search-no-correct-with",
+           # lessons and the history chain (spec LS1-LS10, CH1-CH6): caught
+           # by the lessons scenario.
+           "mcp-lesson-search-no-graph-resolve", "mcp-lesson-search-no-log",
+           "mcp-history-chain-no-lessons"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -304,6 +309,32 @@ def world_set(entity, attribute, value, headers=(), **kw) -> dict:
 
 def world_search(query, **kw) -> dict:
     return tool("memory_world_search", query=query, **kw)
+
+
+def lesson_search(query, headers=(), **kw) -> dict:
+    return tool("memory_lesson_search", headers, query=query, **kw)
+
+
+def history_chain(entity) -> dict:
+    return tool("memory_history", entity=entity)
+
+
+def lesson_row(task, aspect, task_norm, aspect_norm, lesson, about, polarity, outcome,
+               status, entry_text) -> dict:
+    """Seed-only: a ``lessons`` row (only the dream writes lessons), its
+    embedding copied from an entry the Python daemon stored, so both banks
+    hold the same vector. After the seeding daemon stops: its exit flush
+    rewrites the lessons it holds."""
+    def q(v):
+        return "NULL" if v is None else "'" + v.replace("'", "''") + "'"
+    return sql(
+        "INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, about, "
+        "polarity, outcome, status, confidence, origin, support, provenance, asserted_at, "
+        "last_confirmed, embedding) SELECT "
+        f"{q(task)}, {q(aspect)}, {q(task_norm)}, {q(aspect_norm)}, {q(lesson)}, {q(about)}, "
+        f"{q(polarity)}, {q(outcome)}, {q(status)}, 0.8, 'agent', '[]', "
+        "'[\"signal:2\", \"signal:1\"]', 1700000000, 1700000000, embedding "
+        f"FROM entries WHERE text = {q(entry_text)}", after_stop=True)
 
 
 def history(entity, attribute, **kw) -> dict:
@@ -958,6 +989,58 @@ SCENARIOS.update({
             # the stale value moves to last_known_value, in both projections
             world_search("python version"),
             world_search("python version", verbose=True),
+        ],
+    },
+})
+
+
+# Lessons (spec LS1-LS10) and the memory_history chain (CH1-CH6). The
+# lessons are SQL seeds (only the dream writes them), asserted in 2023, so a
+# fact written now about their subject makes them re_verify: directly for
+# "blue-green pipeline", and through the graph alias "bearer tokens" ->
+# "auth tokens" for the credentials lesson.
+LESSON_TEXTS = [
+    "Deploy the engine through the blue-green pipeline, never by hand.",
+    "The flaky integration test needs the bench Postgres on port 5433.",
+    "Rotate the bearer tokens with the CLI, not by editing files.",
+]
+
+SCENARIOS.update({
+    "lessons": {
+        "config": None,
+        "seed": [
+            *[store(t, [sess("sess-l")]) for t in LESSON_TEXTS],
+            fact("blue-green pipeline", "status", "retired", origin="user", confidence=0.9),
+            fact("auth tokens", "rotation", "monthly", origin="user", confidence=0.9),
+            tool("memory_alias", entity="auth tokens", alias="bearer tokens"),
+            tool("memory_graph_relate", src="blue-green pipeline", relation="uses",
+                 dst="Jenkins"),
+            lesson_row("deploy engine to host", "approach", "deploy-engine-to-host", "approach",
+                       "Deploy through the blue-green pipeline, never by hand.",
+                       "blue-green pipeline", "+", "success", "current", LESSON_TEXTS[0]),
+            lesson_row("run integration tests", "pitfall", "run-integration-tests", "pitfall",
+                       "The suite needs the bench Postgres on port 5433.", None, "-",
+                       "failure", "current", LESSON_TEXTS[1]),
+            lesson_row("rotate credentials", "tool-choice", "rotate-credentials", "tool-choice",
+                       "Rotate bearer tokens with the CLI.", "bearer tokens", "+", "success",
+                       "current", LESSON_TEXTS[2]),
+            lesson_row("deploy engine to host", "approach", "deploy-engine-to-host", "approach",
+                       "Deploy by hand over ssh.", "blue-green pipeline", "+", "success",
+                       "superseded", LESSON_TEXTS[0]),
+        ],
+        "ops": [
+            # compact entries; re_verify directly and through the graph alias
+            lesson_search("how do I deploy the engine to a host"),
+            lesson_search("integration tests keep failing", verbose=True),
+            lesson_search("rotating credentials", top_k=1),
+            # a session's search logs its session and open episode
+            lesson_search("deploy and rotate", [sess("sess-l")], top_k=3),
+            # the chain: facts, the edge and the about-named lesson
+            history_chain("blue-green pipeline"),
+            # alias names widen the keys: the bearer-tokens lesson joins
+            history_chain("auth tokens"),
+            history_chain("Nobody at all"),
+            history_chain("   "),
         ],
     },
 })
