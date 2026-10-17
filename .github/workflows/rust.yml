@@ -486,6 +486,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      # Local 2026-10-17, 36/35 cases: Windows live 101s + golden 43s,
+      # WSL live 67s + golden 39s, controls under 1s; ten minutes is about
+      # four times the slower platform.
+      - name: CLI lease operator differential harness
+        if: matrix.suite == 'cli'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_lease_operator.py rust/cli_harness/test_lease_transport.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row lease_operator --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-lease-operator.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row lease_operator --golden --candidate $candidate -v
+          exit $LASTEXITCODE
       # Windows local 2026-10-10: 89-action golden 49s + eight live controls 209s
       # + recovery/control tests 38s; allow about twice the measured 296s gate.
       - name: Dream cursor differential harness
@@ -994,7 +1010,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        shard: [audit-0, audit-1, audit-2, backup-0, backup-1, backup-2, connect-0, connect-1, connect-2, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, mail-0, mail-1, maintainer-0, maintainer-1, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2]
+        shard: [audit-0, audit-1, audit-2, backup-0, backup-1, backup-2, connect-0, connect-1, connect-2, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, lease_operator-0, mail-0, mail-1, maintainer-0, maintainer-1, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
