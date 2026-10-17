@@ -204,6 +204,9 @@ pub struct WriteState {
     pub interaction_count: u64,
     /// `_surprise_history` per band, last 100 (persisted only in `weights.pt`).
     pub surprise_history: HashMap<String, Vec<f64>>,
+    /// `_entity_kind_cache`: `entity_kinds` (entity_norm -> kind), read on the
+    /// first `freshness_class="auto"` fact write and kept for the process.
+    pub entity_kinds: Option<HashMap<String, String>>,
 }
 
 fn duration(raw: Option<&str>, default: f64) -> Result<f64, String> {

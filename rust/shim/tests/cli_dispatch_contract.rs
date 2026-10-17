@@ -22,9 +22,9 @@ fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
         assert_eq!(output.status.code(), Some(0));
         // SHA-256 of pinned cli.py::_USAGE UTF-8 bytes, with Windows CRLF.
         let expected = if cfg!(windows) {
-            "9ccc588d6cecc91c1cd69cae360941e501552ec7c5a5a18d8881f6c9b4af4eba"
+            "173ab68b71f80ad81ebca02924d2ad759922269a605100371d1a4e009b646161"
         } else {
-            "759a7ecda00a610211478fa811804ee5bba9092f55ebf7478bed54c041c9230a"
+            "00e581d612cb27e5d650fe79580aae90da8cba622c69649a94112ec43548c95c"
         };
         assert_eq!(format!("{:x}", Sha256::digest(&output.stdout)), expected);
         assert!(output.stderr.is_empty());
@@ -59,7 +59,7 @@ fn unknown_mode_uses_python_quotes_and_exit_two() {
 
 #[test]
 fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
-    for mode in ["maintainer", "test-login"] {
+    for mode in ["maintainer", "test-login", "delegate-watch"] {
         let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
             .arg(mode)
             .output()

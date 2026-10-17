@@ -1,5 +1,5 @@
 //! Operator role grants use the same lease-first locking order as the store.
-use super::{Error, Event, append, audit_timestamp, settle, vacate, validate_name};
+use super::{Error, Event, append, audit_timestamp, commit, settle, vacate, validate_name};
 use crate::pg::{Row, Session, Transaction};
 use serde_json::{Value, json};
 
@@ -276,7 +276,7 @@ pub async fn grant_delegate(
         .scoped(agent.try_get("project")?, agent.try_get("task")?),
     );
     append(&tx, events, now).await?;
-    tx.commit().await?;
+    commit(tx).await?;
     Ok(Granted {
         name,
         agent_id,

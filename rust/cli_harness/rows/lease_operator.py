@@ -264,12 +264,27 @@ _FAULTS = {
     "commit-refused": ("AFTER INSERT ON coordination_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW",
                        "RAISE EXCEPTION 'harness: refused at commit';"),
     # The CLI's own backend ends itself at COMMIT, before the commit record:
-    # the client's answer is FATAL 57P01 and the server rolls back. Named
-    # after transfer's identical fixture; it is not a transport cut.
+    # the client's answer is FATAL 57P01 and the server rolls back, but the
+    # client cannot know that, so both arms report the outcome as unknown.
+    # Named after transfer's identical fixture; it is not a transport cut.
     "commit-lost": ("AFTER INSERT ON coordination_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW",
                     "PERFORM pg_terminate_backend(pg_backend_pid()); PERFORM pg_sleep(5);"),
 }
+# Faults whose COMMIT answer is FATAL or lost: the uncertain line, not the
+# certain one.
+_UNKNOWN_FAULTS = frozenset({"commit-lost"})
 _FAILED = re.compile(rb"^(break|delegate) failed \(([A-Za-z]+)\); nothing was changed(\r?\n)\Z")
+_LOST = re.compile(rb"^(break|delegate) lost the answer to its COMMIT \(([A-Za-z]+)\); it may have been "
+                   rb"committed: run `pseudolife-mcp lease list` before retrying(\r?\n)\Z")
+_NATIVE_FAILED = b" failed (PostgreSQL transaction failed); nothing was changed"
+_NATIVE_LOST = (b" lost the answer to its COMMIT (PostgreSQL session ended); it may have been "
+                b"committed: run `pseudolife-mcp lease list` before retrying")
+
+
+def _failure_line(obs):
+    """The oracle's whole failure line, matched as the kind the case expects."""
+    pattern = _LOST if obs.get("commit_unknown") else _FAILED
+    return pattern.match(base64.b64decode(obs["stderr"]))
 
 
 def _install_fault(conn, fault):
@@ -284,15 +299,16 @@ def _install_fault(conn, fault):
 def native_pg_diagnostics(obs):
     """Declared native-pg-diagnostics: the oracle names the psycopg class in
     its failure line; the candidate names the safe native class. Only the
-    oracle arm's single whole failure line maps, and only for the class the
-    case expects; exit, stdout and every coordination row stay compared."""
+    oracle arm's single whole failure line maps, only as the line kind the
+    case expects (certain, or COMMIT outcome unknown), and only for the class
+    the case expects; exit, stdout and every coordination row stay compared."""
     if obs.get("arm") != "python":
         return
-    match = _FAILED.match(base64.b64decode(obs["stderr"]))
+    match = _failure_line(obs)
     if obs["exit"] != 1 or not match or match.group(2).decode() != obs.get("failure_class"):
         return
-    line = match.group(1) + b" failed (PostgreSQL transaction failed); nothing was changed" + match.group(3)
-    obs["stderr"] = base64.b64encode(line).decode()
+    native = _NATIVE_LOST if obs.get("commit_unknown") else _NATIVE_FAILED
+    obs["stderr"] = base64.b64encode(match.group(1) + native + match.group(3)).decode()
 
 
 def operator_case(identifier, argv, scenario="missing", events=(), local=False, stdout_closed=False,
@@ -352,6 +368,7 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
         if fault:
             obs["arm"] = arm.name
             obs["failure_class"] = failure_class
+            obs["commit_unknown"] = fault in _UNKNOWN_FAULTS
             if arm.name == "python":
                 # The fixture must do what it claims on the oracle: exit 1
                 # and every coordination row exactly the seeded state. A
@@ -363,7 +380,7 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
                 # Not vacuous: the oracle reached the fault (its own class in
                 # the failure line), and a FIFO block got past the grant's
                 # nextval before failing.
-                failed = _FAILED.match(base64.b64decode(obs["stderr"]))
+                failed = _failure_line(obs)
                 assert failed and failed.group(2).decode() == failure_class, obs["stderr"]
                 if scenario == "queue":
                     fence = "coordination_lease_fence"
@@ -424,6 +441,10 @@ def cases():
                       fault="audit-insert", failure_class="RaiseException"),
         operator_case("break-commit-refused", ["break", "fixture"], "queue",
                       fault="commit-refused", failure_class="RaiseException"),
+        # The near miss of delegate-commit-lost: an ERROR at COMMIT keeps
+        # the certain line.
+        operator_case("delegate-commit-refused", ["delegate", "fixture", "{AGENT}", "--for", "2m"],
+                      "coordinator", fault="commit-refused", failure_class="RaiseException"),
         operator_case("break-commit-lost", ["break", "fixture"], "held",
                       fault="commit-lost", failure_class="AdminShutdown"),
         operator_case("delegate-commit-lost", ["delegate", "fixture", "{AGENT}", "--for", "2m"], "coordinator",
@@ -457,6 +478,14 @@ MUTANTS = [
            ("break-audit-insert-fails",)),
     # A COMMIT whose answer never came must not be reported as a grant.
     Mutant("lease-delegate-commit-ignored", "lease_operator", "shim/src/cli/lease/operator/store/delegate.rs",
-           "    tx.commit().await?;\n    Ok(Granted {", "    let _ = tx.commit().await;\n    Ok(Granted {",
+           "    commit(tx).await?;\n    Ok(Granted {", "    let _ = commit(tx).await;\n    Ok(Granted {",
            ("delegate-commit-lost",)),
+    # A FATAL or lost COMMIT answer must not be reported as certainly
+    # rolled back, and an ERROR at COMMIT must not be reported as unknown.
+    Mutant("lease-commit-unknown-certain", "lease_operator", "shim/src/cli/lease/operator/store.rs",
+           "_ => Error::CommitUnknown,", "_ => Error::Database,",
+           ("break-commit-lost", "delegate-commit-lost")),
+    Mutant("lease-commit-refused-unknown", "lease_operator", "shim/src/cli/lease/operator/store.rs",
+           "Some(Severity::Error) => Error::Database,", "Some(Severity::Error) => Error::CommitUnknown,",
+           ("break-commit-refused", "delegate-commit-refused")),
 ]
