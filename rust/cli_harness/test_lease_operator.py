@@ -238,12 +238,45 @@ def test_pid_association_checks_raw_audit_before_rehashing(platform):
         normalize.apply(bad, PID_RULES, None)
 
 
-def _failure(arm, stderr, exit_code=1, failure_class="RaiseException"):
+def _failure(arm, stderr, exit_code=1, failure_class="RaiseException", commit_unknown=False):
     return {"arm": arm, "exit": exit_code, "failure_class": failure_class,
-            "stderr": base64.b64encode(stderr).decode()}
+            "commit_unknown": commit_unknown, "stderr": base64.b64encode(stderr).decode()}
 
 
 NATIVE_FAILURE = b"break failed (PostgreSQL transaction failed); nothing was changed"
+LOST_TAIL = b"; it may have been committed: run `pseudolife-mcp lease list` before retrying"
+
+
+def _lost(arm, stderr, **kwargs):
+    kwargs.setdefault("failure_class", "AdminShutdown")
+    return _failure(arm, stderr, commit_unknown=True, **kwargs)
+
+
+@pytest.mark.parametrize("eol", [b"\n", b"\r\n"])
+@pytest.mark.parametrize("verb", [b"break", b"delegate"])
+def test_an_expected_lost_commit_line_maps_to_the_native_diagnostic(verb, eol):
+    obs = _lost("python", verb + b" lost the answer to its COMMIT (AdminShutdown)" + LOST_TAIL + eol)
+    normalize.RULES["lease-native-pg-diagnostics"](obs)
+    expected = verb + b" lost the answer to its COMMIT (PostgreSQL session ended)" + LOST_TAIL + eol
+    assert base64.b64decode(obs["stderr"]) == expected
+
+
+@pytest.mark.parametrize("obs", [
+    _lost("rust", b"break lost the answer to its COMMIT (AdminShutdown)" + LOST_TAIL + b"\n"),
+    # The near miss in each direction: a case expecting the uncertain line
+    # never maps the certain one, and the reverse.
+    _lost("python", b"break failed (AdminShutdown); nothing was changed\n"),
+    _failure("python", b"break lost the answer to its COMMIT (RaiseException)" + LOST_TAIL + b"\n"),
+    _lost("python", b"break lost the answer to its COMMIT (OperationalError)" + LOST_TAIL + b"\n"),
+    _lost("python", b"break lost the answer to its COMMIT (AdminShutdown)" + LOST_TAIL + b"\n", exit_code=0),
+    _lost("python", b"break lost the answer to its COMMIT (AdminShutdown)" + LOST_TAIL + b"\nmore\n"),
+    _lost("python", b"break lost the answer to its COMMIT (AdminShutdown); it may have been committed\n"),
+], ids=["candidate", "certain-when-unknown", "unknown-when-certain", "other-class", "exit-0",
+        "suffix", "wording"])
+def test_near_miss_lost_commit_lines_keep_the_raw_stream(obs):
+    before = copy.deepcopy(obs)
+    normalize.RULES["lease-native-pg-diagnostics"](obs)
+    assert obs == before
 
 
 @pytest.mark.parametrize("eol", [b"\n", b"\r\n"])
