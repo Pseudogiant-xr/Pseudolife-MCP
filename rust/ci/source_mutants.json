@@ -136,6 +136,14 @@
     "lease-stale-mirror",
     "lease-timeout-status"
   ],
+  "lease_operator": [
+    "lease-hold-status",
+    "lease-break-holder",
+    "lease-delegate-duration",
+    "lease-designate-warning",
+    "lease-break-audit-swallowed",
+    "lease-delegate-commit-ignored"
+  ],
   "mail": [
     "mail-any-decision-rings",
     "mail-expired-listener",
