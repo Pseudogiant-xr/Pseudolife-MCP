@@ -39,7 +39,7 @@ tool's answers by value.
 | `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred by decision (PARITY.md, "Graph traversal deferred by decision"). |
 | `memory_world_search` | W2-D | No resident world-cortex search service. |
 | `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
-| `memory_history` | W2-D | No canonical history service. |
+| `memory_history` | W2-D | Slot mode (`attribute` given) is served (spec HI1-HI7); chain mode (`attribute` omitted) answers this stub: it merges the lesson store, which has no Rust port yet, with the graph's entity, alias and entry reads. It lands with the lesson store (task H). |
 | `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
@@ -62,7 +62,8 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_fact_set`, `memory_set_add`, `memory_set_remove`,
 `memory_fact_resolve`, `memory_stats`, `memory_episode_start`,
 `memory_episode_end`, `memory_session_title`, `memory_episode_summary`,
-`memory_outcome`, `memory_reinforce`, `memory_agents` and `memory_message`. The two board tools
+`memory_outcome`, `memory_reinforce`, `memory_history` in slot mode (its
+chain mode keeps the stub, row above), `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -206,6 +207,7 @@ binding"). What it cannot or does not reproduce:
 | `memory_stats` `true_drops_total` from a malformed `capacity_true_drops` count | `int()` of any value Python accepts, including non-ASCII digit strings | integers, floats (truncated), booleans and ASCII integer strings; anything else serves both drop keys as null, as Python does for what `int()` rejects | the only writer stores a JSON integer |
 | `memory_stats` `GET /api/stats` | the same `service.stats()` | not served | a later PR (the REST route over this body) |
 | `memory_stats` band sizes under a custom preset that repeats a band name | positional: a store lands in `bands[0]` even when a later band shares its name | an entry carries its band name, so every entry of that name counts in the last band bearing it (exact at startup, where seating picks that band) | no preset repeats a name; a custom config would have to |
+| `memory_history` text block for a NaN or infinite `as_of` | the SDK's `pydantic_core.to_json` text spells the echo `NaN` / `Infinity`, while structured content holds null | null in both (the envelope renders the text from the structured value) | structured content, which the harness compares, matches; only `float()` spellings reach it (`as_of="inf"`) |
 | `memory_episode_summary` distributions over non-string tags | dict keys (`True == 1`) in `(-count, tag)` order, raising a TypeError when equal counts compare tags of different types | each distinct JSON value its own key; equal counts order by its JSON text (a list or object tag fails with Python's `unhashable type` text) | no tool writes a non-string tag (`normalize_tags`); a hand-written row would have to |
 | `memory_outcome` `used_ids` tokens in non-ASCII digits | `int()` takes any Unicode decimal digit (`"١٢"` is 12) | ASCII digits only (with sign, leading zeros, single underscores and the 4,300-digit limit, as `int()`); other digits count as ignored | the same ASCII-only rule as `memory_stats`' drop count; agents type ASCII ids |
 | `used_ids` and dereference credits naming the entry the startup warmup search served | the warmup search logs a NULL-session event: a session-less credit may name it as the most recent serving event, and a session's `used_ids` counts it as served elsewhere | Rust's warmup logs no event (the declared warmup row in `harness/run.py`), so such a credit names the previous NULL-session event or none, and the id may read as unmatched | W2-D warmup telemetry; the harness's ops never name the entry the warmup serves |
