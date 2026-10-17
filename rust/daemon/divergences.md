@@ -42,13 +42,9 @@ tool's answers by value.
 | `memory_history` | W2-D | No canonical history service. |
 | `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
-| `memory_episode_summary` | W2-D | No episode summary service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
 | `memory_world_set` | W2-E | No world-fact mutation service. |
 | `memory_outcome` | W2-E | No outcome/lesson mutation service. |
-| `memory_episode_start` | W2-E | Store-driven episode start/resume and attribution exist; the standalone episode API and MCP dispatch remain unwired. |
-| `memory_episode_end` | W2-E | Background close helpers exist, but the public episode close/outcome service does not. |
-| `memory_session_title` | W2-E | No session title service or public session identity resolution. |
 | `memory_supersede` | W2-E | No supersession service, audit lineage or resident publication. |
 | `memory_reinstate` | W2-E | No reinstatement decision service. |
 | `memory_reinforce` | W2-E | No reinforcement service. |
@@ -66,7 +62,9 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset` and, since their body registrations, `memory_store`,
 `memory_search`, `memory_recent`, `memory_fact_get`, `memory_get`,
 `memory_fact_set`, `memory_set_add`, `memory_set_remove`,
-`memory_fact_resolve`, `memory_stats`, `memory_agents` and `memory_message`. The two board tools
+`memory_fact_resolve`, `memory_stats`, `memory_episode_start`,
+`memory_episode_end`, `memory_session_title`, `memory_episode_summary`,
+`memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -210,6 +208,7 @@ binding"). What it cannot or does not reproduce:
 | `memory_stats` `true_drops_total` from a malformed `capacity_true_drops` count | `int()` of any value Python accepts, including non-ASCII digit strings | integers, floats (truncated), booleans and ASCII integer strings; anything else serves both drop keys as null, as Python does for what `int()` rejects | the only writer stores a JSON integer |
 | `memory_stats` `GET /api/stats` | the same `service.stats()` | not served | a later PR (the REST route over this body) |
 | `memory_stats` band sizes under a custom preset that repeats a band name | positional: a store lands in `bands[0]` even when a later band shares its name | an entry carries its band name, so every entry of that name counts in the last band bearing it (exact at startup, where seating picks that band) | no preset repeats a name; a custom config would have to |
+| `memory_episode_summary` distributions over non-string tags | dict keys (`True == 1`) in `(-count, tag)` order, raising a TypeError when equal counts compare tags of different types | each distinct JSON value its own key; equal counts order by its JSON text (a list or object tag fails with Python's `unhashable type` text) | no tool writes a non-string tag (`normalize_tags`); a hand-written row would have to |
 | `memory_stats` `true_drops` under a multi-band preset | counts evictions out of the last band only (earlier bands relocate) | counts every eviction, as every Rust eviction is a true drop (the multi-band store row below) | the opt-in presets; flat is the default |
 | Legacy transport session (`PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`, header `mcp-session-id`) | the event's session falls back to that header | not read | a one-release rollback switch no shipped client sets |
 | Reranker or BM25 settings Python refuses (`reranker.fusion_weight` outside [0, 1], `reranker.top_n < 1`, `bm25.k1 < 0`, `bm25.b` outside [0, 1]) | init fails (500 on every route) or every BM25 search answers 400 | accepted as given | canonical configs use the shipped defaults; W1-A's early-refusal policy can absorb them |
@@ -283,7 +282,7 @@ The remaining write work is deliberately split into subsequent increments:
 |---|---|---|
 | Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save), `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) and `memory_fact_resolve` (spec FR1-FR8: contender promotion and retirement) are served; world facts remain unimplemented; slot extraction here is a pure text operation, not a canonical write | W2-E world-fact increment (`memory_world_set`) |
 | Outcomes and lessons | Outcome attribution, lesson updates and their persistence remain unimplemented | W2-E outcomes increment |
-| Episode APIs and titles | Standalone episode operations, session-title tools and automatic content titles on idle close remain unimplemented; store-driven open/resume and empty-root reaping share state | W2-E episode increment; content titles also rewrite entry stamps |
+| Episode titles on idle close | `memory_episode_start`, `memory_episode_end`, `memory_session_title` and `memory_episode_summary` are served (spec EP1-EP12) on the state store-driven open/resume and empty-root reaping share; automatic content titles on idle close remain unimplemented | W2-E reaper follow-up; content titles also rewrite entry stamps |
 | Autosave and clean-exit flush | Background scheduling exists, but changed-state saving and exit flush remain no-ops; store rows write through, while counters, surprise history and band weights do not survive restart via `weights.pt` | W2-E persistence increment; the Python tensor format and recovery contract need a separate proof |
 | Resident cortex refresh | `memory_fact_set`, `memory_set_add`, `memory_set_remove` and `memory_fact_resolve` update the resident cortex in place (readers take snapshots); the world and lesson stores have no write path, and auto-promotion stays disabled | W2-E world, lesson and auto-promotion increments |
 | Frozen store catalog snapshots | Original store recordings predate the catalog instrument's `column_types`, owner/comment and sequence-bound representations; replay retains and reports initialization differences | Historical recordings are retained unchanged; live Python comparison is the current-source proof, not a waiver of frozen replay differences |
