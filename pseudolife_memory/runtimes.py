@@ -331,6 +331,54 @@ def _base_of(executable: Path) -> str:
 
 _VERSION_PROBE = "import importlib.metadata as m; print(m.version('pseudolife-mcp'))"
 
+# Which of the runtime's installed distributions fall outside the ranges its
+# own pseudolife-mcp declares. A runtime is built with --no-deps and the
+# INSTALLING code's SHIM_REQUIREMENTS, so an older release's update can put a
+# newer package on an SDK line it refuses: 0.18.1 put 0.18.2 on mcp 2.1.1, and
+# pip only warned (2026-10-17). Requirements that are not installed are
+# skipped: a shim runtime carries none of the daemon's (torch, chromadb).
+# packaging comes from pip's vendored copy when the runtime has no own one.
+_REQUIREMENTS_PROBE = r'''
+import importlib.metadata as m
+import json
+try:
+    from packaging.requirements import Requirement
+except ImportError:
+    from pip._vendor.packaging.requirements import Requirement
+mismatched = []
+for line in m.requires("pseudolife-mcp") or ():
+    requirement = Requirement(line)
+    if requirement.marker is not None and not requirement.marker.evaluate({"extra": ""}):
+        continue
+    try:
+        installed = m.version(requirement.name)
+    except m.PackageNotFoundError:
+        continue
+    if not requirement.specifier.contains(installed, prereleases=True):
+        mismatched.append(f"{requirement.name} {installed} (needs {requirement.specifier})")
+print(json.dumps({"mismatched": mismatched}))
+'''
+
+
+def requirement_mismatches(runtime: Runtime, layout: Layout, *, run: Callable = run_cli) -> list[str] | None:
+    """The runtime's installed requirements that its own pseudolife-mcp
+    refuses, as ``"<name> <version> (needs <range>)"``; ``None`` when the
+    probe cannot say (it failed, or answered something unreadable)."""
+    code, out = run([str(_python(runtime.path, _windows(layout))), "-I", "-c", _REQUIREMENTS_PROBE],
+                    timeout=120)
+    # run_cli appends stderr after stdout, so a warning from a .pth can follow
+    # the report line.
+    line = next((text for text in reversed(out.splitlines()) if text.startswith('{"mismatched"')),
+                None) if code == 0 else None
+    try:
+        report = json.loads(line) if line else None
+    except ValueError:
+        return None
+    mismatched = report.get("mismatched") if isinstance(report, dict) else None
+    if not isinstance(mismatched, list) or not all(isinstance(item, str) for item in mismatched):
+        return None
+    return mismatched
+
 
 _REQUIREMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*(\[[^\]]*\])?\s*([<>=!~].*)?$")
 
