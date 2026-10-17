@@ -7,6 +7,7 @@ registers, holds, renews and releases, a queued run times out and leaves the
 queue, and the audit log records each step.
 """
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -264,6 +265,74 @@ def test_the_operator_grants_a_projects_delegate(board, pg_url, monkeypatch, cap
     assert "delegate refused: instance_not_found" in capsys.readouterr().err
     assert lease_cli.main(["break", "delegate:pseudolife-mcp"]) == 0
     assert json.loads(capsys.readouterr().out)["was_held_by"] == delegate["agent_id"]
+
+
+# The operator's audit-log row fails in one of three ways. The trigger
+# function either terminates its own backend (FATAL AdminShutdown) or raises
+# an ERROR; a deferred constraint trigger does it at COMMIT, a plain one
+# inside the block. Dropped after each test: the fixtures truncate tables
+# but never drop triggers.
+_FAILURES = {
+    "terminated-at-commit": ("PERFORM pg_terminate_backend(pg_backend_pid());", True),
+    "terminated-before-commit": ("PERFORM pg_terminate_backend(pg_backend_pid());", False),
+    "refused-at-commit": ("RAISE EXCEPTION 'refused by the test trigger';", True),
+}
+
+
+@pytest.fixture
+def operator_failure(pg_url):
+    import psycopg
+    admin = psycopg.connect(str(pg_url), autocommit=True)
+
+    def install(kind):
+        body, deferred = _FAILURES[kind]
+        admin.execute("CREATE FUNCTION operator_failure_fn() RETURNS trigger "
+                      f"LANGUAGE plpgsql AS $$ BEGIN {body} RETURN NULL; END $$")
+        timing = "CONSTRAINT TRIGGER" if deferred else "TRIGGER"
+        defer = "DEFERRABLE INITIALLY DEFERRED " if deferred else ""
+        admin.execute(f"CREATE {timing} operator_failure AFTER INSERT ON coordination_events "
+                      f"{defer}FOR EACH ROW EXECUTE FUNCTION operator_failure_fn()")
+
+    try:
+        yield install
+    finally:
+        admin.execute("DROP TRIGGER IF EXISTS operator_failure ON coordination_events")
+        admin.execute("DROP FUNCTION IF EXISTS operator_failure_fn()")
+        admin.close()
+
+
+@pytest.mark.parametrize("verb", ["break", "delegate"])
+@pytest.mark.parametrize("kind", list(_FAILURES))
+def test_an_operator_says_what_it_knows_when_its_transaction_fails(
+        board, pg_url, monkeypatch, capsys, operator_failure, verb, kind):
+    """"Nothing was changed" is printed only when it is true. A FATAL after
+    COMMIT was sent leaves the outcome unknown, so the operator says it may
+    have been committed and names the check (Opus gate review of #676,
+    2026-10-17). The near-misses keep the certain line: the same FATAL
+    inside the block, before COMMIT, and an ERROR the server returned at
+    COMMIT, which rolls the transaction back."""
+    bridge, _ = board
+    held = _post(bridge, "register", {"label": "held", "project": "pseudolife-mcp"})
+    as_held = {"X-PL-Agent": held["agent_id"], "X-PL-Agent-Key": held["credential"]}
+    _post(bridge, "lease", {"name": "claim:shim.py", "ttl": 3600}, as_held)
+    operator_failure(kind)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
+    argv = (["break", "claim:shim.py"] if verb == "break"
+            else ["delegate", "pseudolife-mcp", held["agent_id"]])
+    assert lease_cli.main(argv) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    if kind == "terminated-at-commit":
+        assert captured.err == (
+            f"{verb} lost the answer to its COMMIT (AdminShutdown); "
+            "it may have been committed: run `pseudolife-mcp lease list` before retrying\n")
+    elif kind == "refused-at-commit":
+        assert captured.err == f"{verb} failed (RaiseException); nothing was changed\n"
+    else:
+        # The FATAL reaches the client as AdminShutdown or, when the
+        # socket closes first, as a bare OperationalError.
+        assert re.fullmatch(rf"{verb} failed \((AdminShutdown|OperationalError)\); "
+                            r"nothing was changed\n", captured.err), captured.err
 
 
 def test_designate_is_a_deprecated_alias_for_delegate(board, pg_url, monkeypatch, capsys):

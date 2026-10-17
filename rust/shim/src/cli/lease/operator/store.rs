@@ -4,6 +4,7 @@ use crate::{
     pg::{Session, Transaction},
 };
 use serde_json::{Value, json};
+use tokio_postgres::error::Severity;
 mod delegate;
 pub use delegate::{Granted, grant_delegate};
 
@@ -11,6 +12,9 @@ pub use delegate::{Granted, grant_delegate};
 pub enum Error {
     Refused(&'static str),
     Database,
+    /// COMMIT was sent but its answer was FATAL or PANIC, or none came (the
+    /// connection was lost): the transaction may have committed.
+    CommitUnknown,
     Clock,
 }
 impl From<tokio_postgres::Error> for Error {
@@ -74,6 +78,16 @@ impl Event {
         self.task = task;
         self
     }
+}
+/// COMMIT, telling an ERROR the server answered with (it rolled back) from
+/// an answer that leaves the outcome open, as CoordinationConnection._txn does.
+async fn commit(tx: Transaction<'_>) -> Result<(), Error> {
+    tx.commit()
+        .await
+        .map_err(|error| match error.as_db_error() {
+            Some(db) if db.parsed_severity() == Some(Severity::Error) => Error::Database,
+            _ => Error::CommitUnknown,
+        })
 }
 async fn vacate(tx: &Transaction<'_>, name: &str, now: f64) -> Result<(), Error> {
     tx.execute("UPDATE coordination_leases SET holder_agent_id=NULL,holder_principal='',purpose='',acquired_at=NULL,expires_at=NULL,expect=NULL,expected_end=NULL,freed_at=$1 WHERE name=$2", &[&now, &name]).await?;
@@ -267,14 +281,14 @@ pub async fn break_lease(
         )];
         settle(&tx, name, now, &mut events).await?;
         append(&tx, events, now).await?;
-        tx.commit().await?;
+        commit(tx).await?;
         Ok(Broken {
             name: name.to_owned(),
             broken: true,
             was_held_by: Some(holder),
         })
     } else {
-        tx.commit().await?;
+        commit(tx).await?;
         Ok(Broken {
             name: name.to_owned(),
             broken: false,

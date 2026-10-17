@@ -142,7 +142,9 @@
     "lease-delegate-duration",
     "lease-designate-warning",
     "lease-break-audit-swallowed",
-    "lease-delegate-commit-ignored"
+    "lease-delegate-commit-ignored",
+    "lease-commit-unknown-certain",
+    "lease-commit-refused-unknown"
   ],
   "mail": [
     "mail-any-decision-rings",
