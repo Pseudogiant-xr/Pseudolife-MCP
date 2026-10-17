@@ -3105,7 +3105,7 @@ class DreamOps:
                 "deep_dream": self.deep_dream_need(),
                 # Review-queue health: pending counts, judge modes and an
                 # attention flag. Also outside the lock; never raises.
-                "review_queue": self.review_queue_health(),
+                "review_queue": self.review_queue_health(include_agreement=True),
                 # Dream-stall signal: null while dreams are served; see
                 # DreamStallTracker. ``last_stall`` is the latest closed one.
                 "stall": stall_state["stall"],
@@ -3580,6 +3580,7 @@ class DreamOps:
                               and deg.get(eid, 0) <= cfg.junk_max_degree)
                 if not (zero_structure or tombstoned):
                     continue
+                votes = self._storage.entity_proposal_votes(p["id"])
                 if self._storage.delete_entity(eid):
                     # The proposal row CASCADEs away with the entity, so the
                     # denormalized merge_decisions row (no FK) is the only
@@ -3589,7 +3590,7 @@ class DreamOps:
                         p["id"], display,
                         None, "accepted", p.get("score"),
                         f"junk auto-delete: {p.get('reason')}{suffix}",
-                        "dream-auto", now)
+                        "dream-auto", now, votes=votes)
                     junk_deleted += 1
                     dropped.add(eid)
             # Non-destructive: populate the review queue regardless of auto_apply_safe.
@@ -3713,7 +3714,8 @@ class DreamOps:
         "judges_enabled", "judge_mode", "link_judge_mode", "junk_judge_mode",
         "curation_judge_mode", "candidate_judge_mode")
 
-    def review_queue_health(self) -> dict[str, Any]:
+    def review_queue_health(self, *, include_agreement: bool = False
+                            ) -> dict[str, Any]:
         """Cheap health signal for the review queues, beside
         ``deep_dream_need`` in ``dream_status``: pending rows per queue
         (merge, junk, link), the ages of the oldest pending merge and of the
@@ -3723,6 +3725,9 @@ class DreamOps:
         duplicate listing is not counted: it is recomputed from slot
         embeddings on demand and capped at ``curation_top_k`` per store, so
         it cannot pile up. Never raises: a failure is an ``error`` field.
+        ``include_agreement`` adds the ``judge_agreement`` block
+        (:meth:`judge_agreement`), which scans the window's decisions; the
+        status call asks for it, the session-start briefing does not.
 
         From 2026-09-11 to 09-29 the merge judge sat in "shadow" and the
         pending merge queue grew from ~100 rows to 1,016 while nothing
@@ -3774,10 +3779,47 @@ class DreamOps:
                     "oldest_merge_age_days": age,
                     "oldest_unjudged_merge_age_days": unjudged_age,
                     "judges": judges,
+                    **({"judge_agreement": self.judge_agreement()}
+                       if include_agreement else {}),
                     "attention": {"needed": bool(reasons), "reasons": reasons}}
         except Exception as exc:  # noqa: BLE001 — a status block never raises
             logger.warning("review-queue health failed: %s", exc)
             return {"error": f"{type(exc).__name__}: {exc}", "attention": quiet}
+
+    # Decisions older than this are not scored: the judges, their prompts
+    # and the inflow all change, and the promotion question is about the
+    # votes being recorded now.
+    _JUDGE_AGREEMENT_WINDOW_DAYS = 90.0
+
+    def judge_agreement(self, days: float | None = None) -> dict[str, Any]:
+        """How often each recorded judge vote agreed with the decision a
+        human or agent later took on the row (schema v56): the number a
+        judge mode is promoted from ``shadow`` on. Scores the last ``days``
+        (default 90) of merge, junk and link decisions, excluding the ones
+        the judges applied themselves; see
+        :func:`pseudolife_memory.memory.judge_agreement.compute_judge_agreement`
+        for the shape. Never raises: a failure is an ``error`` field."""
+        import time as _t
+
+        from pseudolife_memory.memory.judge_agreement import compute_judge_agreement
+        window = float(days if days is not None else self._JUDGE_AGREEMENT_WINDOW_DAYS)
+        try:
+            cfg = self.config.memory.deep_dream
+            with self._lock:
+                self._ensure_init()
+                if self._storage is None:
+                    return {"available": False, "reason": "no_storage"}
+                rows = self._storage.judge_vote_decisions(
+                    _t.time() - window * 86400.0)
+            return compute_judge_agreement(
+                rows["merge"], rows["link"],
+                accept_gate=cfg.judge_accept_min_confidence,
+                reject_gate=cfg.judge_reject_min_confidence_2,
+                link_gate=cfg.link_two_vote_min_confidence,
+                window_days=window)
+        except Exception as exc:  # noqa: BLE001 — a status block never raises
+            logger.warning("judge-agreement report failed: %s", exc)
+            return {"error": f"{type(exc).__name__}: {exc}"}
 
     def deep_dream_tick(self) -> dict[str, Any]:
         """Sweep-tick automation of the deep dream's MECHANICAL half: when

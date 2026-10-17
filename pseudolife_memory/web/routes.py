@@ -234,8 +234,13 @@ class ConsoleRoutes:
             b["entity"], b.get("attribute"), decided_by=_decided_by(b)))
         p("/api/graph/delete-entity", lambda q, b: svc.graph_delete_entity(b["entity"]))
         p("/api/graph/merge", lambda q, b: svc.graph_merge(b["from"], b["into"]))
-        p("/api/graph/accept-proposal", lambda q, b: svc.graph_accept_proposal(b["id"]))
-        p("/api/graph/reject-proposal", lambda q, b: svc.graph_reject_proposal(b["id"]))
+        # Link decisions carry who took them (2026-10-18): the judge-agreement
+        # report scores votes against human and agent decisions, and an
+        # unattributed decision is not a label.
+        p("/api/graph/accept-proposal", lambda q, b: svc.graph_accept_proposal(
+            b["id"], decided_by=_decided_by(b)))
+        p("/api/graph/reject-proposal", lambda q, b: svc.graph_reject_proposal(
+            b["id"], decided_by=_decided_by(b)))
         p("/api/graph/accept-entity-merge",
           lambda q, b: svc.graph_accept_entity_merge(
               b["id"], decided_by=_decided_by(b)))
