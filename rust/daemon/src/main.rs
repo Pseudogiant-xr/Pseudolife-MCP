@@ -15,6 +15,7 @@ mod embed;
 mod embedding_math;
 #[cfg_attr(not(feature = "harness"), allow(dead_code))]
 mod episodes;
+mod fact_resolve;
 mod fact_set;
 mod freshness;
 mod graph_read;

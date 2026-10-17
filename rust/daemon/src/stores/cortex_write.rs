@@ -117,7 +117,7 @@ pub(super) fn py_min(a: f64, b: f64) -> f64 {
     if b < a { b } else { a }
 }
 
-fn add_unique(v: &mut Vec<String>, s: &str) {
+pub(super) fn add_unique(v: &mut Vec<String>, s: &str) {
     if !v.iter().any(|x| x == s) {
         v.push(s.to_string());
     }
@@ -125,7 +125,7 @@ fn add_unique(v: &mut Vec<String>, s: &str) {
 
 /// `_mark_tier(rec, sup, dream=False)`: a direct write at a user or action
 /// tier clears that tier's dream mark. Called before adding `sup`.
-fn mark_tier_direct(rec: &mut CortexRecord, sup: &str) {
+pub(super) fn mark_tier_direct(rec: &mut CortexRecord, sup: &str) {
     if DIRECT_TIERS.contains(&sup) {
         let mark = format!("dream:{sup}");
         rec.provenance.retain(|p| *p != mark);
@@ -208,7 +208,7 @@ impl CortexStore {
     }
 
     /// `_active_contender(key)`: the first `contested` record at the slot.
-    fn active_contender(&self, key: &SlotKey) -> Option<usize> {
+    pub(super) fn active_contender(&self, key: &SlotKey) -> Option<usize> {
         self.contested
             .get(key)?
             .iter()
@@ -890,7 +890,8 @@ mod tests {
     /// (`harness/gen_w2e_cortex_write_goldens.py`): every action, record,
     /// final record field, slot index and audit row must match. Ops `add`
     /// and `remove` replay `add_member` / `remove_member`
-    /// (`cortex_members.rs`).
+    /// (`cortex_members.rs`); op `resolve` replays `resolve`
+    /// (`cortex_resolve.rs`), whose None answer is a null action.
     const GOLDEN: &str = include_str!("../../harness/goldens/w2e-cortex-write.json");
 
     fn label(v: &Value) -> Resolved {
@@ -934,13 +935,25 @@ mod tests {
     }
 
     /// One golden write: `(action, record, members_count)`.
-    fn replay(s: &mut CortexStore, x: &Value) -> (&'static str, Option<usize>, Option<usize>) {
+    fn replay(
+        s: &mut CortexStore,
+        x: &Value,
+    ) -> (Option<&'static str>, Option<usize>, Option<usize>) {
         use crate::stores::cortex_members::MemberWrite;
         let text = |k: &str| x[k].as_str().unwrap().to_string();
-        let (e, a, v) = (text("entity"), text("attribute"), text("value"));
+        let (e, a) = (text("entity"), text("attribute"));
         let now = x["now"].as_f64().unwrap();
         let count = |s: &CortexStore| Some(s.members(&e, &a).len());
-        match x["op"].as_str().unwrap_or("fact") {
+        let op = x["op"].as_str().unwrap_or("fact");
+        if op == "resolve" {
+            let hlc = x["hlc"]
+                .as_array()
+                .map(|h| (h[0].as_i64().unwrap(), h[1].as_i64().unwrap()));
+            let got = s.resolve(&e, &a, x["accept"].as_bool().unwrap(), now, "user", hlc);
+            return (got.map(|g| g.action), got.map(|g| g.record), None);
+        }
+        let v = text("value");
+        let (action, record, count) = match op {
             "add" => {
                 let mw = MemberWrite {
                     entity: &e,
@@ -985,7 +998,8 @@ mod tests {
                 let got = s.write_fact(&fw).unwrap();
                 (got.action, Some(got.record), None)
             }
-        }
+        };
+        (Some(action), record, count)
     }
 
     #[test]
@@ -1004,7 +1018,7 @@ mod tests {
             for (i, x) in seq["writes"].as_array().unwrap().iter().enumerate() {
                 let (action, record, count) = replay(&mut s, x);
                 let want = &seq["results"][i];
-                assert_eq!(action, want["action"], "{name} write {i}");
+                assert_eq!(json!(action), want["action"], "{name} write {i}");
                 assert_eq!(
                     record.map(|r| r as u64),
                     want["record"].as_u64(),

@@ -7,7 +7,9 @@ user/action/agent, no stance, no provenance, no ``force_contend``, no
 ``dream``), and those ``memory_set_add`` / ``memory_set_remove`` pass to
 ``add_member`` / ``remove_member`` (``support=None``, no provenance, no
 ``dream``; ops ``add`` and ``remove``, ``src/stores/cortex_members.rs``),
-with fixed clocks and embeddings, and records every write's action and
+and those ``memory_fact_resolve`` passes to ``resolve`` (``support="user"``,
+an HLC only on accept, no ``dream``, no ``expect_value``; op ``resolve``,
+``src/stores/cortex_resolve.rs``), with fixed clocks and embeddings, and records every write's action and
 record, then the final records, the slot indexes and the supersession log. The Rust unit test replays the same writes and must
 reproduce all of it, so every engine branch is checked against the oracle,
 not against a hand-written expectation.
@@ -46,6 +48,13 @@ def add(e, a, m, emb, t, logical=0, conf=0.7, writer="writer-a", session=None):
 def remove(e, a, m, t):
     """One ``remove_member`` call as ``service.set_remove`` makes it."""
     return {"op": "remove", "entity": e, "attribute": a, "value": m, "now": t}
+
+
+def resolve(e, a, accept, t, logical=0):
+    """One ``resolve`` call as ``service.cortex_resolve`` makes it: the HLC
+    ticks only on accept."""
+    return {"op": "resolve", "entity": e, "attribute": a, "accept": accept, "now": t,
+            "hlc": [int(t * 1000), logical] if accept else None}
 
 
 DEFAULT_CONFIG = {"protect_provenance": True, "supersede_confidence_margin": 0.15,
@@ -197,6 +206,65 @@ SEQUENCES = {
     },
 }
 
+SEQUENCES["resolve"] = {
+    "config": DEFAULT_CONFIG,
+    "writes": [
+        # nothing parked anywhere
+        resolve("db", "host", True, 900.0),
+        # a labelled user scalar; an agent contender, replaced by a second one
+        w("db", "host", "10.0.0.5", "user", 0.9, 901.0, authority={"set": "directive"},
+          freshness="slow", session="s0"),
+        w("db", "host", "10.0.0.6", "agent", 0.95, 902.0, session="s1"),
+        w("db", "host", "10.0.0.7", "agent", 0.6, 903.0, writer="writer-b"),
+        # accept: the old current superseded, the contender promoted with the
+        # user tier, the new HLC and the old value as supersedes_value
+        resolve("DB", "Host", True, 904.0, logical=3),
+        # nothing left to resolve
+        resolve("db", "host", True, 905.0),
+        resolve("db", "host", False, 905.5),
+        # the current index names the promoted record: a restatement confirms it
+        w("db", "host", "10.0.0.7", "action", 0.5, 906.0),
+        # a user contender parked below the margin: the tier is already there
+        w("svc", "port", "8765", "user", 0.9, 907.0),
+        w("svc", "port", "8766", "user", 0.5, 908.0),
+        resolve("svc", "port", True, 909.0, logical=2),
+        # reject: the contender retired, the current answered and untouched
+        w("dev box", "os", "Debian 12", "action", 0.8, 910.0),
+        w("dev box", "os", "Debian 13", "agent", 0.9, 911.0),
+        resolve("Dev Box", "OS", False, 912.0),
+        resolve("dev box", "os", False, 913.0),
+        # a contender parked against a scalar later converted to a set:
+        # accept refused (nothing dirty for it), reject allowed
+        {**w("Home Lab", "services", "Jellyfin", "user", 0.9, 914.0),
+         "embedding": [1.0, 0.0, 0.0]},
+        {**w("Home Lab", "services", "Pi-hole", "agent", 0.8, 915.0),
+         "embedding": [0.0, 1.0, 0.0]},
+        add("Home Lab", "services", "Nextcloud", [0.0, 0.0, 1.0], 916.0),
+        resolve("home lab", "services", True, 917.0),
+        resolve("home lab", "services", False, 918.0),
+        # every member removed: no current, no members, the contender parked;
+        # accept keeps the contender's own supersedes_value
+        w("shed", "tools", "drill", "user", 0.9, 919.0),
+        w("shed", "tools", "trimmer", "agent", 0.8, 920.0),
+        w("shed", "tools", "blower", "agent", 0.7, 921.0),
+        add("shed", "tools", "washer", [0.0, 1.0], 922.0),
+        remove("shed", "tools", "drill", 923.0),
+        remove("shed", "tools", "washer", 924.0),
+        resolve("Shed", "Tools", True, 925.0),
+        # the same shape, rejected
+        w("rack", "bikes", "road", "user", 0.9, 926.0),
+        w("rack", "bikes", "gravel", "agent", 0.8, 927.0),
+        add("rack", "bikes", "mountain", [0.0, 1.0], 928.0),
+        remove("rack", "bikes", "road", 929.0),
+        remove("rack", "bikes", "mountain", 930.0),
+        resolve("rack", "bikes", False, 931.0),
+        # a member parked by the aggregate guard, accepted over the total
+        w("Aquarium", "fish count", "32", "user", 0.8, 932.0),
+        add("Aquarium", "fish count", "neon tetra", [0.0, 1.0], 933.0),
+        resolve("aquarium", "fish count", True, 934.0),
+    ],
+}
+
 FIELDS = ("entity", "attribute", "value", "polarity", "status", "kind", "confidence",
           "asserted_at", "last_confirmed", "supersedes_value", "superseded_by_value",
           "superseded_at", "tx_time", "valid_time", "hlc_phys", "hlc_logical", "writer_id",
@@ -235,6 +303,11 @@ def run(seq: dict) -> dict:
                 confidence=x["confidence"], provenance=(), support=None, now=x["now"],
                 hlc=tuple(x["hlc"]), writer_id=x["writer_id"], session_id=x["session_id"],
                 dream=False)
+        elif op == "resolve":
+            res = store.resolve(x["entity"], x["attribute"], x["accept"], now=x["now"],
+                                support="user",
+                                hlc=tuple(x["hlc"]) if x["hlc"] is not None else None,
+                                dream=False, expect_value=None)
         elif op == "remove":
             res = store.remove_member(x["entity"], x["attribute"], x["value"], now=x["now"],
                                       support=None, dream=False)
@@ -247,8 +320,11 @@ def run(seq: dict) -> dict:
                 writer_id=x["writer_id"], session_id=x["session_id"],
                 freshness_class=x["freshness_class"], authority=label(x["authority"]),
                 distortion_tolerance=label(x["distortion_tolerance"]))
-        result = {"action": res.action, "record": index_of(store, res.record)}
-        if op != "fact":
+        if res is None:
+            result = {"action": None, "record": None}
+        else:
+            result = {"action": res.action, "record": index_of(store, res.record)}
+        if op in ("add", "remove"):
             result["members_count"] = len(store.members(x["entity"], x["attribute"]))
         results.append(result)
     return {**seq, "results": results, "records": [record(r) for r in store.records],
