@@ -6,6 +6,7 @@ usage:
   python w2e.py golden  --rust-bin PATH [--only NAME ...] [--out FILE]
   python w2e.py calibrate --rust-bin PATH [--out FILE]   (no tolerances: records them)
   python w2e.py mutants --rust-bin PATH_BUILT_WITH_FEATURES_HARNESS_MUTANTS [--only NAME ...]
+                        [--mutants NAME ...]   (default: every entry of MUTANTS)
 
 Any Rust build serves ``memory_store`` and ``memory_fact_set`` on ``/mcp``
 (``--features mutants`` adds the deliberate breaks). Each scenario prepares
@@ -1004,6 +1005,7 @@ def main() -> int:
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--record", action="store_true")
+    ap.add_argument("--mutants", nargs="*", choices=MUTANTS)
     args = ap.parse_args()
     args.rust_bin = args.rust_bin.resolve()
     root = run_root()
@@ -1012,7 +1014,7 @@ def main() -> int:
     results = []
     if args.mode == "mutants":
         caught = {}
-        for m in MUTANTS:
+        for m in args.mutants or MUTANTS:
             diffs = 0
             for n in names:
                 r = run_scenario(n, args.rust_bin, root, "live", False, tol, mutant=m)
