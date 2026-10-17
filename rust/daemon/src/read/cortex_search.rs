@@ -905,6 +905,7 @@ async fn cortex_search_locked(
         && !crate::mutants::active("w2d-cortex-skip-slot-reads")
         && let Err(e) = bump_slot_reads(db, &slots, now).await
     {
+        crate::read::stats::record_slot_read_error();
         eprintln!("slot-read telemetry failed: {e:#}");
     }
     Ok(entries.into_iter().map(Value::Object).collect())
@@ -959,9 +960,15 @@ async fn attach_served_facts_locked(db: &Client, event_id: i64, facts: &[Value])
         )
         .await
     {
-        Ok(0) => eprintln!("served-facts attach matched no event row (id={event_id})"),
+        Ok(0) => {
+            crate::read::stats::record_retrieval_log_error();
+            eprintln!("served-facts attach matched no event row (id={event_id})");
+        }
         Ok(_) => {}
-        Err(e) => eprintln!("served-facts attach failed: {e:#}"),
+        Err(e) => {
+            crate::read::stats::record_retrieval_log_error();
+            eprintln!("served-facts attach failed: {e:#}");
+        }
     }
     Ok(())
 }

@@ -275,6 +275,7 @@ fn mcp_memory_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFutu
             })
             .await
             {
+                crate::read::stats::record_retrieval_log_error();
                 eprintln!("retrieval-use label failed: {e:#}");
             }
         }

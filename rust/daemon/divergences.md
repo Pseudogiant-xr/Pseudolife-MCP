@@ -40,7 +40,6 @@ tool's answers by value.
 | `memory_world_search` | W2-D | No resident world-cortex search service. |
 | `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
 | `memory_history` | W2-D | No canonical history service. |
-| `memory_stats` | W2-D | No complete statistics service or MCP projection. |
 | `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_episode_summary` | W2-D | No episode summary service. |
@@ -69,7 +68,7 @@ tool's answers by value.
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset` and, since their body registrations, `memory_store`,
 `memory_search`, `memory_recent`, `memory_fact_get`, `memory_get`,
-`memory_fact_set`, `memory_agents` and `memory_message`. The two board tools
+`memory_fact_set`, `memory_stats`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -207,7 +206,13 @@ binding"). What it cannot or does not reproduce:
 | Casefold in slot keys and pin scope | `str.casefold()` (full Unicode folding) | `to_lowercase` plus `ß` to `ss` and final sigma | rare foldings (ligatures and similar) differ; no producer writes them in slot names. Closable with a casefold crate |
 | Pin-scope word characters, non-ASCII | `isalnum()` plus Unicode category M | `char::is_alphanumeric` minus circled letters, plus the main combining-mark blocks | ASCII is exact; closable with `unicode-normalization` |
 | Duplicate current facts at hydration | demoted in memory, persisted on the next save | demoted in memory only | W2-E (save path); the bank's unique indexes prevent duplicates from every current producer |
-| Telemetry failure counters (`_retrieval_log_errors`, slot-read failures) | counted for `stats()` | logged to stderr | `/api/stats` (W2-D, a later PR) |
+| `memory_stats` reference bank (`reference_bank_size`, `reference_document_count`, and its share of `total_memories`) | the ChromaDB collection's size and distinct sources | `0`, as Python serves when its reference bank failed to open | the reference-bank port (W2-D `document_*`); Rust search serves no reference documents either |
+| `memory_stats` counters persisted in `weights.pt` (`interaction_count`, per-band `hit_count`, `retrieval_queries`) | restored at startup, so they count across restarts | count from this process's start | W2-E autosave PR (the same `weights.pt` row below) |
+| `memory_stats` `slot_index_shadow_divergences` and `weights_reset` | a sampled shadow check of the slot index; a flag for an unreadable `weights.pt` | `0` and `false`: Rust has no slot-index shadow and reads no `weights.pt` | the values Python serves on a healthy start |
+| `memory_stats` `true_drops_total` from a malformed `capacity_true_drops` count | `int()` of any value Python accepts, including non-ASCII digit strings | integers, floats (truncated), booleans and ASCII integer strings; anything else serves both drop keys as null, as Python does for what `int()` rejects | the only writer stores a JSON integer |
+| `memory_stats` `GET /api/stats` | the same `service.stats()` | not served | a later PR (the REST route over this body) |
+| `memory_stats` band sizes under a custom preset that repeats a band name | positional: a store lands in `bands[0]` even when a later band shares its name | an entry carries its band name, so every entry of that name counts in the last band bearing it (exact at startup, where seating picks that band) | no preset repeats a name; a custom config would have to |
+| `memory_stats` `true_drops` under a multi-band preset | counts evictions out of the last band only (earlier bands relocate) | counts every eviction, as every Rust eviction is a true drop (the multi-band store row below) | the opt-in presets; flat is the default |
 | Legacy transport session (`PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`, header `mcp-session-id`) | the event's session falls back to that header | not read | a one-release rollback switch no shipped client sets |
 | Reranker or BM25 settings Python refuses (`reranker.fusion_weight` outside [0, 1], `reranker.top_n < 1`, `bm25.k1 < 0`, `bm25.b` outside [0, 1]) | init fails (500 on every route) or every BM25 search answers 400 | accepted as given | canonical configs use the shipped defaults; W1-A's early-refusal policy can absorb them |
 | An integer `memory.reranker.fusion_weight` (`fusion_weight: 1`) | logged in `params.reranker` as written (`1`) | logged as a float (`1.0`) | a canonical config writes the default `0.7` |

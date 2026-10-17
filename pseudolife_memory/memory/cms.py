@@ -7,7 +7,7 @@ spectrum of modules, each updating at a different frequency.
 In v0.5 the bands are :class:`src.memory.miras.MIRASBand` instances whose
 update rule, objective, memory module, and retention policy are all
 configurable per band — see :mod:`src.memory.miras` for the framework and
-:mod:`src.memory.miras.presets` for the canonical preset specifications.
+:mod:`src.utils.miras_presets` for the canonical preset specifications.
 
 Architecture
 ------------
