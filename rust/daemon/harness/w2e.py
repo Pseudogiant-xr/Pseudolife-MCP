@@ -742,7 +742,9 @@ SCENARIOS.update({
 # seed order (1-5). Seeded searches (top_k 1) give the window its events: id 2
 # served twice in sess-a, id 4 once in sess-b, id 5 twice with no session.
 # Entry 1 draws the Python daemon's own startup warmup search (a no-session
-# event Rust does not write, declared), so no session-less op names it.
+# event Rust does not write, declared), so no op names it: a session-less
+# credit could name that event, and a session's credit would count it as
+# served elsewhere.
 OUTCOME_SEED = [
     store("The warmup probe runs once when the daemon starts."),
     store("The payments database listens on port 5432 on db-1.", [sess("sess-a")]),
@@ -765,9 +767,11 @@ SCENARIOS.update({
             # unknown; attributed to sess-a's open leaf
             outcome("deploy engine to host", "success", [sess("sess-a")],
                     used_ids=[2, 3, 4, 999]),
-            # a JSON string with junk tokens; a repeat credit writes no row
+            # text with junk tokens and a repeat; a repeat credit writes no
+            # row (a JSON list in a string with a non-integer item is
+            # refused by the binder, before the body: not this case)
             outcome("deploy engine to host", "failure", [sess("sess-a")],
-                    used_ids='[2, 2, "x", true]'),
+                    used_ids="2 2 x, true"),
             # handle attribution without a header, every optional field
             outcome("bench maintenance", "correction", episode="@root:sess-b:12",
                     about="debian", detail="the upgrade path", polarity="-"),
@@ -780,8 +784,8 @@ SCENARIOS.update({
             outcome("junk label", "success", [sess("sess-a")], used_ids="abc def"),
             # an id past BIGINT fails the label statement: counted, kept unchecked
             outcome("big id", "success", [sess("sess-a")], used_ids="99999999999999999999 2"),
-            # over the cap of fifty
-            outcome("many ids", "success", [sess("sess-a")], used_ids=list(range(1, 54))),
+            # over the cap of fifty (from 2: entry 1 is the warmup's)
+            outcome("many ids", "success", [sess("sess-a")], used_ids=list(range(2, 55))),
             # both counters, the resident copy, the dereference credit
             reinforce(2, [sess("sess-a")]),
             reinforce(999999),

@@ -21,6 +21,9 @@ use crate::service::Ready;
 
 /// `USED_IDS_CAP`.
 const USED_IDS_CAP: usize = 50;
+/// CPython's `int_max_str_digits` default: `int()` refuses longer digit
+/// strings (leading zeros count; signs and underscores do not).
+const MAX_INT_DIGITS: usize = 4300;
 const OUTCOMES: [&str; 3] = ["success", "failure", "correction"];
 /// `_OUTCOME_NOTES`, for the reason the MCP surface can reach.
 const LESSONS_DISABLED_NOTE: &str =
@@ -65,8 +68,9 @@ impl PyInt {
     }
 
     /// `int(token)` for a string: surrounding whitespace, one optional
-    /// sign, ASCII digits with single underscores between them. Python
-    /// also takes other Unicode decimal digits (declared divergence).
+    /// sign, ASCII digits with single underscores between them, at most
+    /// 4,300 digits. Python also takes other Unicode decimal digits
+    /// (declared divergence).
     fn parse(token: &str) -> Option<PyInt> {
         let t = py_strip(token);
         let (negative, body) = match t.as_bytes().first() {
@@ -80,7 +84,11 @@ impl PyInt {
         if !body.bytes().all(|b| b.is_ascii_digit() || b == b'_') {
             return None;
         }
-        Some(PyInt::canonical(negative, &body.replace('_', "")))
+        let digits = body.replace('_', "");
+        if digits.len() > MAX_INT_DIGITS {
+            return None;
+        }
+        Some(PyInt::canonical(negative, &digits))
     }
 
     fn canonical(negative: bool, digits: &str) -> PyInt {
@@ -120,9 +128,12 @@ fn parse_used_ids(value: Option<&Value>) -> (Vec<PyInt>, usize, usize) {
             if text.is_empty() {
                 return (vec![], 0, 0);
             }
-            match serde_json::from_str::<Value>(text) {
-                Ok(Value::Array(items)) => items,
-                Ok(Value::Number(n)) if PyInt::from_number(&n).is_some() => {
+            // Python's `json.loads` (its extensions and its digit limit).
+            // Over MCP a string here is never a JSON array: the SDK's
+            // pre-parse would have decoded it before binding.
+            match crate::mcp::py_loads::loads(text) {
+                Some(Value::Array(items)) => items,
+                Some(Value::Number(n)) if PyInt::from_number(&n).is_some() => {
                     vec![Value::Number(n)]
                 }
                 // Anything else (a float, a string, an object, invalid
@@ -587,11 +598,17 @@ mod tests {
         assert_eq!(ids(json!("")), (s(&[]), 0, 0));
         assert_eq!(ids(json!([])), (s(&[]), 0, 0));
         assert_eq!(ids(json!(true)), (s(&[]), 0, 0));
-        // Big integers stay exact.
+        // Big integers stay exact, up to Python's 4,300-digit limit.
         assert_eq!(
             ids(json!("99999999999999999999")),
             (s(&["99999999999999999999"]), 0, 0)
         );
+        assert_eq!(ids(json!("1".repeat(5000))), (s(&[]), 1, 0));
+        assert_eq!(ids(json!(format!("{}1", "0".repeat(4300)))), (s(&[]), 1, 0));
+        assert_eq!(ids(json!(format!("{}1", "1_".repeat(2200)))).0.len(), 1);
+        assert_eq!(ids(json!(format!("-{}", "1".repeat(4300)))).0.len(), 1);
+        // JSON's Infinity is a float: split as text, then ignored.
+        assert_eq!(ids(json!("Infinity")), (s(&[]), 1, 0));
     }
 
     #[test]
