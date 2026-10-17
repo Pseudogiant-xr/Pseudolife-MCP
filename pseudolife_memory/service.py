@@ -5339,7 +5339,11 @@ class MemoryService(DreamOps, MaintainerOps):
                         f"retyped from related-to on {len(texts)} shared note(s)",
                         "dream-retyped", _t.time())
                     retyped += 1
-                self._storage.set_proposal_status(p["id"], "rejected")
+                # The dream's own decision, named so the judge-agreement
+                # report never reads it as a human's.
+                self._storage.set_proposal_status(
+                    p["id"], "rejected", decided_by="dream-auto",
+                    decided_at=_t.time())
             settled += 1
         return {"considered": len(pending), "retyped": retyped, "settled": settled}
 

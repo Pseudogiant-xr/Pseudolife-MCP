@@ -43,12 +43,14 @@ _MERGE_LABEL = {"accepted": "accept", "rejected": "reject"}
 _LINK_LABEL = {"accepted": "accept", "rejected": "reject", "retyped": "retype"}
 
 
-def proposal_votes(row: dict) -> dict | None:
+def proposal_votes(row: dict, first_served: str | None = None) -> dict | None:
     """The votes an ``entity_proposals`` row carries, as the audit stores
     them: ``{judge: {verdict, confidence, model, [served_model,] relation}}``
     for each opinion with a verdict, or None when none was recorded. The
     relation is the one a relate vote named (read back from the note, as
-    the gates do)."""
+    the gates do). The first opinion's served model is not on the row (the
+    judging memo keeps it, ``ReviewJudgments.observed``), so the caller
+    passes it as ``first_served``; the later opinions' are on the row."""
     rel1, rel2 = relate_relations(row.get("judge_note"))
     rel3 = third_relate_relation(row.get("judge_note"))
     out: dict[str, dict] = {}
@@ -61,7 +63,8 @@ def proposal_votes(row: dict) -> dict | None:
             "confidence": _conf(row.get(f"{opinion}_confidence")),
             "model": row.get(f"{opinion}_model"),
         }
-        served = row.get(f"{opinion}_served_model")
+        served = (first_served if opinion == "judge"
+                  else row.get(f"{opinion}_served_model"))
         if served:
             vote["served_model"] = served
         vote["relation"] = rel if verdict == "relate" else None
@@ -83,12 +86,27 @@ def compute_judge_agreement(merge_rows: Iterable[dict], link_rows: Iterable[dict
     class's gate (``accept_gate`` / ``reject_gate`` for merges,
     ``link_gate`` for links), which is what the two-vote gates would have
     applied. ``majority_three``: the rows with three votes whose 2-of-3
-    majority cleared its gate, what the tiebreak would have applied. The
-    merge ``low_differential`` exclusion is not replayed (it is computed
-    from the live graph at judging time), so ``agreed_two.accept`` and
-    ``majority_three.accept`` count a few rows ``auto`` would skip."""
+    majority cleared its gate, what the tiebreak would have applied.
+
+    ``unattributed_links`` counts decided link rows with votes but no
+    ``decided_by``: decided before the Console and ``memory_graph_review``
+    attributed link decisions (2026-10-18), by a human, an agent or the
+    dream's retype pass, so they are not labels.
+
+    "Distinct models" is the live gates' rule (``_stored_second_distinct``,
+    ``_tiebreak_refusal`` in service_dream): every vote in the pair or
+    majority must carry the model its endpoint reported serving, those
+    served names must differ, and so must the configured stamps; a vote
+    whose served name is unknown is never part of a pair, as the live gate
+    refuses it. Two things are not replayed: the merge ``low_differential``
+    exclusion (computed from the live graph at judging time), so
+    ``agreed_two.accept`` and ``majority_three.accept`` count a few rows
+    ``auto`` would skip; and a decided link row goes with either endpoint
+    when a later merge or junk delete takes it (``edge_proposals`` cascades),
+    so links are scored while both endpoints exist."""
     labels: Counter[str] = Counter()
     scored = {"merge": 0, "junk": 0, "link": 0}
+    unattributed_links = 0
     merge = _Opinions(MERGE_OPINIONS)
     junk = _Opinions(("judge",))
     link = _Opinions(LINK_OPINIONS)
@@ -123,11 +141,16 @@ def compute_judge_agreement(merge_rows: Iterable[dict], link_rows: Iterable[dict
 
     for row in link_rows:
         decider = row.get("decided_by")
-        if not decider or decider in JUDGE_DECIDERS:
-            continue
         label = _LINK_LABEL.get(row.get("status"))
-        if label is None:
+        if label is None or decider in JUDGE_DECIDERS:
             continue
+        if not decider:
+            # Decided before link decisions were attributed (2026-10-18):
+            # a human, an agent or the dream's retype pass, unknowable now.
+            unattributed_links += 1
+            continue
+        # judge_served_model is the memo's served name for the first
+        # opinion, attached by the storage reader; judge2's is on the row.
         votes = {op: {"verdict": row.get(f"{op}_verdict"),
                       "confidence": _conf(row.get(f"{op}_confidence")),
                       "model": row.get(f"{op}_model"),
@@ -148,6 +171,7 @@ def compute_judge_agreement(merge_rows: Iterable[dict], link_rows: Iterable[dict
         "window_days": window_days,
         "scored": scored,
         "labels": dict(labels),
+        "unattributed_links": unattributed_links,
         "merge": {**merge.report(), "agreed_two": merge_two.report(),
                   "majority_three": merge_three.report()},
         "junk": junk.report(),
@@ -184,10 +208,24 @@ def _classes(votes: dict, opinions, classify) -> dict[str, str | None]:
     return {op: classify(votes[op].get("verdict")) for op in opinions if op in votes}
 
 
-def _identity(vote: dict) -> str | None:
-    """The model a vote stands for: the served name when the endpoint
-    reported one, else the configured name."""
-    return vote.get("served_model") or vote.get("model")
+def _distinct(first: dict, second: dict) -> bool:
+    """The live two-vote rule (``_stored_second_distinct``): both served
+    names known and different, and the configured stamps different too. A
+    vote whose endpoint named no model is never one of a distinct pair."""
+    served1, served2 = first.get("served_model"), second.get("served_model")
+    return bool(served1 and served2 and served1 != served2
+                and (first.get("model") or "") != (second.get("model") or ""))
+
+
+def _third_distinct(third: dict, first: dict, second: dict) -> bool:
+    """The live tiebreak rule (``_tiebreak_refusal``): the third vote's
+    served name known and, like its stamp, other than every name the first
+    two votes carry."""
+    earlier = {m for v in (first, second)
+               for m in (v.get("served_model"), v.get("model")) if m}
+    served3 = third.get("served_model")
+    return bool(served3 and served3 not in earlier
+                and third.get("model") not in earlier)
 
 
 def _agreed_pair(votes, classes, gates) -> tuple[str, list] | None:
@@ -200,7 +238,7 @@ def _agreed_pair(votes, classes, gates) -> tuple[str, list] | None:
     if cls not in gates or classes.get("judge2") != cls:
         return None
     first, second = votes["judge"], votes["judge2"]
-    if _identity(first) == _identity(second):
+    if not _distinct(first, second):
         return None
     if (first["confidence"] + second["confidence"]) / 2.0 < gates[cls]:
         return None
@@ -208,10 +246,13 @@ def _agreed_pair(votes, classes, gates) -> tuple[str, list] | None:
 
 
 def _majority(votes, classes, gates) -> tuple[str, list] | None:
-    """``(class, majority votes)`` when all three opinions voted and two
-    share an accept or reject class at a mean of at least that class's
-    gate; the shape the tiebreak applies."""
+    """``(class, majority votes)`` when all three opinions voted from
+    distinct models and two share an accept or reject class at a mean of
+    at least that class's gate; the shape the tiebreak applies."""
     if any(op not in votes for op in MERGE_OPINIONS):
+        return None
+    first, second, third = (votes[op] for op in MERGE_OPINIONS)
+    if not (_distinct(first, second) and _third_distinct(third, first, second)):
         return None
     for cls in gates:
         side = [votes[op] for op in MERGE_OPINIONS if classes.get(op) == cls]

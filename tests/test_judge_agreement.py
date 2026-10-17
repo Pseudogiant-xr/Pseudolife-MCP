@@ -112,35 +112,40 @@ def test_report_scores_each_merge_opinion_against_the_decision():
     assert j3["voted"] == 0 and j3["precision"] is None
 
 
+def _s(verdict, conf, model, relation=None):
+    """A vote whose endpoint reported serving ``<model>-served``."""
+    return _v(verdict, conf, model, relation, served=f"{model}-served")
+
+
 def test_report_scores_two_agreeing_votes_and_a_three_vote_majority():
     rows = [
-        # Agreeing accepts from distinct models at mean 0.85 >= 0.6: scored,
-        # and the human agreed.
-        _merge("accepted", "human", {"judge": _v("accept", 0.9, "m1"),
-                                     "judge2": _v("accept", 0.8, "m2")}),
+        # Agreeing accepts from distinct served models at mean 0.85 >= 0.6:
+        # scored, and the human agreed.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("accept", 0.8, "m2")}),
         # Agreeing accepts below the gate: not an agreed pair.
-        _merge("accepted", "human", {"judge": _v("accept", 0.5, "m1"),
-                                     "judge2": _v("accept", 0.6, "m2")}),
+        _merge("accepted", "human", {"judge": _s("accept", 0.5, "m1"),
+                                     "judge2": _s("accept", 0.6, "m2")}),
         # Agreeing rejects from the SAME served model: one opinion twice,
         # never an agreed pair.
-        _merge("rejected", "human", {"judge": _v("reject", 0.9, "m1"),
-                                     "judge2": _v("reject", 0.9, "m2", served="m1")}),
+        _merge("rejected", "human", {"judge": _s("reject", 0.9, "m1"),
+                                     "judge2": _v("reject", 0.9, "m2", served="m1-served")}),
         # Agreeing reject-class (reject + relate) from distinct models at
         # mean 0.8: scored; the human accepted, so the pair was wrong.
-        _merge("accepted", "human", {"judge": _v("reject", 0.8, "m1"),
-                                     "judge2": _v("relate", 0.8, "m2", "uses")}),
+        _merge("accepted", "human", {"judge": _s("reject", 0.8, "m1"),
+                                     "judge2": _s("relate", 0.8, "m2", "uses")}),
         # Three votes, 2-1 reject at mean 0.75 >= 0.7: scored, and right.
-        _merge("rejected", "agent", {"judge": _v("accept", 0.9, "m1"),
-                                     "judge2": _v("reject", 0.7, "m2"),
-                                     "judge3": _v("relate", 0.8, "m3", "part-of")}),
+        _merge("rejected", "agent", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("reject", 0.7, "m2"),
+                                     "judge3": _s("relate", 0.8, "m3", "part-of")}),
         # Three votes, 2-1 accept at mean 0.65 >= 0.6: scored, and wrong.
-        _merge("rejected", "human", {"judge": _v("accept", 0.6, "m1"),
-                                     "judge2": _v("reject", 0.9, "m2"),
-                                     "judge3": _v("accept", 0.7, "m3")}),
+        _merge("rejected", "human", {"judge": _s("accept", 0.6, "m1"),
+                                     "judge2": _s("reject", 0.9, "m2"),
+                                     "judge3": _s("accept", 0.7, "m3")}),
         # Three votes, 2-1 reject below the gate: no majority scored.
-        _merge("rejected", "human", {"judge": _v("accept", 0.9, "m1"),
-                                     "judge2": _v("reject", 0.5, "m2"),
-                                     "judge3": _v("reject", 0.6, "m3")}),
+        _merge("rejected", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("reject", 0.5, "m2"),
+                                     "judge3": _s("reject", 0.6, "m3")}),
     ]
     out = compute_judge_agreement(rows, [], accept_gate=0.6, reject_gate=0.7,
                                   link_gate=0.7, window_days=30)
@@ -152,6 +157,50 @@ def test_report_scores_two_agreeing_votes_and_a_three_vote_majority():
     assert three["accept"] == {"n": 1, "agree": 0, "precision": 0.0}
 
 
+def test_a_vote_with_no_served_model_is_never_part_of_a_pair():
+    """The live gates refuse a second vote whose endpoint named no model
+    (``_stored_second_distinct``) and a third from a model already heard
+    (``_tiebreak_refusal``); the report counts exactly what they would."""
+    rows = [
+        # The second endpoint named no model: a different configured name
+        # is not evidence of a different model.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _v("accept", 0.9, "m2")}),
+        # The first opinion's served name was never recorded.
+        _merge("accepted", "human", {"judge": _v("accept", 0.9, "m1"),
+                                     "judge2": _s("accept", 0.9, "m2")}),
+        # A-B-A: the third vote repeats the first model, so there is no
+        # tiebreak to score, even though the accepts would be a majority.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("reject", 0.9, "m2"),
+                                     "judge3": _s("accept", 0.9, "m1")}),
+        # The third vote's served name is unknown: refused.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("reject", 0.9, "m2"),
+                                     "judge3": _v("accept", 0.9, "m3")}),
+    ]
+    out = compute_judge_agreement(rows, [], accept_gate=0.6, reject_gate=0.7,
+                                  link_gate=0.7, window_days=30)
+    assert out["merge"]["judge"]["voted"] == 4          # every opinion is scored
+    assert out["merge"]["agreed_two"]["accept"]["n"] == 0
+    assert out["merge"]["majority_three"]["accept"]["n"] == 0
+
+
+def test_an_unattributed_link_decision_is_counted_but_not_a_label():
+    links = [
+        {"status": "accepted", "decided_by": None,
+         "judge_verdict": "accept", "judge_confidence": 0.9, "judge_model": "m1",
+         "judge2_verdict": None},
+        {"status": "rejected", "decided_by": "dream-auto",
+         "judge_verdict": "reject", "judge_confidence": 0.9, "judge_model": "m1",
+         "judge2_verdict": None},
+    ]
+    out = compute_judge_agreement([], links, accept_gate=0.6, reject_gate=0.7,
+                                  link_gate=0.7, window_days=30)
+    assert out["scored"]["link"] == 0 and out["labels"] == {}
+    assert out["unattributed_links"] == 1
+
+
 def test_report_scores_junk_and_link_decisions():
     junk = [
         _merge("accepted", "human", {"judge": _v("delete", 0.9, "m1")}, into=None),
@@ -161,6 +210,7 @@ def test_report_scores_junk_and_link_decisions():
     links = [
         {"status": "accepted", "decided_by": "human",
          "judge_verdict": "accept", "judge_confidence": 0.7, "judge_model": "m1",
+         "judge_served_model": "m1-served",
          "judge2_verdict": "accept", "judge2_confidence": 0.8, "judge2_model": "m2",
          "judge2_served_model": "m2"},
         {"status": "retyped", "decided_by": "human",
@@ -250,6 +300,78 @@ def test_rejecting_a_merge_and_keeping_a_junk_entity_snapshot_their_votes(svc):
     assert _votes_for(svc, junk) == {
         "judge": {"verdict": "keep", "confidence": 0.9, "model": "m1",
                   "relation": None}}
+
+
+def test_the_snapshot_carries_the_first_opinions_served_model_from_the_memo(svc):
+    """The first opinion's stamp is the configured name; the model its
+    endpoint reported serving lives in the judging memo
+    (``ReviewJudgments.observed``), and the pair rule needs it."""
+    st = svc._storage
+    frm, into = _two(svc, "memo-a", "memo-b")
+    now = time.time()
+    pid = st.insert_entity_proposal("merge", frm, into, 0.9, "write-dedup", now)
+    st.set_entity_proposal_judgment(pid, verdict="accept", confidence=0.9,
+                                    note="same", model="m1", at=now)
+    st.set_meta("review_judgments_v1_merge",
+                {str(pid): {"fingerprint": "f", "served_model": "m1-served"}})
+    assert svc.graph_accept_entity_merge(pid, decided_by="human")["accepted"]
+    assert _votes_for(svc, pid)["judge"]["served_model"] == "m1-served"
+
+
+def test_accepting_a_junk_proposal_snapshots_its_vote(svc):
+    st = svc._storage
+    a, _b = _two(svc, "junk-a", "junk-b")
+    now = time.time()
+    pid = st.insert_entity_proposal("junk", a, None, None, "status-word", now)
+    st.set_entity_proposal_judgment(pid, verdict="delete", confidence=0.9,
+                                    note="a status word", model="m1", at=now)
+    assert svc.graph_accept_entity_junk(pid, decided_by="human")["accepted"]
+    assert _votes_for(svc, pid) == {
+        "judge": {"verdict": "delete", "confidence": 0.9, "model": "m1",
+                  "relation": None}}
+    rep = svc.judge_agreement()
+    assert rep["scored"]["junk"] == 1 and rep["junk"]["judge"]["agree"] == 1
+
+
+def test_an_audit_row_without_votes_is_not_scored(svc):
+    """Decisions from before the snapshot (NULL votes) are skipped."""
+    st = svc._storage
+    st.record_merge_decision(None, "old-a", "old-b", "accepted", 0.9,
+                             "write-dedup", "human", time.time())
+    rep = svc.judge_agreement()
+    assert rep["scored"]["merge"] == 0 and rep["labels"] == {}
+
+
+def test_console_and_agent_link_decisions_are_attributed(svc):
+    """The Console routes and ``memory_graph_review`` settled links with no
+    ``decided_by`` until 2026-10-18, so the report could score none of
+    them; a route call now records ``human`` (the Console's default) or
+    the ``agent`` it was told, and an unattributed row is reported, not
+    read as a human's."""
+    from pseudolife_memory.web.routes import ConsoleRoutes
+    st = svc._storage
+    now = time.time()
+    a, b = _two(svc, "route-a", "route-b")
+    c, d = _two(svc, "route-c", "route-d")
+    e, f = _two(svc, "route-e", "route-f")
+    for pair in ((a, b), (c, d), (e, f)):
+        pid = st.insert_proposal(pair[0], "uses", pair[1], 0.6, None, None,
+                                 "deep-dream", now)
+        st.set_proposal_judgment(pid, verdict="accept", confidence=0.7, note=None,
+                                 model="m1", relation=None, at=now)
+    routes = ConsoleRoutes(svc)
+    ids = sorted(r["id"] for r in st.pending_proposals())
+    routes.dispatch("POST", "/api/graph/accept-proposal", {}, {"id": ids[0]})
+    routes.dispatch("POST", "/api/graph/reject-proposal", {},
+                    {"id": ids[1], "decided_by": "agent"})
+    svc.graph_reject_proposal(ids[2])                   # the pre-fix Console path
+    rows = {r["id"]: r for r in st.judge_vote_decisions(now - 60)["link"]}
+    assert rows[ids[0]]["decided_by"] == "human"
+    assert rows[ids[1]]["decided_by"] == "agent"
+    assert rows[ids[2]]["decided_by"] is None
+    rep = svc.judge_agreement()
+    assert rep["scored"]["link"] == 2 and rep["unattributed_links"] == 1
+    assert rep["labels"] == {"human": 1, "agent": 1}
 
 
 def test_a_decision_with_no_recorded_vote_leaves_the_audit_votes_null(svc):

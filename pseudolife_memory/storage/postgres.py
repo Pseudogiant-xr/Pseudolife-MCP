@@ -3953,27 +3953,43 @@ class PostgresStorage:
         return int(row[0])
 
     _PROPOSAL_VOTE_COLUMNS = (
-        "judge_verdict", "judge_confidence", "judge_model", "judge_note",
-        "judge2_verdict", "judge2_confidence", "judge2_model",
+        "id", "kind", "judge_verdict", "judge_confidence", "judge_model",
+        "judge_note", "judge2_verdict", "judge2_confidence", "judge2_model",
         "judge2_served_model", "judge3_verdict", "judge3_confidence",
         "judge3_model", "judge3_served_model")
 
+    def _first_opinion_served(self, kind: str) -> dict:
+        """The judging memo's served model per proposal id for a queue: the
+        first opinion's stamp is the configured name, and the model the
+        endpoint reported serving lives only here
+        (``ReviewJudgments.observed``)."""
+        memo = self.get_meta(f"review_judgments_v1_{kind}") or {}
+        return {pid: entry.get("served_model") for pid, entry in memo.items()
+                if isinstance(entry, dict) and entry.get("served_model")}
+
     def entity_proposal_votes(self, proposal_id: int) -> dict | None:
         """The judge votes an entity proposal carries right now, as the
-        audit snapshots them (:func:`proposal_votes`); None when the row is
+        audit snapshots them (:func:`proposal_votes`), the first opinion's
+        served model taken from the judging memo; None when the row is
         gone or no opinion was recorded."""
         from pseudolife_memory.memory.judge_agreement import proposal_votes
         cols = self._PROPOSAL_VOTE_COLUMNS
         r = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM entity_proposals WHERE id = %s",
             (proposal_id,)).fetchone()
-        return proposal_votes(dict(zip(cols, r))) if r else None
+        if not r:
+            return None
+        row = dict(zip(cols, r))
+        served = self._first_opinion_served(row["kind"]).get(str(row["id"]))
+        return proposal_votes(row, first_served=served)
 
     def judge_vote_decisions(self, since: float) -> dict[str, list[dict]]:
         """The decided rows the judge-agreement report scores, decided at or
         after ``since``: merge and junk decisions that carry a vote
-        snapshot (v56 rows; older audit rows have none and are skipped),
-        and decided link proposals whose row still holds its votes."""
+        snapshot (older audit rows have none and are skipped), and decided
+        link proposals whose row still holds its votes, each with the
+        memo's served model for its first opinion as ``judge_served_model``
+        (None when the memo no longer holds the row)."""
         merge_cols = ("status", "decided_by", "decided_at", "into_display",
                       "votes")
         merges = [dict(zip(merge_cols, r)) for r in self.conn.execute(
@@ -3982,15 +3998,20 @@ class PostgresStorage:
             "WHERE votes IS NOT NULL AND decided_at >= %s "
             "  AND status IN ('accepted', 'rejected')",
             (float(since),)).fetchall()]
-        link_cols = ("status", "decided_by", "decided_at",
+        link_cols = ("id", "status", "decided_by", "decided_at",
                      "judge_verdict", "judge_confidence", "judge_model",
                      "judge2_verdict", "judge2_confidence", "judge2_model",
                      "judge2_served_model")
-        links = [dict(zip(link_cols, r)) for r in self.conn.execute(
-            f"SELECT {', '.join(link_cols)} FROM edge_proposals "
-            "WHERE judge_verdict IS NOT NULL AND decided_at >= %s "
-            "  AND status IN ('accepted', 'rejected', 'retyped')",
-            (float(since),)).fetchall()]
+        served = self._first_opinion_served("link")
+        links = []
+        for r in self.conn.execute(
+                f"SELECT {', '.join(link_cols)} FROM edge_proposals "
+                "WHERE judge_verdict IS NOT NULL AND decided_at >= %s "
+                "  AND status IN ('accepted', 'rejected', 'retyped')",
+                (float(since),)).fetchall():
+            row = dict(zip(link_cols, r))
+            row["judge_served_model"] = served.get(str(row["id"]))
+            links.append(row)
         return {"merge": merges, "link": links}
 
     def junk_accepted_displays(self) -> list[str]:

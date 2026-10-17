@@ -1163,10 +1163,22 @@ distinct models at the two-vote gates (`judge_accept_min_confidence`,
 `judge_reject_min_confidence_2`, `link_two_vote_min_confidence`), what
 the two-vote gates would have applied; `merge.majority_three` the rows
 whose 2-of-3 majority cleared its gate, what the tiebreak would have
-applied (the `low_differential` exclusion is not replayed, so the accept
-side counts a few rows `auto` would skip). `scored` counts the decisions
-read, `labels` who took them; decisions the judges applied themselves
-(`dream-judge`, `dream-auto`) are not labels. Merge and junk votes come
+applied. "Distinct models" is the live gates' rule: every vote in the
+pair or majority carries the model its endpoint reported serving, those
+names differ and so do the configured stamps; a vote whose served name
+is unknown (the first opinion's comes from the judging memo, which a
+requeue clears) is never part of a pair, as the live gate refuses it.
+Two things are not replayed: the `low_differential` exclusion (computed
+from the live graph at judging time), so the accept side counts a few
+rows `auto` would skip; and a decided link row goes with either endpoint
+when a later merge or junk delete takes it, so links are scored while
+both endpoints exist. `scored` counts the decisions read, `labels` who
+took them; decisions the judges applied themselves (`dream-judge`,
+`dream-auto`) are not labels, and `unattributed_links` counts decided
+link rows with votes but no `decided_by` (the Console and
+`memory_graph_review` attribute link decisions since 2026-10-18; earlier
+ones, and the dream's own retype pass before it was named, cannot be
+told apart). Merge and junk votes come
 from the snapshot `merge_decisions.votes` keeps from the moment of the
 decision (an accepted merge deletes its proposal row), so decisions from
 before v56 are not scored; link votes stay on their rows. The health
