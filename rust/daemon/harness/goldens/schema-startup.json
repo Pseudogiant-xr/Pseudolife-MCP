@@ -4,12 +4,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -319,7 +319,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -399,10 +401,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -881,12 +887,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -1196,7 +1202,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -1276,10 +1284,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -5132,12 +5144,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -5447,7 +5459,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -5527,10 +5541,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -6009,12 +6027,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -6324,7 +6342,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -6404,10 +6424,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -7220,12 +7244,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "360c38fa2e267821247e6350"
+      "rows": 494,
+      "sha256": "3868ea4acc46f843de91ed37"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "dfd382274d9e22171c1cad45"
+      "rows": 494,
+      "sha256": "ac51e042a6cfee756dcfb850"
      },
      "constraints": {
       "rows": 356,
@@ -7535,7 +7559,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -7615,10 +7641,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -8097,12 +8127,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "360c38fa2e267821247e6350"
+      "rows": 494,
+      "sha256": "3868ea4acc46f843de91ed37"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "dfd382274d9e22171c1cad45"
+      "rows": 494,
+      "sha256": "ac51e042a6cfee756dcfb850"
      },
      "constraints": {
       "rows": 356,
@@ -8412,7 +8442,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -8492,10 +8524,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -9642,12 +9678,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -9957,7 +9993,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -10037,10 +10075,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -10519,12 +10561,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -10834,7 +10876,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -10914,10 +10958,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -11398,12 +11446,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -11713,7 +11761,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -11793,10 +11843,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -12275,12 +12329,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -12590,7 +12644,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -12670,10 +12726,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -13628,12 +13688,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "360c38fa2e267821247e6350"
+      "rows": 494,
+      "sha256": "3868ea4acc46f843de91ed37"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "dfd382274d9e22171c1cad45"
+      "rows": 494,
+      "sha256": "ac51e042a6cfee756dcfb850"
      },
      "constraints": {
       "rows": 356,
@@ -13943,7 +14003,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -14023,10 +14085,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -14505,12 +14571,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "360c38fa2e267821247e6350"
+      "rows": 494,
+      "sha256": "3868ea4acc46f843de91ed37"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "dfd382274d9e22171c1cad45"
+      "rows": 494,
+      "sha256": "ac51e042a6cfee756dcfb850"
      },
      "constraints": {
       "rows": 356,
@@ -14820,7 +14886,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -14900,10 +14968,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -15384,12 +15456,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "67e7ad1dd03b07f8e548da7d"
+      "rows": 494,
+      "sha256": "eb45a3f86c739413d21eb6d3"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "ec96d26ee248c8da9ce2857d"
+      "rows": 494,
+      "sha256": "8d6096adec70bfccc2044beb"
      },
      "constraints": {
       "rows": 356,
@@ -15699,7 +15771,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -15779,10 +15853,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -16261,12 +16339,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "67e7ad1dd03b07f8e548da7d"
+      "rows": 494,
+      "sha256": "eb45a3f86c739413d21eb6d3"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "ec96d26ee248c8da9ce2857d"
+      "rows": 494,
+      "sha256": "8d6096adec70bfccc2044beb"
      },
      "constraints": {
       "rows": 356,
@@ -16576,7 +16654,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -16656,10 +16736,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -17140,12 +17224,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -17455,7 +17539,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -17535,10 +17621,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -18017,12 +18107,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -18332,7 +18422,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -18412,10 +18504,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -20220,12 +20316,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -20535,7 +20631,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -20615,10 +20713,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -21097,12 +21199,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -21412,7 +21514,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -21492,10 +21596,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -21976,12 +22084,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -22291,7 +22399,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -22371,10 +22481,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -22853,12 +22967,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -23168,7 +23282,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -23248,10 +23364,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -24398,12 +24518,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -24713,7 +24833,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -24793,10 +24915,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -25275,12 +25401,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -25590,7 +25716,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -25670,10 +25798,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -26154,12 +26286,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "c50dda35a3929803fea18ac6"
+      "rows": 494,
+      "sha256": "745f85ae20e28721c28cff48"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "3dc1a11787731b91320be3bd"
+      "rows": 494,
+      "sha256": "3b9fd59b71ab9b83bbb89e40"
      },
      "constraints": {
       "rows": 356,
@@ -26469,7 +26601,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -26549,10 +26683,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -27031,12 +27169,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "c50dda35a3929803fea18ac6"
+      "rows": 494,
+      "sha256": "745f85ae20e28721c28cff48"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "3dc1a11787731b91320be3bd"
+      "rows": 494,
+      "sha256": "3b9fd59b71ab9b83bbb89e40"
      },
      "constraints": {
       "rows": 356,
@@ -27346,7 +27484,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -27426,10 +27566,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -28592,12 +28736,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "eee8578a7fd8847c578a9e77"
+      "rows": 494,
+      "sha256": "565befbe78471cf75ebea44b"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "5bab26bc3798706c69d9326a"
+      "rows": 494,
+      "sha256": "30f44aa80a0fd71c4e4f00dd"
      },
      "constraints": {
       "rows": 356,
@@ -28907,7 +29051,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -28987,10 +29133,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -29469,12 +29619,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "eee8578a7fd8847c578a9e77"
+      "rows": 494,
+      "sha256": "565befbe78471cf75ebea44b"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "5bab26bc3798706c69d9326a"
+      "rows": 494,
+      "sha256": "30f44aa80a0fd71c4e4f00dd"
      },
      "constraints": {
       "rows": 356,
@@ -29784,7 +29934,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -29864,10 +30016,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -30348,12 +30504,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "b6a462560e9a61600406e4d6"
+      "rows": 494,
+      "sha256": "cdd13a45eba3d813eb18efea"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "bb3879abf1b17c96e3fb2d7e"
+      "rows": 494,
+      "sha256": "2f269f61dc3737a9f81843be"
      },
      "constraints": {
       "rows": 356,
@@ -30663,7 +30819,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -30743,10 +30901,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -31225,12 +31387,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "b6a462560e9a61600406e4d6"
+      "rows": 494,
+      "sha256": "cdd13a45eba3d813eb18efea"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "bb3879abf1b17c96e3fb2d7e"
+      "rows": 494,
+      "sha256": "2f269f61dc3737a9f81843be"
      },
      "constraints": {
       "rows": 356,
@@ -31540,7 +31702,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -31620,10 +31784,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -32104,12 +32272,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -32419,7 +32587,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -32499,10 +32669,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -32981,12 +33155,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -33296,7 +33470,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -33376,10 +33552,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -33860,12 +34040,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -34175,7 +34355,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -34255,10 +34437,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -34737,12 +34923,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -35052,7 +35238,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -35132,10 +35320,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -35616,12 +35808,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "360c38fa2e267821247e6350"
+      "rows": 494,
+      "sha256": "3868ea4acc46f843de91ed37"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "dfd382274d9e22171c1cad45"
+      "rows": 494,
+      "sha256": "ac51e042a6cfee756dcfb850"
      },
      "constraints": {
       "rows": 356,
@@ -35931,7 +36123,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -36011,10 +36205,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -36493,12 +36691,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "360c38fa2e267821247e6350"
+      "rows": 494,
+      "sha256": "3868ea4acc46f843de91ed37"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "dfd382274d9e22171c1cad45"
+      "rows": 494,
+      "sha256": "ac51e042a6cfee756dcfb850"
      },
      "constraints": {
       "rows": 356,
@@ -36808,7 +37006,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -36888,10 +37088,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -38350,12 +38554,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "eee8578a7fd8847c578a9e77"
+      "rows": 494,
+      "sha256": "565befbe78471cf75ebea44b"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "5bab26bc3798706c69d9326a"
+      "rows": 494,
+      "sha256": "30f44aa80a0fd71c4e4f00dd"
      },
      "constraints": {
       "rows": 356,
@@ -38665,7 +38869,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -38745,10 +38951,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -39227,12 +39437,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "eee8578a7fd8847c578a9e77"
+      "rows": 494,
+      "sha256": "565befbe78471cf75ebea44b"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "5bab26bc3798706c69d9326a"
+      "rows": 494,
+      "sha256": "30f44aa80a0fd71c4e4f00dd"
      },
      "constraints": {
       "rows": 356,
@@ -39542,7 +39752,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -39622,10 +39834,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -40106,12 +40322,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -40421,7 +40637,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -40501,10 +40719,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -40983,12 +41205,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -41298,7 +41520,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -41378,10 +41602,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -42452,12 +42680,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -42767,7 +42995,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -42847,10 +43077,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -43329,12 +43563,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -43644,7 +43878,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -43724,10 +43960,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -44208,12 +44448,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "eee8578a7fd8847c578a9e77"
+      "rows": 494,
+      "sha256": "565befbe78471cf75ebea44b"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "5bab26bc3798706c69d9326a"
+      "rows": 494,
+      "sha256": "30f44aa80a0fd71c4e4f00dd"
      },
      "constraints": {
       "rows": 356,
@@ -44523,7 +44763,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -44603,10 +44845,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -45085,12 +45331,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "eee8578a7fd8847c578a9e77"
+      "rows": 494,
+      "sha256": "565befbe78471cf75ebea44b"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "5bab26bc3798706c69d9326a"
+      "rows": 494,
+      "sha256": "30f44aa80a0fd71c4e4f00dd"
      },
      "constraints": {
       "rows": 356,
@@ -45400,7 +45646,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -45480,10 +45728,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -45964,12 +46216,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -46279,7 +46531,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -46359,10 +46613,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -46841,12 +47099,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -47156,7 +47414,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -47236,10 +47496,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -47720,12 +47984,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -48035,7 +48299,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -48115,10 +48381,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -48597,12 +48867,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -48912,7 +49182,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -48992,10 +49264,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -49476,12 +49752,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "360c38fa2e267821247e6350"
+      "rows": 494,
+      "sha256": "3868ea4acc46f843de91ed37"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "dfd382274d9e22171c1cad45"
+      "rows": 494,
+      "sha256": "ac51e042a6cfee756dcfb850"
      },
      "constraints": {
       "rows": 356,
@@ -49791,7 +50067,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -49871,10 +50149,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -50353,12 +50635,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "360c38fa2e267821247e6350"
+      "rows": 494,
+      "sha256": "3868ea4acc46f843de91ed37"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "dfd382274d9e22171c1cad45"
+      "rows": 494,
+      "sha256": "ac51e042a6cfee756dcfb850"
      },
      "constraints": {
       "rows": 356,
@@ -50668,7 +50950,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -50748,10 +51032,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -51232,12 +51520,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -51547,7 +51835,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -51627,10 +51917,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -52109,12 +52403,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -52424,7 +52718,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -52504,10 +52800,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -53518,12 +53818,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -53833,7 +54133,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -53913,10 +54215,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -54395,12 +54701,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -54710,7 +55016,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -54790,10 +55098,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -55274,12 +55586,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "67e7ad1dd03b07f8e548da7d"
+      "rows": 494,
+      "sha256": "eb45a3f86c739413d21eb6d3"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "ec96d26ee248c8da9ce2857d"
+      "rows": 494,
+      "sha256": "8d6096adec70bfccc2044beb"
      },
      "constraints": {
       "rows": 356,
@@ -55589,7 +55901,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -55669,10 +55983,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -56151,12 +56469,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "67e7ad1dd03b07f8e548da7d"
+      "rows": 494,
+      "sha256": "eb45a3f86c739413d21eb6d3"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "ec96d26ee248c8da9ce2857d"
+      "rows": 494,
+      "sha256": "8d6096adec70bfccc2044beb"
      },
      "constraints": {
       "rows": 356,
@@ -56466,7 +56784,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -56546,10 +56866,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -57030,12 +57354,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "c50dda35a3929803fea18ac6"
+      "rows": 494,
+      "sha256": "745f85ae20e28721c28cff48"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "3dc1a11787731b91320be3bd"
+      "rows": 494,
+      "sha256": "3b9fd59b71ab9b83bbb89e40"
      },
      "constraints": {
       "rows": 356,
@@ -57345,7 +57669,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -57425,10 +57751,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -57907,12 +58237,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "c50dda35a3929803fea18ac6"
+      "rows": 494,
+      "sha256": "745f85ae20e28721c28cff48"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "3dc1a11787731b91320be3bd"
+      "rows": 494,
+      "sha256": "3b9fd59b71ab9b83bbb89e40"
      },
      "constraints": {
       "rows": 356,
@@ -58222,7 +58552,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -58302,10 +58634,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -59372,12 +59708,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -59687,7 +60023,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -59767,10 +60105,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -60249,12 +60591,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -60564,7 +60906,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -60644,10 +60988,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -61128,12 +61476,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "c50dda35a3929803fea18ac6"
+      "rows": 494,
+      "sha256": "745f85ae20e28721c28cff48"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "3dc1a11787731b91320be3bd"
+      "rows": 494,
+      "sha256": "3b9fd59b71ab9b83bbb89e40"
      },
      "constraints": {
       "rows": 356,
@@ -61443,7 +61791,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -61523,10 +61873,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -62005,12 +62359,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "c50dda35a3929803fea18ac6"
+      "rows": 494,
+      "sha256": "745f85ae20e28721c28cff48"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "3dc1a11787731b91320be3bd"
+      "rows": 494,
+      "sha256": "3b9fd59b71ab9b83bbb89e40"
      },
      "constraints": {
       "rows": 356,
@@ -62320,7 +62674,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -62400,10 +62756,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -62884,12 +63244,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -63199,7 +63559,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -63279,10 +63641,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -63761,12 +64127,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -64076,7 +64442,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -64156,10 +64524,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -64640,12 +65012,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -64955,7 +65327,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -65035,10 +65409,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -65517,12 +65895,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 488,
-      "sha256": "7c3d79a7ce23d33f8343dd46"
+      "rows": 494,
+      "sha256": "36a641f9dc3840802fc1988c"
      },
      "columns": {
-      "rows": 488,
-      "sha256": "45df30e3bf89bd29c3069ea2"
+      "rows": 494,
+      "sha256": "599b5287bec5d4e202ed1dbf"
      },
      "constraints": {
       "rows": 356,
@@ -65832,7 +66210,9 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
-       "judge2_relation"
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -65912,10 +66292,14 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge2_served_model",
+       "judge2_policy",
        "judge3_verdict",
        "judge3_confidence",
        "judge3_model",
-       "judged3_at"
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -66398,5 +66782,5 @@
   "catalog.extensions.extversion": "server-provided version; exact in live Python/Rust diff",
   "relations.created_at": "newly seeded rows only, against the common template"
  },
- "oracle_head": "731ea0df5dbb73c7593a2b7ffb2d2095bb12aa3e"
+ "oracle_head": "4c695f300b21a6fc3aba50c38a722457e43f7224"
 }
