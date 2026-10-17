@@ -4,12 +4,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -315,6 +315,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -401,6 +402,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -888,12 +890,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -1199,6 +1201,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -1285,6 +1288,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -5146,12 +5150,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -5457,6 +5461,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -5543,6 +5548,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -6030,12 +6036,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -6341,6 +6347,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -6427,6 +6434,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -7248,12 +7256,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "595e19272878f7ec2269ee5e"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "d09b83e2b4b6429c9fe6c185"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -7559,6 +7567,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -7645,6 +7654,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -8132,12 +8142,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "595e19272878f7ec2269ee5e"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "d09b83e2b4b6429c9fe6c185"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -8443,6 +8453,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -8529,6 +8540,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -9684,12 +9696,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -9995,6 +10007,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -10081,6 +10094,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -10568,12 +10582,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -10879,6 +10893,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -10965,6 +10980,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -11454,12 +11470,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -11765,6 +11781,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -11851,6 +11868,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -12338,12 +12356,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -12649,6 +12667,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -12735,6 +12754,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -13698,12 +13718,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "595e19272878f7ec2269ee5e"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "d09b83e2b4b6429c9fe6c185"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -14009,6 +14029,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -14095,6 +14116,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -14582,12 +14604,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "595e19272878f7ec2269ee5e"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "d09b83e2b4b6429c9fe6c185"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -14893,6 +14915,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -14979,6 +15002,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -15468,12 +15492,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "4bf185bb0b948c61813bf7ae"
+      "rows": 497,
+      "sha256": "c908dad751ec3d4deb8a3b62"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "88e92063c456009f3ff5b6be"
+      "rows": 497,
+      "sha256": "0c8f1450b0423de7df2db4df"
      },
      "constraints": {
       "rows": 356,
@@ -15779,6 +15803,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -15865,6 +15890,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -16352,12 +16378,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "4bf185bb0b948c61813bf7ae"
+      "rows": 497,
+      "sha256": "c908dad751ec3d4deb8a3b62"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "88e92063c456009f3ff5b6be"
+      "rows": 497,
+      "sha256": "0c8f1450b0423de7df2db4df"
      },
      "constraints": {
       "rows": 356,
@@ -16663,6 +16689,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -16749,6 +16776,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -17238,12 +17266,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -17549,6 +17577,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -17635,6 +17664,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -18122,12 +18152,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -18433,6 +18463,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -18519,6 +18550,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -20332,12 +20364,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -20643,6 +20675,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -20729,6 +20762,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -21216,12 +21250,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -21527,6 +21561,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -21613,6 +21648,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -22102,12 +22138,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -22413,6 +22449,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -22499,6 +22536,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -22986,12 +23024,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -23297,6 +23335,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -23383,6 +23422,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -24538,12 +24578,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -24849,6 +24889,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -24935,6 +24976,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -25422,12 +25464,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -25733,6 +25775,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -25819,6 +25862,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -26308,12 +26352,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c311c15dc315965a5b4acc5a"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "a2cbe849c85d12ad3bdfc228"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -26619,6 +26663,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -26705,6 +26750,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -27192,12 +27238,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c311c15dc315965a5b4acc5a"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "a2cbe849c85d12ad3bdfc228"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -27503,6 +27549,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -27589,6 +27636,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -28760,12 +28808,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "780b49f5ebd73095c03d2a5b"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "4bc1059d135a05c46872c4a7"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -29071,6 +29119,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -29157,6 +29206,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -29644,12 +29694,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "780b49f5ebd73095c03d2a5b"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "4bc1059d135a05c46872c4a7"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -29955,6 +30005,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -30041,6 +30092,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -30530,12 +30582,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "49acf333f03213bfa4a746c0"
+      "rows": 497,
+      "sha256": "3b40081f45b3e570e134379b"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "46305a496c47b66af35e0925"
+      "rows": 497,
+      "sha256": "b8073f279e4fd23ce919e47d"
      },
      "constraints": {
       "rows": 356,
@@ -30841,6 +30893,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -30927,6 +30980,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -31414,12 +31468,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "49acf333f03213bfa4a746c0"
+      "rows": 497,
+      "sha256": "3b40081f45b3e570e134379b"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "46305a496c47b66af35e0925"
+      "rows": 497,
+      "sha256": "b8073f279e4fd23ce919e47d"
      },
      "constraints": {
       "rows": 356,
@@ -31725,6 +31779,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -31811,6 +31866,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -32300,12 +32356,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -32611,6 +32667,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -32697,6 +32754,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -33184,12 +33242,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -33495,6 +33553,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -33581,6 +33640,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -34070,12 +34130,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -34381,6 +34441,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -34467,6 +34528,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -34954,12 +35016,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -35265,6 +35327,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -35351,6 +35414,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -35840,12 +35904,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "595e19272878f7ec2269ee5e"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "d09b83e2b4b6429c9fe6c185"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -36151,6 +36215,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -36237,6 +36302,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -36724,12 +36790,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "595e19272878f7ec2269ee5e"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "d09b83e2b4b6429c9fe6c185"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -37035,6 +37101,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -37121,6 +37188,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -38588,12 +38656,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "780b49f5ebd73095c03d2a5b"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "4bc1059d135a05c46872c4a7"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -38899,6 +38967,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -38985,6 +39054,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -39472,12 +39542,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "780b49f5ebd73095c03d2a5b"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "4bc1059d135a05c46872c4a7"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -39783,6 +39853,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -39869,6 +39940,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -40358,12 +40430,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -40669,6 +40741,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -40755,6 +40828,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -41242,12 +41316,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -41553,6 +41627,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -41639,6 +41714,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -42718,12 +42794,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -43029,6 +43105,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -43115,6 +43192,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -43602,12 +43680,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -43913,6 +43991,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -43999,6 +44078,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -44488,12 +44568,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "780b49f5ebd73095c03d2a5b"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "4bc1059d135a05c46872c4a7"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -44799,6 +44879,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -44885,6 +44966,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -45372,12 +45454,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "780b49f5ebd73095c03d2a5b"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "4bc1059d135a05c46872c4a7"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -45683,6 +45765,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -45769,6 +45852,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -46258,12 +46342,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -46569,6 +46653,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -46655,6 +46740,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -47142,12 +47228,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -47453,6 +47539,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -47539,6 +47626,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -48028,12 +48116,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -48339,6 +48427,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -48425,6 +48514,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -48912,12 +49002,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -49223,6 +49313,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -49309,6 +49400,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -49798,12 +49890,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "595e19272878f7ec2269ee5e"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "d09b83e2b4b6429c9fe6c185"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -50109,6 +50201,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -50195,6 +50288,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -50682,12 +50776,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "595e19272878f7ec2269ee5e"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "d09b83e2b4b6429c9fe6c185"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -50993,6 +51087,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -51079,6 +51174,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -51568,12 +51664,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -51879,6 +51975,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -51965,6 +52062,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -52452,12 +52550,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -52763,6 +52861,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -52849,6 +52948,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -53868,12 +53968,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -54179,6 +54279,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -54265,6 +54366,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -54752,12 +54854,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -55063,6 +55165,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -55149,6 +55252,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -55638,12 +55742,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "4bf185bb0b948c61813bf7ae"
+      "rows": 497,
+      "sha256": "c908dad751ec3d4deb8a3b62"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "88e92063c456009f3ff5b6be"
+      "rows": 497,
+      "sha256": "0c8f1450b0423de7df2db4df"
      },
      "constraints": {
       "rows": 356,
@@ -55949,6 +56053,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -56035,6 +56140,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -56522,12 +56628,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "4bf185bb0b948c61813bf7ae"
+      "rows": 497,
+      "sha256": "c908dad751ec3d4deb8a3b62"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "88e92063c456009f3ff5b6be"
+      "rows": 497,
+      "sha256": "0c8f1450b0423de7df2db4df"
      },
      "constraints": {
       "rows": 356,
@@ -56833,6 +56939,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -56919,6 +57026,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -57408,12 +57516,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c311c15dc315965a5b4acc5a"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "a2cbe849c85d12ad3bdfc228"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -57719,6 +57827,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -57805,6 +57914,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -58292,12 +58402,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c311c15dc315965a5b4acc5a"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "a2cbe849c85d12ad3bdfc228"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -58603,6 +58713,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -58689,6 +58800,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -59764,12 +59876,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -60075,6 +60187,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -60161,6 +60274,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -60648,12 +60762,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -60959,6 +61073,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -61045,6 +61160,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -61534,12 +61650,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c311c15dc315965a5b4acc5a"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "a2cbe849c85d12ad3bdfc228"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -61845,6 +61961,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -61931,6 +62048,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -62418,12 +62536,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c311c15dc315965a5b4acc5a"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "a2cbe849c85d12ad3bdfc228"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -62729,6 +62847,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -62815,6 +62934,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -63304,12 +63424,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -63615,6 +63735,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -63701,6 +63822,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -64188,12 +64310,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -64499,6 +64621,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -64585,6 +64708,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -65074,12 +65198,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -65385,6 +65509,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -65471,6 +65596,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -65958,12 +66084,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 495,
-      "sha256": "c1294a478bde4778afc15ec0"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 495,
-      "sha256": "643537429b2b6b0e72209c20"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -66269,6 +66395,7 @@
        "judge_relation",
        "decided_by",
        "decided_at",
+       "judge_served_model",
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
@@ -66355,6 +66482,7 @@
        "judge2_confidence",
        "judge2_model",
        "judged2_at",
+       "judge_served_model",
        "judge2_served_model",
        "judge2_policy",
        "judge3_verdict",
@@ -66846,5 +66974,5 @@
   "catalog.extensions.extversion": "server-provided version; exact in live Python/Rust diff",
   "relations.created_at": "newly seeded rows only, against the common template"
  },
- "oracle_head": "9c0ded944dd18cfc97d26a76e4309b380a8d7ccf"
+ "oracle_head": "370efe4542820a7fd3ad6b72a53146cf102193f3"
 }
