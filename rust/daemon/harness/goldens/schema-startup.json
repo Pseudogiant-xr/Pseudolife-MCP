@@ -4,12 +4,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -314,7 +314,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -393,7 +398,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -622,7 +631,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -872,12 +881,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -1182,7 +1191,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -1261,7 +1275,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -1490,7 +1508,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -5114,12 +5132,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -5424,7 +5442,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -5503,7 +5526,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -5732,7 +5759,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -5982,12 +6009,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -6292,7 +6319,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -6371,7 +6403,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -6600,7 +6636,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -7184,12 +7220,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 488,
+      "sha256": "360c38fa2e267821247e6350"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 488,
+      "sha256": "dfd382274d9e22171c1cad45"
      },
      "constraints": {
       "rows": 356,
@@ -7494,7 +7530,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -7573,7 +7614,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -7802,7 +7847,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -8052,12 +8097,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 488,
+      "sha256": "360c38fa2e267821247e6350"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 488,
+      "sha256": "dfd382274d9e22171c1cad45"
      },
      "constraints": {
       "rows": 356,
@@ -8362,7 +8407,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -8441,7 +8491,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -8670,7 +8724,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -9588,12 +9642,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -9898,7 +9952,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -9977,7 +10036,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -10206,7 +10269,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -10456,12 +10519,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -10766,7 +10829,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -10845,7 +10913,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -11074,7 +11146,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -11326,12 +11398,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -11636,7 +11708,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -11715,7 +11792,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -11944,7 +12025,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -12194,12 +12275,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -12504,7 +12585,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -12583,7 +12669,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -12812,7 +12902,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -13538,12 +13628,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 488,
+      "sha256": "360c38fa2e267821247e6350"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 488,
+      "sha256": "dfd382274d9e22171c1cad45"
      },
      "constraints": {
       "rows": 356,
@@ -13848,7 +13938,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -13927,7 +14022,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -14156,7 +14255,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -14406,12 +14505,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 488,
+      "sha256": "360c38fa2e267821247e6350"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 488,
+      "sha256": "dfd382274d9e22171c1cad45"
      },
      "constraints": {
       "rows": 356,
@@ -14716,7 +14815,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -14795,7 +14899,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -15024,7 +15132,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -15276,12 +15384,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "eb1ec334477ba3d97eb859b2"
+      "rows": 488,
+      "sha256": "67e7ad1dd03b07f8e548da7d"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "fefde85034a3378f31f2e91b"
+      "rows": 488,
+      "sha256": "ec96d26ee248c8da9ce2857d"
      },
      "constraints": {
       "rows": 356,
@@ -15586,7 +15694,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -15665,7 +15778,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -15894,7 +16011,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -16144,12 +16261,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "eb1ec334477ba3d97eb859b2"
+      "rows": 488,
+      "sha256": "67e7ad1dd03b07f8e548da7d"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "fefde85034a3378f31f2e91b"
+      "rows": 488,
+      "sha256": "ec96d26ee248c8da9ce2857d"
      },
      "constraints": {
       "rows": 356,
@@ -16454,7 +16571,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -16533,7 +16655,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -16762,7 +16888,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -17014,12 +17140,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -17324,7 +17450,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -17403,7 +17534,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -17632,7 +17767,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -17882,12 +18017,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -18192,7 +18327,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -18271,7 +18411,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -18500,7 +18644,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -20076,12 +20220,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -20386,7 +20530,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -20465,7 +20614,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -20694,7 +20847,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -20944,12 +21097,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -21254,7 +21407,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -21333,7 +21491,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -21562,7 +21724,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -21814,12 +21976,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -22124,7 +22286,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -22203,7 +22370,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -22432,7 +22603,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -22682,12 +22853,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -22992,7 +23163,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -23071,7 +23247,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -23300,7 +23480,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -24218,12 +24398,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -24528,7 +24708,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -24607,7 +24792,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -24836,7 +25025,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -25086,12 +25275,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -25396,7 +25585,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -25475,7 +25669,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -25704,7 +25902,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -25956,12 +26154,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 488,
+      "sha256": "c50dda35a3929803fea18ac6"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 488,
+      "sha256": "3dc1a11787731b91320be3bd"
      },
      "constraints": {
       "rows": 356,
@@ -26266,7 +26464,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -26345,7 +26548,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -26574,7 +26781,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -26824,12 +27031,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 488,
+      "sha256": "c50dda35a3929803fea18ac6"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 488,
+      "sha256": "3dc1a11787731b91320be3bd"
      },
      "constraints": {
       "rows": 356,
@@ -27134,7 +27341,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -27213,7 +27425,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -27442,7 +27658,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -28376,12 +28592,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 488,
+      "sha256": "eee8578a7fd8847c578a9e77"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 488,
+      "sha256": "5bab26bc3798706c69d9326a"
      },
      "constraints": {
       "rows": 356,
@@ -28686,7 +28902,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -28765,7 +28986,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -28994,7 +29219,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -29244,12 +29469,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 488,
+      "sha256": "eee8578a7fd8847c578a9e77"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 488,
+      "sha256": "5bab26bc3798706c69d9326a"
      },
      "constraints": {
       "rows": 356,
@@ -29554,7 +29779,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -29633,7 +29863,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -29862,7 +30096,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -30114,12 +30348,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "c233200d1ea4b3c0f9d3b67d"
+      "rows": 488,
+      "sha256": "b6a462560e9a61600406e4d6"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7b82c63d84f3949a722f7b40"
+      "rows": 488,
+      "sha256": "bb3879abf1b17c96e3fb2d7e"
      },
      "constraints": {
       "rows": 356,
@@ -30424,7 +30658,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -30503,7 +30742,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -30732,7 +30975,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -30982,12 +31225,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "c233200d1ea4b3c0f9d3b67d"
+      "rows": 488,
+      "sha256": "b6a462560e9a61600406e4d6"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7b82c63d84f3949a722f7b40"
+      "rows": 488,
+      "sha256": "bb3879abf1b17c96e3fb2d7e"
      },
      "constraints": {
       "rows": 356,
@@ -31292,7 +31535,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -31371,7 +31619,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -31600,7 +31852,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -31852,12 +32104,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -32162,7 +32414,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -32241,7 +32498,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -32470,7 +32731,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -32720,12 +32981,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -33030,7 +33291,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -33109,7 +33375,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -33338,7 +33608,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -33590,12 +33860,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -33900,7 +34170,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -33979,7 +34254,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -34208,7 +34487,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -34458,12 +34737,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -34768,7 +35047,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -34847,7 +35131,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -35076,7 +35364,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -35328,12 +35616,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 488,
+      "sha256": "360c38fa2e267821247e6350"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 488,
+      "sha256": "dfd382274d9e22171c1cad45"
      },
      "constraints": {
       "rows": 356,
@@ -35638,7 +35926,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -35717,7 +36010,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -35946,7 +36243,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -36196,12 +36493,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 488,
+      "sha256": "360c38fa2e267821247e6350"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 488,
+      "sha256": "dfd382274d9e22171c1cad45"
      },
      "constraints": {
       "rows": 356,
@@ -36506,7 +36803,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -36585,7 +36887,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -36814,7 +37120,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -38044,12 +38350,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 488,
+      "sha256": "eee8578a7fd8847c578a9e77"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 488,
+      "sha256": "5bab26bc3798706c69d9326a"
      },
      "constraints": {
       "rows": 356,
@@ -38354,7 +38660,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -38433,7 +38744,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -38662,7 +38977,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -38912,12 +39227,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 488,
+      "sha256": "eee8578a7fd8847c578a9e77"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 488,
+      "sha256": "5bab26bc3798706c69d9326a"
      },
      "constraints": {
       "rows": 356,
@@ -39222,7 +39537,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -39301,7 +39621,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -39530,7 +39854,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -39782,12 +40106,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -40092,7 +40416,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -40171,7 +40500,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -40400,7 +40733,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -40650,12 +40983,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -40960,7 +41293,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -41039,7 +41377,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -41268,7 +41610,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -42110,12 +42452,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -42420,7 +42762,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -42499,7 +42846,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -42728,7 +43079,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -42978,12 +43329,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -43288,7 +43639,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -43367,7 +43723,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -43596,7 +43956,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -43848,12 +44208,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 488,
+      "sha256": "eee8578a7fd8847c578a9e77"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 488,
+      "sha256": "5bab26bc3798706c69d9326a"
      },
      "constraints": {
       "rows": 356,
@@ -44158,7 +44518,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -44237,7 +44602,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -44466,7 +44835,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -44716,12 +45085,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 488,
+      "sha256": "eee8578a7fd8847c578a9e77"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 488,
+      "sha256": "5bab26bc3798706c69d9326a"
      },
      "constraints": {
       "rows": 356,
@@ -45026,7 +45395,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -45105,7 +45479,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -45334,7 +45712,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -45586,12 +45964,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -45896,7 +46274,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -45975,7 +46358,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -46204,7 +46591,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -46454,12 +46841,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -46764,7 +47151,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -46843,7 +47235,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -47072,7 +47468,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -47324,12 +47720,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -47634,7 +48030,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -47713,7 +48114,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -47942,7 +48347,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -48192,12 +48597,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -48502,7 +48907,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -48581,7 +48991,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -48810,7 +49224,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -49062,12 +49476,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 488,
+      "sha256": "360c38fa2e267821247e6350"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 488,
+      "sha256": "dfd382274d9e22171c1cad45"
      },
      "constraints": {
       "rows": 356,
@@ -49372,7 +49786,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -49451,7 +49870,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -49680,7 +50103,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -49930,12 +50353,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 488,
+      "sha256": "360c38fa2e267821247e6350"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 488,
+      "sha256": "dfd382274d9e22171c1cad45"
      },
      "constraints": {
       "rows": 356,
@@ -50240,7 +50663,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -50319,7 +50747,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -50548,7 +50980,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -50800,12 +51232,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -51110,7 +51542,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -51189,7 +51626,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -51418,7 +51859,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -51668,12 +52109,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -51978,7 +52419,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -52057,7 +52503,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -52286,7 +52736,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -53068,12 +53518,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -53378,7 +53828,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -53457,7 +53912,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -53686,7 +54145,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -53936,12 +54395,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -54246,7 +54705,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -54325,7 +54789,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -54554,7 +55022,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -54806,12 +55274,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "eb1ec334477ba3d97eb859b2"
+      "rows": 488,
+      "sha256": "67e7ad1dd03b07f8e548da7d"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "fefde85034a3378f31f2e91b"
+      "rows": 488,
+      "sha256": "ec96d26ee248c8da9ce2857d"
      },
      "constraints": {
       "rows": 356,
@@ -55116,7 +55584,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -55195,7 +55668,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -55424,7 +55901,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -55674,12 +56151,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "eb1ec334477ba3d97eb859b2"
+      "rows": 488,
+      "sha256": "67e7ad1dd03b07f8e548da7d"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "fefde85034a3378f31f2e91b"
+      "rows": 488,
+      "sha256": "ec96d26ee248c8da9ce2857d"
      },
      "constraints": {
       "rows": 356,
@@ -55984,7 +56461,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -56063,7 +56545,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -56292,7 +56778,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -56544,12 +57030,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 488,
+      "sha256": "c50dda35a3929803fea18ac6"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 488,
+      "sha256": "3dc1a11787731b91320be3bd"
      },
      "constraints": {
       "rows": 356,
@@ -56854,7 +57340,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -56933,7 +57424,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -57162,7 +57657,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -57412,12 +57907,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 488,
+      "sha256": "c50dda35a3929803fea18ac6"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 488,
+      "sha256": "3dc1a11787731b91320be3bd"
      },
      "constraints": {
       "rows": 356,
@@ -57722,7 +58217,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -57801,7 +58301,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -58030,7 +58534,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -58868,12 +59372,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -59178,7 +59682,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -59257,7 +59766,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -59486,7 +59999,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -59736,12 +60249,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -60046,7 +60559,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -60125,7 +60643,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -60354,7 +60876,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -60606,12 +61128,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 488,
+      "sha256": "c50dda35a3929803fea18ac6"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 488,
+      "sha256": "3dc1a11787731b91320be3bd"
      },
      "constraints": {
       "rows": 356,
@@ -60916,7 +61438,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -60995,7 +61522,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -61224,7 +61755,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -61474,12 +62005,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 488,
+      "sha256": "c50dda35a3929803fea18ac6"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 488,
+      "sha256": "3dc1a11787731b91320be3bd"
      },
      "constraints": {
       "rows": 356,
@@ -61784,7 +62315,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -61863,7 +62399,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -62092,7 +62632,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -62344,12 +62884,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -62654,7 +63194,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -62733,7 +63278,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -62962,7 +63511,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -63212,12 +63761,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -63522,7 +64071,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -63601,7 +64155,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -63830,7 +64388,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -64082,12 +64640,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -64392,7 +64950,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -64471,7 +65034,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -64700,7 +65267,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -64950,12 +65517,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 488,
+      "sha256": "7c3d79a7ce23d33f8343dd46"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 488,
+      "sha256": "45df30e3bf89bd29c3069ea2"
      },
      "constraints": {
       "rows": 356,
@@ -65260,7 +65827,12 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation"
       ],
       "rows": []
      },
@@ -65339,7 +65911,11 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at"
       ],
       "rows": []
      },
@@ -65568,7 +66144,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -65822,17 +66398,5 @@
   "catalog.extensions.extversion": "server-provided version; exact in live Python/Rust diff",
   "relations.created_at": "newly seeded rows only, against the common template"
  },
- "oracle_head": "babe75a5630e58355ccd0c6b4345b03ea37bb4ed",
- "recorded_extension_versions": [
-  [
-   "plpgsql",
-   "1.0",
-   "pg_catalog"
-  ],
-  [
-   "vector",
-   "0.8.6",
-   "public"
-  ]
- ]
+ "oracle_head": "731ea0df5dbb73c7593a2b7ffb2d2095bb12aa3e"
 }
