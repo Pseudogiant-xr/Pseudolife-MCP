@@ -48,7 +48,9 @@ fn mcp_memory_fact_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Too
         let cfg = &app.service.config;
         let knobs = CortexKnobs::from_config(cfg);
         let relative_age = cfg.time.relative_age;
-        let store: &CortexStore = &ready.cortex;
+        // A snapshot: the read lock is never held across an await.
+        let snapshot = ready.cortex.snapshot();
+        let store: &CortexStore = &snapshot;
         let db = ready.storage.client();
         let internal = |e: anyhow::Error| ToolError::Internal(e);
 

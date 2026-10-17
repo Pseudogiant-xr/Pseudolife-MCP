@@ -9,11 +9,11 @@
 //!
 //! The indexes are `pub(crate)` so the write slice can extend them in place:
 //! an append pushes onto `records` and inserts the new index into `current`,
-//! `members` or `contested` under the record's `key`.
+//! `members` or `contested` under the record's `key`. The write primitives
+//! live in `cortex_write.rs`, their persistence in `cortex_sync.rs`.
 
-// The route wiring lands with the integration of this slice.
-
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Arc, RwLock};
 
 use anyhow::{Result, bail};
 use serde_json::Value;
@@ -107,7 +107,13 @@ pub struct CortexRecord {
     pub supersedes_value: Option<String>,
     pub superseded_by_value: Option<String>,
     pub superseded_at: Option<f64>,
-    pub embedding: Option<Vec<f32>>,
+    /// Shared so that cloning the store (a writer that meets a reader's
+    /// snapshot) does not copy the vectors.
+    pub embedding: Option<Arc<[f32]>>,
+    /// The value-free slot embedding (`f"{entity} {attribute}"`). Resident
+    /// only: Python keeps it in RAM for the dream's slot resolver and never
+    /// persists it, so hydrated records carry None (`cortex.py:300`).
+    pub slot_embedding: Option<Arc<[f32]>>,
     pub entity_id: Option<i64>,
     pub object_entity_id: Option<i64>,
     /// `row.freshness_class or "evergreen"` (`sync.py:hydrate_cortex`).
@@ -131,7 +137,7 @@ pub struct CortexRecord {
     pub(crate) key: SlotKey,
     /// `embedding / (||embedding|| + 1e-12)` in f32, the per-row
     /// normalisation `CortexStore.search` applies (`cortex.py:1524`).
-    pub(crate) unit: Option<Vec<f32>>,
+    pub(crate) unit: Option<Arc<[f32]>>,
 }
 
 impl CortexRecord {
@@ -151,7 +157,7 @@ impl CortexRecord {
     /// `attribute` or `embedding`.
     pub(crate) fn refresh_derived(&mut self) {
         self.key = slot_key(&self.entity, &self.attribute);
-        self.unit = self.embedding.as_deref().map(unit_f32);
+        self.unit = self.embedding.as_deref().map(|e| Arc::from(unit_f32(e)));
     }
 }
 
@@ -175,7 +181,7 @@ pub fn dot_f32(a: &[f32], b: &[f32]) -> f32 {
         .sum::<f64>() as f32
 }
 
-#[derive(Default)]
+#[derive(Clone)]
 pub struct CortexStore {
     /// Every row, in `facts.id` order at hydration, appended after.
     pub(crate) records: Vec<CortexRecord>,
@@ -186,6 +192,65 @@ pub struct CortexStore {
     /// Slot -> contested records, in record order (at most one after the
     /// load-time healing).
     pub(crate) contested: HashMap<SlotKey, Vec<usize>>,
+    /// `memory.cortex.protect_provenance` (`CortexStore.__init__`).
+    pub(crate) protect_provenance: bool,
+    /// `memory.cortex.supersede_confidence_margin`.
+    pub(crate) supersede_confidence_margin: f64,
+    /// `memory.cortex.reinforce_rate`.
+    pub(crate) reinforce_rate: f64,
+    /// Slots mutated since the last storage sync (`dirty_slots`), sorted as
+    /// `_replace_slot_rows` sorts them.
+    pub(crate) dirty_slots: BTreeSet<SlotKey>,
+    /// The supersession log or dream cursor changed since the last sync.
+    pub(crate) meta_dirty: bool,
+    /// `supersession_log`: the resident audit rows, seeded from
+    /// `meta.cortex_supersession_log` at startup.
+    pub(crate) supersession_log: Vec<Value>,
+    /// `dream_cursor`, seeded from `meta.cortex_dream_cursor`.
+    pub(crate) dream_cursor: f64,
+}
+
+impl Default for CortexStore {
+    fn default() -> Self {
+        CortexStore {
+            records: Vec::new(),
+            current: HashMap::new(),
+            members: HashMap::new(),
+            contested: HashMap::new(),
+            protect_provenance: true,
+            supersede_confidence_margin: 0.15,
+            reinforce_rate: 0.34,
+            dirty_slots: BTreeSet::new(),
+            meta_dirty: false,
+            supersession_log: Vec::new(),
+            dream_cursor: 0.0,
+        }
+    }
+}
+
+/// The resident cortex as `Ready` holds it. Readers take a snapshot (an
+/// `Arc` clone under a brief read lock) and never hold the lock across an
+/// await; the writer, serialized by `Ready.write`, mutates in place through
+/// [`SharedCortex::write`], which copies the store only when a reader still
+/// holds an older snapshot.
+#[derive(Default)]
+pub struct SharedCortex(RwLock<Arc<CortexStore>>);
+
+impl SharedCortex {
+    pub fn new(store: CortexStore) -> Self {
+        SharedCortex(RwLock::new(Arc::new(store)))
+    }
+
+    /// The current store, consistent for as long as the caller keeps it.
+    pub fn snapshot(&self) -> Arc<CortexStore> {
+        self.0.read().expect("cortex lock").clone()
+    }
+
+    /// Run `f` on the store under the write lock. `f` must not block.
+    pub fn write<T>(&self, f: impl FnOnce(&mut CortexStore) -> T) -> T {
+        let mut guard = self.0.write().expect("cortex lock");
+        f(Arc::make_mut(&mut guard))
+    }
 }
 
 impl CortexStore {
@@ -494,7 +559,8 @@ async fn hydrate_locked(client: &Client, dim: usize) -> Result<CortexStore> {
             supersedes_value: r.get(14),
             superseded_by_value: r.get(15),
             superseded_at: r.get(16),
-            embedding,
+            embedding: embedding.map(Arc::from),
+            slot_embedding: None,
             entity_id: r.get(18),
             object_entity_id: r.get(19),
             freshness_class: freshness
@@ -522,7 +588,13 @@ async fn hydrate_locked(client: &Client, dim: usize) -> Result<CortexStore> {
         records,
         ..CortexStore::default()
     };
-    store.reindex();
+    // `_reindex_current` marks each demoted record's slot dirty, so the
+    // next save persists the load-time healing (`cortex.py:1975`).
+    let demoted = store.reindex();
+    for i in demoted {
+        let key = store.records[i].key.clone();
+        store.dirty_slots.insert(key);
+    }
     Ok(store)
 }
 
@@ -587,10 +659,10 @@ pub(crate) mod tests {
         let mut newer = rec("box", "shell", "zsh");
         newer.last_confirmed = 2000.0;
         let mut similar = rec("laptop", "os", "macOS");
-        similar.embedding = Some(vec![1.0, 0.0]);
+        similar.embedding = Some(vec![1.0, 0.0].into());
         similar.refresh_derived();
         let mut far = rec("printer", "toner", "low");
-        far.embedding = Some(vec![0.0, 1.0]);
+        far.embedding = Some(vec![0.0, 1.0].into());
         far.refresh_derived();
         let s = indexed(vec![older, newer, rec("box", "os", "debian"), similar, far]);
         let got = s.candidates_for("box", "os", Some(&[1.0, 0.0]), 5, 0.35);
@@ -636,6 +708,7 @@ pub(crate) mod tests {
             superseded_by_value: None,
             superseded_at: None,
             embedding: None,
+            slot_embedding: None,
             entity_id: None,
             object_entity_id: None,
             freshness_class: "evergreen".into(),
@@ -715,16 +788,16 @@ pub(crate) mod tests {
     #[test]
     fn search_penalises_positive_assistant_cosines_before_the_floor() {
         let mut user = rec("u", "a", "v");
-        user.embedding = Some(axis(1, 0.5));
+        user.embedding = Some(axis(1, 0.5).into());
         let mut asst = rec("s", "a", "v");
         asst.support = vec!["assistant".into()];
-        asst.embedding = Some(axis(2, 0.5));
+        asst.embedding = Some(axis(2, 0.5).into());
         let mut neg = rec("n", "a", "v");
         neg.support = vec!["assistant".into()];
-        neg.embedding = Some(axis(3, -0.3));
+        neg.embedding = Some(axis(3, -0.3).into());
         let mut old = rec("o", "a", "v");
         old.status = "superseded".into();
-        old.embedding = Some(axis(4, 0.9));
+        old.embedding = Some(axis(4, 0.9).into());
         let s = store(vec![user, asst, neg, old]);
         let q = axis(5, 1.0);
         let hits = s.search(&q, 5, -1.0);

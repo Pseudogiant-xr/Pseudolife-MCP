@@ -562,8 +562,10 @@ pub async fn search_with_facts(
         .await;
         let facts = match qv {
             Ok(Ok(qv)) => {
+                // A snapshot: the read lock is never held across an await.
+                let store = ready.cortex.snapshot();
                 cortex_search::cortex_search(
-                    &ready.cortex,
+                    &store,
                     ready.storage.client(),
                     &qv,
                     &raw_q,

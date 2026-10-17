@@ -1,0 +1,1551 @@
+{
+ "branches": {
+  "config": {
+   "protect_provenance": true,
+   "supersede_confidence_margin": 0.15,
+   "reinforce_rate": 0.34
+  },
+  "writes": [
+   {
+    "entity": "Dev Box",
+    "attribute": "OS",
+    "value": "Debian 12",
+    "support": "agent",
+    "confidence": 0.7,
+    "now": 100.0,
+    "hlc": [
+     100000,
+     0
+    ],
+    "authority": {
+     "set": "directive"
+    },
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "dev_box",
+    "attribute": "os",
+    "value": " debian 12 ",
+    "support": "user",
+    "confidence": 0.5,
+    "now": 101.0,
+    "hlc": [
+     101000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": "s1"
+   },
+   {
+    "entity": "pipeline",
+    "attribute": "schedule",
+    "value": "the deploy pipeline runs nightly on the bench box",
+    "support": "action",
+    "confidence": 0.6,
+    "now": 102.0,
+    "hlc": [
+     102000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "volatile",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "Pipeline",
+    "attribute": "Schedule",
+    "value": "deploy pipeline runs nightly",
+    "support": "agent",
+    "confidence": 0.9,
+    "now": 103.0,
+    "hlc": [
+     103000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "pipeline",
+    "attribute": "schedule",
+    "value": "the deploy pipeline runs nightly on bench box 2",
+    "support": "action",
+    "confidence": 0.3,
+    "now": 104.0,
+    "hlc": [
+     104000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "pipeline",
+    "attribute": "schedule",
+    "value": "the deploy pipeline runs hourly",
+    "support": "user",
+    "confidence": 0.9,
+    "now": 105.0,
+    "hlc": [
+     105000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": {
+     "set": "constraint"
+    },
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.5",
+    "support": "user",
+    "confidence": 0.9,
+    "now": 106.0,
+    "hlc": [
+     106000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "slow",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.6",
+    "support": "agent",
+    "confidence": 0.95,
+    "now": 107.0,
+    "hlc": [
+     107000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": "s2"
+   },
+   {
+    "entity": "DB",
+    "attribute": "Host",
+    "value": "10.0.0.6 ",
+    "support": "action",
+    "confidence": 0.4,
+    "now": 108.0,
+    "hlc": [
+     108000,
+     0
+    ],
+    "authority": {
+     "set": "quoted"
+    },
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.7",
+    "support": "agent",
+    "confidence": 0.5,
+    "now": 109.0,
+    "hlc": [
+     109000,
+     0
+    ],
+    "authority": {
+     "set": null
+    },
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.7",
+    "support": "user",
+    "confidence": 0.9,
+    "now": 110.0,
+    "hlc": [
+     110000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-b",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.8",
+    "support": "user",
+    "confidence": 0.99,
+    "now": 111.0,
+    "hlc": [
+     111000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "value": "5432",
+    "support": "action",
+    "confidence": 0.8,
+    "now": 112.0,
+    "hlc": [
+     112000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "value": "5433",
+    "support": "action",
+    "confidence": 0.8,
+    "now": 112.5,
+    "hlc": [
+     111000,
+     9
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "value": "5434",
+    "support": "action",
+    "confidence": 0.8,
+    "now": 111.9,
+    "hlc": [
+     112000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "value": "5435",
+    "support": "action",
+    "confidence": 0.8,
+    "now": 112.1,
+    "hlc": [
+     112000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "svc",
+    "attribute": "state",
+    "value": "not deployed to the bench box yet",
+    "support": "agent",
+    "confidence": 0.7,
+    "now": 113.0,
+    "hlc": [
+     113000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "svc",
+    "attribute": "state",
+    "value": "deployed to the bench box",
+    "support": "agent",
+    "confidence": 0.7,
+    "now": 114.0,
+    "hlc": [
+     114000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "dev box",
+    "attribute": "os",
+    "value": "Debian 12",
+    "support": "agent",
+    "confidence": 0.2,
+    "now": 115.0,
+    "hlc": [
+     115000,
+     0
+    ],
+    "authority": {
+     "set": null
+    },
+    "distortion_tolerance": {
+     "set": "belief"
+    },
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "printer",
+    "attribute": "toner",
+    "value": "low",
+    "support": "agent",
+    "confidence": 0.6,
+    "now": 116.0,
+    "hlc": [
+     116000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "weekly",
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "results": [
+   {
+    "action": "inserted",
+    "record": 0
+   },
+   {
+    "action": "confirmed",
+    "record": 0
+   },
+   {
+    "action": "inserted",
+    "record": 1
+   },
+   {
+    "action": "confirmed",
+    "record": 1
+   },
+   {
+    "action": "contested",
+    "record": 2
+   },
+   {
+    "action": "confirmed",
+    "record": 1
+   },
+   {
+    "action": "inserted",
+    "record": 3
+   },
+   {
+    "action": "contested",
+    "record": 4
+   },
+   {
+    "action": "contested",
+    "record": 4
+   },
+   {
+    "action": "contested",
+    "record": 5
+   },
+   {
+    "action": "superseded",
+    "record": 6
+   },
+   {
+    "action": "superseded",
+    "record": 7
+   },
+   {
+    "action": "inserted",
+    "record": 8
+   },
+   {
+    "action": "contested",
+    "record": 9
+   },
+   {
+    "action": "contested",
+    "record": 10
+   },
+   {
+    "action": "superseded",
+    "record": 11
+   },
+   {
+    "action": "inserted",
+    "record": 12
+   },
+   {
+    "action": "superseded",
+    "record": 13
+   },
+   {
+    "action": "confirmed",
+    "record": 0
+   },
+   {
+    "action": "inserted",
+    "record": 14
+   }
+  ],
+  "records": [
+   {
+    "entity": "Dev Box",
+    "attribute": "OS",
+    "value": "Debian 12",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.86932,
+    "asserted_at": 100.0,
+    "last_confirmed": 115.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 115.0,
+    "valid_time": 100.0,
+    "hlc_phys": 115000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": "s1",
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": "belief",
+    "support": [
+     "agent",
+     "user"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "pipeline",
+    "attribute": "schedule",
+    "value": "the deploy pipeline runs nightly on the bench box",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.934,
+    "asserted_at": 102.0,
+    "last_confirmed": 105.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 105.0,
+    "valid_time": 102.0,
+    "hlc_phys": 105000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "volatile",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": "constraint",
+    "support": [
+     "action",
+     "agent",
+     "user"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "pipeline",
+    "attribute": "schedule",
+    "value": "the deploy pipeline runs nightly on bench box 2",
+    "polarity": "+",
+    "status": "contested",
+    "kind": "scalar",
+    "confidence": 0.3,
+    "asserted_at": 104.0,
+    "last_confirmed": 104.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 104.0,
+    "valid_time": 104.0,
+    "hlc_phys": 104000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "action"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.5",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.9,
+    "asserted_at": 106.0,
+    "last_confirmed": 106.0,
+    "supersedes_value": null,
+    "superseded_by_value": "10.0.0.7",
+    "superseded_at": 110.0,
+    "tx_time": 106.0,
+    "valid_time": 106.0,
+    "hlc_phys": 106000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "slow",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "user"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.6",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.967,
+    "asserted_at": 107.0,
+    "last_confirmed": 108.0,
+    "supersedes_value": null,
+    "superseded_by_value": "10.0.0.7",
+    "superseded_at": 109.0,
+    "tx_time": 108.0,
+    "valid_time": 107.0,
+    "hlc_phys": 108000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": "s2",
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": "quoted",
+    "distortion_tolerance": null,
+    "support": [
+     "action",
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.7",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.5,
+    "asserted_at": 109.0,
+    "last_confirmed": 109.0,
+    "supersedes_value": "10.0.0.6",
+    "superseded_by_value": "10.0.0.7",
+    "superseded_at": 110.0,
+    "tx_time": 109.0,
+    "valid_time": 109.0,
+    "hlc_phys": 109000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.7",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.9,
+    "asserted_at": 110.0,
+    "last_confirmed": 110.0,
+    "supersedes_value": "10.0.0.5",
+    "superseded_by_value": "10.0.0.8",
+    "superseded_at": 111.0,
+    "tx_time": 110.0,
+    "valid_time": 110.0,
+    "hlc_phys": 110000,
+    "hlc_logical": 0,
+    "writer_id": "writer-b",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent",
+     "user"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "10.0.0.8",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.99,
+    "asserted_at": 111.0,
+    "last_confirmed": 111.0,
+    "supersedes_value": "10.0.0.7",
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 111.0,
+    "valid_time": 111.0,
+    "hlc_phys": 111000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "user"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "value": "5432",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.8,
+    "asserted_at": 112.0,
+    "last_confirmed": 112.0,
+    "supersedes_value": null,
+    "superseded_by_value": "5435",
+    "superseded_at": 112.1,
+    "tx_time": 112.0,
+    "valid_time": 112.0,
+    "hlc_phys": 112000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "action"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "value": "5433",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.8,
+    "asserted_at": 112.5,
+    "last_confirmed": 112.5,
+    "supersedes_value": null,
+    "superseded_by_value": "5434",
+    "superseded_at": 111.9,
+    "tx_time": 112.5,
+    "valid_time": 112.5,
+    "hlc_phys": 111000,
+    "hlc_logical": 9,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "action"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "value": "5434",
+    "polarity": "+",
+    "status": "contested",
+    "kind": "scalar",
+    "confidence": 0.8,
+    "asserted_at": 111.9,
+    "last_confirmed": 111.9,
+    "supersedes_value": "5433",
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 111.9,
+    "valid_time": 111.9,
+    "hlc_phys": 112000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "action"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "value": "5435",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.8,
+    "asserted_at": 112.1,
+    "last_confirmed": 112.1,
+    "supersedes_value": "5432",
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 112.1,
+    "valid_time": 112.1,
+    "hlc_phys": 112000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "action"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "svc",
+    "attribute": "state",
+    "value": "not deployed to the bench box yet",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 113.0,
+    "last_confirmed": 113.0,
+    "supersedes_value": null,
+    "superseded_by_value": "deployed to the bench box",
+    "superseded_at": 114.0,
+    "tx_time": 113.0,
+    "valid_time": 113.0,
+    "hlc_phys": 113000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "svc",
+    "attribute": "state",
+    "value": "deployed to the bench box",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.7,
+    "asserted_at": 114.0,
+    "last_confirmed": 114.0,
+    "supersedes_value": "not deployed to the bench box yet",
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 114.0,
+    "valid_time": 114.0,
+    "hlc_phys": 114000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "printer",
+    "attribute": "toner",
+    "value": "low",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.6,
+    "asserted_at": 116.0,
+    "last_confirmed": 116.0,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 116.0,
+    "valid_time": 116.0,
+    "hlc_phys": 116000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   }
+  ],
+  "log": [
+   {
+    "entity": "pipeline",
+    "attribute": "schedule",
+    "old_value": "the deploy pipeline runs nightly on the bench box",
+    "new_value": "deploy pipeline runs nightly",
+    "decision": "confirm",
+    "reason": "compression_echo",
+    "confidence_delta": 0.3,
+    "timestamp": 103.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "pipeline",
+    "attribute": "schedule",
+    "old_value": "the deploy pipeline runs nightly on the bench box",
+    "new_value": "the deploy pipeline runs nightly on bench box 2",
+    "decision": "contested",
+    "reason": "below_confidence_margin",
+    "confidence_delta": -0.6,
+    "timestamp": 104.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "pipeline",
+    "attribute": "schedule",
+    "old_value": "the deploy pipeline runs nightly on the bench box",
+    "new_value": "the deploy pipeline runs hourly",
+    "decision": "confirm",
+    "reason": "compression_echo",
+    "confidence_delta": 0.0,
+    "timestamp": 105.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "10.0.0.5",
+    "new_value": "10.0.0.6",
+    "decision": "contested",
+    "reason": "tier_downgrade",
+    "confidence_delta": 0.05,
+    "timestamp": 107.0,
+    "writer_id": "writer-a",
+    "session_id": "s2"
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "10.0.0.5",
+    "new_value": "10.0.0.6 ",
+    "decision": "contested",
+    "reason": "contender_confirmed",
+    "confidence_delta": -0.5,
+    "timestamp": 108.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "10.0.0.5",
+    "new_value": "10.0.0.7",
+    "decision": "contested",
+    "reason": "tier_downgrade",
+    "confidence_delta": -0.4,
+    "timestamp": 109.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "10.0.0.5",
+    "new_value": "10.0.0.7",
+    "decision": "supersede",
+    "reason": "newer_wins",
+    "confidence_delta": 0.0,
+    "timestamp": 110.0,
+    "writer_id": "writer-b",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "10.0.0.7",
+    "new_value": "10.0.0.7",
+    "decision": "resolved",
+    "reason": "contender_value_now_current",
+    "confidence_delta": 0.4,
+    "timestamp": 110.0,
+    "writer_id": "writer-b",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "10.0.0.7",
+    "new_value": "10.0.0.8",
+    "decision": "supersede",
+    "reason": "newer_wins",
+    "confidence_delta": 0.09,
+    "timestamp": 111.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "old_value": "5432",
+    "new_value": "5433",
+    "decision": "contested",
+    "reason": "below_confidence_margin",
+    "confidence_delta": 0.0,
+    "timestamp": 112.5,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "old_value": "5432",
+    "new_value": "5434",
+    "decision": "contested",
+    "reason": "below_confidence_margin",
+    "confidence_delta": 0.0,
+    "timestamp": 111.9,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "port",
+    "old_value": "5432",
+    "new_value": "5435",
+    "decision": "supersede",
+    "reason": "newer_wins",
+    "confidence_delta": 0.0,
+    "timestamp": 112.1,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "svc",
+    "attribute": "state",
+    "old_value": "not deployed to the bench box yet",
+    "new_value": "deployed to the bench box",
+    "decision": "supersede",
+    "reason": "newer_wins",
+    "confidence_delta": 0.0,
+    "timestamp": 114.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "dirty_slots": [
+   [
+    "db",
+    "host"
+   ],
+   [
+    "db",
+    "port"
+   ],
+   [
+    "dev-box",
+    "os"
+   ],
+   [
+    "pipeline",
+    "schedule"
+   ],
+   [
+    "printer",
+    "toner"
+   ],
+   [
+    "svc",
+    "state"
+   ]
+  ],
+  "meta_dirty": true
+ },
+ "newer_wins": {
+  "config": {
+   "protect_provenance": false,
+   "supersede_confidence_margin": 0.15,
+   "reinforce_rate": 0.34
+  },
+  "writes": [
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "a",
+    "support": "user",
+    "confidence": 0.9,
+    "now": 200.0,
+    "hlc": [
+     200000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "b",
+    "support": "agent",
+    "confidence": 0.9,
+    "now": 201.0,
+    "hlc": [
+     201000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "c",
+    "support": "agent",
+    "confidence": 0.1,
+    "now": 202.0,
+    "hlc": [
+     202000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "c",
+    "support": "agent",
+    "confidence": 0.1,
+    "now": 203.0,
+    "hlc": [
+     203000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "results": [
+   {
+    "action": "inserted",
+    "record": 0
+   },
+   {
+    "action": "superseded",
+    "record": 1
+   },
+   {
+    "action": "contested",
+    "record": 1
+   },
+   {
+    "action": "contested",
+    "record": 1
+   }
+  ],
+  "records": [
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "a",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.9,
+    "asserted_at": 200.0,
+    "last_confirmed": 200.0,
+    "supersedes_value": null,
+    "superseded_by_value": "b",
+    "superseded_at": 201.0,
+    "tx_time": 200.0,
+    "valid_time": 200.0,
+    "hlc_phys": 200000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "user"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "b",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.9,
+    "asserted_at": 201.0,
+    "last_confirmed": 201.0,
+    "supersedes_value": "a",
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 201.0,
+    "valid_time": 201.0,
+    "hlc_phys": 201000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   }
+  ],
+  "log": [
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "a",
+    "new_value": "b",
+    "decision": "supersede",
+    "reason": "newer_wins",
+    "confidence_delta": 0.0,
+    "timestamp": 201.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "b",
+    "new_value": "c",
+    "decision": "contested",
+    "reason": "below_confidence_margin",
+    "confidence_delta": -0.8,
+    "timestamp": 202.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "b",
+    "new_value": "c",
+    "decision": "contested",
+    "reason": "below_confidence_margin",
+    "confidence_delta": -0.8,
+    "timestamp": 203.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "dirty_slots": [
+   [
+    "db",
+    "host"
+   ]
+  ],
+  "meta_dirty": true
+ },
+ "tuned": {
+  "config": {
+   "protect_provenance": true,
+   "supersede_confidence_margin": 0.5,
+   "reinforce_rate": 0.5
+  },
+  "writes": [
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "a",
+    "support": "agent",
+    "confidence": 0.9,
+    "now": 300.0,
+    "hlc": [
+     300000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "b",
+    "support": "agent",
+    "confidence": 0.45,
+    "now": 301.0,
+    "hlc": [
+     301000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "c",
+    "support": "agent",
+    "confidence": 0.3,
+    "now": 302.0,
+    "hlc": [
+     302000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "c",
+    "support": "agent",
+    "confidence": 0.3,
+    "now": 303.0,
+    "hlc": [
+     303000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "b",
+    "support": "agent",
+    "confidence": 0.9,
+    "now": 304.0,
+    "hlc": [
+     304000,
+     0
+    ],
+    "authority": "inherit",
+    "distortion_tolerance": "inherit",
+    "freshness_class": "evergreen",
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "results": [
+   {
+    "action": "inserted",
+    "record": 0
+   },
+   {
+    "action": "superseded",
+    "record": 1
+   },
+   {
+    "action": "superseded",
+    "record": 2
+   },
+   {
+    "action": "confirmed",
+    "record": 2
+   },
+   {
+    "action": "superseded",
+    "record": 3
+   }
+  ],
+  "records": [
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "a",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.9,
+    "asserted_at": 300.0,
+    "last_confirmed": 300.0,
+    "supersedes_value": null,
+    "superseded_by_value": "b",
+    "superseded_at": 301.0,
+    "tx_time": 300.0,
+    "valid_time": 300.0,
+    "hlc_phys": 300000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "b",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.45,
+    "asserted_at": 301.0,
+    "last_confirmed": 301.0,
+    "supersedes_value": "a",
+    "superseded_by_value": "c",
+    "superseded_at": 302.0,
+    "tx_time": 301.0,
+    "valid_time": 301.0,
+    "hlc_phys": 301000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "c",
+    "polarity": "+",
+    "status": "superseded",
+    "kind": "scalar",
+    "confidence": 0.6499999999999999,
+    "asserted_at": 302.0,
+    "last_confirmed": 303.0,
+    "supersedes_value": "b",
+    "superseded_by_value": "b",
+    "superseded_at": 304.0,
+    "tx_time": 303.0,
+    "valid_time": 302.0,
+    "hlc_phys": 303000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "value": "b",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.9,
+    "asserted_at": 304.0,
+    "last_confirmed": 304.0,
+    "supersedes_value": "c",
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 304.0,
+    "valid_time": 304.0,
+    "hlc_phys": 304000,
+    "hlc_logical": 0,
+    "writer_id": "writer-a",
+    "session_id": null,
+    "freshness_class": "evergreen",
+    "stance": null,
+    "authority": null,
+    "distortion_tolerance": null,
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "slot_embedding": true
+   }
+  ],
+  "log": [
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "a",
+    "new_value": "b",
+    "decision": "supersede",
+    "reason": "newer_wins",
+    "confidence_delta": -0.45,
+    "timestamp": 301.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "b",
+    "new_value": "c",
+    "decision": "supersede",
+    "reason": "newer_wins",
+    "confidence_delta": -0.15,
+    "timestamp": 302.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   },
+   {
+    "entity": "db",
+    "attribute": "host",
+    "old_value": "c",
+    "new_value": "b",
+    "decision": "supersede",
+    "reason": "newer_wins",
+    "confidence_delta": 0.25,
+    "timestamp": 304.0,
+    "writer_id": "writer-a",
+    "session_id": null
+   }
+  ],
+  "dirty_slots": [
+   [
+    "db",
+    "host"
+   ]
+  ],
+  "meta_dirty": true
+ }
+}

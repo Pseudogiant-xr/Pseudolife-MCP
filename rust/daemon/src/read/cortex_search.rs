@@ -1244,9 +1244,9 @@ mod tests {
     #[test]
     fn bm25_fusion_boosts_and_injects_per_record() {
         let mut a = rec("alpha", "port", "8080");
-        a.embedding = Some(axis(1, 0.6));
+        a.embedding = Some(axis(1, 0.6).into());
         let mut b = rec("beta", "port", "zeta_identifier");
-        b.embedding = Some(axis(2, 0.1));
+        b.embedding = Some(axis(2, 0.1).into());
         let s = store(vec![a, b]);
         let q = axis(3, 1.0);
         let dense = s.search(&q, 5, 0.2);
