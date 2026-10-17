@@ -628,12 +628,14 @@ SCENARIOS.update({
             resolve("Payments DB", "host", False),
             # the promoted record holds the slot: a restatement confirms it
             fact("Payments DB", "host", "10.0.0.7"),
-            # the user tier is already there
-            resolve("Build Server", "hostname", True),
-            # reject: the contender retired, the kept current answered twice
-            resolve("Dev Box", "OS", False),
-            # accept binds laxly: 0 is false
-            resolve("dev box", "os", 0),
+            # the user tier is already there; accept binds laxly ("yes" is
+            # true, so the contender is promoted)
+            resolve("Build Server", "hostname", "yes"),
+            # reject, bound laxly (0 is false, so the contender is retired
+            # rather than promoted); the kept current is answered twice
+            resolve("Dev Box", "OS", 0),
+            # nothing left to resolve; "no" binds to false
+            resolve("dev box", "os", "no"),
         ],
     },
     "fact-resolve-set-slot": {

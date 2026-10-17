@@ -586,8 +586,11 @@ checked offline against `resolve` sequences recorded from
 `memory/cortex.py` (`harness/gen_w2e_cortex_write_goldens.py`: resolve),
 which each of the three mutants fails, and which checks the HLC stamp an
 accept writes. A tick that writes no stamp (a reject, had it ticked, or an
-accept with nothing to resolve) leaves no trace in a bank or an answer, so
-no mutant targets FR2's reject side.
+accept with nothing to resolve) shows only in the logical counter of a
+stamp written in the same millisecond, which the harness's calls, seconds
+apart, never produce; so no mutant targets FR2's reject side. The lax
+`accept` binding is checked where it decides the outcome: `"yes"` promotes
+a contender and `0` retires one.
 
 ### Board tools over MCP (2026-10-16)
 
