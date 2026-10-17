@@ -365,7 +365,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -444,7 +451,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -882,7 +897,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -902,7 +918,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
@@ -1455,7 +1471,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -1534,7 +1557,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -1972,7 +2003,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -1992,7 +2024,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
@@ -2546,7 +2578,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -2625,7 +2664,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -3063,7 +3110,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -3083,7 +3131,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
@@ -3690,7 +3738,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -3769,7 +3824,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -4207,7 +4270,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -4227,7 +4291,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
@@ -4780,7 +4844,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -4859,7 +4930,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -5297,7 +5376,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -5317,7 +5397,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
@@ -5872,7 +5952,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -5951,7 +6038,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -6389,7 +6484,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -6409,7 +6505,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
@@ -6965,7 +7061,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -7044,7 +7147,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -7482,7 +7593,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -7502,7 +7614,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
@@ -8111,7 +8223,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -8190,7 +8309,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -8628,7 +8755,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -8648,7 +8776,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
@@ -9201,7 +9329,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -9280,7 +9415,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -9718,7 +9861,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -9738,7 +9882,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
@@ -10293,7 +10437,14 @@
               "judged_at",
               "judge_relation",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "judge2_verdict",
+              "judge2_confidence",
+              "judge2_model",
+              "judged2_at",
+              "judge2_relation",
+              "judge2_served_model",
+              "judge2_policy"
             ],
             "rows": []
           },
@@ -10372,7 +10523,15 @@
               "judge2_verdict",
               "judge2_confidence",
               "judge2_model",
-              "judged2_at"
+              "judged2_at",
+              "judge2_served_model",
+              "judge2_policy",
+              "judge3_verdict",
+              "judge3_confidence",
+              "judge3_model",
+              "judged3_at",
+              "judge3_served_model",
+              "judge3_policy"
             ],
             "rows": []
           },
@@ -10810,7 +10969,8 @@
               "score",
               "reason",
               "decided_by",
-              "decided_at"
+              "decided_at",
+              "votes"
             ],
             "rows": []
           },
@@ -10830,7 +10990,7 @@
               ],
               [
                 "schema_version",
-                55
+                56
               ],
               [
                 "writer_lease_epoch",
