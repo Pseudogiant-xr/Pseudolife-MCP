@@ -3976,7 +3976,13 @@ ladder has measured the third vote yet, which is why it ships in shadow.
 `link_judge_two_vote` decide what applies, not what a judge says, so they
 are not part of the judging policy: switching either from `shadow` to
 `auto` keeps every recorded vote, and the next tick applies the gates to
-those votes with no model call (a row refused once is left for a human).
+those votes with no model call. A row the gate refused for a lasting reason
+(no distinct model, an unknown second served model, a name veto, a variant
+conflict, an analyzer-filed row) is left for a human; a graph-snapshot
+failure instead sends the row back to its first opinion next tick. A
+recorded second or third vote whose endpoint has since reported serving
+another model is cleared and asked again, never applied (a cleared second
+vote takes the merge third with it).
 Switching back to `shadow` reopens none of the decisions `auto` took.
 Setting `judge_third_model` or `judge_third_url`, or changing
 `link_two_vote_min_confidence`, does change the policy: every queue's

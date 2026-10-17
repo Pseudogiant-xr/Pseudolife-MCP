@@ -4013,8 +4013,11 @@ class DreamOps:
                   float(row.get("judge_confidence") or 0.0)),
                  (row.get("judge2_verdict"), rel2,
                   float(row.get("judge2_confidence") or 0.0)),
+                 # The live path passes the response's relation; a replay
+                 # reads it back from the note's whole 3rd tail.
                  (row.get("judge3_verdict"),
-                  third_relate_relation(row.get("judge_note")),
+                  row.get("judge3_relation")
+                  or third_relate_relation(row.get("judge_note")),
                   float(row.get("judge3_confidence") or 0.0))]
         rejects = [x for x in votes if merge_verdict_class(x[0]) == "reject"]
         accepts = [x for x in votes if x[0] == "accept"]
@@ -4042,7 +4045,7 @@ class DreamOps:
         note = row.get("judge_note") or ""
         if f"| {reason}" in note:
             return
-        note = f"{note} | {reason}"[:400]
+        note = f"{note} | {reason}"
         if self._storage.set_entity_proposal_third_judgment(
                 row["id"], verdict=row.get("judge3_verdict"),
                 confidence=row.get("judge3_confidence"),
@@ -4059,9 +4062,15 @@ class DreamOps:
         decision carries both later votes' endpoints, so reconsideration
         reopens it when either endpoint later serves another model. Caller
         holds the lock, inside the row's transaction."""
+        from pseudolife_memory.memory.review_judgments import vote_endpoint_moved
         cfg = self.config.memory.deep_dream
         decided = self._tiebreak_majority(row, e, cfg)
         if decided is None:
+            return
+        # refresh() already clears a vote whose endpoint has since served
+        # another model; this holds the rule for any row it did not see.
+        if any(vote_endpoint_moved(self, "merge", row, opinion)
+               for opinion in ("second", "third")):
             return
         action, votes = decided
         if action == "accept":
@@ -4155,6 +4164,7 @@ class DreamOps:
         """Apply the link two-vote gate to votes already recorded on
         ``rows`` (``link_judge_two_vote`` promoted to auto after they were
         taken; the mode is unsigned), with no model call. Takes the lock."""
+        from pseudolife_memory.memory.review_judgments import vote_endpoint_moved
         cfg = self.config.memory.deep_dream
         with self._lock:
             review.validate_recorded(rows)
@@ -4163,11 +4173,13 @@ class DreamOps:
                     if not review.current(p, first_opinion=True):
                         continue
                     action = self._link_two_vote_action(p, cfg, cfg.link_judge_mode)
-                    if action is None:
+                    # As for the tiebreak: never a vote its endpoint no
+                    # longer stands behind (refresh() normally cleared it).
+                    if action is None or vote_endpoint_moved(self, "link", p, "second"):
                         continue
                     if not self._stored_second_distinct(
                             review, p, cfg.judge_second_model or None):
-                        note = f"{p.get('judge_note') or ''} | {self._TWO_VOTE_REFUSAL}"[:400]
+                        note = f"{p.get('judge_note') or ''} | {self._TWO_VOTE_REFUSAL}"
                         if self._storage.set_proposal_second_judgment(
                                 p["id"], verdict=p["judge2_verdict"],
                                 confidence=p.get("judge2_confidence"),
@@ -4219,7 +4231,8 @@ class DreamOps:
         import time as _t
 
         from pseudolife_memory.memory.graph_review import (
-            MERGE_REJECT_CLASS, merge_verdict_class, merge_verdict_token)
+            MERGE_REJECT_CLASS, merge_verdict_class, merge_verdict_token,
+            note_with_tail)
         self._stamp_skipped(verdicts3, proposals3)
         self._relate_needs_relation(verdicts3)
         self._report_served_model(out, "third", ex3)
@@ -4249,10 +4262,13 @@ class DreamOps:
                              else "no majority")
                     v3, c3 = v["verdict"], float(v["confidence"])
                     token3 = merge_verdict_token(v3, v.get("relation"))
-                    # The earlier opinions' note is the prefix; the 3rd tail
-                    # (and any refusal after it) must survive the 400 cap.
-                    note = (f"{(row.get('judge_note') or '')[:280]} | "
-                            f"3rd ({model3}): {token3} {c3:.2f} [{tally}]")[:400]
+                    # Only the free text gives way to the 400 cap: the 2nd
+                    # and 3rd tails carry the verdicts and relations that
+                    # are read back (a long model id cut the 3rd tail's
+                    # relation off, review 2026-10-17).
+                    note = note_with_tail(
+                        row.get("judge_note"),
+                        f" | 3rd ({model3}): {token3} {c3:.2f} [{tally}]")
                     if not self._storage.set_entity_proposal_third_judgment(
                             e["id"], verdict=v3, confidence=c3, model=model3,
                             at=now, note=note, served_model=served3,
@@ -4262,7 +4278,8 @@ class DreamOps:
                     row.update(judge3_verdict=v3, judge3_confidence=c3,
                                judge3_model=model3, judged3_at=now,
                                judge3_served_model=served3,
-                               judge3_policy=policy3, judge_note=note)
+                               judge3_policy=policy3, judge_note=note,
+                               judge3_relation=v.get("relation"))
                     self._tiebreak_apply(out, review, row, e, snap,
                                          dismissed, canon_by_id)
 
@@ -5109,7 +5126,7 @@ class DreamOps:
                                 self._storage.set_proposal_second_judgment(
                                     p["id"], verdict=v2, confidence=c2,
                                     model=model2, relation=rel2, at=now,
-                                    note=f"{note} | {self._TWO_VOTE_REFUSAL}"[:400])
+                                    note=f"{note} | {self._TWO_VOTE_REFUSAL}")
                                 out["two_vote_refused_same_model"] += 1
                                 continue
                             if v1 == "accept":

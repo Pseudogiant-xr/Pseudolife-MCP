@@ -57,6 +57,22 @@ def relate_relations(note):
     return (head.group(1) if head else None, tail.group(1) if tail else None)
 
 
+def note_with_tail(note, tail, cap=400):
+    """``note`` + ``tail`` within ``cap`` characters, cutting only the
+    free text: a leading ``relate:<relation>`` token and every structured
+    ``| 2nd (...)`` / ``| 3rd (...)`` tail survive whole, so the relations
+    and verdicts read back from the note never depend on model-id length.
+    Structured parts longer than ``cap`` are kept whole (the cap is a
+    display convention, not a column limit)."""
+    note = note or ""
+    cut = note.find(" | 2nd (")
+    free, structured = (note[:cut], note[cut:]) if cut != -1 else (note, "")
+    head = _RELATE_TOKEN.match(free)
+    keep = len(head.group(0)) if head else 0
+    budget = max(keep, cap - len(structured) - len(tail))
+    return free[:budget] + structured + tail
+
+
 def third_relate_relation(note):
     """The relation the third opinion's ``| 3rd (...)`` tail recorded
     (schema v56), or None."""

@@ -2498,6 +2498,11 @@ def run_sweep_once(service) -> dict:
                    or judged.get("third_opinions")
                    or judged.get("tiebreak_refused_same_model")
                    or judged.get("tiebreak_refused_unknown_second")
+                   # v56: a promoted mode applies recorded votes with no
+                   # new verdict, so what it applied counts on its own.
+                   or judged.get("tiebreak_applied")
+                   or judged.get("auto_rejected")
+                   or judged.get("auto_accepted")
                    or judged.get("third_opinion_error")):
         logger.info("deep-dream judge: %s", judged)
     if judged is not None:

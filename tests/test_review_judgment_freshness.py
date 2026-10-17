@@ -789,3 +789,89 @@ def test_a_stale_first_merge_verdict_clears_the_votes_endpoints(svc):
     svc.deep_dream_judge(first)
     assert svc._storage.conn.execute(
         f'SELECT {cols} FROM entity_proposals WHERE id=%s', (pid,)).fetchone() == (None,) * 4
+
+
+# ── review round 2: a later vote follows its own endpoint's identity ──────
+
+def _endpoint_now_serves(svc, queue, policy, model='another-model'):
+    from pseudolife_memory.memory.review_judgments import record_response_identity
+    with svc._lock:
+        record_response_identity(svc, queue, policy, model)
+
+
+def test_a_third_vote_whose_endpoint_changed_model_is_cleared_not_applied(svc):
+    pid, first, third, _out = _tiebroken(svc, tiebreak='shadow')
+    row = svc._storage.conn.execute(
+        'SELECT judge3_policy FROM entity_proposals WHERE id=%s', (pid,)).fetchone()
+    _endpoint_now_serves(svc, 'merge_third', row[0])
+    svc.config.memory.deep_dream.judge_tiebreak_mode = 'auto'
+    out = svc.deep_dream_judge(first)
+    assert out.get('tiebreak_applied', 0) == 0
+    row = svc._storage.get_entity_proposal(pid)
+    assert row['status'] == 'pending' and row['judge3_verdict'] is None
+    assert row['judge2_verdict'] == 'reject'           # the second vote stands
+    calls = third.calls
+    svc.deep_dream_judge(first, third_extractor=third)   # re-asked
+    assert third.calls == calls + 1
+
+
+def test_a_second_vote_whose_endpoint_changed_model_takes_the_third_with_it(svc):
+    pid, first, _third, _out = _tiebroken(svc, tiebreak='shadow')
+    row = svc._storage.conn.execute(
+        'SELECT judge2_policy FROM entity_proposals WHERE id=%s', (pid,)).fetchone()
+    _endpoint_now_serves(svc, 'merge_second', row[0])
+    svc.config.memory.deep_dream.judge_tiebreak_mode = 'auto'
+    out = svc.deep_dream_judge(first)
+    assert out.get('tiebreak_applied', 0) == 0
+    row = svc._storage.get_entity_proposal(pid)
+    assert row['status'] == 'pending' and row['judge_verdict'] == 'accept'
+    assert row['judge3_verdict'] is None
+    # Cleared, then asked again in the same tick (the test hook asks the
+    # first extractor): the old vote and its tails are gone.
+    again = svc._storage.conn.execute(
+        'SELECT judge2_model, judge_note FROM entity_proposals WHERE id=%s',
+        (pid,)).fetchone()
+    assert again[0] == 'stub-merge-judge'
+    assert 'stub-merge-judge-2' not in again[1] and '| 3rd (' not in again[1]
+
+
+def test_a_promoted_link_two_vote_skips_votes_from_a_changed_endpoint(svc):
+    from tests.test_queue_judges_service import _two_vote_links
+    pids, first, out = _two_vote_links(svc, two_vote='shadow')
+    pid = pids[('k-a', 'uses', 'k-b')]
+    policy = svc._storage.conn.execute(
+        'SELECT judge2_policy FROM edge_proposals WHERE id=%s', (pid,)).fetchone()[0]
+    _endpoint_now_serves(svc, 'link_second', policy)
+    svc.config.memory.deep_dream.link_judge_two_vote = 'auto'
+    again = svc.deep_dream_judge_links(first)
+    assert again.get('two_vote_applied', 0) == 0
+    assert svc._storage.get_proposal(pid)['status'] == 'pending'
+    row = _pending_link(svc, pid)
+    # Cleared, then asked again in the same tick (the test hook asks the
+    # first extractor, whose same-model pair applies nothing).
+    assert row['judge_verdict'] == 'accept'
+    assert row['judge2_model'] == 'stub-link-judge'
+    assert 'stub-link-judge-2' not in row['judge_note']
+
+
+def test_the_apply_paths_hold_the_moved_endpoint_rule_on_their_own(svc, monkeypatch):
+    """Belt and braces: with refresh()'s clearing switched off, neither
+    the tiebreak nor the link two-vote gate applies a vote whose endpoint
+    has since served another model."""
+    from pseudolife_memory.memory.review_judgments import ReviewJudgments
+    from tests.test_queue_judges_service import _two_vote_links
+    monkeypatch.setattr(ReviewJudgments, '_clear_moved_votes', lambda self: None)
+    pid, first, _third, _out = _tiebroken(svc, tiebreak='shadow')
+    policy = svc._storage.conn.execute(
+        'SELECT judge3_policy FROM entity_proposals WHERE id=%s', (pid,)).fetchone()[0]
+    _endpoint_now_serves(svc, 'merge_third', policy)
+    svc.config.memory.deep_dream.judge_tiebreak_mode = 'auto'
+    assert svc.deep_dream_judge(first).get('tiebreak_applied', 0) == 0
+    assert svc._storage.get_entity_proposal(pid)['status'] == 'pending'
+    pids, lfirst, _ = _two_vote_links(svc, two_vote='shadow')
+    lpid = pids[('k-a', 'uses', 'k-b')]
+    policy = svc._storage.conn.execute(
+        'SELECT judge2_policy FROM edge_proposals WHERE id=%s', (lpid,)).fetchone()[0]
+    _endpoint_now_serves(svc, 'link_second', policy)
+    svc.config.memory.deep_dream.link_judge_two_vote = 'auto'
+    assert svc.deep_dream_judge_links(lfirst).get('two_vote_applied', 0) == 0

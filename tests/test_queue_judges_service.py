@@ -1756,6 +1756,10 @@ def test_judge_third_url_builds_the_third_opinion_on_its_own_endpoint(svc, monke
     ({"judged": 0, "third_opinions": 1, "tiebreak_refused_same_model": 1}, True),
     ({"judged": 0, "third_opinion_error": "HTTP Error 401"}, True),
     ({"judged": 0, "tiebreak_refused_unknown_second": 1}, True),
+    # A tick that only applied votes already recorded (a promoted mode).
+    ({"judged": 0, "tiebreak_applied": 1, "auto_rejected": 1}, True),
+    ({"judged": 0, "auto_accepted": 1}, True),
+    ({"judged": 0, "auto_rejected": 1}, True),
 ])
 def test_sweep_logs_the_merge_judge_whenever_it_did_or_refused_something(caplog, result, logged):
     """The sweep logged the merge judge only when it judged or reopened
@@ -1941,3 +1945,50 @@ def test_promoting_the_link_two_vote_still_refuses_one_model_asked_twice(svc):
     # Refused once, then left for a human: no refusal on every tick.
     later = svc.deep_dream_judge_links(first)
     assert later.get("two_vote_refused_same_model", 0) == 0
+
+
+# ── review round 2: structured note tails survive long model ids ──────────
+
+_LONG2 = "second-" + "x" * 110          # 117-character model ids
+_LONG3 = "third-" + "y" * 111
+
+
+class _LongSecond(_MergeJudge):
+    model = served_model = _LONG2
+
+
+class _LongThird(_MergeJudge):
+    model = served_model = _LONG3
+
+
+class _VerboseFirst(_MergeJudge):
+    def judge_merges(self, proposals):
+        out = super().judge_merges(proposals)
+        for v in out:
+            v["note"] = "long first-opinion reasoning " * 12
+        return out
+
+
+@pytest.mark.parametrize("promote", [False, True])
+def test_the_third_votes_relation_survives_long_model_ids(svc, promote):
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "auto-reject"
+    cfg.judge_second_opinion = True
+    cfg.judge_tiebreak_mode = "shadow" if promote else "auto"
+    pair = ("psi module", "psi concept")
+    pid = _propose(svc, *pair)
+    first = _VerboseFirst({pair: ("accept", 0.7)})
+    svc.deep_dream_judge(first)
+    svc.deep_dream_judge(first, second_extractor=_LongSecond({pair: ("reject", 0.75)}))
+    out = svc.deep_dream_judge(first, third_extractor=_LongThird(
+        {pair: ("relate", 0.9, "part-of")}))
+    note = svc._storage.conn.execute(
+        "SELECT judge_note FROM entity_proposals WHERE id=%s", (pid,)).fetchone()[0]
+    assert note.endswith(f"| 3rd ({_LONG3}): relate:part-of 0.90 [2-1 reject]")
+    assert f"| 2nd ({_LONG2}): reject 0.75 [split]" in note
+    if promote:
+        cfg.judge_tiebreak_mode = "auto"
+        out = svc.deep_dream_judge(first)
+    assert out["tiebreak_applied"] == 1
+    assert _merge_links(svc) == [
+        ("psi module", "part-of", "psi concept", "merge-judge-relate")]
