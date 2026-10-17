@@ -362,5 +362,49 @@
  [
   "Straße",
   null
+ ],
+ [
+  "gıt commit -m x",
+  "command-string"
+ ],
+ [
+  "pİp install foo",
+  "command-string"
+ ],
+ [
+  "actıon: x",
+  "action-prefix"
+ ],
+ [
+  "İction: x",
+  null
+ ],
+ [
+  "build = abcdef12́",
+  "hash-status"
+ ],
+ [
+  "x = abcdef1‿z",
+  "hash-status"
+ ],
+ [
+  "build = abcdef1²",
+  null
+ ],
+ [
+  "build = abcdef1_",
+  null
+ ],
+ [
+  "build = abcdef1-",
+  "hash-status"
+ ],
+ [
+  "build = abcdef1é",
+  null
+ ],
+ [
+  "build = abcdef1١",
+  null
  ]
 ]

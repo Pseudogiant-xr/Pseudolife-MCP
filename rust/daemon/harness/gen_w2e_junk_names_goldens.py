@@ -57,6 +57,10 @@ CASES = [
     # legitimate names
     "Payments DB", "Go", "uv", "dev box", "ops/backup.ps1", "origin/master",
     "codex-cli / installer", "pg+extractor", "Qwen3-8B", "gpt-5.6-luna", "Straße",
+    # review cases: sre IGNORECASE case fixes for i, and Python's word class at 
+    "gıt commit -m x", "pİp install foo", "actıon: x", "İction: x",
+    "build = abcdef12́", "x = abcdef1‿z", "build = abcdef1²", "build = abcdef1_",
+    "build = abcdef1-", "build = abcdef1é", "build = abcdef1١",
 ]
 
 

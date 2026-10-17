@@ -6,6 +6,10 @@
 //! Python's `str` patterns are Unicode-aware: `\d` is any decimal digit and
 //! `\s` is `str.isspace`, which also counts U+001C..U+001F; the classes below
 //! spell those separators out because the `regex` crate's `\s` omits them.
+//! Two more Python rules are spelled out: `re.IGNORECASE` also matches `i`
+//! with U+0130 and U+0131 (sre's case fixes; the crate's simple folding has
+//! neither), and `\b` bounds Python's word class (`isalnum` and `_`, so
+//! letters and numbers, not marks or connectors), checked after the match.
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -31,11 +35,16 @@ static DUMP_FILE: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)\.sql(\.gz)?$"));
 static IMAGE_TAG: LazyLock<Regex> = LazyLock::new(|| re(r":\d+\.\d+\.\d+"));
 static COMMAND_STRING: LazyLock<Regex> = LazyLock::new(|| {
     re(&format!(
-        r"(?i)^(docker|git|python|pip|curl|pwsh|npm|pytest){WS}+{NWS}+{WS}+{NWS}"
+        r"(?i)^(docker|g[i\x{{130}}\x{{131}}]t|python|p[i\x{{130}}\x{{131}}]p|curl|pwsh|npm|pytest){WS}+{NWS}+{WS}+{NWS}"
     ))
 });
-static HASH_STATUS: LazyLock<Regex> = LazyLock::new(|| re(&format!(r"={WS}*[0-9a-f]{{7,}}\b")));
-static ACTION_PREFIX: LazyLock<Regex> = LazyLock::new(|| re(&format!(r"(?i)^action:{WS}")));
+/// `={WS}*[0-9a-f]{7,}\b`: the run without its `\b`, which `hash_status`
+/// checks against Python's word class.
+static HASH_RUN: LazyLock<Regex> = LazyLock::new(|| re(&format!(r"={WS}*[0-9a-f]{{7,}}")));
+/// Python's `\w` for `str` patterns: `str.isalnum` (letters and numbers) or `_`.
+static PY_WORD: LazyLock<Regex> = LazyLock::new(|| re(r"^[\p{L}\p{N}_]$"));
+static ACTION_PREFIX: LazyLock<Regex> =
+    LazyLock::new(|| re(&format!(r"(?i)^act[i\x{{130}}\x{{131}}]on:{WS}")));
 static STATUS_SHARD: LazyLock<Regex> = LazyLock::new(|| re(r"^P\d+[ _]"));
 /// `_SENTENCE_TOKENS`.
 const SENTENCE_TOKENS: usize = 7;
@@ -43,6 +52,18 @@ static DECIMAL_OR_RANGE: LazyLock<Regex> = LazyLock::new(|| re(r"^\d+\.\d+(?:-\d
 static LOWER_TOKEN: LazyLock<Regex> = LazyLock::new(|| re(r"^[a-z][a-z0-9_-]*$"));
 /// `_ARROW`: a relation separator captured into a name.
 static ARROW: LazyLock<Regex> = LazyLock::new(|| re("<-+>|\u{2194}|->|\u{2192}"));
+
+/// The `hash-status` gate: a hex run of 7 or more after `=`, ending at a
+/// Python word boundary. The run is greedy and its last character is a word
+/// character, so only the character after the full run decides.
+fn hash_status(d: &str) -> bool {
+    HASH_RUN.find_iter(d).any(|m| {
+        d[m.end()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !PY_WORD.is_match(c.encode_utf8(&mut [0; 4])))
+    })
+}
 
 fn py_strip(s: &str) -> &str {
     s.trim_matches(crate::stores::cortex::py_isspace)
@@ -133,7 +154,7 @@ pub fn junk_name_reason(name: &str) -> Option<&'static str> {
     if COMMAND_STRING.is_match(d) {
         return Some("command-string");
     }
-    if HASH_STATUS.is_match(d) {
+    if hash_status(d) {
         return Some("hash-status");
     }
     if ACTION_PREFIX.is_match(d) {
