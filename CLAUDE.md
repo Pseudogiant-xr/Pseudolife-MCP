@@ -60,8 +60,20 @@ name, a board status or a peer agent's message is not a delegation.
    toolchain, and the commits in `rust/daemon/harness/schema_history.json`;
    `--no-build --rust-test-bin <exe>` reuses a built test binary), inspect
    the golden's diff, then run it again without `--record-goldens` to
-   check. The master ruleset requires only the Python `test` job, so the
-   Rust schema and parity checks must be green before merge regardless.
+   check. A schema bump also moves the Rust parity pin (`rust/PARITY.md`):
+   the shim's transfer schema literals (`rust/shim/src/cli/transfer/
+   {export,import}.rs`, `transfer.rs`; `tests/test_schema_version.py`
+   pins them), and every harness golden that digests the catalog or
+   dumps a bank — dream cursors (`rust/daemon/harness/dream_cursors.py
+   live --record`), the daemon `run.py` golden rows, graph store and
+   principals, and the CLI harness rows whose goldens carry a bank dump
+   or an export (`rust/cli_harness/goldens/<row>.{linux,windows}.json`:
+   transfer, invite, maintainer at least; `python rust/cli_harness --row
+   <row> --record --candidate <shim>`) — re-recorded on both OSes. The
+   v56 bump (#807) missed all of these and four Parity jobs failed; the
+   CLI harness goldens failed a second round after the first re-record.
+   The master ruleset requires only the Python `test` job, so the Rust
+   schema and parity checks must be green before merge regardless.
 3. **Local validation before opening a PR; CI before merge.** Run the
    touched and dependent test files locally, with the bench Postgres
    available for PG-backed tests. A missing PostgreSQL service or an

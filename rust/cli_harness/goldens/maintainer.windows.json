@@ -1,7 +1,8 @@
 {
  "row": "CLI-MAINTAINER",
  "platform": "windows",
- "oracle_commit": "8263e7e30c5e75f686ab8dd3a666d82edbc4c144",
+ "oracle_commit": "ebf1957c7feccd6e43c56e2b84f2c51d46c657d6",
+ "oracle_commit_source": "git",
  "cases": {
   "list-empty": {
    "home": null,
@@ -10,8 +11,8 @@
    "stdout": "Tm8gcGFzc2tleXMuDQo=",
    "stderr": "",
    "window": [
-    1791577456.463541,
-    1791577456.8345783
+    1792252977.6033592,
+    1792252978.172401
    ],
    "arm": "python",
    "seed_secret": null,
@@ -30,8 +31,8 @@
    "stdout": "LXBlbmRpbmdLZXlBICBwZW5kaW5nICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0tICBsYXN0X3VzZWQ9LQ0K",
    "stderr": "",
    "window": [
-    1791577460.31091,
-    1791577460.6218615
+    1792252979.854517,
+    1792252980.408705
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -60,8 +61,8 @@
    "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxIDEwOjAxICBsYXN0X3VzZWQ9MjAyNi0wNy0wMSAxMDowNiAgRkxBR0dFRCAoc2lnbiBjb3VudCB3ZW50IGJhY2t3YXJkcykNCnBob25lS2V5X3F1YSAgYWN0aXZlICAgIlRvbSdzIHBob25lIOKYjiIgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAxMDowMiAgbGFzdF91c2VkPS0NCnR3aW5BQjFrZXlEQSAgYWN0aXZlICAgJ2l0XCdzICJ0d2luIicgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAxMDowMyAgbGFzdF91c2VkPS0NCnR3aW5BQjJrZXlFQSAgYWN0aXZlICAgJ3R3aW4gdHdvJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDEwOjA0ICBsYXN0X3VzZWQ9LQ0KY2FuY2VsWGRSZXZvICByZXZva2VkICAnc3BhcmUnICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDIgMTA6MDUgIGxhc3RfdXNlZD0tDQo=",
    "stderr": "",
    "window": [
-    1791577462.983926,
-    1791577463.3679829
+    1792252981.2530737,
+    1792252981.8180294
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -122,8 +123,8 @@
    "stdout": "",
    "stderr": "ZXJyb3I6IHRoaXMgYmFuayBoYXMgbm8gbWFpbnRhaW5lciB0YWJsZXMgeWV0IChzY2hlbWEgb2xkZXIgdGhhbiB2NTQpOyBzdGFydCBhIHY1NCBkYWVtb24gb25jZSB0byBjcmVhdGUgdGhlbQ0K",
    "window": [
-    1791577463.9994547,
-    1791577464.455975
+    1792252982.2022464,
+    1792252982.7707846
    ],
    "arm": "python",
    "seed_secret": null,
@@ -142,8 +143,8 @@
    "stdout": "",
    "stderr": "ZXJyb3I6IHRoaXMgYmFuayBoYXMgbm8gbWFpbnRhaW5lciB0YWJsZXMgeWV0IChzY2hlbWEgb2xkZXIgdGhhbiB2NTQpOyBzdGFydCBhIHY1NCBkYWVtb24gb25jZSB0byBjcmVhdGUgdGhlbQ0K",
    "window": [
-    1791577464.6894639,
-    1791577465.0830135
+    1792252982.8889349,
+    1792252983.4568217
    ],
    "arm": "python",
    "seed_secret": null,
@@ -162,8 +163,8 @@
    "stdout": "",
    "stderr": "ZXJyb3I6IHRoaXMgYmFuayBoYXMgbm8gbWFpbnRhaW5lciB0YWJsZXMgeWV0IChzY2hlbWEgb2xkZXIgdGhhbiB2NTQpOyBzdGFydCBhIHY1NCBkYWVtb24gb25jZSB0byBjcmVhdGUgdGhlbQ0K",
    "window": [
-    1791577465.5185108,
-    1791577465.899004
+    1792252984.6031418,
+    1792252985.1729941
    ],
    "arm": "python",
    "seed_secret": null,
@@ -179,21 +180,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IEdHUFhaQ0pWTEMNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IE5SQTNPVFhXVUcNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
    "stderr": "",
    "window": [
-    1791577468.141313,
-    1791577468.4662886
+    1792252987.5058572,
+    1792252988.0821724
    ],
    "arm": "python",
    "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "seed": "31830850cb4ce2410b83b9683a020e73dc6374eb53f6123f77cd77cc52d9e720",
     "tables": {
      "maintainer_bootstrap": [
-      "{\"used_at\": null, \"code_hash\": \"ed82f1e000f746fc719e5095811e79945048c37fdd69fc24a33837ad827fcaf5\", \"expires_at\": 1791578068.4337249, \"credential_id\": null, \"failed_attempts\": 0}"
+      "{\"used_at\": null, \"code_hash\": \"179c7f4a46e026d2f367ec445c0ce6c5db4da19a2c423bb363003d17d432946c\", \"expires_at\": 1792253588.0617077, \"credential_id\": null, \"failed_attempts\": 0}"
      ]
     }
    },
@@ -206,21 +207,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFBLTVE2NldGTkoNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFBMVDdLSTdLWDMNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
    "stderr": "",
    "window": [
-    1791577468.7395828,
-    1791577469.151403
+    1792252988.5659528,
+    1792252989.1577358
    ],
    "arm": "python",
    "seed_secret": null,
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "18315e6440ca1897efe3e3217964d019bf358477fa7eb71fda83ac9d367cdffe",
+    "seed": "d0e06f07fb09d589feb8facb1f55b1a113da0351ed2e1b4a469d74ce23239f04",
     "tables": {
      "maintainer_bootstrap": [
-      "{\"used_at\": null, \"code_hash\": \"679f065f6e5bd66eb7a804ce837e5613852ab14824fee804d6f094547262af16\", \"expires_at\": 1791578069.1177676, \"credential_id\": null, \"failed_attempts\": 0}"
+      "{\"used_at\": null, \"code_hash\": \"683c97061fe9a7bd132c31960de56ce1949c55d28034f52214d213c2a171cb59\", \"expires_at\": 1792253589.1383913, \"credential_id\": null, \"failed_attempts\": 0}"
      ]
     }
    },
@@ -233,21 +234,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFVTQ1lQSkJTWlYNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IEhNNk9FWUZFUDUNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
    "stderr": "",
    "window": [
-    1791577471.8514664,
-    1791577472.2228463
+    1792252989.8802104,
+    1792252990.4347148
    ],
    "arm": "python",
    "seed_secret": "0191e9aca9c8b455107a16cbc0656383d68520410b4811873c256a37624ed80d",
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "7b06d709d17be40946b0c68a5b81647cfcbf0c2a546392bbf00298bf685fc105",
+    "seed": "0a790d025ea8ed2cadc367dc722fc35936d93b5d208e0ff38a3b06d1865b3be9",
     "tables": {
      "maintainer_bootstrap": [
-      "{\"used_at\": null, \"code_hash\": \"cce0cfb5dfcb49462e38ac48a20a8e9b438c8b2acebd593040d68d7ba359360f\", \"expires_at\": 1791578072.191492, \"credential_id\": null, \"failed_attempts\": 0}"
+      "{\"used_at\": null, \"code_hash\": \"f4a00478b8d4ac63effcc446612075a71fe4770110eb3703f3a8a4cbb9936127\", \"expires_at\": 1792253590.416601, \"credential_id\": null, \"failed_attempts\": 0}"
      ]
     }
    },
@@ -263,8 +264,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogYSBwYXNza2V5IGlzIGFscmVhZHkgcGVuZGluZyBvciBhY3RpdmU7IHJldm9rZSBpdCBvciBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgcmVzZXRgIGZpcnN0DQo=",
    "window": [
-    1791577472.652955,
-    1791577473.0022516
+    1792252990.6325495,
+    1792252991.1992753
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -293,8 +294,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogYSBwYXNza2V5IGlzIGFscmVhZHkgcGVuZGluZyBvciBhY3RpdmU7IHJldm9rZSBpdCBvciBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgcmVzZXRgIGZpcnN0DQo=",
    "window": [
-    1791577473.310418,
-    1791577473.6395545
+    1792252991.4008489,
+    1792252991.9562907
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -352,24 +353,24 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFRLN0NCNzdKWFANClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQpFbnJvbGxlZCAocGVuZGluZyk6IGRlc2tLZXlIb29rQSAgbGFiZWw6IGRlc2sga2V5DQpDaGVjayB0aGF0IHRoZSBDb25zb2xlIHNob3dzIHRoZSBzYW1lIHByZWZpeCBhbmQgbGFiZWwsIHRoZW4gcnVuOg0KICBwc2V1ZG9saWZlLW1jcCBtYWludGFpbmVyIGNvbmZpcm0gZGVza0tleUhvb2tBDQpJZiBpdCBkb2VzIG5vdCBtYXRjaCwgc29tZW9uZSBlbHNlIHJlZGVlbWVkIHRoZSBjb2RlOiBydW4NCiAgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciByZXZva2UgZGVza0tleUhvb2tBDQo=",
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IEg3QlhHSVBNNFQNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQpFbnJvbGxlZCAocGVuZGluZyk6IGRlc2tLZXlIb29rQSAgbGFiZWw6IGRlc2sga2V5DQpDaGVjayB0aGF0IHRoZSBDb25zb2xlIHNob3dzIHRoZSBzYW1lIHByZWZpeCBhbmQgbGFiZWwsIHRoZW4gcnVuOg0KICBwc2V1ZG9saWZlLW1jcCBtYWludGFpbmVyIGNvbmZpcm0gZGVza0tleUhvb2tBDQpJZiBpdCBkb2VzIG5vdCBtYXRjaCwgc29tZW9uZSBlbHNlIHJlZGVlbWVkIHRoZSBjb2RlOiBydW4NCiAgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciByZXZva2UgZGVza0tleUhvb2tBDQo=",
    "stderr": "",
    "window": [
-    1791577473.896411,
-    1791577476.249537
+    1792252992.14272,
+    1792252994.714803
    ],
    "arm": "python",
    "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "seed": "31830850cb4ce2410b83b9683a020e73dc6374eb53f6123f77cd77cc52d9e720",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"30265ddfbf4c3a666e6ec6a9cefb8602b6ed44e841c4d3ec9f06e250304ddd4a\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"deskKeyHookAAAAAAAAAAA\\\",\\\"label\\\":\\\"desk key\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782867600, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_bootstrap": [
-      "{\"used_at\": 1782867600, \"code_hash\": \"2a14a7ad7b006136eac771eb13549763490ce957ca97edde33af54949893013a\", \"expires_at\": 1791578074.2134318, \"credential_id\": \"deskKeyHookAAAAAAAAAAA\", \"failed_attempts\": 0}"
+      "{\"used_at\": 1782867600, \"code_hash\": \"9962d36d66552f78fa3b4df8579412609cbd73acf00113b12d98ac8a0e5ad550\", \"expires_at\": 1792253592.6920917, \"credential_id\": \"deskKeyHookAAAAAAAAAAA\", \"failed_attempts\": 0}"
      ],
      "maintainer_nonces": [
       "{\"nonce\": \"5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\", \"expires_at\": 1782867720}"
@@ -388,21 +389,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 1,
-   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IE1GNVhaRElMQlINClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQpUaGUgY29kZSB3YXMgYnVybmVkIGFmdGVyIHRvbyBtYW55IHdyb25nIGd1ZXNzZXMgaW4gdGhlIENvbnNvbGUuIElmIHRoZXkgd2VyZSBub3QgeW91cnMsIHNvbWVvbmUgZWxzZSBpcyB0cnlpbmcgdG8gZW5yb2w6IGNoZWNrIGBwc2V1ZG9saWZlLW1jcCBtYWludGFpbmVyIGxpc3RgLCB0aGVuIHJ1biBlbnJvbC1jb2RlIGFnYWluLg0K",
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IEhSVERLV1pFM0oNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQpUaGUgY29kZSB3YXMgYnVybmVkIGFmdGVyIHRvbyBtYW55IHdyb25nIGd1ZXNzZXMgaW4gdGhlIENvbnNvbGUuIElmIHRoZXkgd2VyZSBub3QgeW91cnMsIHNvbWVvbmUgZWxzZSBpcyB0cnlpbmcgdG8gZW5yb2w6IGNoZWNrIGBwc2V1ZG9saWZlLW1jcCBtYWludGFpbmVyIGxpc3RgLCB0aGVuIHJ1biBlbnJvbC1jb2RlIGFnYWluLg0K",
    "stderr": "",
    "window": [
-    1791577476.90794,
-    1791577479.266264
+    1792252994.8553782,
+    1792252997.4248
    ],
    "arm": "python",
    "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "seed": "31830850cb4ce2410b83b9683a020e73dc6374eb53f6123f77cd77cc52d9e720",
     "tables": {
      "maintainer_bootstrap": [
-      "{\"used_at\": null, \"code_hash\": \"028fb289f0804a34daa6717baeceabd323d113c305e2af6f0171dc2420d0fa29\", \"expires_at\": 1791578077.2299166, \"credential_id\": null, \"failed_attempts\": 5}"
+      "{\"used_at\": null, \"code_hash\": \"1665b10adafe4fda1ab8670cd3adb41d7c2855d07d053db87b3605a0dc125443\", \"expires_at\": 1792253595.4012752, \"credential_id\": null, \"failed_attempts\": 5}"
      ]
     }
    },
@@ -418,8 +419,8 @@
    "stdout": "QWN0aXZlOiAtcGVuZGluZ0tleUEgIGxhYmVsOiBsYXB0b3ANCg==",
    "stderr": "",
    "window": [
-    1791577479.7516043,
-    1791577480.3845775
+    1792252997.6015859,
+    1792252998.1611857
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -436,14 +437,14 @@
     ]
    },
    "db": {
-    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "seed": "7a7425b33982e07340e6e985043dc7a790e81eb937235f6c0e9ae5bf9b3da6e3",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"7ce68052af83121e17dacfb3bf32589db19be0d9f6100cbcfeb056993c9025a9\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577480.3402753, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"85d3e87754735bf78cb3fbd4a1ef8fbb532104ae26b1e6e41d978e702c882358\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1792252998.1400378, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577480.3387642, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1792252998.1395218, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
      ]
     }
    },
@@ -459,8 +460,8 @@
    "stdout": "QWN0aXZlOiAtcGVuZGluZ0tleUEgIGxhYmVsOiBsYXB0b3ANCg==",
    "stderr": "",
    "window": [
-    1791577480.7434897,
-    1791577481.1356347
+    1792252998.608941,
+    1792252999.186165
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -477,14 +478,14 @@
     ]
    },
    "db": {
-    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "seed": "7a7425b33982e07340e6e985043dc7a790e81eb937235f6c0e9ae5bf9b3da6e3",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"730a33ed03e8d6e0aa633073124235d53468c0f8e989afd9f7a6b988e6ebab07\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577481.0955348, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"7b89da33d88c46cda69f75e353ac57c6f34fd8cd732634ffb74d4f875d8cc643\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1792252999.165793, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577481.0944378, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1792252999.164743, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
      ]
     }
    },
@@ -500,8 +501,8 @@
    "stdout": "QWN0aXZlOiAtcGVuZGluZ0tleUEgIGxhYmVsOiBsYXB0b3ANCg==",
    "stderr": "",
    "window": [
-    1791577481.6245642,
-    1791577481.9558072
+    1792252999.442217,
+    1792253000.009588
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -518,14 +519,14 @@
     ]
    },
    "db": {
-    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "seed": "7a7425b33982e07340e6e985043dc7a790e81eb937235f6c0e9ae5bf9b3da6e3",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"010ca5834438e0effa18364c55cf422f3efe15a80d5a5e3004d2549a284338f7\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577481.9275627, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"e66f5046ee6198a7639735c33abb9f789eff17a9d55e61f326c9f05613fbf4e5\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1792252999.9890115, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577481.9265263, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1792252999.9884937, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
      ]
     }
    },
@@ -541,8 +542,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogbm8gc2luZ2xlIHBhc3NrZXkgbWF0Y2hlcyB0aGF0IHByZWZpeCAoaW4gdGhlIHN0YXRlIHRoaXMgY29tbWFuZCBuZWVkcyk7IHJ1biBgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciBsaXN0YA0K",
    "window": [
-    1791577482.2237475,
-    1791577482.5627084
+    1792253000.158851,
+    1792253000.7215703
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -603,8 +604,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
    "window": [
-    1791577482.8428724,
-    1791577483.176477
+    1792253000.9189942,
+    1792253001.4973245
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -633,8 +634,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogbm8gc2luZ2xlIHBhc3NrZXkgbWF0Y2hlcyB0aGF0IHByZWZpeCAoaW4gdGhlIHN0YXRlIHRoaXMgY29tbWFuZCBuZWVkcyk7IHJ1biBgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciBsaXN0YA0K",
    "window": [
-    1791577483.3848479,
-    1791577483.757602
+    1792253001.6811807,
+    1792253002.2434947
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -663,8 +664,8 @@
    "stdout": "UmV2b2tlZDogLWRhc2hLZXlBQUFBICBsYWJlbDogbGFwdG9wDQo=",
    "stderr": "",
    "window": [
-    1791577484.853384,
-    1791577485.1846516
+    1792253002.4116204,
+    1792253002.9712555
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -713,7 +714,7 @@
     ]
    },
    "db": {
-    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "seed": "69f185e52021efc24240862047e60d847463324fb643f16036a2ec035e4dd4e5",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
@@ -723,12 +724,12 @@
       "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"d8e8933a736b13928ef6c1658a80909ce1cee14589e530ecf4cabce0cf9b0232\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577485.1565409, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"49620b0ac223be2d9a3204c93994da393c8713db68f6d6a6a02f179e9075c330\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1792253002.9514012, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_passkeys": [
       "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"active\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
       "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"active\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1791577485.1555154, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1792253002.950346, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
       "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
       "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"active\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
      ]
@@ -746,8 +747,8 @@
    "stdout": "UmV2b2tlZDogcGhvbmVLZXlfcXVhICBsYWJlbDogVG9tJ3MgcGhvbmUg4piODQo=",
    "stderr": "",
    "window": [
-    1791577485.4070125,
-    1791577485.7492201
+    1792253003.154221,
+    1792253003.7092776
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -796,7 +797,7 @@
     ]
    },
    "db": {
-    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "seed": "69f185e52021efc24240862047e60d847463324fb643f16036a2ec035e4dd4e5",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
@@ -806,10 +807,10 @@
       "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"59477dbf09d477171d88e47f8af3aa94a958f6ba93108c153dfb246b7c6999c4\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"phoneKey_quarantineAAA\\\",\\\"label\\\":\\\"Tom's phone \u260e\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577485.7168353, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"014e8c22cb3883a5399586227f0da87505143e16c0bea5d54cd2d0b53f8251bd\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"phoneKey_quarantineAAA\\\",\\\"label\\\":\\\"Tom's phone \u260e\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1792253003.6884534, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1791577485.7163298, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
+      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1792253003.6879382, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
       "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"active\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
       "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
       "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
@@ -829,8 +830,8 @@
    "stdout": "UmV2b2tlZDogLXBlbmRpbmdLZXlBICBsYWJlbDogbGFwdG9wDQo=",
    "stderr": "",
    "window": [
-    1791577486.031465,
-    1791577486.349306
+    1792253003.8716202,
+    1792253004.4243407
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -847,14 +848,14 @@
     ]
    },
    "db": {
-    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "seed": "7a7425b33982e07340e6e985043dc7a790e81eb937235f6c0e9ae5bf9b3da6e3",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"56f4d0b2d7754b3bbc2153d5d67394561a6bd022a0715538e58d0fbec9255e84\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577486.3208246, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"9e6a09ef1528ad91e96d9918ea61aa84e8ee03378f038a554d9e0f3b9a3273fd\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1792253004.403297, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": 1791577486.320292, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": null, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": 1792253004.4027755, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": null, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
      ]
     }
    },
@@ -870,8 +871,8 @@
    "stdout": "UmV2b2tlZDogY2FuY2VsWGRSZXZvICBsYWJlbDogc3BhcmUNCg==",
    "stderr": "",
    "window": [
-    1791577486.5821729,
-    1791577486.9216075
+    1792253004.5693893,
+    1792253005.153721
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -932,8 +933,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogbm8gc2luZ2xlIHBhc3NrZXkgbWF0Y2hlcyB0aGF0IHByZWZpeCAoaW4gdGhlIHN0YXRlIHRoaXMgY29tbWFuZCBuZWVkcyk7IHJ1biBgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciBsaXN0YA0K",
    "window": [
-    1791577487.2227998,
-    1791577487.5751202
+    1792253005.3199885,
+    1792253005.90169
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -994,8 +995,8 @@
    "stdout": "UmV2b2tlZDogdHdpbkFCMmtleUVBICBsYWJlbDogdHdpbiB0d28NCg==",
    "stderr": "",
    "window": [
-    1791577487.8927193,
-    1791577488.2517974
+    1792253006.0366492,
+    1792253006.5856936
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1044,7 +1045,7 @@
     ]
    },
    "db": {
-    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "seed": "69f185e52021efc24240862047e60d847463324fb643f16036a2ec035e4dd4e5",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
@@ -1054,14 +1055,14 @@
       "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"2f1a5e6e4fd3da5a84ffb0e2f2b49656c7dcc3edbfa8d1929da985c4f5fdbd27\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577488.2167206, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"07ee4bc86754b5f0adaab3c95519221a39b7a8c418dcccb47dd937c42d18b5c7\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"revoke\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1792253006.56549, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_passkeys": [
       "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"active\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
       "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"active\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
       "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
       "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
-      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1791577488.2156396, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1792253006.5644414, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
      ]
     }
    },
@@ -1077,8 +1078,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogbm8gc2luZ2xlIHBhc3NrZXkgbWF0Y2hlcyB0aGF0IHByZWZpeCAoaW4gdGhlIHN0YXRlIHRoaXMgY29tbWFuZCBuZWVkcyk7IHJ1biBgcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciBsaXN0YA0K",
    "window": [
-    1791577488.581711,
-    1791577488.9268115
+    1792253006.7421079,
+    1792253007.296072
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1139,8 +1140,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
    "window": [
-    1791577491.3692997,
-    1791577491.7337728
+    1792253007.7607183,
+    1792253008.323936
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1201,8 +1202,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
    "window": [
-    1791577491.961475,
-    1791577492.311148
+    1792253008.5141368,
+    1792253009.073071
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1263,8 +1264,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
    "window": [
-    1791577492.5954642,
-    1791577492.9292922
+    1792253009.4790184,
+    1792253010.0327406
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1325,8 +1326,8 @@
    "stdout": "",
    "stderr": "cmVmdXNlZDogdGhlIHByZWZpeCBtdXN0IGJlIGF0IGxlYXN0IDYgY2hhcmFjdGVycyBvZiB0aGUgY3JlZGVudGlhbCBpZA0K",
    "window": [
-    1791577493.1825984,
-    1791577493.5143192
+    1792253010.4739585,
+    1792253011.051594
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1387,8 +1388,8 @@
    "stdout": "",
    "stderr": "cmVzZXQgcmV2b2tlcyBldmVyeSBwYXNza2V5IGFuZCByb3RhdGVzIHRoZSBzZWNyZXQ7IHBhc3MgLS15ZXMNCg==",
    "window": [
-    1791577494.758466,
-    1791577495.0927253
+    1792253011.4673266,
+    1792253012.056202
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1449,8 +1450,8 @@
    "stdout": "UmV2b2tlZCA0IHBhc3NrZXkocyk7IHNlY3JldCByb3RhdGVkOyBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgZW5yb2wtY29kZWAgdG8gZW5yb2wgYWdhaW4uDQo=",
    "stderr": "",
    "window": [
-    1791577496.6252954,
-    1791577496.9792044
+    1792253012.4714346,
+    1792253013.0383203
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1499,7 +1500,7 @@
     ]
    },
    "db": {
-    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "seed": "69f185e52021efc24240862047e60d847463324fb643f16036a2ec035e4dd4e5",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
@@ -1509,19 +1510,19 @@
       "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"a015cd34b34f5913f03e09d2d74391eda8d85f5c8467408320373ef59d052c09\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":4}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577496.9480965, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"279200039d9831c642dd4e4a55e51e50df0d990820222db75604ad2e9f366fe8\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":4}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1792253013.0175965, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_bootstrap": [],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1791577496.9442773, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
-      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"revoked\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": 1791577496.9442773, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1791577496.9442773, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1792253013.0139441, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
+      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"revoked\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": 1792253013.0139441, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1792253013.0139441, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
       "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
-      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1791577496.9442773, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1792253013.0139441, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
      ],
      "meta": [
-      "{\"key\": \"maintainer_secret_v1\", \"value\": \"2cea0c799f48bee394cc63ff195c27917083c1f5b982c41098916868da54a818\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"maintainer_secret_v1\", \"value\": \"5d7fb221e997543c9ffc64ff9facf4ee2d788524c9b260f5597f2bc70550171f\"}",
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ]
     }
    },
@@ -1537,8 +1538,8 @@
    "stdout": "UmV2b2tlZCAxIHBhc3NrZXkocyk7IHNlY3JldCByb3RhdGVkOyBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgZW5yb2wtY29kZWAgdG8gZW5yb2wgYWdhaW4uDQo=",
    "stderr": "",
    "window": [
-    1791577497.2968323,
-    1791577497.6183286
+    1792253013.3114147,
+    1792253013.8856995
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -1555,19 +1556,19 @@
     ]
    },
    "db": {
-    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "seed": "7a7425b33982e07340e6e985043dc7a790e81eb937235f6c0e9ae5bf9b3da6e3",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"291dc8d5130cfbe6b4c373da16fe452d20df34665909b1432c28352272de5581\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":1}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577497.5904255, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"c80c935540f16577fa25b29c70e8f4a6fa43df0c4586bf3d00af22937f34ba2f\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":1}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1792253013.8640985, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_bootstrap": [],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": 1791577497.5867066, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": null, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": 1792253013.8607407, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": null, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
      ],
      "meta": [
-      "{\"key\": \"maintainer_secret_v1\", \"value\": \"dcbbf2f34ed965a0489d47cf673a3de5b9bf59bf606c13ecfe87faec2c1fb0fd\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"maintainer_secret_v1\", \"value\": \"52908418d05b87ad4c743d284fe3c8aac714d952dfd72caa19f92a7c45d8a5fd\"}",
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ]
     }
    },
@@ -1583,22 +1584,22 @@
    "stdout": "UmV2b2tlZCAwIHBhc3NrZXkocyk7IHNlY3JldCByb3RhdGVkOyBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgZW5yb2wtY29kZWAgdG8gZW5yb2wgYWdhaW4uDQo=",
    "stderr": "",
    "window": [
-    1791577498.0494847,
-    1791577498.391659
+    1792253014.370625,
+    1792253014.9352767
    ],
    "arm": "python",
    "seed_secret": null,
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "18315e6440ca1897efe3e3217964d019bf358477fa7eb71fda83ac9d367cdffe",
+    "seed": "d0e06f07fb09d589feb8facb1f55b1a113da0351ed2e1b4a469d74ce23239f04",
     "tables": {
      "coordination_events": [
-      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"049e47a706fced1bea876829830d5dcfae4237ed49cd62a481973c95c41cd649\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":0}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1791577498.3618953, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"6702642da57a317c3e625c36688865184a0faabe73e4311a439007a1314252bb\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":0}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1792253014.9150255, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "meta": [
-      "{\"key\": \"maintainer_secret_v1\", \"value\": \"beea3122385cd39af2d8661c95d016b8223c4d5e8c90baf14bbd791b28b7e5e2\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"maintainer_secret_v1\", \"value\": \"f3ff7d5e29c4748755f09331c3f7b33e800a497222239f63b8c26cec095e03f2\"}",
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ]
     }
    },
@@ -1614,8 +1615,8 @@
    "stdout": "",
    "stderr": "ZXJyb3I6IFJhaXNlRXhjZXB0aW9uOyBjaGVjayBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwNCg==",
    "window": [
-    1791577498.7394,
-    1791577499.0504618
+    1792253015.436544,
+    1792253016.0026138
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -1644,8 +1645,8 @@
    "stdout": "",
    "stderr": "ZXJyb3I6IEludGVybmFsRXJyb3I7IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0K",
    "window": [
-    1791577499.3581061,
-    1791577499.69496
+    1792253016.4885573,
+    1792253017.0584252
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1706,8 +1707,8 @@
    "stdout": "",
    "stderr": "ZXJyb3I6IEFkbWluU2h1dGRvd247IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0K",
    "window": [
-    1791577500.1922336,
-    1791577500.5410073
+    1792253017.5804906,
+    1792253018.1517768
    ],
    "arm": "python",
    "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
@@ -1723,21 +1724,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 2,
-   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFRDNkNXSk81M0wNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQo=",
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFZPR0tPQUk0UFQNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQo=",
    "stderr": "ZXJyb3I6IEFkbWluU2h1dGRvd247IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0K",
    "window": [
-    1791577500.8177605,
-    1791577503.1324818
+    1792253018.5952075,
+    1792253021.1539218
    ],
    "arm": "python",
    "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "seed": "31830850cb4ce2410b83b9683a020e73dc6374eb53f6123f77cd77cc52d9e720",
     "tables": {
      "maintainer_bootstrap": [
-      "{\"used_at\": null, \"code_hash\": \"418430164693efa00a90c5f1a04e0f081449d2d095e5d5b9fc7e075dd8196e06\", \"expires_at\": 1791578101.1028686, \"credential_id\": null, \"failed_attempts\": 0}"
+      "{\"used_at\": null, \"code_hash\": \"563924e3cbe99afd5cf1a8c91feb81f1fca50f6a6847c2957c63e843d13738c2\", \"expires_at\": 1792253619.1311877, \"credential_id\": null, \"failed_attempts\": 0}"
      ]
     }
    },
@@ -1750,21 +1751,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 2,
-   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IFBQRURGWEk0QjYNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQo=",
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IDdZR1NLSlRXSTINClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0KV2FpdGluZyBmb3IgdGhlIENvbnNvbGUgdG8gcmVkZWVtIGl0Li4uDQo=",
    "stderr": "ZXJyb3I6IExvY2tOb3RBdmFpbGFibGU7IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0K",
    "window": [
-    1791577504.256282,
-    1791577511.6580331
+    1792253021.4462266,
+    1792253029.0170999
    ],
    "arm": "python",
    "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "seed": "31830850cb4ce2410b83b9683a020e73dc6374eb53f6123f77cd77cc52d9e720",
     "tables": {
      "maintainer_bootstrap": [
-      "{\"used_at\": null, \"code_hash\": \"b1ed501f2907e160cc280be39947bef11353c9269f1979c637da3fc58c992167\", \"expires_at\": 1791578104.624303, \"credential_id\": null, \"failed_attempts\": 0}"
+      "{\"used_at\": null, \"code_hash\": \"a5ddee91044cfbd14639654b2e08222b557cd77285036703fea60bc72aebead9\", \"expires_at\": 1792253621.9945898, \"credential_id\": null, \"failed_attempts\": 0}"
      ]
     }
    },
@@ -1780,8 +1781,8 @@
    "stdout": "",
    "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
    "window": [
-    1791577512.4102607,
-    1791577512.8073335
+    1792253029.4883983,
+    1792253030.0424414
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -1798,14 +1799,14 @@
     ]
    },
    "db": {
-    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "seed": "7a7425b33982e07340e6e985043dc7a790e81eb937235f6c0e9ae5bf9b3da6e3",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"a8569fe94043f655bf829fb8689749453b45c03a93fd082b3f85d0de6e1732cf\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577512.7562509, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"cde459174a2e23a61d2c57f6febb6babdbdef89d08db77ac73c2de75b32d263a\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1792253030.0226138, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577512.7552125, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1792253030.0220907, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
      ]
     }
    },
@@ -1821,18 +1822,18 @@
    "stdout": "",
    "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
    "window": [
-    1791577513.9139268,
-    1791577514.2463613
+    1792253030.206652,
+    1792253030.7673352
    ],
    "arm": "python",
    "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "seed": "31830850cb4ce2410b83b9683a020e73dc6374eb53f6123f77cd77cc52d9e720",
     "tables": {
      "maintainer_bootstrap": [
-      "{\"used_at\": null, \"code_hash\": \"f8e013342cce01039946fdeb189b53a94b7aac6d7702aa0c01ce2b3849fbd5ad\", \"expires_at\": 1791578114.2205303, \"credential_id\": null, \"failed_attempts\": 0}"
+      "{\"used_at\": null, \"code_hash\": \"6371fa29f25c5aa14752cc4e02cf011743b3bdd2c46a7abafc55b39b3996f218\", \"expires_at\": 1792253630.747939, \"credential_id\": null, \"failed_attempts\": 0}"
      ]
     }
    },
@@ -1848,18 +1849,18 @@
    "stdout": "",
    "stderr": "ZXJyb3I6IE9TRXJyb3I7IGNoZWNrIFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTA0KRXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
    "window": [
-    1791577514.4807246,
-    1791577514.8040717
+    1792253030.9465613,
+    1792253031.50127
    ],
    "arm": "python",
    "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "seed": "31830850cb4ce2410b83b9683a020e73dc6374eb53f6123f77cd77cc52d9e720",
     "tables": {
      "maintainer_bootstrap": [
-      "{\"used_at\": null, \"code_hash\": \"7ad3535976782fb995275073be66c966ce5a431d47eb4f28256e4af6d534150d\", \"expires_at\": 1791578114.7739701, \"credential_id\": null, \"failed_attempts\": 0}"
+      "{\"used_at\": null, \"code_hash\": \"3d7218c251ca592e39757123e42631f8b1d0bba755ae03a366cdd97275501b50\", \"expires_at\": 1792253631.480107, \"credential_id\": null, \"failed_attempts\": 0}"
      ]
     }
    },
@@ -1875,8 +1876,8 @@
    "stdout": "",
    "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4NCk9TRXJyb3I6IFtFcnJubyAyMl0gSW52YWxpZCBhcmd1bWVudA0K",
    "window": [
-    1791577515.0732853,
-    1791577515.4323335
+    1792253031.679637,
+    1792253032.2488542
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1937,8 +1938,8 @@
    "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxIDAwOjAxICBsYXN0X3VzZWQ9MjAyNi0wNy0wMSAwMDowNiAgRkxBR0dFRCAoc2lnbiBjb3VudCB3ZW50IGJhY2t3YXJkcykNCnBob25lS2V5X3F1YSAgYWN0aXZlICAgIlRvbSdzIHBob25lIOKYjiIgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAwMDowMiAgbGFzdF91c2VkPS0NCnR3aW5BQjFrZXlEQSAgYWN0aXZlICAgJ2l0XCdzICJ0d2luIicgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAwMDowMyAgbGFzdF91c2VkPS0NCnR3aW5BQjJrZXlFQSAgYWN0aXZlICAgJ3R3aW4gdHdvJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDAwOjA0ICBsYXN0X3VzZWQ9LQ0KY2FuY2VsWGRSZXZvICByZXZva2VkICAnc3BhcmUnICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDIgMDA6MDUgIGxhc3RfdXNlZD0tDQo=",
    "stderr": "",
    "window": [
-    1791577515.8367016,
-    1791577516.2182572
+    1792253032.395249,
+    1792253032.941945
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -1999,8 +2000,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgWy1oXQ0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAge3NldHVwLGVucm9sLWNvZGUsY29uZmlybSxyZXZva2UscmVzZXQsbGlzdH0NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC4uLg0KDQpIb3N0LXNpZGUgbWFuYWdlbWVudCBvZiB0aGUgbWFpbnRhaW5lcidzIHBhc3NrZXlzIChvcGVyYXRvci1vbmx5KS4gUmVhZHMNClBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCwgb3IgdGhlIGxpdGUgdGllcidzIGJhbmssIGVsc2UgcnVucyBpbnNpZGUgdGhlDQpwc2V1ZG9saWZlLW1jcC1kYWVtb24gY29udGFpbmVyIHdoZW4gaXQgcnVucyBoZXJlLg0KDQpwb3NpdGlvbmFsIGFyZ3VtZW50czoNCiAge3NldHVwLGVucm9sLWNvZGUsY29uZmlybSxyZXZva2UscmVzZXQsbGlzdH0NCiAgICBzZXR1cCAgICAgICAgICAgICAgIGd1aWRlZDogdGhlIENvbnNvbGUncyBIVFRQUyBuYW1lLCB0aGUgZGFlbW9uJ3MgY29uZmlnDQogICAgICAgICAgICAgICAgICAgICAgICBhbmQgdGhlIGZpcnN0IHBhc3NrZXkgKHNlZSBgbWFpbnRhaW5lciBzZXR1cCAtLWhlbHBgKQ0KICAgIGVucm9sLWNvZGUgICAgICAgICAgcHJpbnQgYSBvbmUtdGltZSBjb2RlIGZvciB0aGUgZmlyc3QgcGFzc2tleQ0KICAgIGNvbmZpcm0gICAgICAgICAgICAgYWN0aXZhdGUgdGhlIHBlbmRpbmcgYm9vdHN0cmFwIHBhc3NrZXkNCiAgICByZXZva2UgICAgICAgICAgICAgIHJldm9rZSBvbmUgcGFzc2tleQ0KICAgIHJlc2V0ICAgICAgICAgICAgICAgcmV2b2tlIGV2ZXJ5IHBhc3NrZXksIHJvdGF0ZSB0aGUgc2VjcmV0LCByZW9wZW4NCiAgICAgICAgICAgICAgICAgICAgICAgIGJvb3RzdHJhcA0KICAgIGxpc3QgICAgICAgICAgICAgICAgcHJpbnQgZXZlcnkgcGFzc2tleQ0KDQpvcHRpb25zOg0KICAtaCwgLS1oZWxwICAgICAgICAgICAgc2hvdyB0aGlzIGhlbHAgbWVzc2FnZSBhbmQgZXhpdA0K",
    "stderr": "",
    "window": [
-    1791577517.3912838,
-    1791577517.474881
+    1792253033.1092954,
+    1792253033.3335705
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -2061,8 +2062,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgbGlzdCBbLWhdDQoNCm9wdGlvbnM6DQogIC1oLCAtLWhlbHAgIHNob3cgdGhpcyBoZWxwIG1lc3NhZ2UgYW5kIGV4aXQNCg==",
    "stderr": "",
    "window": [
-    1791577520.287083,
-    1791577520.3723269
+    1792253033.4675872,
+    1792253033.6993918
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -2120,21 +2121,21 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IEVCSzVIUFRLRzYNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
+   "stdout": "T25lLXRpbWUgZW5yb2xtZW50IGNvZGU6IDNUNDNCUFVNRUoNClZhbGlkIGZvciAxMCBtaW51dGVzLiBFbnRlciBpdCBpbiB0aGUgQ29uc29sZSB3aXRoIGEgbGFiZWwsIHRoZW4gcmVnaXN0ZXIgeW91ciBwYXNza2V5Lg0K",
    "stderr": "",
    "window": [
-    1791577521.9660625,
-    1791577522.2933602
+    1792253033.883294,
+    1792253034.4525216
    ],
    "arm": "python",
    "seed_secret": "214e6fff19eb5f88a447c3cfeab793c9fe43db055be3080edc6292259e791c92",
    "shown": {},
    "local_times": {},
    "db": {
-    "seed": "acdf3ca5beb14ea495ff6e2dc370db88f578334bca0e1b27ac7d9c6c0be97614",
+    "seed": "31830850cb4ce2410b83b9683a020e73dc6374eb53f6123f77cd77cc52d9e720",
     "tables": {
      "maintainer_bootstrap": [
-      "{\"used_at\": null, \"code_hash\": \"b72a17b01c841c14e33de3ddbfd687278c296ae036cd66f8554e373aae0d987b\", \"expires_at\": 1791578122.2669463, \"credential_id\": null, \"failed_attempts\": 0}"
+      "{\"used_at\": null, \"code_hash\": \"6bd9436b346ef773edeb3f2d9ff9959d4074d15c382b48a61fc30ad1c20c5574\", \"expires_at\": 1792253634.4336405, \"credential_id\": null, \"failed_attempts\": 0}"
      ]
     }
    },
@@ -2150,8 +2151,8 @@
    "stdout": "QWN0aXZlOiAtcGVuZGluZ0tleUEgIGxhYmVsOiBsYXB0b3ANCg==",
    "stderr": "",
    "window": [
-    1791577529.4344685,
-    1791577529.8012097
+    1792253034.6323466,
+    1792253035.2142708
    ],
    "arm": "python",
    "seed_secret": "a9769d3c59dedc8caf3444ac394c4f2c442458b4fb438a6157dd33e59e3170b3",
@@ -2168,14 +2169,14 @@
     ]
    },
    "db": {
-    "seed": "2d56e9214942d502b8c11c0168cb511cc5d0dc2a4a37305629e2f9b3aa788bda",
+    "seed": "7a7425b33982e07340e6e985043dc7a790e81eb937235f6c0e9ae5bf9b3da6e3",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"755c76185f367da12a8ecc9e268908a2c3849dcc4eb28e92bc0fe437e0058fd5\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1791577529.7715182, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"845d84171619830007d98321dc3c5f11059b89c52e071fba65aa0a7653856dd9\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-pendingKeyAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"d965ef9e3cdfac885a7db8120eaf2f9bcb32a46890da02f8d29097384d050b26\", \"principal\": \"\", \"created_at\": 1792253035.1932347, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1791577529.7704825, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"active\", \"created_at\": 1782864000, \"flagged_at\": null, \"public_key\": \"\\\\xa50102032620012158202287b66f6ed67cf7682a3b4bf566fe9a4c58e6e4545a28e86d6553b79842cb7e225820b90d597f338dd5b8f99c6c2730c1f66a0091bfb329989e2f24aa94dd0740ff3a\", \"revoked_at\": null, \"revoked_by\": null, \"sign_count\": 1, \"active_from\": 1792253035.1927202, \"enrolled_by\": \"bootstrap\", \"last_used_at\": null, \"credential_id\": \"-pendingKeyAAAAAAAAAAA\"}"
      ]
     }
    },
@@ -2191,8 +2192,8 @@
    "stdout": "UmV2b2tlZCA0IHBhc3NrZXkocyk7IHNlY3JldCByb3RhdGVkOyBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgZW5yb2wtY29kZWAgdG8gZW5yb2wgYWdhaW4uDQo=",
    "stderr": "",
    "window": [
-    1791577530.160558,
-    1791577530.5750167
+    1792253035.3967752,
+    1792253035.981603
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -2241,7 +2242,7 @@
     ]
    },
    "db": {
-    "seed": "7be52cafc7bc80d378ba93d143b75339ea34057d5125c6362cd8df3e9390118e",
+    "seed": "69f185e52021efc24240862047e60d847463324fb643f16036a2ec035e4dd4e5",
     "tables": {
      "coordination_events": [
       "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
@@ -2251,19 +2252,19 @@
       "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
       "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"a1bd4d72d9548ef5ec43746a836030e47611ba02a3ecad77b60605ffc3cceaca\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":4}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1791577530.5337863, \"message_id\": null, \"recipient_agent_id\": null}"
+      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"def2f502b645b47d715262017198a98345dac67caf1d5006fa3df8b52ef9be84\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":4}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1792253035.9611988, \"message_id\": null, \"recipient_agent_id\": null}"
      ],
      "maintainer_bootstrap": [],
      "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1791577530.5287893, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
-      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"revoked\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": 1791577530.5287893, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1791577530.5287893, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1792253035.9575315, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
+      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"revoked\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": 1792253035.9575315, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
+      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1792253035.9575315, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
       "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
-      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1791577530.5287893, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
+      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1792253035.9575315, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
      ],
      "meta": [
-      "{\"key\": \"maintainer_secret_v1\", \"value\": \"433a8556288014e771c76df1afcaac1dbea1f46a925c836eb28dc8dde9ac578f\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"maintainer_secret_v1\", \"value\": \"3a32b58f9e4a455075bd0c164bd756b9a4819682f6515cb0f6ff262deabe94eb\"}",
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ]
     }
    },
@@ -2279,8 +2280,8 @@
    "stdout": "",
    "stderr": "ZXJyb3I6IG5vIGJhbmsgZm91bmQ6IHNldCBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgdG8gdGhlIGJhbmsncyBkYXRhYmFzZSBVUkwsIG9yIHJ1biB3aGVyZSB0aGUgbGl0ZSB0aWVyJ3MgZGF0YSBkaXIgaG9sZHMgb25lIChEb2NrZXIgdGllcjogc3RhcnQgdGhlIGRhZW1vbiwgb3IgcnVuIGBkb2NrZXIgZXhlYyAtaXQgcHNldWRvbGlmZS1tY3AtZGFlbW9uIHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgLi4uYCBvbiBpdHMgaG9zdCkNCg==",
    "window": [
-    1791577531.8494587,
-    1791577532.2093384
+    1792253036.227898,
+    1792253036.7615411
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
@@ -2341,8 +2342,8 @@
    "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxIDEwOjAxICBsYXN0X3VzZWQ9MjAyNi0wNy0wMSAxMDowNiAgRkxBR0dFRCAoc2lnbiBjb3VudCB3ZW50IGJhY2t3YXJkcykNCnBob25lS2V5X3F1YSAgYWN0aXZlICAgIlRvbSdzIHBob25lIOKYjiIgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAxMDowMiAgbGFzdF91c2VkPS0NCnR3aW5BQjFrZXlEQSAgYWN0aXZlICAgJ2l0XCdzICJ0d2luIicgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAxMDowMyAgbGFzdF91c2VkPS0NCnR3aW5BQjJrZXlFQSAgYWN0aXZlICAgJ3R3aW4gdHdvJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDEwOjA0ICBsYXN0X3VzZWQ9LQ0KY2FuY2VsWGRSZXZvICByZXZva2VkICAnc3BhcmUnICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDIgMTA6MDUgIGxhc3RfdXNlZD0tDQo=",
    "stderr": "",
    "window": [
-    1791577532.4325376,
-    1791577532.77089
+    1792253036.9389641,
+    1792253037.4919672
    ],
    "arm": "python",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",

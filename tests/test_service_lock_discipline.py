@@ -92,6 +92,10 @@ CALLER_HOLDS_LOCK = {
     # locked reject loop of deep_dream_judge.
     "_file_relate_link",
     "_file_relate_link_isolated",
+    # The merge tiebreak's apply and refusal note (v56), called inside the
+    # locked loops of _tiebreak_record and _tiebreak_replay.
+    "_tiebreak_apply",
+    "_tiebreak_refuse",
     "_link_evidence_locked",
     "_junk_evidence_locked",
     "_graph_accept_proposal_locked",

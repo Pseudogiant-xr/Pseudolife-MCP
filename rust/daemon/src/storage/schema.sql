@@ -1,4 +1,4 @@
--- schema_version 55
+-- schema_version 56
 
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,

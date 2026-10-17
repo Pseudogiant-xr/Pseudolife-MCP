@@ -640,6 +640,22 @@ def test_relate_note_round_trips_both_opinions():
     assert merge_verdict_token("reject", None) == "reject"
 
 
+def test_relate_note_keeps_the_third_opinions_relation_apart():
+    """v56: the tiebreak's ``| 3rd (...)`` tail follows the second's; each
+    opinion's relation is read from its own tail only."""
+    from pseudolife_memory.memory.graph_review import (
+        relate_relations, third_relate_relation)
+    note = ("relate:implements | n | 2nd (m2): reject 0.80 [split] "
+            "| 3rd (m3): relate:uses 0.90 [2-1 reject]")
+    assert relate_relations(note) == ("implements", None)
+    assert third_relate_relation(note) == "uses"
+    both = ("n | 2nd (m2): relate:part-of 0.80 [split] "
+            "| 3rd (m3): relate:uses 0.90 [2-1 reject]")
+    assert relate_relations(both) == (None, "part-of")
+    assert third_relate_relation("n | 2nd (m2): relate:part-of 0.80 [split]") is None
+    assert third_relate_relation(None) is None
+
+
 def _note(svc, pid):
     return svc._storage.conn.execute(
         "SELECT judge_note FROM entity_proposals WHERE id=%s", (pid,)).fetchone()[0]

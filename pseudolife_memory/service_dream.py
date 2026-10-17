@@ -3843,9 +3843,10 @@ class DreamOps:
                 extra_body=ex.extra_body)
         return ex if hasattr(ex, method) else None
 
-    def _judge_second_extractor(self):
-        """The merge judge's second-opinion endpoint, or None to reuse the
-        first opinion's extractor. ``judge_second_url`` builds an endpoint
+    def _judge_second_extractor(self, method: str = "judge_merges"):
+        """The second-opinion endpoint (the merge judge's, which the link
+        judge shares since v56), or None to reuse the first opinion's
+        extractor. ``judge_second_url`` builds an endpoint
         of its own serving ``judge_second_model`` (so the two opinions can
         come from different providers), authenticated only by
         ``PSEUDOLIFE_JUDGE_SECOND_API_KEY``; without it,
@@ -3857,14 +3858,39 @@ class DreamOps:
 
             from pseudolife_memory.memory.dream import OpenAICompatExtractor
             dream_cfg = self.config.memory.dream
-            return OpenAICompatExtractor(
+            ex = OpenAICompatExtractor(
                 cfg.judge_second_url, cfg.judge_second_model or "judge",
                 api_key=os.environ.get("PSEUDOLIFE_JUDGE_SECOND_API_KEY") or None,
                 # The same budget as judge_url's endpoint (see above).
                 max_tokens=dream_cfg.extractor_max_tokens,
                 timeout_seconds=dream_cfg.extractor_timeout_seconds)
+            return ex if hasattr(ex, method) else None
         if cfg.judge_second_model:
-            return self._judge_extractor(None, model=cfg.judge_second_model)
+            return self._judge_extractor(None, method=method,
+                                         model=cfg.judge_second_model)
+        return None
+
+    def _judge_third_extractor(self):
+        """The merge tiebreak's third-opinion endpoint (v56), or None when
+        no third model is configured: unlike the second opinion it never
+        falls back to the first opinion's model. ``judge_third_url`` builds
+        an endpoint of its own serving ``judge_third_model``, authenticated
+        only by ``PSEUDOLIFE_JUDGE_THIRD_API_KEY``; without it,
+        ``judge_third_model`` is swapped onto the first opinion's endpoint.
+        Read per call, so both are live knobs."""
+        cfg = self.config.memory.deep_dream
+        if cfg.judge_third_url:
+            import os
+
+            from pseudolife_memory.memory.dream import OpenAICompatExtractor
+            dream_cfg = self.config.memory.dream
+            return OpenAICompatExtractor(
+                cfg.judge_third_url, cfg.judge_third_model or "judge",
+                api_key=os.environ.get("PSEUDOLIFE_JUDGE_THIRD_API_KEY") or None,
+                max_tokens=dream_cfg.extractor_max_tokens,
+                timeout_seconds=dream_cfg.extractor_timeout_seconds)
+        if cfg.judge_third_model:
+            return self._judge_extractor(None, model=cfg.judge_third_model)
         return None
 
     # A dated snapshot of the requested model (``gpt-4o`` served as
@@ -3921,6 +3947,341 @@ class DreamOps:
         return bool(first_served and served2 and first_served != served2
                     and ex2 is not ex and first_model != model2
                     and not (configured2 and first_model == configured2))
+
+    # Model names that ask an endpoint for whatever it serves, so they say
+    # nothing about which model answers.
+    _JUDGE_ALIASES = ("judge", "extractor", "bench")
+
+    @classmethod
+    def _third_model_taken(cls, row, ex, ex3, second_model=None) -> bool:
+        """Whether the configuration already makes a split row's third
+        opinion the first or the second model again (v56), so no call is
+        spent on it: the same endpoint object, or a configured third name
+        equal to the first endpoint's configured name, the configured
+        ``judge_second_model`` (unless a launch alias), or either opinion's
+        stamp or served name on the row. An alias third name tells nothing;
+        :meth:`_tiebreak_refusal` checks the served names after the call."""
+        if ex3 is ex:
+            return True
+        name3 = getattr(ex3, "model", None)
+        if not name3 or name3 in cls._JUDGE_ALIASES:
+            return False
+        taken = {getattr(ex, "model", None), row.get("judge_model"),
+                 row.get("judge2_model"), row.get("judge2_served_model")}
+        if second_model and second_model not in cls._JUDGE_ALIASES:
+            taken.add(second_model)
+        return name3 in taken
+
+    @staticmethod
+    def _tiebreak_refusal(review, row, configured3=None) -> str | None:
+        """Why a split row's three recorded votes cannot authorize an
+        automatic tiebreak (v56), from what the row stores, or None. The
+        second vote was taken on an earlier tick, so only its stored served
+        name stands for it: a second endpoint that named no model leaves
+        only the configured name in ``judge2_model``, which proves nothing,
+        and the tiebreak is refused. The third vote must come from a model
+        other than both earlier ones, by served name and by stamp (rows
+        judged before served names were stamped carry configured names)."""
+        second = row.get("judge2_served_model")
+        if not second:
+            return "unknown_second"
+        first = review.observed(row)
+        third = row.get("judge3_served_model")
+        earlier = {m for m in (first, second, row.get("judge_model"),
+                               row.get("judge2_model")) if m}
+        if not (first and third and third not in earlier
+                and row.get("judge3_model") not in earlier
+                and not (configured3 and configured3 in earlier)):
+            return "same_model"
+        return None
+
+    @staticmethod
+    def _tiebreak_majority(row, e, cfg):
+        """``(action, votes)`` a split row's three recorded votes decide
+        under the current modes (v56), or None: two reject-class votes at
+        mean >= ``judge_reject_min_confidence_2`` reject (``judge_mode``
+        auto-reject or auto); two accepts at mean >=
+        ``judge_accept_min_confidence`` fold only under ``judge_mode`` auto
+        on a non-low-differential row. ``votes`` are the majority's
+        ``(verdict, relation, confidence)``."""
+        from pseudolife_memory.memory.graph_review import (
+            merge_verdict_class, relate_relations, third_relate_relation)
+        if cfg.judge_tiebreak_mode != "auto" or not row.get("judge3_verdict"):
+            return None
+        rel1, rel2 = relate_relations(row.get("judge_note"))
+        votes = [(row.get("judge_verdict"), rel1,
+                  float(row.get("judge_confidence") or 0.0)),
+                 (row.get("judge2_verdict"), rel2,
+                  float(row.get("judge2_confidence") or 0.0)),
+                 # The live path passes the response's relation; a replay
+                 # reads it back from the note's whole 3rd tail.
+                 (row.get("judge3_verdict"),
+                  row.get("judge3_relation")
+                  or third_relate_relation(row.get("judge_note")),
+                  float(row.get("judge3_confidence") or 0.0))]
+        rejects = [x for x in votes if merge_verdict_class(x[0]) == "reject"]
+        accepts = [x for x in votes if x[0] == "accept"]
+        if (len(rejects) >= 2 and cfg.judge_mode in ("auto-reject", "auto")
+                and sum(c for _, _, c in rejects) / len(rejects)
+                >= cfg.judge_reject_min_confidence_2):
+            return "reject", rejects
+        if (len(accepts) >= 2 and cfg.judge_mode == "auto"
+                and e.get("low_differential") is False
+                and sum(c for _, _, c in accepts) / len(accepts)
+                >= cfg.judge_accept_min_confidence):
+            return "accept", accepts
+        return None
+
+    # Refusal tails the tiebreak writes on a row's note; a row carrying one
+    # is not reconsidered from its recorded votes (a promoted mode would
+    # otherwise refuse it again on every tick).
+    _TIEBREAK_REFUSALS = {
+        "unknown_second": "tiebreak needs the second vote's served model",
+        "same_model": "tiebreak needs a distinct third model"}
+
+    def _tiebreak_refuse(self, out: dict, row, reason: str, counter: str) -> None:
+        """Note a tiebreak refusal on the row once, and count it once.
+        Caller holds the lock."""
+        note = row.get("judge_note") or ""
+        if f"| {reason}" in note:
+            return
+        note = f"{note} | {reason}"
+        if self._storage.set_entity_proposal_third_judgment(
+                row["id"], verdict=row.get("judge3_verdict"),
+                confidence=row.get("judge3_confidence"),
+                model=row.get("judge3_model"), at=row.get("judged3_at"),
+                note=note):
+            row["judge_note"] = note
+            out[counter] = out.get(counter, 0) + 1
+
+    def _tiebreak_apply(self, out: dict, review, row, e, snap: dict,
+                        dismissed, canon_by_id) -> None:
+        """Apply what a split row's three recorded votes decide, if
+        anything (v56): the live tiebreak right after the third vote, and a
+        mode promoted to auto from the votes already on the row. The
+        decision carries both later votes' endpoints, so reconsideration
+        reopens it when either endpoint later serves another model. Caller
+        holds the lock, inside the row's transaction."""
+        from pseudolife_memory.memory.review_judgments import vote_endpoint_moved
+        cfg = self.config.memory.deep_dream
+        decided = self._tiebreak_majority(row, e, cfg)
+        if decided is None:
+            return
+        # refresh() already clears a vote whose endpoint has since served
+        # another model; this holds the rule for any row it did not see.
+        if any(vote_endpoint_moved(self, "merge", row, opinion)
+               for opinion in ("second", "third")):
+            return
+        action, votes = decided
+        if action == "accept":
+            pair = tuple(sorted((canon_by_id.get(row["entity_id"], ""),
+                                 canon_by_id.get(row["into_id"], ""))))
+            if pair in dismissed:
+                # Settled as distinct already, as on the two-vote path:
+                # close the moot row instead.
+                res = review.apply(row, self.graph_reject_entity_proposal,
+                                   e["id"], decided_by="dream-judge")
+                out["auto_rejected"] += bool(res.get("rejected"))
+                out["auto_accept_refused"] = out.get("auto_accept_refused", 0) + 1
+                return
+        refusal = self._tiebreak_refusal(review, row, cfg.judge_third_model or None)
+        if refusal is not None:
+            self._tiebreak_refuse(
+                out, row, self._TIEBREAK_REFUSALS[refusal],
+                "tiebreak_refused_unknown_second" if refusal == "unknown_second"
+                else "tiebreak_refused_same_model")
+            return
+        if action == "accept":
+            reason = self._merge_accept_refusal(review, row, e, snap)
+            if reason is not None:
+                self._tiebreak_refuse(out, row, reason, "auto_accept_refused")
+                return
+        review.second_policy = row.get("judge2_policy")
+        review.second_model = row.get("judge2_served_model")
+        review.third_policy = row.get("judge3_policy")
+        review.third_model = row.get("judge3_served_model")
+        if action == "reject":
+            res = review.apply(row, self.graph_reject_entity_proposal,
+                               e["id"], decided_by="dream-judge")
+            if res.get("rejected"):
+                out["auto_rejected"] += 1
+                out["tiebreak_applied"] += 1
+                self._file_relate_link_isolated(out, row, e, votes)
+        else:
+            res = review.apply(row, self.graph_accept_entity_merge,
+                               e["id"], decided_by="dream-judge")
+            if res.get("accepted"):
+                out["auto_accepted"] += 1
+                out["tiebreak_applied"] += 1
+
+    def _tiebreak_replay(self, out: dict, review, rows: list[dict]) -> None:
+        """Apply the tiebreak from votes already recorded on ``rows`` (a
+        mode promoted after they were taken), with no model call: the
+        evidence is re-signed first, as for any decision. Takes the lock."""
+        enriched = review.rows(rows)
+        snap: dict = {}
+        with self._lock:
+            dismissed = self._storage.dismissed_pairs()
+            canon_by_id = {e["id"]: e["canonical"]
+                           for e in self._storage.load_graph()["entities"]}
+            review.validate_recorded(rows)
+            for row, e in zip(rows, enriched):
+                with self._storage.transaction():
+                    if review.current(row, first_opinion=True, second_opinion=True):
+                        self._tiebreak_apply(out, review, row, e, snap,
+                                             dismissed, canon_by_id)
+
+    _TWO_VOTE_REFUSAL = "two-vote apply needs a distinct second model"
+
+    @staticmethod
+    def _link_two_vote_action(p, cfg, mode):
+        """``accept`` / ``reject`` when a link row's two recorded votes
+        agree at mean >= ``link_two_vote_min_confidence`` under
+        ``link_judge_two_vote`` auto and ``link_judge_mode`` auto (v56),
+        else None. A retype never applies."""
+        v1, v2 = p.get("judge_verdict"), p.get("judge2_verdict")
+        if not (cfg.link_judge_two_vote == "auto" and mode == "auto"
+                and v1 == v2 and v1 in ("accept", "reject")):
+            return None
+        mean = (float(p.get("judge_confidence") or 0.0)
+                + float(p.get("judge2_confidence") or 0.0)) / 2.0
+        return v1 if mean >= cfg.link_two_vote_min_confidence else None
+
+    @classmethod
+    def _stored_second_distinct(cls, review, row, configured2=None) -> bool:
+        """:meth:`_second_opinion_distinct` over what the row stores (v56):
+        the second vote's served name and stamp against the first's, for a
+        two-vote decision taken on a later tick than the second vote."""
+        first_model = row.get("judge_model") or ""
+        first_served = review.observed(row)
+        served2 = row.get("judge2_served_model")
+        return bool(first_served and served2 and first_served != served2
+                    and first_model != row.get("judge2_model")
+                    and not (configured2 and configured2 not in cls._JUDGE_ALIASES
+                             and first_model == configured2))
+
+    def _link_two_vote_replay(self, out: dict, review, rows: list[dict]) -> None:
+        """Apply the link two-vote gate to votes already recorded on
+        ``rows`` (``link_judge_two_vote`` promoted to auto after they were
+        taken; the mode is unsigned), with no model call. Takes the lock."""
+        from pseudolife_memory.memory.review_judgments import vote_endpoint_moved
+        cfg = self.config.memory.deep_dream
+        with self._lock:
+            review.validate_recorded(rows)
+            for p in rows:
+                with self._storage.transaction():
+                    if not review.current(p, first_opinion=True):
+                        continue
+                    action = self._link_two_vote_action(p, cfg, cfg.link_judge_mode)
+                    # As for the tiebreak: never a vote its endpoint no
+                    # longer stands behind (refresh() normally cleared it).
+                    if action is None or vote_endpoint_moved(self, "link", p, "second"):
+                        continue
+                    if not self._stored_second_distinct(
+                            review, p, cfg.judge_second_model or None):
+                        note = f"{p.get('judge_note') or ''} | {self._TWO_VOTE_REFUSAL}"
+                        if self._storage.set_proposal_second_judgment(
+                                p["id"], verdict=p["judge2_verdict"],
+                                confidence=p.get("judge2_confidence"),
+                                model=p.get("judge2_model"),
+                                relation=p.get("judge2_relation"),
+                                at=p.get("judged2_at"), note=note):
+                            out["two_vote_refused_same_model"] += 1
+                        continue
+                    review.second_policy = p.get("judge2_policy")
+                    review.second_model = p.get("judge2_served_model")
+                    op = (self.graph_accept_proposal if action == "accept"
+                          else self.graph_reject_proposal)
+                    res = review.apply(p, op, p["id"], decided_by="dream-judge")
+                    done = bool(res.get("accepted") or res.get("rejected"))
+                    out["two_vote_applied"] += done
+                    out["applied"] += done
+
+    def _merge_accept_refusal(self, review, row, e, snap: dict) -> str | None:
+        """Why an automatic fold of ``row`` is refused, or None: the
+        analyzer-row, name-veto and variant-conflict guards and the
+        snapshot-first rule every automatic merge accept passes (the
+        two-vote accept and, since v56, the tiebreak's 2-of-3). Caller
+        holds the lock and has already checked the vote's independence."""
+        from pseudolife_memory.memory.graph_consolidation import variant_conflict
+        from pseudolife_memory.memory.graph_review import merge_veto
+        a_name = e["from"]["display"] or ""
+        b_name = e["into"]["display"] or ""
+        if str(row.get("reason") or "").startswith("analyzer-duplicate"):
+            # The accept gate's evidence holds no analyzer-filed rows
+            # (2026-09-02 panel: write-dedup 56, dream-alias 4, token-subset
+            # 3); unmeasured class stays pending with the verdicts attached.
+            return "auto-accept refused: analyzer-filed rows are unmeasured"
+        if merge_veto(a_name, b_name) is not None:
+            return "auto-accept refused: name veto"
+        if variant_conflict(a_name, b_name):
+            return "auto-accept refused: variant conflict"
+        if not self._snapshot_once(snap):
+            review.retry(row)
+            return "auto-accept refused: graph snapshot failed"
+        return None
+
+    def _tiebreak_record(self, out: dict, review, ex, ex3, batch3: list[dict],
+                         enriched3: list[dict], verdicts3: list[dict],
+                         proposals3: list[dict], third_observed) -> None:
+        """Record the merge tiebreak's third opinions (v56) with the
+        endpoint they came from and, in ``judge_tiebreak_mode: auto``,
+        apply a 2-of-3 majority through the two-vote gates
+        (:meth:`_tiebreak_apply`). Takes the lock."""
+        import time as _t
+
+        from pseudolife_memory.memory.graph_review import (
+            MERGE_REJECT_CLASS, merge_verdict_class, merge_verdict_token,
+            note_with_tail)
+        self._stamp_skipped(verdicts3, proposals3)
+        self._relate_needs_relation(verdicts3)
+        self._report_served_model(out, "third", ex3)
+        model3 = self._model_name(ex3)
+        served3 = getattr(ex3, "served_model", None)
+        now = _t.time()
+        snap: dict = {}
+        with self._lock:
+            dismissed = self._storage.dismissed_pairs()
+            canon_by_id = {e["id"]: e["canonical"]
+                           for e in self._storage.load_graph()["entities"]}
+            review.validate(batch3, response_extractor=ex3,
+                            expected_model=third_observed, opinion="third")
+            policy3 = review.third_policy
+            for v in sorted(verdicts3, key=lambda item: item["verdict"] not in (*MERGE_REJECT_CLASS, "keep")):
+                with self._storage.transaction():
+                    e = enriched3[v["n"] - 1]
+                    row = batch3[v["n"] - 1]
+                    if not review.current(row, first_opinion=True,
+                                          second_opinion=True):
+                        continue
+                    classes = [merge_verdict_class(x) for x in (
+                        row.get("judge_verdict"), row.get("judge2_verdict"),
+                        v["verdict"])]
+                    tally = ("2-1 reject" if classes.count("reject") >= 2
+                             else "2-1 accept" if classes.count("accept") >= 2
+                             else "no majority")
+                    v3, c3 = v["verdict"], float(v["confidence"])
+                    token3 = merge_verdict_token(v3, v.get("relation"))
+                    # Only the free text gives way to the 400 cap: the 2nd
+                    # and 3rd tails carry the verdicts and relations that
+                    # are read back (a long model id cut the 3rd tail's
+                    # relation off, review 2026-10-17).
+                    note = note_with_tail(
+                        row.get("judge_note"),
+                        f" | 3rd ({model3}): {token3} {c3:.2f} [{tally}]")
+                    if not self._storage.set_entity_proposal_third_judgment(
+                            e["id"], verdict=v3, confidence=c3, model=model3,
+                            at=now, note=note, served_model=served3,
+                            policy=policy3):
+                        continue
+                    out["third_opinions"] += 1
+                    row.update(judge3_verdict=v3, judge3_confidence=c3,
+                               judge3_model=model3, judged3_at=now,
+                               judge3_served_model=served3,
+                               judge3_policy=policy3, judge_note=note,
+                               judge3_relation=v.get("relation"))
+                    self._tiebreak_apply(out, review, row, e, snap,
+                                         dismissed, canon_by_id)
 
     def _judge_evidence_locked(self, pending: list[dict]) -> dict:
         """The storage reads behind the merge-judge evidence pack (caller
@@ -4121,7 +4482,8 @@ class DreamOps:
 
     def deep_dream_judge(self, extractor=None, *,
                          limit: int | None = None,
-                         second_extractor=None) -> dict[str, Any]:
+                         second_extractor=None,
+                         third_extractor=None) -> dict[str, Any]:
         """Autonomous Step C over pending MERGE proposals (2026-08-16
         design, extended 2026-09-02). First opinion: judge a bounded batch
         of not-yet-judged rows, recording each verdict on the row; in
@@ -4134,8 +4496,9 @@ class DreamOps:
         mean confidence >= ``judge_reject_min_confidence_2`` apply, and in
         ``auto`` mode two
         accepts on a non-low-differential row at mean >=
-        ``judge_accept_min_confidence`` fold the entity — the only path
-        that ever auto-applies an accept, and only when the two opinions
+        ``judge_accept_min_confidence`` fold the entity — one of the two
+        paths that ever auto-apply an accept (the tiebreak below is the
+        other), and only when the two opinions
         come from DIFFERENT models (``judge_second_model``; the same model
         at temperature 0 mostly repeats itself — batch composition alone
         flipped 2/129 verdicts on the 2026-08-16 ladder — so a same-model
@@ -4146,9 +4509,27 @@ class DreamOps:
         first model again (no ``judge_second_url``; ``judge_second_model``
         empty or the first's configured name) the pass is skipped with no
         model call (``second_opinion_skipped_same_model``), in every mode.
-        ``second_extractor`` is the test hook for the second opinion's
-        endpoint; passing either extractor keeps the pass. Never raises
-        into the sweep timer."""
+
+        Tiebreak (schema v56, ``judge_tiebreak_mode`` shadow | auto): a
+        split row gets one third opinion in a fresh batch from
+        ``judge_third_model`` (on ``judge_third_url`` when set), only when
+        that model is configured (else ``third_opinion_skipped_unconfigured``)
+        and is neither the first nor the second model (else
+        ``third_opinion_skipped_same_model``, no call). In ``auto`` a 2-of-3
+        majority applies through the two-vote gates: two reject-class votes
+        at mean >= ``judge_reject_min_confidence_2`` reject (filing a relate
+        vote's link), and two accepts at mean >=
+        ``judge_accept_min_confidence`` fold only under ``judge_mode``
+        ``auto`` on a non-low-differential row, behind the same guards as
+        the two-vote accept; both need the third vote served by a model
+        other than both earlier ones and the second vote's served model
+        known (:meth:`_tiebreak_refusal`). The mode is not part of the
+        judging policy, so promoting it to auto applies the gates to the
+        votes already recorded, with no model call.
+
+        ``second_extractor`` / ``third_extractor`` are the test hooks for
+        the second and third opinions' endpoints; passing either extractor
+        keeps the second pass. Never raises into the sweep timer."""
         import time as _t
         cfg = self.config.memory.deep_dream
         if not cfg.judges_enabled:
@@ -4205,8 +4586,45 @@ class DreamOps:
                      or cfg.judge_second_model == getattr(ex, "model", None)))
             second = [] if same_model_second else awaiting
             skipped = len(awaiting) if same_model_second else 0
-            if not first and not second:
-                idle = {"judged": 0, "reconsideration": reconsidered}
+            # The tiebreak's rows: the first two opinions disagree on the
+            # merge ("split", the note's tag) and no third was asked yet.
+            split = ([p for p in pending
+                      if p.get("judge_verdict") and p.get("judge2_verdict")
+                      and not p.get("judge3_verdict")
+                      and merge_verdict_class(p["judge_verdict"])
+                      != merge_verdict_class(p["judge2_verdict"])]
+                     if cfg.judge_tiebreak_mode in ("shadow", "auto") else [])
+            third, ex3, third_skips = [], None, {}
+            if split:
+                if third_extractor is not None:
+                    ex3 = third_extractor
+                elif extractor is None:
+                    ex3 = self._judge_third_extractor()
+                if ex3 is None:
+                    third_skips["third_opinion_skipped_unconfigured"] = len(split)
+                else:
+                    third = [p for p in split
+                             if not self._third_model_taken(
+                                 p, ex, ex3, cfg.judge_second_model)]
+                    if len(third) < len(split):
+                        third_skips["third_opinion_skipped_same_model"] = (
+                            len(split) - len(third))
+            # Split rows whose three votes are already recorded (a tiebreak
+            # promoted to auto after they were taken; the mode is unsigned,
+            # so promoting it clears nothing) are decided from those votes
+            # with no model call. A row whose note carries a refusal is
+            # left for a human, not refused again on every tick.
+            replay = []
+            if cfg.judge_tiebreak_mode == "auto":
+                refused = (*(f"| {r}" for r in self._TIEBREAK_REFUSALS.values()),
+                           "| auto-accept refused")
+                replay = [p for p in pending
+                          if p.get("judge3_verdict")
+                          and not any(r in (p.get("judge_note") or "") for r in refused)
+                          and self._tiebreak_majority(p, review.rows([p])[0], cfg)][:cap]
+            if not first and not second and not third and not replay:
+                idle = {"judged": 0, "reconsideration": reconsidered,
+                        **third_skips}
                 if skipped:
                     idle["second_opinion_skipped_same_model"] = skipped
                 return idle
@@ -4214,11 +4632,16 @@ class DreamOps:
                    "second_opinions": 0, "pending_unjudged": 0,
                    "second_opinion_skipped_same_model": skipped,
                    "auto_reject_refused_same_model": 0,
+                   "third_opinions": 0, "tiebreak_applied": 0,
+                   "tiebreak_refused_same_model": 0,
+                   "tiebreak_refused_unknown_second": 0, **third_skips,
                    "relate_links_filed": 0,
                    "served_model_mismatch": 0, "served_model_mismatches": [],
                    "reconsideration": reconsidered,
                    "model": getattr(ex, "model", None) or type(ex).__name__,
                    "mode": cfg.judge_mode}
+            if replay:
+                self._tiebreak_replay(out, review, replay)
             # Second opinions first: these rows were judged on an EARLIER
             # sweep, so the batch they now share is a different one, which
             # is what makes the second vote an independent sample.
@@ -4228,9 +4651,6 @@ class DreamOps:
                 else:
                     ex2 = (self._judge_second_extractor()
                            if extractor is None else None) or ex
-                from pseudolife_memory.memory.graph_consolidation import (
-                    variant_conflict)
-                from pseudolife_memory.memory.graph_review import merge_veto
                 batch = second[:cap]
                 logger.info("deep-dream judge: second opinion on %d pending "
                             "merge proposal(s) (mode %s)", len(batch),
@@ -4311,9 +4731,14 @@ class DreamOps:
                             note = f"{note1} | 2nd ({model2}): {token2} {c2:.2f} [{tag}]"
                             if not review.current(row, first_opinion=True):
                                 continue
+                            # The endpoint the vote came from rides the row
+                            # (v56): a tiebreak decided on a later tick
+                            # checks and records it from there.
                             ok = self._storage.set_entity_proposal_second_judgment(
                                 e["id"], verdict=v2, confidence=c2, model=model2,
-                                at=now, note=note)
+                                at=now, note=note,
+                                served_model=getattr(ex2, "served_model", None),
+                                policy=review.second_policy)
                             if not ok:
                                 continue
                             out["second_opinions"] += 1
@@ -4341,8 +4766,6 @@ class DreamOps:
                             elif (v1 == v2 == "accept" and cfg.judge_mode == "auto"
                                     and e.get("low_differential") is False
                                     and mean >= cfg.judge_accept_min_confidence):
-                                a_name = e["from"]["display"] or ""
-                                b_name = e["into"]["display"] or ""
                                 pair = tuple(sorted((
                                     canon_by_id.get(row["entity_id"], ""),
                                     canon_by_id.get(row["into_id"], ""))))
@@ -4360,21 +4783,9 @@ class DreamOps:
                                 if not self._second_opinion_distinct(
                                         review, row, ex, ex2, model2):
                                     reason = "auto-accept needs a distinct second model"
-                                elif str(row.get("reason") or "").startswith("analyzer-duplicate"):
-                                    # The accept gate's evidence holds no analyzer-
-                                    # filed rows (2026-09-02 panel: write-dedup 56,
-                                    # dream-alias 4, token-subset 3); unmeasured
-                                    # class stays pending with the verdicts attached.
-                                    reason = "auto-accept refused: analyzer-filed rows are unmeasured"
-                                elif merge_veto(a_name, b_name) is not None:
-                                    reason = "auto-accept refused: name veto"
-                                elif variant_conflict(a_name, b_name):
-                                    reason = "auto-accept refused: variant conflict"
-                                elif not self._snapshot_once(snap):
-                                    reason = "auto-accept refused: graph snapshot failed"
-                                    review.retry(row)
                                 else:
-                                    reason = None
+                                    reason = self._merge_accept_refusal(
+                                        review, row, e, snap)
                                 if reason is not None:
                                     self._storage.set_entity_proposal_second_judgment(
                                         e["id"], verdict=v2, confidence=c2,
@@ -4387,8 +4798,42 @@ class DreamOps:
                                     e["id"], decided_by="dream-judge")
                                 if res.get("accepted"):
                                     out["auto_accepted"] += 1
-            if first and cap > len(second[:cap]):
-                batch = first[:cap - len(second[:cap])]
+            # Third opinions next, on the split rows (v56): each was split
+            # on an earlier tick, so this batch is a fresh one too. They
+            # share the tick's batch budget with the second and first.
+            budget = cap - len(second[:cap])
+            if third and budget > 0:
+                batch3 = third[:budget]
+                logger.info("deep-dream judge: third opinion on %d split "
+                            "merge proposal(s) (mode %s, tiebreak %s)",
+                            len(batch3), cfg.judge_mode, cfg.judge_tiebreak_mode)
+                enriched3 = review.rows(batch3)
+                proposals3 = [{"n": i + 1, "from": e["from"], "into": e["into"],
+                               "reason": e.get("reason"), "score": e.get("score"),
+                               "low_differential": e.get("low_differential"),
+                               "snippet_chars": cfg.judge_snippet_max_chars}
+                              for i, e in enumerate(enriched3)]
+                third_observed = observed_model(ex3)
+                try:
+                    verdicts3 = ex3.judge_merges(proposals3)
+                except Exception as exc:  # noqa: BLE001 — as the second's
+                    if ex3 is ex or (getattr(ex3, "base_url", None) is not None
+                                     and getattr(ex3, "base_url", None)
+                                     == getattr(ex, "base_url", None)
+                                     and getattr(ex3, "api_key", None)
+                                     == getattr(ex, "api_key", None)):
+                        raise
+                    logger.warning("deep-dream judge: third opinion failed, "
+                                   "first opinions continue: %s", exc)
+                    out["third_opinion_error"] = str(exc)
+                    batch3 = []
+                if batch3:
+                    budget -= len(batch3)
+                    self._tiebreak_record(out, review, ex, ex3, batch3,
+                                          enriched3, verdicts3, proposals3,
+                                          third_observed)
+            if first and budget > 0:
+                batch = first[:budget]
                 # Announce the batch BEFORE the model call: the completion
                 # line alone let the 2026-08-31 forensics misplace a ~50s
                 # window inside this (lock-free) phase.
@@ -4421,7 +4866,8 @@ class DreamOps:
                             ok = self._storage.set_entity_proposal_judgment(
                                 e["id"], verdict=v["verdict"],
                                 confidence=v["confidence"], note=note,
-                                model=model, at=now)
+                                model=model, at=now,
+                                served_model=getattr(ex, "served_model", None))
                             if ok:
                                 review.record(row)
                             if not ok:
@@ -4513,14 +4959,29 @@ class DreamOps:
         return rows
 
     def deep_dream_judge_links(self, extractor=None, *,
-                               limit: int | None = None) -> dict[str, Any]:
+                               limit: int | None = None,
+                               second_extractor=None) -> dict[str, Any]:
         """Judge a bounded batch of not-yet-judged pending LINK proposals,
         recording each verdict on the row (schema v36). In ``auto``:
         accept at/above ``link_accept_min_confidence`` promotes the edge
         (origin ``action``); reject at/above ``link_reject_min_confidence``
         marks the row rejected. A retype is recorded (``judge_relation``)
         but never auto-applied — see the comment at the retype branch
-        below. Never raises into the sweep."""
+        below.
+
+        Second opinion (schema v56, ``link_judge_two_vote`` shadow | auto,
+        asked only while ``judge_second_opinion`` is on): a row whose first
+        accept or reject sat below its single-vote gate is judged once more
+        in a fresh batch, by the merge judge's second model and endpoint
+        (``judge_second_model`` / ``judge_second_url``). In ``auto``, and
+        only while ``link_judge_mode`` is ``auto``, two agreeing accepts or
+        rejects at mean >= ``link_two_vote_min_confidence`` apply, and only
+        when the two votes came from DIFFERENT models
+        (:meth:`_second_opinion_distinct`). A configuration that makes the
+        second opinion the first model again is skipped with no call
+        (``second_opinion_skipped_same_model``), as for the merge judge.
+        ``second_extractor`` is the test hook for the second endpoint.
+        Never raises into the sweep."""
         import time as _t
         cfg = self.config.memory.deep_dream
         if not cfg.judges_enabled:
@@ -4552,53 +5013,186 @@ class DreamOps:
                 review.prepare(cap)
             review.sign()
             with self._lock:
-                pending = [p for p in review.refresh() if not p.get("judge_verdict")]
-            if not pending:
-                return {"judged": 0, "reconsideration": reconsidered}
-            batch = pending[:cap]      # the cap prepare() signed for
-            logger.info("deep-dream link judge: judging %d pending link "
-                        "proposal(s) (mode %s)", len(batch), mode)
-            rows = review.rows(batch)
-            verdicts = ex.judge_links(rows)
-            self._stamp_skipped(verdicts, rows, relation=None)
-            model = self._model_name(ex)
-            judged = applied = 0
-            now = _t.time()
-            with self._lock:
-                review.validate(batch)
-                for v in sorted(verdicts, key=lambda item: item["verdict"] not in ("reject", "keep")):
-                    with self._storage.transaction():
-                        p = batch[v["n"] - 1]
-                        if not review.current(p):
-                            continue
-                        ok = self._storage.set_proposal_judgment(
-                            p["id"], verdict=v["verdict"], confidence=v["confidence"],
-                            note=v.get("note"), model=model,
-                            relation=v.get("relation"), at=now)
-                        if ok:
-                            review.record(p)
-                        if not ok:
-                            continue
-                        judged += 1
-                        if mode != "auto":
-                            continue
-                        conf = float(v["confidence"])
-                        if v["verdict"] == "accept" and conf >= cfg.link_accept_min_confidence:
-                            res = review.apply(p, self.graph_accept_proposal,
-                                               p["id"], decided_by="dream-judge")
-                            applied += bool(res.get("accepted"))
-                        # A retype is recorded, never auto-written: the first ladder
-                        # run scored the judge's relation choice at 0/1 on retypes
-                        # (and 6/10 on candidate proposals), so the corrected edge
-                        # waits for a reviewer — the verdict and judge_relation are
-                        # on the row for the Console / an agent to apply.
-                        elif v["verdict"] == "reject" and conf >= cfg.link_reject_min_confidence:
-                            res = review.apply(p, self.graph_reject_proposal,
-                                               p["id"], decided_by="dream-judge")
-                            applied += bool(res.get("rejected"))
-            return {"judged": judged, "applied": applied,
-                    "pending_unjudged": max(0, len(pending) - judged),
-                    "model": model, "mode": mode, "reconsideration": reconsidered}
+                pending = review.refresh()
+            first = [p for p in pending if not p.get("judge_verdict")]
+            two_vote = cfg.link_judge_two_vote
+            gates = {"accept": cfg.link_accept_min_confidence,
+                     "reject": cfg.link_reject_min_confidence}
+            # Only an accept or a reject the single-vote gate left pending
+            # can become a two-vote decision: a retype is never applied, and
+            # a leave has nothing for a second vote to agree with.
+            awaiting = ([p for p in pending
+                         if p.get("judge_verdict") in gates
+                         and not p.get("judge2_verdict")
+                         and float(p.get("judge_confidence") or 0.0)
+                         < gates[p["judge_verdict"]]]
+                        if cfg.judge_second_opinion
+                        and two_vote in ("shadow", "auto") else [])
+            # The same rule as the merge judge's: a second opinion the
+            # configuration already makes the first model again is not asked.
+            same_model_second = (
+                extractor is None and second_extractor is None
+                and not cfg.judge_second_url
+                and (not cfg.judge_second_model
+                     or cfg.judge_second_model == getattr(ex, "model", None)))
+            second = [] if same_model_second else awaiting
+            skipped = len(awaiting) if same_model_second else 0
+            # Rows whose two votes are already recorded are decided from
+            # them when the two-vote mode was promoted to auto after they
+            # were taken (the mode is unsigned, so promoting it clears
+            # nothing), with no model call; a refused row is left for a
+            # human, not refused again on every tick.
+            replay = [p for p in pending
+                      if p.get("judge2_verdict")
+                      and self._link_two_vote_action(p, cfg, mode)
+                      and f"| {self._TWO_VOTE_REFUSAL}" not in (p.get("judge_note") or "")][:cap]
+            if not first and not second and not replay:
+                idle = {"judged": 0, "reconsideration": reconsidered}
+                if skipped:
+                    idle["second_opinion_skipped_same_model"] = skipped
+                return idle
+            out = {"judged": 0, "applied": 0, "pending_unjudged": 0,
+                   "second_opinions": 0, "two_vote_applied": 0,
+                   "two_vote_refused_same_model": 0,
+                   "second_opinion_skipped_same_model": skipped,
+                   "served_model_mismatch": 0, "served_model_mismatches": [],
+                   "model": getattr(ex, "model", None) or type(ex).__name__,
+                   "mode": mode, "two_vote": two_vote,
+                   "reconsideration": reconsidered}
+            if replay:
+                self._link_two_vote_replay(out, review, replay)
+            # Second opinions first, as for the merge judge: these rows were
+            # judged on an earlier tick, so the batch they share now is a
+            # different one. Unlike the merge judge's, they take at most
+            # half the batch while first opinions wait: on the live bank
+            # ~160 below-gate link rows would otherwise hold new links'
+            # first opinions back for many ticks (review, 2026-10-17).
+            second_cap = cap - min(len(first), cap // 2)
+            if second:
+                if second_extractor is not None:
+                    ex2 = second_extractor
+                else:
+                    ex2 = (self._judge_second_extractor("judge_links")
+                           if extractor is None else None) or ex
+                batch2 = second[:second_cap]
+                logger.info("deep-dream link judge: second opinion on %d "
+                            "pending link proposal(s) (mode %s, two-vote %s)",
+                            len(batch2), mode, two_vote)
+                rows2 = review.rows(batch2)
+                second_observed = observed_model(ex2)
+                try:
+                    verdicts2 = ex2.judge_links(rows2)
+                except Exception as exc:  # noqa: BLE001 — as the merge judge's
+                    if ex2 is ex or (getattr(ex2, "base_url", None) is not None
+                                     and getattr(ex2, "base_url", None)
+                                     == getattr(ex, "base_url", None)
+                                     and getattr(ex2, "api_key", None)
+                                     == getattr(ex, "api_key", None)):
+                        raise
+                    logger.warning("deep-dream link judge: second opinion "
+                                   "failed, first opinions continue: %s", exc)
+                    out["second_opinion_error"] = str(exc)
+                    second = []
+            if second:
+                self._stamp_skipped(verdicts2, rows2, relation=None)
+                self._report_served_model(out, "second", ex2)
+                model2 = self._model_name(ex2)
+                now = _t.time()
+                with self._lock:
+                    review.validate(batch2, response_extractor=ex2,
+                                    expected_model=second_observed)
+                    for v in sorted(verdicts2, key=lambda item: item["verdict"] not in ("reject", "keep")):
+                        with self._storage.transaction():
+                            p = batch2[v["n"] - 1]
+                            if not review.current(p, first_opinion=True):
+                                continue
+                            v1 = p.get("judge_verdict")
+                            c1 = float(p.get("judge_confidence") or 0.0)
+                            v2, c2 = v["verdict"], float(v["confidence"])
+                            rel2 = v.get("relation")
+                            token2 = (f"retype:{rel2}" if v2 == "retype" and rel2
+                                      else v2)
+                            tag = "agree" if v1 == v2 else "split"
+                            note = (f"{(p.get('judge_note') or '')[:160]} | "
+                                    f"2nd ({model2}): {token2} {c2:.2f} [{tag}]")
+                            if not self._storage.set_proposal_second_judgment(
+                                    p["id"], verdict=v2, confidence=c2,
+                                    model=model2, relation=rel2, at=now,
+                                    note=note,
+                                    served_model=getattr(ex2, "served_model", None),
+                                    policy=review.second_policy):
+                                continue
+                            out["second_opinions"] += 1
+                            if not (two_vote == "auto" and mode == "auto"
+                                    and v1 == v2 and v1 in ("accept", "reject")
+                                    and (c1 + c2) / 2.0
+                                    >= cfg.link_two_vote_min_confidence):
+                                continue
+                            if not self._second_opinion_distinct(
+                                    review, p, ex, ex2, model2):
+                                self._storage.set_proposal_second_judgment(
+                                    p["id"], verdict=v2, confidence=c2,
+                                    model=model2, relation=rel2, at=now,
+                                    note=f"{note} | {self._TWO_VOTE_REFUSAL}")
+                                out["two_vote_refused_same_model"] += 1
+                                continue
+                            if v1 == "accept":
+                                res = review.apply(p, self.graph_accept_proposal,
+                                                   p["id"], decided_by="dream-judge")
+                                done = bool(res.get("accepted"))
+                            else:
+                                res = review.apply(p, self.graph_reject_proposal,
+                                                   p["id"], decided_by="dream-judge")
+                                done = bool(res.get("rejected"))
+                            out["two_vote_applied"] += done
+                            out["applied"] += done
+            taken2 = len(second[:second_cap])
+            if first and cap > taken2:
+                batch = first[:cap - taken2]
+                logger.info("deep-dream link judge: judging %d pending link "
+                            "proposal(s) (mode %s)", len(batch), mode)
+                rows = review.rows(batch)
+                verdicts = ex.judge_links(rows)
+                self._stamp_skipped(verdicts, rows, relation=None)
+                self._report_served_model(out, "first", ex)
+                model = self._model_name(ex)
+                out["model"] = model
+                now = _t.time()
+                with self._lock:
+                    review.validate(batch)
+                    for v in sorted(verdicts, key=lambda item: item["verdict"] not in ("reject", "keep")):
+                        with self._storage.transaction():
+                            p = batch[v["n"] - 1]
+                            if not review.current(p):
+                                continue
+                            ok = self._storage.set_proposal_judgment(
+                                p["id"], verdict=v["verdict"], confidence=v["confidence"],
+                                note=v.get("note"), model=model,
+                                relation=v.get("relation"), at=now,
+                                served_model=getattr(ex, "served_model", None))
+                            if ok:
+                                review.record(p)
+                            if not ok:
+                                continue
+                            out["judged"] += 1
+                            if mode != "auto":
+                                continue
+                            conf = float(v["confidence"])
+                            if v["verdict"] == "accept" and conf >= cfg.link_accept_min_confidence:
+                                res = review.apply(p, self.graph_accept_proposal,
+                                                   p["id"], decided_by="dream-judge")
+                                out["applied"] += bool(res.get("accepted"))
+                            # A retype is recorded, never auto-written: the first ladder
+                            # run scored the judge's relation choice at 0/1 on retypes
+                            # (and 6/10 on candidate proposals), so the corrected edge
+                            # waits for a reviewer — the verdict and judge_relation are
+                            # on the row for the Console / an agent to apply.
+                            elif v["verdict"] == "reject" and conf >= cfg.link_reject_min_confidence:
+                                res = review.apply(p, self.graph_reject_proposal,
+                                                   p["id"], decided_by="dream-judge")
+                                out["applied"] += bool(res.get("rejected"))
+            out["pending_unjudged"] = max(0, len(first) - out["judged"])
+            return out
         except Exception as exc:  # noqa: BLE001 — never kill the sweep
             logger.warning("deep-dream link judge failed: %s", exc)
             return {"judged": 0, "error": str(exc)}
@@ -4754,7 +5348,8 @@ class DreamOps:
                             continue
                         ok = self._storage.set_entity_proposal_judgment(
                             p["id"], verdict=v["verdict"], confidence=v["confidence"],
-                            note=v.get("note"), model=model, at=now)
+                            note=v.get("note"), model=model, at=now,
+                            served_model=getattr(ex, "served_model", None))
                         if ok:
                             review.record(p)
                         if not ok:
@@ -5767,6 +6362,10 @@ class DreamOps:
                 row["judge2"] = {"verdict": p["judge2_verdict"],
                                  "confidence": p.get("judge2_confidence"),
                                  "model": p.get("judge2_model")}
+            if p.get("judge3_verdict"):
+                row["judge3"] = {"verdict": p["judge3_verdict"],
+                                 "confidence": p.get("judge3_confidence"),
+                                 "model": p.get("judge3_model")}
             add_relate_relations(row, p)
             out.append(row)
         return out
