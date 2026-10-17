@@ -176,3 +176,61 @@ def test_failure_cleans_only_this_scenarios_databases(harness, monkeypatch, tmp_
     assert present == {prior}
     assert prior not in dropped
     assert all(d.stopped for d in daemons if d.started)
+
+
+def test_fact_embeddings_are_compared_by_fact_id(harness):
+    def state(embedding):
+        return {"rows": {"public.facts": {
+            "columns": ["id", "embedding", "asserted_at"],
+            "rows": [[7, embedding, 1.0]],
+        }}}
+
+    python, rust = state("[1.0,0.0]"), state("[0.0,1.0]")
+    a, b = harness.extract_fact_numeric(python), harness.extract_fact_numeric(rust)
+    assert python == rust and a == {7: [1.0, 0.0]}
+    tolerance = json.loads(harness.TOLERANCE_FILE.read_text(encoding="utf-8"))
+    differences = harness.compare_numeric({"facts": a}, {"facts": b}, tolerance, {})
+    assert len(differences) == 1 and differences[0].startswith("facts[7].embedding")
+    assert harness.compare_numeric({"facts": a}, {"facts": dict(a)}, tolerance, {}) == []
+
+
+def test_fact_clocks_and_the_supersession_log_keep_only_presence(harness, monkeypatch):
+    monkeypatch.setattr(harness.w1a, "scrub_declared_rows", lambda state, before: {"state": state})
+    state = {"rows": {
+        "public.facts": {"columns": ["id", "tx_time", "hlc_phys", "hlc_logical", "superseded_at"],
+                         "rows": [[1, 5.5, 1700000000000, 0, None]]},
+        "public.meta": {"columns": ["key", "value"], "rows": [
+            ["cortex_supersession_log", [{"timestamp": 9.5, "reason": "newer_wins"}]]]},
+    }}
+    normalized, _, _ = harness.normalize_state(state, {"rows": {}})
+    assert normalized["rows"]["public.facts"]["rows"] == [[1, "<clock>", "<clock>", 0, None]]
+    assert normalized["rows"]["public.meta"]["rows"] == [
+        ["cortex_supersession_log", [{"timestamp": "<clock>", "reason": "newer_wins"}]]]
+
+
+def test_fact_answers_compare_clocks_by_presence_and_age_by_one_step(harness):
+    def answer(t, age, current_age):
+        return {"isError": False, "value": {
+            "action": "contested", "asserted_at": t, "superseded_at": None, "age": age,
+            "current": {"tx_time": t, "age": current_age}}}
+
+    assert harness.compare_response(answer(1.0, "just now", "1 minute ago"),
+                                    answer(2.0, "just now", "just now"), {}, {}) == []
+    assert harness.compare_response(answer(1.0, "just now", "59 minutes ago"),
+                                    answer(2.0, "just now", "1 hour ago"), {}, {}) == []
+    # Two steps apart, or a clock present on one side only, still differ.
+    assert harness.compare_response(answer(1.0, "just now", "2 minutes ago"),
+                                    answer(2.0, "just now", "just now"), {}, {})
+    assert harness.compare_response(answer(1.0, "just now", "just now"),
+                                    answer(None, "just now", "just now"), {}, {})
+
+
+def test_fact_set_scenarios_reach_every_declared_mutant(harness):
+    names = [n for n in harness.SCENARIOS if n.startswith("fact-set-")]
+    assert names, "no fact_set scenarios"
+    fact_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-fact-set-")]
+    assert len(fact_mutants) == 4
+    ops = [op for n in names for op in harness.SCENARIOS[n]["ops"]]
+    assert all(op["name"] == "memory_fact_set" for op in ops)
+    # SQL is seed-only: the compared operations all go through MCP.
+    assert all(op["op"] != "sql" for n in harness.SCENARIOS for op in harness.SCENARIOS[n]["ops"])

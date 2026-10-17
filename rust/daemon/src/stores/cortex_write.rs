@@ -18,24 +18,24 @@ use super::cortex::{
 };
 use crate::labels::Resolved;
 
-/// `SUPERSESSION_LOG_CAP` (`cortex.py:156`).
+/// `SUPERSESSION_LOG_CAP` (`cortex.py:148`).
 pub const SUPERSESSION_LOG_CAP: usize = 200;
-/// `_ECHO_CONTAINMENT`, `_ECHO_NEGATORS`, `_ECHO_MIN_TOKENS` (`cortex.py:78-92`).
+/// `_ECHO_CONTAINMENT`, `_ECHO_NEGATORS`, `_ECHO_MIN_TOKENS` (`cortex.py:83-94`).
 const ECHO_CONTAINMENT: f64 = 0.75;
 const ECHO_NEGATORS: [&str; 5] = ["not", "no", "never", "none", "without"];
 const ECHO_MIN_TOKENS: usize = 3;
 /// `_DIRECT_TIERS` (`cortex.py:210`).
 const DIRECT_TIERS: [&str; 2] = ["user", "action"];
-/// The refusal `write_fact` raises at a set-valued slot (`cortex.py:529`).
+/// The refusal `write_fact` raises at a set-valued slot (`cortex.py:503`).
 pub const SET_SLOT_REFUSAL: &str =
     "slot holds a set; use add_member/remove_member \u{2014} scalar writes are rejected";
 
-/// `_norm_value` (`cortex.py:75`): strip and casefold.
+/// `_norm_value` (`cortex.py:73`): strip and casefold.
 pub fn norm_value(s: &str) -> String {
     py_casefold(s.trim_matches(py_isspace))
 }
 
-/// `_norm_freshness` (`cortex.py:63`): a known class, else `evergreen`.
+/// `_norm_freshness` (`cortex.py:62`): a known class, else `evergreen`.
 pub fn norm_freshness(c: &str) -> String {
     let c = py_casefold(c.trim_matches(py_isspace));
     if ["evergreen", "slow", "volatile"].contains(&c.as_str()) {
@@ -53,7 +53,7 @@ pub fn norm_support(s: Option<&str>) -> Option<&'static str> {
         .find(|t| *t == s)
 }
 
-/// `_rank` (`cortex.py:232`): the provenance tier rank; unknown is 0.
+/// `_rank` (`cortex.py:265`): the provenance tier rank; unknown is 0.
 fn rank(origin: Option<&str>) -> i32 {
     match py_casefold(origin.unwrap_or("").trim_matches(py_isspace)).as_str() {
         "user" => 3,
@@ -99,7 +99,7 @@ pub fn is_compression_echo(new: &str, cur: &str) -> bool {
     nt.intersection(&ct).count() as f64 / nt.len() as f64 >= ECHO_CONTAINMENT
 }
 
-/// `_pick` (`cortex.py:236`): `INHERIT` takes the landing record's label,
+/// `_pick` (`cortex.py:237`): `INHERIT` takes the landing record's label,
 /// an explicit value (None clears) wins.
 fn pick(label: &Resolved, inherit: Option<&Option<String>>) -> Option<String> {
     match label {
@@ -213,7 +213,7 @@ impl CortexStore {
         conf >= cur.confidence - self.supersede_confidence_margin
     }
 
-    /// `_log` (`cortex.py:732`): one audit row, capped in place.
+    /// `_log` (`cortex.py:731`): one audit row, capped in place.
     #[allow(clippy::too_many_arguments)]
     fn log(
         &mut self,

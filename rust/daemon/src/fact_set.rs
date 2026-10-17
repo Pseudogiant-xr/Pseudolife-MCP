@@ -18,7 +18,7 @@ use crate::store::py_strip;
 use crate::stores::cortex::norm_key;
 use crate::stores::cortex_write::{FactWrite, norm_support};
 
-/// The tool-boundary refusal for a set-valued slot (`service.py:4013`).
+/// The tool-boundary refusal for a set-valued slot (`service.py:4014`).
 pub const SET_SLOT_REFUSAL: &str = "slot holds a set; use memory_set_add / memory_set_remove";
 /// `episode_warning` for an unknown, closed or ambiguous handle.
 const EPISODE_WARNING: &str = "unknown or closed episode handle";

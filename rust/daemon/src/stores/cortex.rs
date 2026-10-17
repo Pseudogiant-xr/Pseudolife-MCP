@@ -112,7 +112,7 @@ pub struct CortexRecord {
     pub embedding: Option<Arc<[f32]>>,
     /// The value-free slot embedding (`f"{entity} {attribute}"`). Resident
     /// only: Python keeps it in RAM for the dream's slot resolver and never
-    /// persists it, so hydrated records carry None (`cortex.py:300`).
+    /// persists it, so hydrated records carry None (`cortex.py:302`).
     pub slot_embedding: Option<Arc<[f32]>>,
     pub entity_id: Option<i64>,
     pub object_entity_id: Option<i64>,
