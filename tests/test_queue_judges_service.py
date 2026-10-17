@@ -1511,6 +1511,21 @@ def test_first_opinion_relation_is_recovered_for_the_link(svc):
     assert _merge_links(svc) == [("phi module", "part-of", "phi concept", "merge-judge-relate")]
 
 
+def test_a_typed_relate_vote_outranks_a_more_confident_related_to(svc):
+    """related-to is never filed (2026-10-17), but it says only "related,
+    untyped" and does not contradict a typed vote: when the more confident
+    relate vote is related-to, the typed vote is still filed."""
+    _two_vote_auto_reject(svc)
+    _propose(svc, "psi module", "psi concept")
+    pair = ("psi module", "psi concept")
+    judge = _MergeJudge({pair: ("relate", 0.7, "implements")})
+    second = _SecondJudge({pair: ("relate", 0.85, "related-to")})
+    svc.deep_dream_judge(judge)
+    out = svc.deep_dream_judge(judge, second_extractor=second)
+    assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 1
+    assert _merge_links(svc) == [("psi module", "implements", "psi concept", "merge-judge-relate")]
+
+
 # ── v56: the first opinion stamps the model its endpoint served ──────────
 
 def _served_stamp(svc, table, pid):
