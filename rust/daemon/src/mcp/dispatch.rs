@@ -97,6 +97,7 @@ pub fn registry() -> &'static HashMap<&'static str, ToolFn> {
         // One line per body slice, as each lands.
         map.extend(crate::store::mcp_tools());
         map.extend(crate::read::mcp_search::mcp_tools());
+        map.extend(crate::read::mcp_reads::mcp_tools());
         map.extend(crate::board::mcp::mcp_tools());
         map
     })

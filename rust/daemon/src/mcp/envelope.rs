@@ -158,6 +158,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_type_error_in_prose_is_invalid_argument_with_its_text() {
+        // memory_recent's unhashable stored tag (Python's set() TypeError).
+        let p = error_payload(
+            "memory_recent",
+            &ToolError::Invalid("unhashable type: 'list'".into()),
+        );
+        assert_eq!(
+            p,
+            json!({"error": "invalid_argument", "message": "unhashable type: 'list'"})
+        );
+    }
+
+    #[test]
     fn refusal_codes_and_prose() {
         let p = error_payload(
             "memory_store",

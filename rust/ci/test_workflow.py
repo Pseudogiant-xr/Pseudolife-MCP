@@ -241,7 +241,8 @@ def check_executable_coverage(jobs):
     search = parity["Offline W2-D search harness regressions"]
     require_command(commands(search["run"]), ("python", "-m", "pytest"),
                     ("rust/daemon/harness/test_w2d_controls.py",
-                     "rust/daemon/harness/test_w2d_namespace.py"), PYTEST_FILTERS)
+                     "rust/daemon/harness/test_w2d_namespace.py",
+                     "rust/daemon/harness/test_w2d_recent.py"), PYTEST_FILTERS)
     assert search["timeout-minutes"] == 1
     for name, rows in (("CLI differential harness", ("mail", "hook", "episode")),
                        ("CLI lease differential harness", ("lease",))):
