@@ -53,8 +53,10 @@ change:
   7. The Rust side: `python rust/daemon/harness/gen_schema_sql.py` (then
      `--check`), the shim's transfer schema literals (pinned below by
      test_rust_shim_transfer_pins_the_same_schema_version), the schema
-     startup golden, and every parity golden that digests the catalog
-     (dream cursors, daemon run.py rows, graph store, principals),
+     startup golden, and every parity golden that digests the catalog or
+     dumps a bank (dream cursors, daemon run.py rows, graph store,
+     principals, and the CLI harness w1c rows whose goldens carry a bank
+     dump or export: transfer, invite, maintainer at least),
      re-recorded on both OSes — rust/PARITY.md names the pin.
 
 And test the behaviour the bump added BESIDE ITS CONSUMER — or, if it is

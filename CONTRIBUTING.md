@@ -280,8 +280,11 @@ guard tests go red:
   `rust/shim/src/cli/transfer/{export,import}.rs` and `transfer.rs`
   (pinned to `SCHEMA_META_VERSION` by `tests/test_schema_version.py`), the
   schema-startup golden, and every parity golden that digests the table
-  catalog (dream cursors, the daemon `run.py` rows, graph store,
-  principals), re-recorded on both OSes; `rust/PARITY.md` names the pin.
+  catalog or dumps a bank (dream cursors, the daemon `run.py` rows, graph
+  store, principals, and the CLI harness rows under
+  `rust/cli_harness/goldens/` whose cases dump or export the bank:
+  transfer, invite, maintainer at least), re-recorded on both OSes;
+  `rust/PARITY.md` names the pin.
 
 ## Licensing of contributions
 
