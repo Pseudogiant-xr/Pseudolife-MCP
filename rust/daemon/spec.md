@@ -500,6 +500,54 @@ sequences recorded from `memory/cortex.py`
 (`harness/gen_w2e_cortex_write_goldens.py`), and `junk_name_reason` against
 `harness/gen_w2e_junk_names_goldens.py`.
 
+### memory_set_add and memory_set_remove over MCP (2026-10-17)
+
+`set_members.rs` (the tools, `service.set_add` and `service.set_remove`),
+`stores/cortex_members.rs` (the engine), reusing `fact_set.rs`'s
+embedding, entity mint and save, and `stores/cortex_write.rs`'s contend,
+settle and audit log; registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py:679-684, 721-733, 1750-1782`; `service.py` `set_add`
+(4042-4098) and `set_remove` (4100-4133); `memory/cortex.py` `add_member`
+(754-1032), `_insert_member` (1034-1081), `remove_member` (1083-1135).
+
+| # | Exact item | Source |
+|---|---|---|
+| SA1 | Bound arguments: `entity`, `attribute`, `member`, each a required plain string with no minimum length, passed raw (blank included). No projection. Neither tool is read-only: an internal failure carries `mutation: "unknown"`. Errors map as for `memory_fact_set`. | `mcp_server.py:1750-1782` |
+| SA2 | The answer is `{action, entity, attribute, member, members_count}` echoing the raw arguments, `members_count` the slot's current members after the call; `_noted(..., key="action")` then appends `note` only for `member_invalid`, `member_capped` (the text names `MAX_CURRENT_MEMBERS`, 100), `member_not_found` and `member_remove_refused` (unreachable here, SA11). | `service.py:4092-4098, 4127-4133`; `mcp_server.py:679-684, 721-733` |
+| SA3 | `set_add` under the service lock (Rust: `Ready.write`, held to the answer): one document-side encode of `f"{entity} {attribute} {member}".strip()`, made even for a blank member; writer and session as FS5 (no episode handle); the service HLC ticks before `add_member`, so an invalid or capped add still advances it. `add_member` gets `confidence=0.7`, no provenance, `support=None`, `dream=False`. | `service.py:4042-4091` |
+| SA4 | A member whose `_norm_value` (strip, casefold) is empty answers `member_invalid`: nothing dirty, nothing logged. | `cortex.py:846-852` |
+| SA5 | A current scalar whose stripped value is number-led (`^[$€£]?[+-]?\d`, `\d` the Unicode decimal digits) is protected: the slot is dirty; the same `_norm_value` confirms the scalar (`last_confirmed` = now, confidence `min(1, max(c + (1 - c) * reinforce_rate, 0.7))`; `tx_time`, HLC, writer, session, labels untouched) and answers `confirmed`; any other member is parked by `_contend` with reason `member_add_blocked_aggregate` (FS8: no tier, `evergreen`, labels inherited from the scalar, the scalar's resident slot embedding, the new HLC, `tx_time` = `valid_time` = now; a contender of the same value is refreshed with `contested/contender_confirmed`) and answers `contested`. | `cortex.py:118-127, 862-888, 1238-1329` |
+| SA6 | Any other current scalar converts, one way: the slot is dirty, the scalar `superseded` (`superseded_at` = now, `superseded_by_value` = `"(converted to set)"`) and out of the current index; the log row `convert_to_set/member_add_to_scalar` is anchored on it (new value the member, `confidence_delta` = round(0.7 - c, 4)) and gains `dropped_freshness_class` (a class other than `evergreen`), `dropped_authority` and `dropped_distortion_tolerance` (non-empty labels). The old value becomes the first member: the scalar's entity, attribute, value, polarity, embedding, confidence, provenance, support, writer and session; `asserted_at` = `last_confirmed` = `tx_time` = `valid_time` = the scalar's `asserted_at`; the new HLC; `evergreen`; no labels, no stance, no slot embedding. | `cortex.py:936-970, 1034-1081` |
+| SA7 | Dedup over the current members in insertion order (the converted one included): the same `_norm_value`, or a float32 cosine `m @ e / (m.norm() * e.norm() + 1e-12)` of at least `MEMBER_DEDUP_COSINE` (0.9; 0.0 for a member with no embedding). The first match is refreshed: slot dirty, `last_confirmed` = now, confidence `min(1, max(c, 0.7))`, nothing else; answers `member_confirmed`. | `cortex.py:150-157, 972-994` |
+| SA8 | With 100 or more current members: one log row `member_capped/max_current_members` anchored on the rejected value (`old_value` = `new_value` = the member, `confidence_delta` 0.0, the writer and session), nothing dirty; answers `member_capped`. | `cortex.py:158-162, 1010-1023` |
+| SA9 | Otherwise the slot is dirty and a member row is appended: kind `member`, `current`, the entity, attribute and member as passed, polarity `+`, confidence 0.7, empty support and provenance, `asserted_at` = `last_confirmed` = `tx_time` = `valid_time` = now, the HLC, writer and session, `evergreen`, the claim embedding; then a parked contender of the same value is settled (FS8, its non-assistant tiers carried to the member); answers `member_added`. | `cortex.py:1024-1032, 1034-1081, 1331-1361` |
+| SA10 | After `add_member`, whatever its action: `_ensure_subject_entity(entity)` (FS10; a blank, invalid or capped add can still mint the subject), then `_save_cortex` (FS11: member rows carry `value_norm` = `_norm_value(value)`, so the rewrite satisfies the one-current-member-per-value unique index). | `service.py:4087-4091`; `sync.py:170-209`; `schema.py:1565-1578` |
+| SA11 | `set_remove` under the service lock: no encode, no HLC tick, no writer resolution, no entity mint. `remove_member` takes the first current member (insertion order) whose `_norm_value` matches; none answers `member_not_found` and changes nothing. A match: slot dirty, `status` = `removed`, `superseded_at` = now, out of the member index (the row is kept), log `member_removed/user_removed` anchored on it with the raw `member` as `new_value`, `confidence_delta` 0.0, writer and session null; answers `member_removed`. Then `_save_cortex` and the SA2 answer. The removal refusal needs a support tier or `dream`, which the tool never passes. | `service.py:4100-4133`; `cortex.py:1083-1135` |
+
+Not reachable over MCP, so not ported: the assistant-origin guards, the
+conversion tier guard, the dream direct-write guard and tier mark, and the
+removal refusal (`divergences.md`).
+
+`harness/w2e.py live --only set-add-branches set-add-aggregate set-cap`
+compares every answer and the full bank after each call, on templates
+seeded through the Python daemon (the cap's hundred members are one
+seed-only SQL insert with NULL embeddings, run after the seeding daemon
+stops, since its exit flush rewrites `facts` from its resident cortex):
+the conversion of a labelled
+volatile scalar with its dropped-label log row, the member it adds and the
+contender it settles; re-adding the old value (by value) and a near
+synonym (by cosine); a plain add; blank members (the subject minted all
+the same); real and junk-shaped subjects; removal by normalised value, a
+repeat, an empty slot, and a re-add beside the removed row; the aggregate
+guard's confirm, park, refresh and replacement, with a currency-led total;
+the cap, dedup before it, room made by a removal and the cap again. The
+`mcp-set-add-no-convert`, `mcp-set-add-no-cosine-dedup` and
+`mcp-set-remove-noop` mutants must be caught. The engine is also checked
+offline against `add_member` / `remove_member` sequences recorded from
+`memory/cortex.py` (`harness/gen_w2e_cortex_write_goldens.py`: members,
+aggregate, aggregate_newer_wins, cap), including Unicode-digit and
+superscript aggregates and exact slot indexes.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

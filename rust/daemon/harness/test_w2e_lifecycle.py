@@ -234,3 +234,54 @@ def test_fact_set_scenarios_reach_every_declared_mutant(harness):
     assert all(op["name"] == "memory_fact_set" for op in ops)
     # SQL is seed-only: the compared operations all go through MCP.
     assert all(op["op"] != "sql" for n in harness.SCENARIOS for op in harness.SCENARIOS[n]["ops"])
+
+
+def test_set_scenarios_reach_every_declared_mutant(harness):
+    names = [n for n in harness.SCENARIOS if n.startswith("set-")]
+    assert set(names) == {"set-add-branches", "set-add-aggregate", "set-cap"}
+    set_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-set-")]
+    assert set_mutants == ["mcp-set-add-no-convert", "mcp-set-add-no-cosine-dedup",
+                           "mcp-set-remove-noop"]
+    ops = [op for n in names for op in harness.SCENARIOS[n]["ops"]]
+    assert {op["name"] for op in ops} == {"memory_set_add", "memory_set_remove"}
+    assert all(set(op["args"]) == {"entity", "attribute", "member"} for op in ops)
+    # The cap's hundred members are one seed statement, never compared ops.
+    cap_seed = harness.SCENARIOS["set-cap"]["seed"]
+    assert [op["op"] for op in cap_seed] == ["sql"]
+    assert "generate_series(0, 99)" in cap_seed[0]["sql"]
+
+
+def test_after_stop_sql_runs_once_the_seeding_daemon_has_stopped(harness, monkeypatch, tmp_path):
+    events = []
+
+    class Daemon:
+        port = 1
+
+        def start(self, timeout):
+            events.append("start")
+
+        def stop(self):
+            events.append("stop")
+
+    class Client:
+        def __init__(self, port):
+            pass
+
+        def init(self):
+            pass
+
+    def run_op(op, port, mcp, dsn):
+        events.append(op.get("sql") or op["name"])
+        return {"isError": False, "value": None}
+
+    monkeypatch.setattr(harness.pg, "create", lambda name, **kw: "dsn")
+    monkeypatch.setattr(harness.daemons, "python_daemon", lambda *a, **kw: Daemon())
+    monkeypatch.setattr(harness.w1a, "wait_settled", lambda *a, **kw: None)
+    monkeypatch.setattr(harness, "Mcp", Client)
+    monkeypatch.setattr(harness, "run_op", run_op)
+    scn = {"config": None, "seed": [harness.sql("late", after_stop=True),
+                                    harness.sql("early"),
+                                    harness.set_add("box", "tags", "a")]}
+    harness.prepare_template(scn, "after_stop", tmp_path, [])
+    assert events == ["start", "early", "memory_set_add", "stop", "late"]
+    assert harness.SCENARIOS["set-cap"]["seed"][0]["after_stop"] is True

@@ -178,7 +178,7 @@ def test_compensated_case_truncation_is_rejected(tmp_path, monkeypatch, consumer
     assert not mcp_compare.recording_errors(record)
     record['protocol_versions'] = record['protocol_versions'][:6]
     record['handshake'] += [response] * 4
-    assert sum(len(value) for value in record.values()) == 343
+    assert sum(len(value) for value in record.values()) == 341
     target = tmp_path / 'output.json'
     target.write_text('previous golden', encoding='utf-8')
     if consumer == 'producer':

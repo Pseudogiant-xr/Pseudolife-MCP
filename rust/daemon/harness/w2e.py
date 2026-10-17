@@ -8,8 +8,9 @@ usage:
   python w2e.py mutants --rust-bin PATH_BUILT_WITH_FEATURES_HARNESS_MUTANTS [--only NAME ...]
                         [--mutants NAME ...]   (default: every entry of MUTANTS)
 
-Any Rust build serves ``memory_store`` and ``memory_fact_set`` on ``/mcp``
-(``--features mutants`` adds the deliberate breaks). Each scenario prepares
+Any Rust build serves ``memory_store``, ``memory_fact_set``,
+``memory_set_add`` and ``memory_set_remove`` on ``/mcp`` (``--features
+mutants`` adds the deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
 clones it for each side, starts both daemons, then sends every operation to
@@ -46,7 +47,11 @@ Normalizers (declared, spec "Free for W1 and W2"):
 
 Seed operations may also be ``{"op": "sql"}``: a statement run on the
 template only, for state no tool writes (``entity_kinds``, which only an
-out-of-process backfill fills).
+out-of-process backfill fills). With ``"after_stop": true`` it runs once
+the seeding daemon has stopped, for ``facts`` rows: the Python daemon's
+exit flush rewrites ``facts`` from its resident cortex and would drop rows
+it never loaded (the set-cap scenario's hundred members, with NULL
+embeddings so that no cosine decides the cap).
 
 Exit status: 0 only when no response and no bank state differs.
 Environment: ``ORT_DYLIB_PATH`` and ``PSEUDOLIFE_DAEMON_ONNX_DIR`` for the
@@ -96,7 +101,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-store-no-session",
            # memory_fact_set (spec FS1-FS12): caught by the fact-set-* scenarios.
            "mcp-fact-set-no-supersede", "mcp-fact-set-no-confirm-reinforce",
-           "mcp-fact-set-no-correction-signal", "mcp-fact-set-no-entity-mint"]
+           "mcp-fact-set-no-correction-signal", "mcp-fact-set-no-entity-mint",
+           # memory_set_add / memory_set_remove (spec SA1-SA11): caught by
+           # the set-* scenarios.
+           "mcp-set-add-no-convert", "mcp-set-add-no-cosine-dedup", "mcp-set-remove-noop"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -196,9 +204,17 @@ def tool(name, headers=(), **args) -> dict:
     return {"op": "tool", "name": name, "args": args, "headers": list(headers)}
 
 
-def sql(statement: str) -> dict:
+def set_add(entity, attribute, member, headers=()) -> dict:
+    return tool("memory_set_add", headers, entity=entity, attribute=attribute, member=member)
+
+
+def set_remove(entity, attribute, member, headers=()) -> dict:
+    return tool("memory_set_remove", headers, entity=entity, attribute=attribute, member=member)
+
+
+def sql(statement: str, after_stop: bool = False) -> dict:
     """Seed-only: a statement run on the template (see the module docstring)."""
-    return {"op": "sql", "sql": statement}
+    return {"op": "sql", "sql": statement, "after_stop": after_stop}
 
 
 SLOT_TEXTS = [
@@ -481,6 +497,86 @@ SCENARIOS.update({
             fact("Dev Box", "Users", "bob"),
             # only a removed member: the scalar lands beside the audit row
             fact("dev box", "groups", "ops"),
+        ],
+    },
+})
+
+
+# memory_set_add / memory_set_remove (spec SA1-SA11). Every branch the MCP
+# tools reach. A member's embedding is that of "{entity} {attribute}
+# {member}"; the cosines quoted below were measured with the daemon's
+# Qwen3-Embedding-0.6B (fp32 torch, CPU), all far from the 0.9 dedup line.
+SET_CAP_MEMBERS = (
+    "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm, value, status, "
+    "confidence, asserted_at, last_confirmed, kind, value_norm) "
+    "SELECT 'cap box', 'tags', 'cap-box', 'tags', v, 'current', 0.7, 1000.0 + g, 1000.0 + g, "
+    "'member', v FROM (SELECT g, 'tag-' || lpad(g::text, 3, '0') AS v "
+    "FROM generate_series(0, 99) AS g) AS s ORDER BY g")
+
+SCENARIOS.update({
+    "set-add-branches": {
+        "config": None,
+        "seed": [
+            # a labelled volatile user scalar, and an agent contender beside it
+            fact("Home Lab", "services", "Jellyfin media server", origin="user", confidence=0.9,
+                 freshness_class="volatile", authority="directive",
+                 distortion_tolerance="constraint"),
+            fact("Home Lab", "services", "Pi-hole DNS ad blocker"),
+        ],
+        "ops": [
+            # converts the scalar (dropped class and labels on the log row), adds
+            # the member (cosine 0.71 to the old value) and settles the contender
+            set_add("home lab", "Services", "Pi-hole DNS ad blocker", [sess("sa-a")]),
+            # the old scalar's value is a member now: confirmed by value
+            set_add("Home Lab", "services", "  jellyfin MEDIA server "),
+            # confirmed by cosine (0.99 to the converted member)
+            set_add("Home Lab", "services", "Jellyfin media streaming server"),
+            # added (cosine 0.81 and 0.67 to the two members)
+            set_add("Home Lab", "services", "Nextcloud file sync"),
+            # blank members are refused with a note; the subject is minted all the same
+            set_add("Home Lab", "services", "   "),
+            set_add("Bike Rack", "bikes", ""),
+            # a real subject is minted, a junk-shaped one is not
+            set_add("Garden Shed", "tools", "cordless hedge trimmer"),
+            set_add("236 memories", "tags", "archived snapshot"),
+            # removed by normalised value; then not found, and an empty slot
+            set_remove("HOME LAB", "services", "nextcloud FILE sync "),
+            set_remove("Home Lab", "services", "Nextcloud file sync"),
+            set_remove("nobody", "things", "anything"),
+            # re-added after its removal: a new row beside the removed one
+            set_add("Home Lab", "services", "Nextcloud file sync"),
+        ],
+    },
+    "set-add-aggregate": {
+        "config": None,
+        "seed": [
+            fact("Aquarium", "fish count", "32", origin="user"),
+            fact("Aquarium", "budget", "$1,500"),
+        ],
+        "ops": [
+            # the same total confirms the scalar
+            set_add("aquarium", "Fish Count", " 32 "),
+            # anything else parks a contender; the same value refreshes it, a new
+            # one replaces it
+            set_add("Aquarium", "fish count", "neon tetra"),
+            set_add("Aquarium", "fish count", "Neon Tetra "),
+            set_add("Aquarium", "fish count", "guppy"),
+            set_add("Aquarium", "budget", "new canister filter"),
+        ],
+    },
+    "set-cap": {
+        "config": None,
+        "seed": [sql(SET_CAP_MEMBERS, after_stop=True)],
+        "ops": [
+            # a hundred current members: capped, logged, nothing written but the log
+            set_add("Cap Box", "tags", "volcanic basalt sample"),
+            # dedup runs before the cap
+            set_add("cap box", "tags", "TAG-007"),
+            # a removal makes room (the slot's hundred rows are rewritten)
+            set_remove("cap box", "tags", "tag-000"),
+            set_add("Cap Box", "tags", "volcanic basalt sample"),
+            # cosine 0.66 to the one embedded member: capped again
+            set_add("cap box", "tags", "medieval lute tablature"),
         ],
     },
 })
@@ -828,11 +924,16 @@ def prepare_template(scn: dict, tag: str, root: Path, owned: list[str]) -> str:
         mcp = Mcp(d.port)
         mcp.init()
         for op in scn["seed"]:
+            if op.get("after_stop"):
+                continue
             r = run_op(op, d.port, mcp, dsn)
             if r and r["isError"]:
                 raise RuntimeError(f"seed op failed: {op} -> {r}")
     finally:
         d.stop()
+    for op in scn["seed"]:
+        if op.get("after_stop"):
+            run_op(op, 0, None, dsn)
     return template
 
 
