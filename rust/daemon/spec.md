@@ -679,6 +679,53 @@ order. The `mcp-episode-start-no-anchor`, `mcp-episode-end-pops-root`,
 `mcp-episode-summary-count-order` mutants must be caught. Native tests cover
 the episode primitives and the title name's cleaning against Python's.
 
+### Outcome and reinforcement tools over MCP (2026-10-18)
+
+`outcome_tools.rs` (both tools and their service bodies), reusing the
+episode log and handle resolver of `episodes.rs` and the dereference credit
+of `read/mcp_reads.rs` (`credit_retrieval_use`, now taking its `used_via`);
+registered in `mcp::dispatch::registry`. Python: `mcp_server.py`
+`USED_IDS_CAP` and `_parse_used_ids` (1933-2003), `memory_outcome`
+(2006-2059), `memory_reinforce` (1542-1554); `service.py`
+`_caller_episode_id` (4946-4959), `record_outcome` (4976-5044),
+`_record_signal_used_ids` (5046-5055), `_label_used_entries` (5057-5129),
+`_record_retrieval_use` (6043-6070), `reinforce` (6140-6155);
+`storage/postgres.py` `add_signal` (2012-2023), `set_signal_used_ids`
+(2025-2032), `credit_retrieval_use` (2200-2227), `credit_retrieval_uses`
+(2229-2319), `bump_reinforcements` (4315-4329).
+
+| # | Exact item | Source |
+|---|---|---|
+| OC1 | Bound arguments: `memory_outcome(task, outcome, about=None, detail=None, polarity=None, episode=None, used_ids=None)` (`outcome` one of `success`/`failure`/`correction` and `polarity` `+`/`-`, both refused by the binder otherwise; `used_ids` a list of lax ints or a string) and `memory_reinforce(entry_id)` (a lax int). Neither is read-only (an internal failure carries `mutation: "unknown"`); both run to completion detached from the request, under the service lock (Rust: `Ready.write`). | `mcp_server.py:1542-1554, 2006-2039` |
+| OC2 | `_parse_used_ids` on the bound value: none or a boolean is no ids; a list is its items; a string is stripped (empty is no ids), then JSON-decoded: a list is its items, an integer is one item, and anything else (or invalid JSON) is split as text (`[]() ` stripped from the ends, commas as spaces, split on whitespace). Per item: a boolean is ignored; an integer is itself; a string is stripped of whitespace and then of double and single quotes, skipped when empty, else `int()` of it (sign, leading zeros, single underscores between digits; ASCII digits only, declared) or ignored; anything else is ignored. Ids deduplicate in first-seen order and cap at fifty; the answer is `(ids, ignored, truncated)`. Integers keep their full size. | `mcp_server.py:1933-2003` |
+| OC3 | `record_outcome`: an unknown outcome answers `{"recorded": false, "reason": "unknown_outcome", "outcomes": [...]}` before the lock (unreachable over MCP: the binder refuses it). Under the lock, lessons disabled answers `{"recorded": false, "reason": "lessons disabled"}`. Else the handle resolves as W2.3 (`resume=True`; an empty handle is none), then the session as `_resolve_writer` (an invalid TTL setting is the `invalid_argument` prose). The episode is the resolved root, else the session's open leaf (`open_leaf_for`), else none: without a session there is none, never the global current leaf. | `service.py:4946-4959, 5016-5031` |
+| OC4 | The signal: one `INSERT INTO outcome_signals (task, outcome, about, detail, polarity, origin, episode_id, created_at)` in its own transaction, origin `action`, `created_at` now, `RETURNING id`; a failure is an internal error. The answer is `{"recorded": true, "signal_id", "task", "outcome"}` plus `episode_warning: "unknown or closed episode handle"` for an unresolved non-empty handle. | `service.py:5032-5038`; `storage/postgres.py:2012-2023` |
+| OC5 | With ids: the retrieval log disabled adds `{"used_ids_recorded": 0, "used_ids_reason": "retrieval log disabled"}` and records nothing. Else one statement (`credit_retrieval_uses`, `used_via="outcome"`, the window `memory.retrieval_log.use_window_seconds` back from now): over the sorted distinct ids, every event in the window whose `served` holds an id is a hit; with a session every same-session hit gains a `retrieval_uses` row (`ON CONFLICT DO NOTHING`), without one only the most recent NULL-session hit per id (by `created_at`, then id); per hit id it reports whether an eligible same-session event served it and whether another session's did. An id outside BIGINT fails the statement. | `service.py:5101-5110`; `storage/postgres.py:2229-2319` |
+| OC6 | The report, in the caller's order: credited (an eligible event served it), else served elsewhere (only another session's event did), else unmatched. `used_ids_recorded` (the credited count), then `used_ids_unmatched` and `used_ids_served_elsewhere` when non-empty. The record `{"credited", "unmatched", "served_elsewhere"}` (id lists) is written to the signal row's `used_ids` (`UPDATE outcome_signals SET used_ids`, its own transaction; a failure is counted in `retrieval_log_errors` and logged). A failed statement instead counts one retrieval-log error and reports `{"used_ids_recorded": 0, "used_ids_errors": <ids>}`, recording `{"unchecked": ids, "reason": "label write failed"}`. | `service.py:5046-5055, 5110-5129` |
+| OC7 | The MCP layer after the service: a `reason` of `lessons disabled` adds its `_OUTCOME_NOTES` note; `used_ids_ignored` and `used_ids_truncated` when non-zero; when `used_ids` was given but no id survived, `used_ids_reason` is `no usable entry ids` (something was ignored) or `empty: no label written (used_ids is positive-only)`. | `mcp_server.py:2040-2059, 712-717` |
+| OC8 | `reinforce`: no `entries` row with the id (an id past BIGINT included) answers `{"reinforced": false, "faded": true}`, to which the MCP layer adds the faded note; nothing is written. | `service.py:6143-6145`; `mcp_server.py:1551-1554, 718-720` |
+| OC9 | Else `UPDATE entries SET reinforcements = reinforcements + 1, explicit_reinforcements = explicit_reinforcements + 1` in one statement; the resident entry's `reinforcements` follows. | `service.py:6146-6153`; `storage/postgres.py:4315-4329` |
+| OC10 | Then, with the retrieval log enabled, the dereference credit (`used_via="reinforce"`): the most recent event in the window that served the id under the caller's session (`IS NOT DISTINCT FROM`, so no session matches NULL-session events) gains one `retrieval_uses` row (`ON CONFLICT DO NOTHING`); a failure is counted and logged, never failing the call. The answer is `{"reinforced": true, "entry_id"}`. | `service.py:6043-6070, 6154-6155`; `storage/postgres.py:2200-2227` |
+| OC11 | The session for OC10 is read per call from `meta.active_session_pointer`, as `memory_get`'s credit reads it (the declared retrieval-event session row: the same values). | `divergences.md` |
+| OC12 | Not reproduced: non-ASCII decimal digits in `used_ids` tokens; a session-less credit that Python's startup warmup event would win (both declared in `divergences.md`). | `mcp_server.py:1986-1991` |
+
+`harness/w2e.py live --only outcome-labels outcome-lessons-off outcome-log-off`
+compares every answer and the full bank after each call, on templates whose
+entries and logged searches (top 1 each) the Python daemon wrote: an
+outcome crediting an id two same-session events served, with unmatched,
+served-elsewhere and unknown ids; a JSON-string list with junk tokens and a
+repeat credit; handle attribution without a header with every optional
+field; an unknown handle; a session-less outcome that credits only the most
+recent NULL-session event; an empty list; junk only; an id past BIGINT that
+fails the label statement; fifty-three ids; a reinforce with its credit, an
+unknown id, and a session-less reinforce with nothing to credit; lessons
+disabled (the note, with junk and with ids); and the retrieval log disabled
+(the reason, and a reinforce without a credit). The
+`mcp-outcome-no-used-ids-record`, `mcp-outcome-credit-latest-only`,
+`mcp-outcome-ignore-handle`, `mcp-reinforce-no-explicit` and
+`mcp-reinforce-no-use-credit` mutants must be caught. The `used_ids` parser
+is checked natively against cases whose Python answers were recorded.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

@@ -34,6 +34,7 @@ mod meta_filter;
 mod mutants;
 mod onnx_artifacts;
 mod onnx_runtime;
+mod outcome_tools;
 #[cfg(feature = "principal-harness")]
 mod principal_probe;
 mod principals;
