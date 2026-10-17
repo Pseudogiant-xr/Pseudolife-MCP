@@ -12,6 +12,7 @@ the real ``~/.pseudolife-mcp/locks`` or a live daemon.
 from __future__ import annotations
 
 import _thread
+import contextlib
 import hashlib
 import json
 import os
@@ -26,6 +27,7 @@ import time
 from pathlib import Path
 
 import httpx
+import psycopg
 import pytest
 
 from pseudolife_memory import cli as console
@@ -1797,3 +1799,57 @@ Write-Output ("RESULT=" + ($null -eq $before) + "," + ($null -ne $during) + "," 
     assert line == "RESULT=True,True,True,True", result.stdout + result.stderr
     # The second hold found the lock taken and said so, instead of "started".
     assert "could not take the gpu lease" in result.stdout + result.stderr
+
+
+# --- operator: a COMMIT whose answer was lost ----------------------------------------
+
+class _CommitAnswerLost:
+    """A connection whose COMMIT gets no answer at all: the socket closed
+    after COMMIT was sent, so psycopg raises an OperationalError with no
+    server severity. Errors inside the block pass through untouched."""
+    closed = broken = False
+
+    @contextlib.contextmanager
+    def transaction(self):
+        yield None
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("fails_in_block", [False, True], ids=["at-commit", "before-commit"])
+def test_an_operator_commit_without_an_answer_says_it_may_have_committed(
+        monkeypatch, capsys, fails_in_block):
+    """``lease break`` / ``lease delegate`` cannot know the outcome when
+    COMMIT went out and no answer came back, so they must not claim that
+    nothing was changed (Opus gate review of #676, 2026-10-17). The near-
+    miss: the same error class raised inside the block, before COMMIT,
+    still means nothing was changed."""
+    from pseudolife_memory.storage import coordination
+
+    real = coordination.CoordinationConnection
+
+    def open_lost(dsn):
+        storage = real.__new__(real)
+        storage.dsn, storage._in_txn, storage._conn = dsn, False, _CommitAnswerLost()
+        return storage
+
+    def act(store):
+        with store.storage._txn():
+            if fails_in_block:
+                raise psycopg.OperationalError("server closed the connection unexpectedly")
+        return {"broken": True}
+
+    monkeypatch.setattr(coordination, "CoordinationConnection", open_lost)
+    monkeypatch.setattr(coordination, "CoordinationStore",
+                        lambda storage: type("Store", (), {"storage": storage})())
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", "postgresql://example.invalid/bank")
+    assert lease_cli._operator("break", act) == 1
+    err = capsys.readouterr().err
+    if fails_in_block:
+        assert "break failed (OperationalError); nothing was changed" in err
+    else:
+        assert ("break lost the answer to its COMMIT (OperationalError); it may have been "
+                "committed: run `pseudolife-mcp lease list` before retrying") in err
+        assert "nothing was changed" not in err

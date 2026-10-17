@@ -30,7 +30,25 @@ pub struct Ready {
     /// Complete durable startup inputs for the read/write slices.
     #[allow(dead_code)] // W2-D/E adopt these inputs when their stores land.
     pub startup: Arc<StartupState>,
-    pub cortex: Arc<crate::stores::cortex::CortexStore>,
+    /// The resident cortex; `fact_set.rs` writes it under `write`.
+    pub cortex: crate::stores::cortex::SharedCortex,
+    /// The service hybrid logical clock (`MemoryService._hlc`).
+    pub hlc: std::sync::Mutex<crate::hlc::Clock>,
+}
+
+impl Ready {
+    /// `self._hlc.tick()`, with the clock re-seeded first from the stored
+    /// high-water mark as `_reseed_hlc` seeds it (`service.py:1642-1669`).
+    /// Observing the same mark again is a no-op, and the mark changes only
+    /// when a reseed runs, so this equals observing once per reseed.
+    pub fn tick_hlc(&self) -> (i64, i64) {
+        let high = self.startup.clock_state().hlc_highwater;
+        let mut clock = self.hlc.lock().expect("hlc lock");
+        if high > (0, 0) {
+            clock.observe(high.0, high.1);
+        }
+        clock.tick()
+    }
 }
 
 /// Lock-free view for `/health` (it never waits on init, spec L7).
@@ -54,6 +72,9 @@ struct Inner {
 
 pub struct Service {
     pub writes: crate::store::WriteTasks,
+    /// `MemoryService._persist_errors`: durable saves that failed (served
+    /// by `/health`).
+    pub persist_errors: std::sync::atomic::AtomicU64,
     pub session_dream: Arc<dyn crate::background_sessions::SessionDream>,
     pub release_check: Arc<crate::release_check::ReleaseCheck>,
     pub config: Config,
@@ -83,6 +104,7 @@ impl Service {
             .unwrap_or(4);
         Service {
             writes: crate::store::WriteTasks::default(),
+            persist_errors: std::sync::atomic::AtomicU64::new(0),
             session_dream: Arc::new(crate::background_sessions::DeferredSessionDream),
             release_check: Arc::new(crate::release_check::ReleaseCheck::default()),
             config,
@@ -247,8 +269,9 @@ impl Service {
             )
             .await?;
             let write = crate::episodes::from_startup(&startup)?;
-            let cortex =
+            let mut cortex =
                 crate::stores::cortex::hydrate(storage.client(), embedder.embedding_dim()).await?;
+            cortex.configure(&self.config.memory.cortex, &startup.metadata);
             Ok::<_, anyhow::Error>((bank, startup, write, cortex))
         }
         .await;
@@ -268,7 +291,8 @@ impl Service {
                     write: tokio::sync::Mutex::new(write),
                     writes: self.writes.clone(),
                     startup: Arc::new(startup),
-                    cortex: Arc::new(cortex),
+                    cortex: crate::stores::cortex::SharedCortex::new(cortex),
+                    hlc: std::sync::Mutex::new(crate::hlc::Clock::default()),
                 });
                 inner.ready = Some(ready.clone());
                 // Python publishes every loaded store before the late reseed.

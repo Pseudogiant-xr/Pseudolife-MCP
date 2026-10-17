@@ -45,6 +45,19 @@ from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
 logger = logging.getLogger("pseudolife-mcp")
 
 
+class CommitOutcomeUnknown(psycopg.OperationalError):
+    """COMMIT was sent but the server never gave a definite answer (the
+    connection was lost, or the session ended with a FATAL), so the
+    transaction may or may not have committed. ``__cause__`` is the driver
+    error. A subclass so callers that catch OperationalError keep working."""
+
+
+def _severity(exc: psycopg.Error) -> str | None:
+    """The server's severity for ``exc`` (ERROR, FATAL, PANIC), or None
+    when no server answer came back."""
+    return exc.diag.severity_nonlocalized or exc.diag.severity
+
+
 class CoordinationConnection:
     """Dedicated autocommit connection for the mailbox, never the shared
     service connection.
@@ -105,9 +118,19 @@ class CoordinationConnection:
         conn = self.conn
         outer = not self._in_txn
         self._in_txn = True
+        committing = False
         try:
             with conn.transaction() as tx:
                 yield
+                committing = outer
+        except psycopg.Error as exc:
+            # The block finished and the outermost exit sent COMMIT. Only an
+            # ERROR the server answered with means it rolled back; a FATAL
+            # or a lost connection leaves the outcome unknown.
+            if committing and _severity(exc) != "ERROR":
+                raise CommitOutcomeUnknown(
+                    f"COMMIT got no definite answer ({type(exc).__name__})") from exc
+            raise
         finally:
             if outer:
                 self._in_txn = False
