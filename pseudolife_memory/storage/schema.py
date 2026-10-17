@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 55
+SCHEMA_META_VERSION = 56
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -1597,6 +1597,21 @@ def ensure_schema(conn) -> dict:
         # gate for the rows the single-vote 0.8 reject gate leaves pending.
         for ddl in ("judge2_verdict TEXT", "judge2_confidence REAL",
                     "judge2_model TEXT", "judged2_at DOUBLE PRECISION"):
+            cur.execute(
+                f"ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS {ddl}")
+        # v56 additive (2026-10-17): (4) the LINK judge's second opinion
+        # beside its first, as v36 gave the merge judge (judge2_relation: a
+        # second retype's corrected relation). (5) The merge judge's THIRD
+        # opinion, asked only on a row whose first two disagree on the
+        # merge (the "split" rows), from a third model. NULL = not asked,
+        # exactly the pre-v56 behaviour.
+        for ddl in ("judge2_verdict TEXT", "judge2_confidence REAL",
+                    "judge2_model TEXT", "judged2_at DOUBLE PRECISION",
+                    "judge2_relation TEXT"):
+            cur.execute(
+                f"ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS {ddl}")
+        for ddl in ("judge3_verdict TEXT", "judge3_confidence REAL",
+                    "judge3_model TEXT", "judged3_at DOUBLE PRECISION"):
             cur.execute(
                 f"ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS {ddl}")
         cur.execute(

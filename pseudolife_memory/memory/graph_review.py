@@ -20,7 +20,8 @@ _TEST_PATTERNS = re.compile(
 # holds from FROM to INTO as the judge was shown them. entity_proposals has
 # no relation column: the relation rides in the note, as a ``relate:<rel>``
 # token at the head of the first opinion's note and as the verdict token of
-# the second opinion's ``| 2nd (<model>): <token> <conf>`` tail.
+# the second opinion's ``| 2nd (<model>): <token> <conf>`` tail, and (v56)
+# of the third opinion's ``| 3rd (<model>): <token> <conf>`` tail.
 MERGE_REJECT_CLASS = ("reject", "relate")
 _RELATE_TOKEN = re.compile(r"relate:([a-z0-9-]+)")
 
@@ -49,15 +50,32 @@ def relate_relations(note):
     tail = None
     cut = note.rfind("| 2nd (")
     if cut != -1:
-        tail = re.search(r"\): relate:([a-z0-9-]+) ", note[cut:])
+        # The third opinion's tail (v56) follows the second's: stop there.
+        end = note.find("| 3rd (", cut)
+        tail = re.search(r"\): relate:([a-z0-9-]+) ",
+                         note[cut:end if end != -1 else None])
     return (head.group(1) if head else None, tail.group(1) if tail else None)
 
 
+def third_relate_relation(note):
+    """The relation the third opinion's ``| 3rd (...)`` tail recorded
+    (schema v56), or None."""
+    note = note or ""
+    cut = note.rfind("| 3rd (")
+    if cut == -1:
+        return None
+    tail = re.search(r"\): relate:([a-z0-9-]+) ", note[cut:])
+    return tail.group(1) if tail else None
+
+
 def add_relate_relations(payload, row):
-    """Stamp ``relation`` on a review payload's ``judge`` / ``judge2``
-    blocks whose verdict is ``relate``; every other block is unchanged."""
-    first, second = relate_relations(row.get("judge_note"))
-    for key, relation in (("judge", first), ("judge2", second)):
+    """Stamp ``relation`` on a review payload's ``judge`` / ``judge2`` /
+    ``judge3`` blocks whose verdict is ``relate``; every other block is
+    unchanged."""
+    note = row.get("judge_note")
+    first, second = relate_relations(note)
+    for key, relation in (("judge", first), ("judge2", second),
+                          ("judge3", third_relate_relation(note))):
         block = payload.get(key)
         if block and block.get("verdict") == "relate" and relation:
             block["relation"] = relation
@@ -417,6 +435,12 @@ def proposed_links(proposals):
                             "note": p.get("judge_note"),
                             "model": p.get("judge_model"),
                             "relation": p.get("judge_relation")}
+        # The second opinion (schema v56) beside the first.
+        if p.get("judge2_verdict"):
+            row["judge2"] = {"verdict": p["judge2_verdict"],
+                             "confidence": p.get("judge2_confidence"),
+                             "model": p.get("judge2_model"),
+                             "relation": p.get("judge2_relation")}
         links.append(row)
     return [{"type": "proposed_link", "severity": "info", "action": "review",
              "label": f"{len(links)} proposed cross-session links",
@@ -476,6 +500,11 @@ def merge_candidates(entity_proposals):
             m["judge2"] = {"verdict": p["judge2_verdict"],
                            "confidence": p.get("judge2_confidence"),
                            "model": p.get("judge2_model")}
+        # The tiebreak on a split (schema v56) beside both.
+        if p.get("judge3_verdict"):
+            m["judge3"] = {"verdict": p["judge3_verdict"],
+                           "confidence": p.get("judge3_confidence"),
+                           "model": p.get("judge3_model")}
         add_relate_relations(m, p)
         merges.append(m)
     return [{"type": "merge_candidate", "severity": "warn", "action": "merge",

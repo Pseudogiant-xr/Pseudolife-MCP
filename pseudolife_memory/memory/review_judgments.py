@@ -32,16 +32,26 @@ def fingerprint(value) -> str:
 # fingerprinted over the deep_dream config, so a new knob signed at its
 # unset default would change every fingerprint: the first tick after the
 # deploy would clear every recorded verdict and reopen every automatic
-# reject. Setting one changes the policy, as any other knob does.
-_SIGNED_WHEN_SET = ("judge_second_url",)
+# reject. Setting one changes the policy, as any other knob does. Each
+# maps to the values that mean "unset": its shipped default, and for a
+# string knob the Console's clear (None) too.
+_SIGNED_WHEN_SET = {
+    "judge_second_url": ("", None),
+    # v56 (2026-10-17): the link second opinion and the merge tiebreak.
+    "link_judge_two_vote": ("shadow",),
+    "link_two_vote_min_confidence": (0.7,),
+    "judge_tiebreak_mode": ("shadow",),
+    "judge_third_model": ("", None),
+    "judge_third_url": ("", None),
+}
 
 
 def signed_deep_dream(deep_dream) -> dict:
     """The deep_dream config as review fingerprints sign it."""
     view = dataclasses.asdict(deep_dream)
-    for key in _SIGNED_WHEN_SET:
-        if not view.get(key):
-            view.pop(key, None)
+    for key, unset in _SIGNED_WHEN_SET.items():
+        if key in view and view[key] in unset:
+            view.pop(key)
     return view
 
 
@@ -292,14 +302,17 @@ class ReviewJudgments:
                     self.storage.conn.execute(
                         "UPDATE edge_proposals SET judge_verdict=NULL, "
                         "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                        "judged_at=NULL, judge_relation=NULL "
+                        "judged_at=NULL, judge_relation=NULL, "
+                        "judge2_verdict=NULL, judge2_confidence=NULL, "
+                        "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL "
                         "WHERE id=%s AND status='pending'", (p["id"],))
                 else:
                     self.storage.conn.execute(
                         "UPDATE entity_proposals SET judge_verdict=NULL, "
                         "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
                         "judged_at=NULL, judge2_verdict=NULL, judge2_confidence=NULL, "
-                        "judge2_model=NULL, judged2_at=NULL "
+                        "judge2_model=NULL, judged2_at=NULL, judge3_verdict=NULL, "
+                        "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL "
                         "WHERE id=%s AND status='pending'", (p["id"],))
                 for key in p:
                     if key.startswith("judge"):
@@ -308,18 +321,24 @@ class ReviewJudgments:
             self.storage.set_meta(self.key, memo)
         return self.pending
 
-    def validate(self, batch, *, response_extractor=None, expected_model=None):
-        """Refresh one projection after inference; caller keeps the lock to apply."""
+    def validate(self, batch, *, response_extractor=None, expected_model=None,
+                 opinion="second"):
+        """Refresh one projection after inference; caller keeps the lock to apply.
+        ``opinion`` names a ``response_extractor``'s vote: ``second``, or
+        ``third`` for the merge tiebreak (v56). Each keeps its own response
+        identity, so reconsideration sees either endpoint change models."""
+        if opinion not in ("second", "third"):
+            raise ValueError("unsupported opinion")
         response = response_extractor or self.extractor
         response_policy = fingerprint(judging_policy(
             self.service, response, self.policy()["prompt"])) if response_extractor else self.request_policy
-        record_response_identity(self.service, self.kind + ("_second" if response_extractor else ""),
+        record_response_identity(self.service, self.kind + (f"_{opinion}" if response_extractor else ""),
                                  response_policy, getattr(response, "served_model", None))
+        self.second_policy = self.second_model = None
+        self.third_policy = self.third_model = None
         if response_extractor is not None:
-            self.second_policy = response_policy
-            self.second_model = getattr(response, "served_model", None)
-        else:
-            self.second_policy = self.second_model = None
+            setattr(self, opinion + "_policy", response_policy)
+            setattr(self, opinion + "_model", getattr(response, "served_model", None))
         expected_model = self.current_model if response_extractor is None else expected_model
         if expected_model and getattr(response, "served_model", None) != expected_model:
             self.valid, self.batch = set(), {}
@@ -333,11 +352,12 @@ class ReviewJudgments:
                       if signatures[str(p["id"])] == self.expected.get(str(p["id"]))}
         self.batch = {p["id"]: p for p in live}
 
-    def current(self, proposal, *, first_opinion=False):
+    def current(self, proposal, *, first_opinion=False, second_opinion=False):
         """``first_opinion``: a second vote pairs with the first verdict
         ``proposal`` was read with, so the live row must still carry it.
         The signatures strip every judge* key and cannot see requeue()
-        clear it during the second model call."""
+        clear it during the second model call. ``second_opinion``: a third
+        vote (v56) pairs with the second verdict too."""
         if proposal["id"] not in self.valid:
             return False
         if self.kind == "link":
@@ -348,6 +368,9 @@ class ReviewJudgments:
             return False
         if first_opinion and any(row.get(key) != proposal.get(key)
                                  for key in ("judge_verdict", "judge_confidence")):
+            return False
+        if second_opinion and any(row.get(key) != proposal.get(key)
+                                  for key in ("judge2_verdict", "judge2_confidence")):
             return False
         return True
 
@@ -447,14 +470,17 @@ def requeue(service, queue="all", limit=32):
                             storage.conn.execute(
                                 "UPDATE edge_proposals SET judge_verdict=NULL, "
                                 "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
-                                "judged_at=NULL, judge_relation=NULL "
+                                "judged_at=NULL, judge_relation=NULL, "
+                                "judge2_verdict=NULL, judge2_confidence=NULL, "
+                                "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL "
                                 "WHERE id=%s AND status='pending'", (p["id"],))
                         else:
                             storage.conn.execute(
                                 "UPDATE entity_proposals SET judge_verdict=NULL, "
                                 "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
                                 "judged_at=NULL, judge2_verdict=NULL, judge2_confidence=NULL, "
-                                "judge2_model=NULL, judged2_at=NULL "
+                                "judge2_model=NULL, judged2_at=NULL, judge3_verdict=NULL, "
+                                "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL "
                                 "WHERE id=%s AND status='pending'", (p["id"],))
                         memo.pop(str(p["id"]), None)
                     storage.set_meta(memo_key, memo)

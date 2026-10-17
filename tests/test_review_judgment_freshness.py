@@ -638,3 +638,124 @@ def test_actual_response_rotation_is_not_hidden_by_an_older_probe(svc):
     result = svc.deep_dream_judge_links(ResponseJudge('model-b'))
     assert result['reconsideration']['reopened'] == 1
     assert svc._storage.get_proposal(pid)['status'] == 'pending'
+
+
+# ── v56: the link second opinion follows its first verdict ────────────────
+
+def _link_second_opinion(svc, verdict, c1, c2, *, two_vote='shadow'):
+    from tests.test_queue_judges_service import _SecondLinkJudge, _ServedLinkJudge
+    cfg = svc.config.memory.deep_dream
+    cfg.link_judge_mode = 'auto' if two_vote == 'auto' else 'shadow'
+    cfg.judge_second_opinion = True
+    cfg.link_judge_two_vote = two_vote
+    key = ('alpha-tool', 'uses', 'beta-lib')
+    pid = _link(svc, *key)
+    first = _ServedLinkJudge({key: (verdict, c1, None)})
+    assert svc.deep_dream_judge_links(first)['judged'] == 1
+    second = _SecondLinkJudge({key: (verdict, c2, None)})
+    out = svc.deep_dream_judge_links(first, second_extractor=second)
+    assert out['second_opinions'] == 1
+    return pid, first, second, out
+
+
+def test_requeue_clears_a_link_rows_second_opinion_with_its_first(svc):
+    pid, _first, _second, _out = _link_second_opinion(svc, 'accept', .7, .8)
+    assert _pending_link(svc, pid)['judge2_verdict'] == 'accept'
+    assert svc.review_rejudge('link', limit=1)['requeued'] == 1
+    row = _pending_link(svc, pid)
+    assert row['judge_verdict'] is None and row['judge2_verdict'] is None
+    assert row['judge2_model'] is None and row['judged2_at'] is None
+
+
+def test_a_stale_first_link_verdict_takes_its_second_opinion_with_it(svc):
+    pid, first, _second, _out = _link_second_opinion(svc, 'accept', .7, .8)
+    svc.graph_relate('alpha-tool', 'uses', 'gamma-lib')    # the evidence moves
+    out = svc.deep_dream_judge_links(first)
+    assert out['judged'] == 1
+    assert _pending_link(svc, pid)['judge2_verdict'] is None
+
+
+def test_two_vote_link_reject_records_its_second_judge_and_reopens_clean(svc):
+    from pseudolife_memory.memory.review_decisions import decision_record
+    pid, first, second, out = _link_second_opinion(svc, 'reject', .65, .8,
+                                                   two_vote='auto')
+    assert out['two_vote_applied'] == 1
+    assert svc._storage.get_proposal(pid)['status'] == 'rejected'
+    index = svc._storage.get_meta('automatic_review_decisions_v1')
+    marker = decision_record(svc._storage, index['active'][f'link:{pid}']['decision_id'])
+    assert marker['second_model'] == 'stub-link-judge-2' and marker['second_policy']
+    # A policy change reopens the automatic reject with no opinion left on it.
+    svc.config.memory.deep_dream.link_two_vote_min_confidence = .75
+    again = svc.deep_dream_judge_links(_LinkJudge({}))
+    assert again['reconsideration']['reopened'] == 1
+    row = svc._storage.conn.execute(
+        'SELECT status, judge2_verdict, judge2_model, judge2_relation '
+        'FROM edge_proposals WHERE id=%s', (pid,)).fetchone()
+    assert row[0] == 'pending' and row[1:] == (None, None, None)
+
+
+# ── v56: the merge tiebreak follows the votes it broke ────────────────────
+
+def _tiebroken(svc, *, tiebreak='auto'):
+    from tests.test_queue_judges_service import _split, _ThirdJudge
+    pair = ('chi svc', 'chi harness')
+    pid, first = _split(svc, pair, ('accept', .7), ('reject', .75),
+                        mode='auto-reject', tiebreak=tiebreak)
+    third = _ThirdJudge({pair: ('reject', .85)})
+    out = svc.deep_dream_judge(first, third_extractor=third)
+    assert out['third_opinions'] == 1
+    return pid, first, third, out
+
+
+def test_requeue_clears_a_merge_rows_third_opinion_with_its_first(svc):
+    pid, _first, _third, _out = _tiebroken(svc, tiebreak='shadow')
+    assert svc._storage.get_entity_proposal(pid)['judge3_verdict'] == 'reject'
+    assert svc.review_rejudge('merge', limit=1)['requeued'] == 1
+    row = svc._storage.conn.execute(
+        'SELECT judge_verdict, judge2_verdict, judge3_verdict, judge3_confidence, '
+        'judge3_model, judged3_at FROM entity_proposals WHERE id=%s', (pid,)).fetchone()
+    assert row == (None,) * 6
+
+
+def test_a_stale_first_merge_verdict_takes_its_third_opinion_with_it(svc):
+    pid, first, _third, _out = _tiebroken(svc, tiebreak='shadow')
+    svc.config.memory.deep_dream.judge_snippet_max_chars = 300   # the policy moves
+    svc.deep_dream_judge(first)
+    row = svc._storage.get_entity_proposal(pid)
+    assert row['judge2_verdict'] is None and row['judge3_verdict'] is None
+
+
+def test_third_vote_cannot_pair_with_a_second_verdict_requeued_mid_call(svc):
+    from tests.test_queue_judges_service import _split, _ThirdJudge
+    pair = ('chi svc', 'chi harness')
+    pid, first = _split(svc, pair, ('accept', .7), ('reject', .75), mode='auto-reject')
+
+    class RequeueingJudge(_ThirdJudge):
+        def judge_merges(self, proposals):
+            assert svc.review_rejudge('merge', limit=1)['requeued'] == 1
+            return super().judge_merges(proposals)
+
+    out = svc.deep_dream_judge(first, third_extractor=RequeueingJudge({pair: ('reject', .9)}))
+    assert out['third_opinions'] == 0 and out['tiebreak_applied'] == 0
+    row = svc._storage.get_entity_proposal(pid)
+    assert row['status'] == 'pending' and row['judge3_verdict'] is None
+
+
+def test_tiebreak_reject_records_its_third_judge_and_reopens_clean(svc):
+    from pseudolife_memory.memory.review_decisions import decision_record
+    pid, first, third, out = _tiebroken(svc)
+    assert out['tiebreak_applied'] == 1
+    index = svc._storage.get_meta('automatic_review_decisions_v1')
+    marker = decision_record(svc._storage, index['active'][f'merge:{pid}']['decision_id'])
+    assert marker['third_model'] == 'stub-merge-judge-3' and marker['third_policy']
+    assert marker['second_model'] is None
+    # The third endpoint starts serving another model: the reject reopens.
+    from pseudolife_memory.memory.review_judgments import record_response_identity
+    with svc._lock:
+        record_response_identity(svc, 'merge_third', marker['third_policy'], 'another-model')
+    again = svc.deep_dream_judge(first)
+    assert again['reconsideration']['reopened'] == 1
+    row = svc._storage.conn.execute(
+        'SELECT status, judge2_verdict, judge3_verdict, judge3_model '
+        'FROM entity_proposals WHERE id=%s', (pid,)).fetchone()
+    assert row[0] == 'pending' and row[1:] == (None, None, None)

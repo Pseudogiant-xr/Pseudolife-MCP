@@ -187,6 +187,15 @@ _NULLABLE_COLUMNS = [
     ("coordination_agents", "parent_agent_id"),   # v50: NULL = no parent (yet)
     ("coordination_agents", "parent_thread"),     # v50: NULL = not a subagent
     ("coordination_agents", "name_set_at"),       # v55: NULL = never named
+    ("edge_proposals", "judge2_verdict"),         # v56: the link second opinion
+    ("edge_proposals", "judge2_confidence"),
+    ("edge_proposals", "judge2_model"),
+    ("edge_proposals", "judged2_at"),
+    ("edge_proposals", "judge2_relation"),
+    ("entity_proposals", "judge3_verdict"),       # v56: the merge tiebreak
+    ("entity_proposals", "judge3_confidence"),
+    ("entity_proposals", "judge3_model"),
+    ("entity_proposals", "judged3_at"),
     ("dream_run_slots", "chronicle_event_id"),    # v28: NULL on non-event rows
     ("entries", "authority"),                     # v35: NULL = observation
     ("entries", "distortion_tolerance"),          # v35: NULL = unlabelled

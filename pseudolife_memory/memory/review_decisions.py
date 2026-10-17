@@ -190,6 +190,9 @@ def record_proposal_terminal(review, proposal: dict, *, action: str,
         "served_model": served, "decided_by": current.get("decided_by"),
         "second_policy": getattr(review, "second_policy", None),
         "second_model": getattr(review, "second_model", None),
+        # v56: a merge tiebreak's third vote, reconsidered like the second.
+        "third_policy": getattr(review, "third_policy", None),
+        "third_model": getattr(review, "third_model", None),
         "decided_at": current.get("decided_at"),
         "terminal_status": current.get("status"),
         "pair": list(pair) if pair else None, "dismissed_at": pair_at})
@@ -403,11 +406,13 @@ def _reopen_proposal(storage, marker: dict) -> bool:
     resets = ["status='pending'", "decided_by=NULL", "decided_at=NULL",
               "judge_verdict=NULL", "judge_confidence=NULL", "judge_note=NULL",
               "judge_model=NULL", "judged_at=NULL"]
+    resets.extend(("judge2_verdict=NULL", "judge2_confidence=NULL",
+                   "judge2_model=NULL", "judged2_at=NULL"))
     if table == "edge_proposals":
-        resets.append("judge_relation=NULL")
+        resets.extend(("judge_relation=NULL", "judge2_relation=NULL"))
     else:
-        resets.extend(("judge2_verdict=NULL", "judge2_confidence=NULL",
-                       "judge2_model=NULL", "judged2_at=NULL"))
+        resets.extend(("judge3_verdict=NULL", "judge3_confidence=NULL",
+                       "judge3_model=NULL", "judged3_at=NULL"))
     with storage.transaction():
         current = (storage.get_proposal(marker["proposal_id"])
                    if marker["queue"] == "link"
@@ -487,11 +492,13 @@ def refresh_proposal_terminals(review, *, limit: int) -> dict[str, int]:
         changed = signatures.get(str(projection["id"])) != marker.get("fingerprint")
         if any(model and marker.get("served_model") != model for model in observations):
             changed = True
-        if marker.get("second_policy"):
-            second_model = last_response_identity(
-                review.service, review.kind + "_second", marker["second_policy"])
-            if second_model and second_model != marker.get("second_model"):
-                changed = True
+        for opinion in ("second", "third"):
+            if marker.get(opinion + "_policy"):
+                model = last_response_identity(
+                    review.service, review.kind + "_" + opinion,
+                    marker[opinion + "_policy"])
+                if model and model != marker.get(opinion + "_model"):
+                    changed = True
         if not changed:
             continue
         with storage.transaction():

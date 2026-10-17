@@ -2494,7 +2494,10 @@ def run_sweep_once(service) -> dict:
                    or judged.get("second_opinions")
                    or judged.get("auto_reject_refused_same_model")
                    or judged.get("served_model_mismatch")
-                   or judged.get("second_opinion_error")):
+                   or judged.get("second_opinion_error")
+                   or judged.get("third_opinions")
+                   or judged.get("tiebreak_refused_same_model")
+                   or judged.get("third_opinion_error")):
         logger.info("deep-dream judge: %s", judged)
     if judged is not None:
         extra["deep_judge"] = judged
@@ -2507,9 +2510,15 @@ def run_sweep_once(service) -> dict:
                       ("judge_candidates", "deep_dream_judge_candidates")):
         fn = getattr(service, name, None)
         res = _timed(key, lambda fn=fn: fn() if fn is not None else None)
+        # The link judge's second opinions (v56) judge and apply nothing
+        # on a tick of their own, so they and their refusals count too.
         if res and (res.get("judged") or res.get("applied")
                     or res.get("proposed") or res.get("error")
-                    or (res.get("reconsideration") or {}).get("reopened")):
+                    or (res.get("reconsideration") or {}).get("reopened")
+                    or res.get("second_opinions")
+                    or res.get("two_vote_refused_same_model")
+                    or res.get("served_model_mismatch")
+                    or res.get("second_opinion_error")):
             logger.info("deep-dream %s: %s", key, res)
         if res is not None:
             extra[f"deep_{key}"] = res

@@ -3421,12 +3421,16 @@ class PostgresStorage:
         cols = ("id", "src_id", "relation", "dst_id", "confidence", "similarity",
                 "rationale", "source", "created_at", "status",
                 "judge_verdict", "judge_confidence", "judge_note",
-                "judge_model", "judged_at", "judge_relation")
+                "judge_model", "judged_at", "judge_relation",
+                "judge2_verdict", "judge2_confidence", "judge2_model",
+                "judged2_at", "judge2_relation")
         rows = self.conn.execute(
             "SELECT p.id, p.src_id, p.relation, p.dst_id, p.confidence, p.similarity, "
             "       p.rationale, p.source, p.created_at, p.status, "
             "       p.judge_verdict, p.judge_confidence, p.judge_note, "
             "       p.judge_model, p.judged_at, p.judge_relation, "
+            "       p.judge2_verdict, p.judge2_confidence, p.judge2_model, "
+            "       p.judged2_at, p.judge2_relation, "
             "       s.display, d.display "
             "FROM edge_proposals p "
             "JOIN entities s ON s.id = p.src_id JOIN entities d ON d.id = p.dst_id "
@@ -3434,8 +3438,8 @@ class PostgresStorage:
         ).fetchall()
         out = []
         for r in rows:
-            d = dict(zip(cols, r[:16]))
-            d["src"], d["dst"] = r[16], r[17]
+            d = dict(zip(cols, r[:21]))
+            d["src"], d["dst"] = r[21], r[22]
             out.append(d)
         return out
 
@@ -3453,6 +3457,23 @@ class PostgresStorage:
                 "judged_at=%s, judge_relation=%s "
                 "WHERE id=%s AND status='pending'",
                 (verdict, confidence, note, model, at, relation, proposal_id))
+        return cur.rowcount > 0
+
+    def set_proposal_second_judgment(self, proposal_id: int, *, verdict: str,
+                                     confidence: float | None,
+                                     model: str | None,
+                                     relation: str | None, at: float,
+                                     note: str | None = None) -> bool:
+        """Record the link judge's SECOND opinion on a still-pending row
+        (schema v56); ``note`` replaces the combined judge_note when given.
+        ``relation`` is a second retype's corrected relation."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE edge_proposals SET judge2_verdict=%s, "
+                "judge2_confidence=%s, judge2_model=%s, judged2_at=%s, "
+                "judge2_relation=%s, judge_note = COALESCE(%s, judge_note) "
+                "WHERE id=%s AND status='pending'",
+                (verdict, confidence, model, at, relation, note, proposal_id))
         return cur.rowcount > 0
 
     def record_curation_judgment(self, store: str, a_key: str, b_key: str, *,
@@ -3553,7 +3574,7 @@ class PostgresStorage:
         cols = ("id", "src_id", "relation", "dst_id", "confidence", "similarity",
                 "rationale", "source", "created_at", "status", "decided_by",
                 "decided_at", "judge_verdict", "judge_confidence",
-                "judge_relation")
+                "judge_relation", "judge2_verdict", "judge2_confidence")
         r = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM edge_proposals WHERE id = %s", (proposal_id,)
         ).fetchone()
@@ -3738,13 +3759,15 @@ class PostgresStorage:
                 "status", "created_at", "judge_verdict", "judge_confidence",
                 "judge_note", "judge_model", "judged_at",
                 "judge2_verdict", "judge2_confidence", "judge2_model",
-                "judged2_at")
+                "judged2_at", "judge3_verdict", "judge3_confidence",
+                "judge3_model", "judged3_at")
         rows = self.conn.execute(
             "SELECT p.id, p.kind, p.entity_id, p.into_id, p.score, p.reason, p.status, "
             "       p.created_at, p.judge_verdict, p.judge_confidence, "
             "       p.judge_note, p.judge_model, p.judged_at, "
             "       p.judge2_verdict, p.judge2_confidence, p.judge2_model, "
-            "       p.judged2_at, "
+            "       p.judged2_at, p.judge3_verdict, p.judge3_confidence, "
+            "       p.judge3_model, p.judged3_at, "
             "       e.display, i.display "
             "FROM entity_proposals p "
             "JOIN entities e ON e.id = p.entity_id "
@@ -3753,8 +3776,8 @@ class PostgresStorage:
         ).fetchall()
         out = []
         for r in rows:
-            d = dict(zip(cols, r[:17]))
-            d["entity"], d["into"] = r[17], r[18]
+            d = dict(zip(cols, r[:21]))
+            d["entity"], d["into"] = r[21], r[22]
             out.append(d)
         return out
 
@@ -3769,6 +3792,23 @@ class PostgresStorage:
             cur = self.conn.execute(
                 "UPDATE entity_proposals SET judge2_verdict=%s, "
                 "judge2_confidence=%s, judge2_model=%s, judged2_at=%s, "
+                "judge_note = COALESCE(%s, judge_note) "
+                "WHERE id=%s AND status='pending'",
+                (verdict, confidence, model, at, note, proposal_id))
+        return cur.rowcount > 0
+
+    def set_entity_proposal_third_judgment(self, proposal_id: int, *,
+                                           verdict: str,
+                                           confidence: float | None,
+                                           model: str | None, at: float,
+                                           note: str | None = None) -> bool:
+        """Record the merge judge's THIRD opinion, the tiebreak on a split
+        row (schema v56); ``note`` replaces the combined judge_note when
+        given."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE entity_proposals SET judge3_verdict=%s, "
+                "judge3_confidence=%s, judge3_model=%s, judged3_at=%s, "
                 "judge_note = COALESCE(%s, judge_note) "
                 "WHERE id=%s AND status='pending'",
                 (verdict, confidence, model, at, note, proposal_id))
@@ -3835,7 +3875,8 @@ class PostgresStorage:
     def get_entity_proposal(self, proposal_id: int) -> dict | None:
         cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status",
                 "created_at", "decided_by", "decided_at", "judge_verdict",
-                "judge_confidence", "judge2_verdict", "judge2_confidence")
+                "judge_confidence", "judge2_verdict", "judge2_confidence",
+                "judge3_verdict", "judge3_confidence")
         r = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM entity_proposals WHERE id = %s", (proposal_id,)
         ).fetchone()

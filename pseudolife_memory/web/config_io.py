@@ -329,8 +329,10 @@ KNOBS: list[dict[str, Any]] = [
              "non-low-differential evidence at mean >= "
              "judge_accept_min_confidence (0.6) and only when the two "
              "opinions come from different models (judge_second_model) — "
-             "the only path that ever auto-applies an accept (6/6 on the "
-             "2026-09-02 panel, evals/results/queue-judge-panel-20260902.json"
+             "with the tiebreak's 2-of-3 accept (judge_tiebreak_mode auto), "
+             "the only paths that ever auto-apply an accept (two-vote: 6/6 "
+             "on the 2026-09-02 panel, "
+             "evals/results/queue-judge-panel-20260902.json"
              "). Caveat: both "
              "auto modes are only measured-safe on an Opus-class judge "
              "endpoint (live auto-reject precision 1.000, "
@@ -438,6 +440,62 @@ KNOBS: list[dict[str, Any]] = [
              "(first ladder: retype 0/1). Edges are "
              "reversible (memory_graph_unrelate), which is why this queue "
              "may run auto; measured per arm by evals/queue_judge_ladder.py."},
+    {"path": "memory.deep_dream.link_judge_two_vote", "group": "Deep dream",
+     "label": "Link judge second opinion", "type": "enum",
+     "options": ["off", "shadow", "auto"], "default": "shadow",
+     "restart": False,
+     "help": "A link proposal whose first accept or reject sat below its "
+             "single-vote gate (0.8) is judged once more, in a fresh batch, "
+             "by the merge judge's second model and endpoint (asked only "
+             "while the merge judge's second opinion is on). \"shadow\" "
+             "records the second verdict; \"auto\" additionally applies two "
+             "agreeing accepts or rejects from DIFFERENT models at mean >= "
+             "link_two_vote_min_confidence (0.7), and only while the link "
+             "judge itself is \"auto\". A retype is never applied. Rescoring "
+             "the 2026-09-29 ladder (37 link rows) at that gate gave 7/7 and "
+             "8/8 correct accepts and 6/6 and 7/7 correct rejects per "
+             "replicate; the panel is small, hence shadow."},
+    {"path": "memory.deep_dream.link_two_vote_min_confidence",
+     "group": "Deep dream", "label": "Link two-vote gate", "type": "float",
+     "default": 0.7, "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
+     "help": "Mean confidence two agreeing link votes need before the link "
+             "judge's second opinion applies them (auto only). 0.7 is the "
+             "gate the 2026-09-29 ladder rescoring was measured at."},
+    {"path": "memory.deep_dream.judge_tiebreak_mode", "group": "Deep dream",
+     "label": "Merge judge tiebreak", "type": "enum",
+     "options": ["off", "shadow", "auto"], "default": "shadow",
+     "restart": False,
+     "help": "A merge proposal whose first two opinions disagree (\"split\") "
+             "gets one third opinion from the third model below, only when "
+             "that model is set and is neither the first nor the second. "
+             "\"shadow\" records it; \"auto\" applies a 2-of-3 majority "
+             "through the two-vote gates: two reject-class votes at mean >= "
+             "judge_reject_min_confidence_2 (0.7) reject, and two accepts at "
+             "mean >= judge_accept_min_confidence (0.6) fold only while the "
+             "merge judge is \"auto\" and the row is not low-differential. "
+             "Unmeasured by any ladder yet, hence shadow."},
+    {"path": "memory.deep_dream.judge_third_model", "group": "Deep dream",
+     "label": "Merge judge third model", "type": "string", "default": None,
+     "restart": False,
+     "suggestions": ["claude-fable-5", "claude-opus-5", "claude-sonnet-5",
+                     "gpt-5.6-terra", "gpt-5.6-luna"],
+     "help": "Model for the merge tiebreak's third opinion, served by the "
+             "third endpoint URL when set, else by the first opinion's "
+             "endpoint. Empty = no third opinion is asked. A name equal to "
+             "the first or the second model is skipped with no call, and a "
+             "third vote served by either of them applies nothing."},
+    {"path": "memory.deep_dream.judge_third_url", "group": "Deep dream",
+     "label": "Merge judge third endpoint URL", "type": "string",
+     "format": "url", "default": None, "restart": False,
+     "suggestions": ["http://host.docker.internal:8082/v1",
+                     "http://host.docker.internal:8086/v1"],
+     "help": "OpenAI-compatible /v1 endpoint for the merge tiebreak's third "
+             "opinion, serving the third model above (empty = its launch "
+             "default). Empty = the first opinion's endpoint. Its bearer key "
+             "is env-only: PSEUDOLIFE_JUDGE_THIRD_API_KEY, sent to this "
+             "endpoint and nowhere else. Changing it changes the judging "
+             "policy: recorded verdicts in every review queue are re-judged "
+             "and automatic decisions reconsidered."},
     {"path": "memory.deep_dream.junk_judge_mode", "group": "Deep dream",
      "label": "Junk judge", "type": "enum",
      "options": ["off", "shadow", "auto"], "default": "shadow",
