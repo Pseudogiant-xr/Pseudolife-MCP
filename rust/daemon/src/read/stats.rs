@@ -14,10 +14,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// `CAPACITY_WARNING_FRACTION` (memory/cms.py:162).
 const CAPACITY_WARNING_FRACTION: f64 = 0.8;
 
-/// `_tier_queries`: retrievals that counted access.
-static TIER_QUERIES: AtomicU64 = AtomicU64::new(0);
-/// `_tier_hits`: per band, the retrievals whose candidate pool held it.
-static TIER_HITS: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
+/// `_tier_queries` (retrievals that counted access) and `_tier_hits` (per
+/// band, the retrievals whose candidate pool held it), under one lock so a
+/// snapshot never pairs a query count with hits from a later query.
+struct Tier {
+    queries: u64,
+    hits: BTreeMap<String, u64>,
+}
+static TIER: Mutex<Tier> = Mutex::new(Tier {
+    queries: 0,
+    hits: BTreeMap::new(),
+});
 /// `_true_drops`: capacity evictions out of the last band.
 static TRUE_DROPS: AtomicU64 = AtomicU64::new(0);
 /// `_retrieval_log_errors`: swallowed retrieval-log write failures.
@@ -28,13 +35,13 @@ static SLOT_READ_ERRORS: AtomicU64 = AtomicU64::new(0);
 /// `cms.retrieve` with `count_access` (cms.py:1430-1437): one query, and one
 /// hit for each band that contributed a candidate to the pool.
 pub fn record_query<'a>(hit_bands: impl IntoIterator<Item = &'a str>) {
-    TIER_QUERIES.fetch_add(1, Ordering::Relaxed);
+    let mut tier = TIER.lock().expect("tier lock");
+    tier.queries += 1;
     if crate::mutants::active("mcp-stats-no-tier-hits") {
         return;
     }
-    let mut hits = TIER_HITS.lock().expect("tier hits lock");
     for band in hit_bands {
-        *hits.entry(band.to_string()).or_insert(0) += 1;
+        *tier.hits.entry(band.to_string()).or_insert(0) += 1;
     }
 }
 
@@ -188,15 +195,27 @@ async fn stats(app: &crate::http::App) -> anyhow::Result<Map<String, Value>> {
     let Some(last) = specs.last() else {
         anyhow::bail!("no memory bands configured");
     };
+    // Entries carry their band's name; a repeated custom name seats in the
+    // last band that bears it (startup seating, as Python's name lookup),
+    // so the earlier ones hold none.
     let sizes: Vec<usize> = {
         let bank = ready.bank.read().expect("bank lock");
         specs
             .iter()
-            .map(|s| bank.entries.iter().filter(|e| e.band == s.name).count())
+            .enumerate()
+            .map(|(i, s)| {
+                if specs.iter().rposition(|o| o.name == s.name) == Some(i) {
+                    bank.entries.iter().filter(|e| e.band == s.name).count()
+                } else {
+                    0
+                }
+            })
             .collect()
     };
-    let queries = TIER_QUERIES.load(Ordering::Relaxed);
-    let hits = TIER_HITS.lock().expect("tier hits lock").clone();
+    let (queries, hits) = {
+        let tier = TIER.lock().expect("tier lock");
+        (tier.queries, tier.hits.clone())
+    };
     let interaction_count = ready.write.lock().await.interaction_count;
 
     let mut out = Map::new();
