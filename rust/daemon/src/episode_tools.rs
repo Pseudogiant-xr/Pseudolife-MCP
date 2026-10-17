@@ -190,8 +190,13 @@ async fn episode_end(
 
 fn mcp_memory_session_title<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
     Box::pin(async move {
+        // An empty title is answered before the service initializes, as
+        // `_retitle_session` answers it before taking the lock.
+        let title = py_strip(&text_arg(call.args, "title").unwrap_or_default()).to_string();
+        if title.is_empty() {
+            return Ok(json!({"ok": false, "reason": "empty title"}));
+        }
         let ready = app.service.ensure_init().await.map_err(internal)?;
-        let title = text_arg(call.args, "title").unwrap_or_default();
         let (handle, caller) = (handle_arg(call.args), caller(&call));
         // `_request_principal`: the bearer's principal, None when it names
         // none (the board then names no row).
@@ -213,19 +218,17 @@ fn mcp_memory_session_title<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -
     })
 }
 
-/// `service._retitle_session`: the answer, and on success the session's
-/// keys (its key, then its root id) with the stripped title for the board,
-/// which is named after the write lock is released.
+/// `service._retitle_session` after its empty-title check, with the title
+/// already stripped: the answer, and on success the session's keys (its
+/// key, then its root id) with the title for the board, which is named
+/// after the write lock is released.
 async fn retitle_session(
     ready: &Arc<Ready>,
     caller: &Caller,
     title: &str,
     handle: Option<String>,
 ) -> Result<(Value, Option<(Vec<String>, String)>), ToolError> {
-    let title = py_strip(title).to_string();
-    if title.is_empty() {
-        return Ok((json!({"ok": false, "reason": "empty title"}), None));
-    }
+    let title = title.to_string();
     let mut ws = ready.write.lock().await;
     let client = ready.storage.client();
     let resolved = ws.resolve_handle(client, handle.as_deref()).await;
@@ -367,10 +370,23 @@ fn distribution(counts: Vec<(Value, i64)>, field: &str) -> Value {
     )
 }
 
-fn count(counts: &mut Vec<(Value, i64)>, key: &Value) {
-    match counts.iter_mut().find(|(k, _)| k == key) {
-        Some((_, c)) => *c += 1,
-        None => counts.push((key.clone(), 1)),
+/// Counts in first-seen order, keyed by each value's JSON text (one key per
+/// distinct JSON value), as Python's dict counts them.
+#[derive(Default)]
+struct Counter {
+    rows: Vec<(Value, i64)>,
+    index: std::collections::HashMap<String, usize>,
+}
+
+impl Counter {
+    fn add(&mut self, key: &Value) {
+        match self.index.entry(key.to_string()) {
+            std::collections::hash_map::Entry::Occupied(at) => self.rows[*at.get()].1 += 1,
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(self.rows.len());
+                self.rows.push((key.clone(), 1));
+            }
+        }
     }
 }
 
@@ -396,19 +412,19 @@ fn episode_summary(
         .collect();
     entries.sort_by_key(|&i| rank(&bank.entries[i].band));
     entries.sort_by(|&x, &y| bank.entries[y].ts.total_cmp(&bank.entries[x].ts));
-    let mut tags = Vec::new();
-    let mut sources = Vec::new();
+    let mut tags = Counter::default();
+    let mut sources = Counter::default();
     for &i in &entries {
         for t in &bank.entries[i].tags {
             if t.is_array() || t.is_object() {
                 let kind = if t.is_array() { "list" } else { "dict" };
                 return Err(format!("unhashable type: '{kind}'"));
             }
-            count(&mut tags, t);
+            tags.add(t);
         }
     }
     for &i in &entries {
-        count(&mut sources, &json!(bank.entries[i].source));
+        sources.add(&json!(bank.entries[i].source));
     }
     let mut served: Vec<(usize, Value)> = entries
         .iter()
@@ -426,10 +442,10 @@ fn episode_summary(
     out.insert("found".into(), json!(true));
     out.extend(episode_dict(ep));
     out.insert("entry_count".into(), json!(entries.len()));
-    out.insert("tag_distribution".into(), distribution(tags, "tag"));
+    out.insert("tag_distribution".into(), distribution(tags.rows, "tag"));
     out.insert(
         "source_distribution".into(),
-        distribution(sources, "source"),
+        distribution(sources.rows, "source"),
     );
     out.insert(
         "recent_entries".into(),
