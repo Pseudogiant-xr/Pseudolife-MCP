@@ -302,20 +302,45 @@ def test_rejecting_a_merge_and_keeping_a_junk_entity_snapshot_their_votes(svc):
                   "relation": None}}
 
 
-def test_the_snapshot_carries_the_first_opinions_served_model_from_the_memo(svc):
-    """The first opinion's stamp is the configured name; the model its
-    endpoint reported serving lives in the judging memo
-    (``ReviewJudgments.observed``), and the pair rule needs it."""
+def test_the_snapshot_carries_the_first_opinions_served_model_from_the_row(svc):
+    """The first opinion's stamp (``judge_served_model``, v56) is the model
+    its endpoint reported serving; the pair rule needs it, and the
+    snapshot reads it from the row, not from the judging memo (which every
+    refresh prunes to pending rows)."""
     st = svc._storage
-    frm, into = _two(svc, "memo-a", "memo-b")
+    frm, into = _two(svc, "stamp-a", "stamp-b")
     now = time.time()
     pid = st.insert_entity_proposal("merge", frm, into, 0.9, "write-dedup", now)
     st.set_entity_proposal_judgment(pid, verdict="accept", confidence=0.9,
-                                    note="same", model="m1", at=now)
-    st.set_meta("review_judgments_v1_merge",
-                {str(pid): {"fingerprint": "f", "served_model": "m1-served"}})
+                                    note="same", model="m1", at=now,
+                                    served_model="m1-served")
+    assert st.get_meta("review_judgments_v1_merge") in (None, {})
     assert svc.graph_accept_entity_merge(pid, decided_by="human")["accepted"]
     assert _votes_for(svc, pid)["judge"]["served_model"] == "m1-served"
+
+
+def test_a_decided_link_is_scored_with_the_first_opinions_stamp(svc):
+    """A link row keeps its votes; the report reads the first opinion's
+    served model from the row's stamp, so a two-vote pair from distinct
+    served models counts as what the gate would have applied."""
+    st = svc._storage
+    now = time.time()
+    a, b = _two(svc, "lstamp-a", "lstamp-b")
+    pid = st.insert_proposal(a, "uses", b, 0.6, None, None, "deep-dream", now)
+    st.set_proposal_judgment(pid, verdict="accept", confidence=0.7, note=None,
+                             model="m1", relation=None, at=now,
+                             served_model="m1-served")
+    st.set_proposal_second_judgment(pid, verdict="accept", confidence=0.8,
+                                    note=None, model="m2", relation=None,
+                                    at=now, served_model="m2-served",
+                                    policy="p")
+    assert svc.graph_accept_proposal(pid, decided_by="human")["accepted"]
+    row = {r["id"]: r for r in st.judge_vote_decisions(now - 60)["link"]}[pid]
+    assert row["judge_served_model"] == "m1-served"
+    rep = svc.judge_agreement()
+    assert rep["scored"]["link"] == 1
+    assert rep["link"]["agreed_two"]["accept"]["n"] == 1
+    assert rep["link"]["agreed_two"]["accept"]["agree"] == 1
 
 
 def test_accepting_a_junk_proposal_snapshots_its_vote(svc):

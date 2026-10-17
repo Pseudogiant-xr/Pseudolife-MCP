@@ -1166,8 +1166,9 @@ whose 2-of-3 majority cleared its gate, what the tiebreak would have
 applied. "Distinct models" is the live gates' rule: every vote in the
 pair or majority carries the model its endpoint reported serving, those
 names differ and so do the configured stamps; a vote whose served name
-is unknown (the first opinion's comes from the judging memo, which a
-requeue clears) is never part of a pair, as the live gate refuses it.
+is unknown (a row judged before v56 stamped the first opinion's, or an
+endpoint that named no model) is never part of a pair, as the live gate
+refuses it.
 Two things are not replayed: the `low_differential` exclusion (computed
 from the live graph at judging time), so the accept side counts a few
 rows `auto` would skip; and a decided link row goes with either endpoint

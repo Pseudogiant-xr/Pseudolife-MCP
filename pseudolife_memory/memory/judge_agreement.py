@@ -43,14 +43,14 @@ _MERGE_LABEL = {"accepted": "accept", "rejected": "reject"}
 _LINK_LABEL = {"accepted": "accept", "rejected": "reject", "retyped": "retype"}
 
 
-def proposal_votes(row: dict, first_served: str | None = None) -> dict | None:
+def proposal_votes(row: dict) -> dict | None:
     """The votes an ``entity_proposals`` row carries, as the audit stores
     them: ``{judge: {verdict, confidence, model, [served_model,] relation}}``
     for each opinion with a verdict, or None when none was recorded. The
     relation is the one a relate vote named (read back from the note, as
-    the gates do). The first opinion's served model is not on the row (the
-    judging memo keeps it, ``ReviewJudgments.observed``), so the caller
-    passes it as ``first_served``; the later opinions' are on the row."""
+    the gates do). Each opinion's served model is its
+    ``<opinion>_served_model`` column (the first's since v56); a vote
+    recorded without one carries no ``served_model`` key."""
     rel1, rel2 = relate_relations(row.get("judge_note"))
     rel3 = third_relate_relation(row.get("judge_note"))
     out: dict[str, dict] = {}
@@ -63,8 +63,7 @@ def proposal_votes(row: dict, first_served: str | None = None) -> dict | None:
             "confidence": _conf(row.get(f"{opinion}_confidence")),
             "model": row.get(f"{opinion}_model"),
         }
-        served = (first_served if opinion == "judge"
-                  else row.get(f"{opinion}_served_model"))
+        served = row.get(f"{opinion}_served_model")
         if served:
             vote["served_model"] = served
         vote["relation"] = rel if verdict == "relate" else None
@@ -149,8 +148,6 @@ def compute_judge_agreement(merge_rows: Iterable[dict], link_rows: Iterable[dict
             # a human, an agent or the dream's retype pass, unknowable now.
             unattributed_links += 1
             continue
-        # judge_served_model is the memo's served name for the first
-        # opinion, attached by the storage reader; judge2's is on the row.
         votes = {op: {"verdict": row.get(f"{op}_verdict"),
                       "confidence": _conf(row.get(f"{op}_confidence")),
                       "model": row.get(f"{op}_model"),
