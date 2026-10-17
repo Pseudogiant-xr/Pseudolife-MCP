@@ -343,11 +343,12 @@ def test_an_audit_row_without_votes_is_not_scored(svc):
 
 
 def test_console_and_agent_link_decisions_are_attributed(svc):
-    """The Console routes and ``memory_graph_review`` settled links with no
-    ``decided_by`` until 2026-10-18, so the report could score none of
+    """The Console routes settled links with no ``decided_by`` until
+    2026-10-18 (``memory_graph_review``'s handlers likewise; they pass
+    ``agent`` now, not exercised here), so the report could score none of
     them; a route call now records ``human`` (the Console's default) or
-    the ``agent`` it was told, and an unattributed row is reported, not
-    read as a human's."""
+    the ``decided_by`` it was sent, and a row decided through the old
+    unattributed path is counted, not read as a human's."""
     from pseudolife_memory.web.routes import ConsoleRoutes
     st = svc._storage
     now = time.time()

@@ -220,7 +220,7 @@ def _distinct(first: dict, second: dict) -> bool:
 def _third_distinct(third: dict, first: dict, second: dict) -> bool:
     """The live tiebreak rule (``_tiebreak_refusal``): the third vote's
     served name known and, like its stamp, other than every name the first
-    two votes carry."""
+    two votes carry. The caller checks the earlier served names are known."""
     earlier = {m for v in (first, second)
                for m in (v.get("served_model"), v.get("model")) if m}
     served3 = third.get("served_model")
@@ -252,7 +252,12 @@ def _majority(votes, classes, gates) -> tuple[str, list] | None:
     if any(op not in votes for op in MERGE_OPINIONS):
         return None
     first, second, third = (votes[op] for op in MERGE_OPINIONS)
-    if not (_distinct(first, second) and _third_distinct(third, first, second)):
+    # The live tiebreak (``_tiebreak_refusal``) needs both earlier served
+    # names known and the third other than every name heard; the first two
+    # need not differ from each other (a same-model second vote is still
+    # recorded, and a split row still gets its third).
+    if not (first.get("served_model") and second.get("served_model")
+            and _third_distinct(third, first, second)):
         return None
     for cls in gates:
         side = [votes[op] for op in MERGE_OPINIONS if classes.get(op) == cls]
