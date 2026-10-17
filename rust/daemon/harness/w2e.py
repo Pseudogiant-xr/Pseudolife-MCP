@@ -9,8 +9,8 @@ usage:
                         [--mutants NAME ...]   (default: every entry of MUTANTS)
 
 Any Rust build serves ``memory_store``, ``memory_fact_set``,
-``memory_set_add`` and ``memory_set_remove`` on ``/mcp`` (``--features
-mutants`` adds the deliberate breaks). Each scenario prepares
+``memory_set_add``, ``memory_set_remove`` and ``memory_fact_resolve`` on
+``/mcp`` (``--features mutants`` adds the deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
 clones it for each side, starts both daemons, then sends every operation to
@@ -104,7 +104,11 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-fact-set-no-correction-signal", "mcp-fact-set-no-entity-mint",
            # memory_set_add / memory_set_remove (spec SA1-SA11): caught by
            # the set-* scenarios.
-           "mcp-set-add-no-convert", "mcp-set-add-no-cosine-dedup", "mcp-set-remove-noop"]
+           "mcp-set-add-no-convert", "mcp-set-add-no-cosine-dedup", "mcp-set-remove-noop",
+           # memory_fact_resolve (spec FR1-FR8): caught by the fact-resolve-*
+           # scenarios.
+           "mcp-fact-resolve-no-user-tier", "mcp-fact-resolve-reject-noop",
+           "mcp-fact-resolve-no-set-guard"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -210,6 +214,10 @@ def set_add(entity, attribute, member, headers=()) -> dict:
 
 def set_remove(entity, attribute, member, headers=()) -> dict:
     return tool("memory_set_remove", headers, entity=entity, attribute=attribute, member=member)
+
+
+def resolve(entity, attribute, accept) -> dict:
+    return tool("memory_fact_resolve", entity=entity, attribute=attribute, accept=accept)
 
 
 def sql(statement: str, after_stop: bool = False) -> dict:
@@ -578,6 +586,92 @@ SCENARIOS.update({
             set_add("Cap Box", "tags", "volcanic basalt sample"),
             # cosine 0.66 to the one embedded member: capped again
             set_add("cap box", "tags", "medieval lute tablature"),
+        ],
+    },
+})
+
+
+# memory_fact_resolve (spec FR1-FR8). Every branch service.cortex_resolve
+# reaches over MCP. Contenders are parked through the Python daemon's own
+# tools: memory_fact_set at a weaker tier or below the confidence margin
+# (protect_provenance is on by default), and memory_set_add's aggregate park.
+# A contender with no current scalar exists only once memory_set_add has
+# converted the scalar it was parked against; removing every member then
+# leaves it parked at a slot with neither a current scalar nor members. The
+# member cosines (measured as for the set-* scenarios) sit far below the 0.9
+# dedup line: 0.81 (Home Lab), 0.81 (Garden Shed), 0.80 (Bike Rack).
+SCENARIOS.update({
+    "fact-resolve-scalar": {
+        "config": None,
+        "seed": [
+            # a user scalar; an agent contender, replaced by a second one
+            fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9,
+                 authority="directive"),
+            fact("Payments DB", "host", "10.0.0.6"),
+            fact("Payments DB", "host", "10.0.0.7"),
+            # a user contender parked below the confidence margin
+            fact("Build Server", "hostname", "ci-box-2", origin="user", confidence=0.9),
+            fact("Build Server", "hostname", "ci-box-3", origin="user", confidence=0.5),
+            # an agent contender under an action scalar
+            fact("dev box", "os", "Debian 12", origin="action"),
+            fact("dev box", "os", "Debian 13"),
+        ],
+        "ops": [
+            # nothing parked: no_contender with the raw arguments (the accept
+            # still ticks the clock)
+            resolve("Nobody", "thing", True),
+            # accept: the old current superseded, the contender promoted with
+            # the user tier and the old value as supersedes_value
+            resolve("payments db", "Host", True),
+            # nothing left to resolve, either way
+            resolve("Payments DB", "host", True),
+            resolve("Payments DB", "host", False),
+            # the promoted record holds the slot: a restatement confirms it
+            fact("Payments DB", "host", "10.0.0.7"),
+            # the user tier is already there
+            resolve("Build Server", "hostname", True),
+            # reject: the contender retired, the kept current answered twice
+            resolve("Dev Box", "OS", False),
+            # accept binds laxly: 0 is false
+            resolve("dev box", "os", 0),
+        ],
+    },
+    "fact-resolve-set-slot": {
+        "config": None,
+        "seed": [
+            # a contender parked against a scalar that then converts to a set
+            fact("Home Lab", "services", "Jellyfin media server", origin="user",
+                 confidence=0.9),
+            fact("Home Lab", "services", "Pi-hole DNS ad blocker"),
+            set_add("Home Lab", "services", "Nextcloud file sync"),
+            # the same, then every member removed: no current, no members;
+            # the contender replaced one, so it carries a supersedes_value
+            fact("Garden Shed", "tools", "cordless drill", origin="user", confidence=0.9),
+            fact("Garden Shed", "tools", "hedge trimmer"),
+            fact("Garden Shed", "tools", "leaf blower"),
+            set_add("Garden Shed", "tools", "pressure washer"),
+            set_remove("Garden Shed", "tools", "cordless drill"),
+            set_remove("Garden Shed", "tools", "pressure washer"),
+            fact("Bike Rack", "bikes", "road bike", origin="user", confidence=0.9),
+            fact("Bike Rack", "bikes", "gravel bike"),
+            set_add("Bike Rack", "bikes", "kids balance bike"),
+            set_remove("Bike Rack", "bikes", "road bike"),
+            set_remove("Bike Rack", "bikes", "kids balance bike"),
+            # a member parked by the aggregate guard
+            fact("Aquarium", "fish count", "32", origin="user"),
+            set_add("Aquarium", "fish count", "neon tetra"),
+        ],
+        "ops": [
+            # accept at a slot with current members: slot_holds_set, nothing written
+            resolve("home lab", "Services", True),
+            # reject is allowed there: current null, the retired contender answered
+            resolve("Home Lab", "services", False),
+            # accept with no current: the contender keeps its own supersedes_value
+            resolve("garden shed", "tools", True),
+            # reject with no current
+            resolve("Bike Rack", "bikes", False),
+            # the parked member replaces the protected total
+            resolve("Aquarium", "Fish Count", True),
         ],
     },
 })

@@ -251,6 +251,24 @@ def test_set_scenarios_reach_every_declared_mutant(harness):
     assert "generate_series(0, 99)" in cap_seed[0]["sql"]
 
 
+def test_fact_resolve_scenarios_reach_every_declared_mutant(harness):
+    names = [n for n in harness.SCENARIOS if n.startswith("fact-resolve-")]
+    assert set(names) == {"fact-resolve-scalar", "fact-resolve-set-slot"}
+    resolve_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-fact-resolve-")]
+    assert resolve_mutants == ["mcp-fact-resolve-no-user-tier", "mcp-fact-resolve-reject-noop",
+                               "mcp-fact-resolve-no-set-guard"]
+    ops = [op for n in names for op in harness.SCENARIOS[n]["ops"]]
+    resolves = [op for op in ops if op["name"] == "memory_fact_resolve"]
+    assert all(set(op["args"]) == {"entity", "attribute", "accept"} for op in resolves)
+    # Both answers are exercised at a set slot and at a scalar slot.
+    accepts = {(n, op["args"]["accept"]) for n in names for op in harness.SCENARIOS[n]["ops"]
+               if op["name"] == "memory_fact_resolve"}
+    assert {("fact-resolve-scalar", True), ("fact-resolve-scalar", False),
+            ("fact-resolve-set-slot", True), ("fact-resolve-set-slot", False)} <= accepts
+    # Contenders are parked through the tools, never by SQL.
+    assert all(op["op"] == "tool" for n in names for op in harness.SCENARIOS[n]["seed"])
+
+
 def test_after_stop_sql_runs_once_the_seeding_daemon_has_stopped(harness, monkeypatch, tmp_path):
     events = []
 

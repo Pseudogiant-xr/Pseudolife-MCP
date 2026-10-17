@@ -45,7 +45,6 @@ tool's answers by value.
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_episode_summary` | W2-D | No episode summary service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
-| `memory_fact_resolve` | W2-E | No contender promotion service. |
 | `memory_world_set` | W2-E | No world-fact mutation service. |
 | `memory_outcome` | W2-E | No outcome/lesson mutation service. |
 | `memory_episode_start` | W2-E | Store-driven episode start/resume and attribution exist; the standalone episode API and MCP dispatch remain unwired. |
@@ -67,8 +66,8 @@ tool's answers by value.
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset` and, since their body registrations, `memory_store`,
 `memory_search`, `memory_recent`, `memory_fact_get`, `memory_get`,
-`memory_fact_set`, `memory_set_add`, `memory_set_remove`, `memory_agents` and
-`memory_message`. The two board tools
+`memory_fact_set`, `memory_set_add`, `memory_set_remove`,
+`memory_fact_resolve`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -277,11 +276,11 @@ The remaining write work is deliberately split into subsequent increments:
 
 | Item | Remaining behavior | Owner / reason |
 |---|---|---|
-| Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save) and `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) are served; contender resolution and world facts remain unimplemented; slot extraction here is a pure text operation, not a canonical write | W2-E fact-tool increments (`memory_fact_resolve` reuses `stores/cortex_write.rs`, `stores/cortex_members.rs` and `stores/cortex_sync.rs`) |
+| Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save), `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) and `memory_fact_resolve` (spec FR1-FR8: contender promotion and retirement) are served; world facts remain unimplemented; slot extraction here is a pure text operation, not a canonical write | W2-E world-fact increment (`memory_world_set`) |
 | Outcomes and lessons | Outcome attribution, lesson updates and their persistence remain unimplemented | W2-E outcomes increment |
 | Episode APIs and titles | Standalone episode operations, session-title tools and automatic content titles on idle close remain unimplemented; store-driven open/resume and empty-root reaping share state | W2-E episode increment; content titles also rewrite entry stamps |
 | Autosave and clean-exit flush | Background scheduling exists, but changed-state saving and exit flush remain no-ops; store rows write through, while counters, surprise history and band weights do not survive restart via `weights.pt` | W2-E persistence increment; the Python tensor format and recovery contract need a separate proof |
-| Resident cortex refresh | `memory_fact_set`, `memory_set_add` and `memory_set_remove` update the resident cortex in place (readers take snapshots); the world and lesson stores have no write path, and auto-promotion stays disabled | W2-E world, lesson and auto-promotion increments |
+| Resident cortex refresh | `memory_fact_set`, `memory_set_add`, `memory_set_remove` and `memory_fact_resolve` update the resident cortex in place (readers take snapshots); the world and lesson stores have no write path, and auto-promotion stays disabled | W2-E world, lesson and auto-promotion increments |
 | Frozen store catalog snapshots | Original store recordings predate the catalog instrument's `column_types`, owner/comment and sequence-bound representations; replay retains and reports initialization differences | Historical recordings are retained unchanged; live Python comparison is the current-source proof, not a waiver of frozen replay differences |
 | New reaper recording's startup state | The live fixture inherits Python-seeded relation timestamps, curation metadata and dream acknowledgement state; a fresh Rust-only replay does not reproduce that seed state | W3-H startup/dream integration; the new recording is retained unchanged and its replay differences are reported separately from the matching live reaper behavior |
 | Unicode runtime | Label, meta-filter and slot regexes retain the existing Unicode-14 assigned-character contract; newer assigned characters may follow Rust's newer tables | Explicitly retained runtime substitution; no comparator or frozen expectation is weakened |
@@ -308,6 +307,12 @@ The remaining write work is deliberately split into subsequent increments:
 | `add_member` with `support="assistant"` (the conversion guard and the join park, `cortex.py:891, 995`), a support tier under `protect_provenance` (the conversion tier guard, `:897`) or `dream=True` (the direct-write guard and the `dream:<tier>` mark, `:901, 1029`); provenance on a member write | ported in `memory/cortex.py` | not ported; `stores/cortex_members.rs` takes no such inputs | unreachable over MCP (`service.set_add` passes `origin=None`, no provenance, `dream=False`); the dream and rollback slices (W3-H) add them with their callers |
 | `remove_member` refusal (`member_remove_refused`: an assistant, lower-tier or dream retraction, `cortex.py:1121-1128`) | ported | not ported; the note text is served for parity | unreachable over MCP (`service.set_remove` passes `origin=None`, `dream=False`) |
 | The member dedup cosine at exactly 0.9 | torch float32 `dot` and `norm` (BLAS / vectorized reduction order) | float32 products summed in f64, rounded once to f32 | within one f32 step of torch (measured on 2,000 unit 1024-vectors: at most 4.5e-8 apart); a cosine that close to 0.9 may decide `member_confirmed` against `member_added` differently, as may the ONNX/torch embedding gap (about 1e-6) itself; the harness members sit at least 0.08 from the line |
+
+### memory_fact_resolve (2026-10-17)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `resolve` with `expect_value` (`refused_changed`, `cortex.py:1477-1479`; the service's `contender_changed` answer, `service.py:4513-4516`) or `dream=True` (`refused_direct` against a direct-backed current, `:1480-1485`, the `direct_write` answer, `:4509-4512`, and the `dream:<tier>` mark on the promoted contender) | ported | not ported; `stores/cortex_resolve.rs` takes no such inputs | unreachable over MCP (`service.cortex_resolve` gets `support="user"`, `dream=False`, `expect_value=None`); the consolidation quarantine (W3-H) adds them with its caller |
 
 The WRITE-CMS, WRITE-CORTEX and CONTRADICTION parity rows remain deferred;
 this increment does not claim the complete write boundary or cutover readiness.

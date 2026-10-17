@@ -548,6 +548,47 @@ offline against `add_member` / `remove_member` sequences recorded from
 aggregate, aggregate_newer_wins, cap), including Unicode-digit and
 superscript aggregates and exact slot indexes.
 
+### memory_fact_resolve over MCP (2026-10-17)
+
+`fact_resolve.rs` (the tool and `service.cortex_resolve`),
+`stores/cortex_resolve.rs` (the engine), reusing `fact_set.rs`'s save and
+`stores/cortex_write.rs`'s contender index, tier mark and audit log;
+registered in `mcp::dispatch::registry`. Python: `mcp_server.py:1785-1801`;
+`service.py` `cortex_resolve` (4465-4528); `memory/cortex.py` `resolve`
+(1417-1513).
+
+| # | Exact item | Source |
+|---|---|---|
+| FR1 | Bound arguments: `entity` and `attribute` (required plain strings, passed raw) and `accept` (a required lax boolean: `true`/`false`, 0/1 and the pydantic string spellings). No projection, no `_noted`. Not read-only: an internal failure carries `mutation: "unknown"`. The service gets `support="user"`, `dream=False`, `expect_value=None`. | `mcp_server.py:1785-1801`; `service.py:4465-4467` |
+| FR2 | Under the service lock (Rust: `Ready.write`, held to the answer). The service HLC ticks only when `accept` is true, before the store is consulted, so an accept that finds no contender or a set slot still advances it; a reject never ticks. No embedding, no writer or session, no entity mint, no correction signal. | `service.py:4492-4502` |
+| FR3 | The contender is the first record at the slot (`_norm_key` of both parts) whose status is `contested`, in record order. None: the answer is `{"resolved": false, "reason": "no_contender", "entity", "attribute"}` with the raw arguments; nothing changes. | `cortex.py:1463-1471`; `service.py:4503-4505` |
+| FR4 | An accept at a slot with current members (the scalar the contender was parked against has since converted to a set) is refused before anything is marked: `{"resolved": false, "reason": "slot_holds_set", "entity", "attribute"}`, nothing dirty, nothing saved. A reject there is allowed (FR6). | `cortex.py:1472-1473`; `service.py:4506-4508` |
+| FR5 | Accept: the slot is dirty. The current scalar (the slot's entry in the current index, if any) becomes `superseded` with `superseded_at` = now and `superseded_by_value` = the contender's value. The contender becomes `current`; `_norm_support("user") or "agent"` is marked (a direct tier clears its `dream:<tier>` provenance mark) and unioned into `support`; `last_confirmed` = `tx_time` = now; the fresh HLC stamp replaces its own; `supersedes_value` = the old current's value when there was one, else its own is kept; `asserted_at`, `valid_time`, confidence, labels, writer and session are unchanged. The current index names the contender. Log `resolved/accepted` anchored on the old current, or the contender when there is none (`new_value` the contender's value, `confidence_delta` = round(contender - anchor, 4), writer and session null). The action is `superseded`, naming the contender. | `cortex.py:1486-1508, 227-234, 731-751` |
+| FR6 | Reject: the slot is dirty; the contender becomes `retired` with `superseded_at` = now (`superseded_by_value` untouched); log `resolved/rejected` anchored as FR5. The action is `contested` (as Python names it), naming the current scalar, or the contender when the slot has none (a set slot, or one whose members were all removed). | `cortex.py:1509-1513` |
+| FR7 | After FR5 or FR6: `_save_cortex` (FS11), then the answer `{"resolved": true, "accepted": accept, "action", "current", "record"}`: `current` is `lookup(entity, attribute)` (the slot's current scalar, null for a set slot or an empty one) and `record` the named record, both as `_cortex_record_to_dict` with `age` and the stale policy (FS12). | `service.py:297-344, 4517-4528` |
+| FR8 | `refused_direct` (`dream=True` only) and `refused_changed` (`expect_value` only), with their `direct_write` and `contender_changed` answers, are unreachable over MCP and not ported (`divergences.md`). | `cortex.py:1477-1485`; `service.py:4509-4516` |
+
+`harness/w2e.py live --only fact-resolve-scalar fact-resolve-set-slot`
+compares every answer and the full bank after each call, on templates whose
+contenders are parked through the Python daemon's own tools: no contender
+(an accept, which ticks); an accept over a labelled user scalar of a
+replacement agent contender (supersedes_value the old value), the repeat
+answering no contender either way, and a restatement that confirms the
+promoted record; an accept of a user contender parked below the margin; a
+reject under an action scalar, then a lax `accept: 0`; at a converted set
+slot, the accept refused with `slot_holds_set` and the reject allowed;
+after every member is removed, an accept with no current (the contender
+keeps its own supersedes_value) and a reject with no current; and an
+accept of a member parked by the aggregate guard over the protected total.
+The `mcp-fact-resolve-no-user-tier`, `mcp-fact-resolve-reject-noop` and
+`mcp-fact-resolve-no-set-guard` mutants must be caught. The engine is also
+checked offline against `resolve` sequences recorded from
+`memory/cortex.py` (`harness/gen_w2e_cortex_write_goldens.py`: resolve),
+which each of the three mutants fails, and which checks the HLC stamp an
+accept writes. A tick that writes no stamp (a reject, had it ticked, or an
+accept with nothing to resolve) leaves no trace in a bank or an answer, so
+no mutant targets FR2's reject side.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
