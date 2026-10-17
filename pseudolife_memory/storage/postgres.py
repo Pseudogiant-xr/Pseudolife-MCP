@@ -3976,14 +3976,16 @@ class PostgresStorage:
     def judge_vote_decisions(self, since: float) -> dict[str, list[dict]]:
         """The decided rows the judge-agreement report scores, decided at or
         after ``since``: merge and junk decisions that carry a vote
-        snapshot (older audit rows have none and are skipped), and decided
-        link proposals whose row still holds its votes, served models
-        included (``judge_served_model`` is NULL on a row judged before
+        snapshot (older audit rows have none and are skipped), with both
+        names and the proposal's reason for the accept-side replay, and
+        decided link proposals whose row still holds its votes, served
+        models included (``judge_served_model`` is NULL on a row judged before
         v56 stamped it)."""
-        merge_cols = ("status", "decided_by", "decided_at", "into_display",
-                      "votes")
+        merge_cols = ("status", "decided_by", "decided_at", "entity_display",
+                      "into_display", "reason", "votes")
         merges = [dict(zip(merge_cols, r)) for r in self.conn.execute(
-            "SELECT status, decided_by, decided_at, into_display, votes "
+            "SELECT status, decided_by, decided_at, entity_display, "
+            "       into_display, reason, votes "
             "FROM merge_decisions "
             "WHERE votes IS NOT NULL AND decided_at >= %s "
             "  AND status IN ('accepted', 'rejected')",

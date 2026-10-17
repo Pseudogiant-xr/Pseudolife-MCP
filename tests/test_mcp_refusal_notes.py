@@ -356,8 +356,9 @@ def test_graph_review_batch_results_carry_notes(
     mod = _reload(tmp_path, monkeypatch)
     monkeypatch.setattr(
         mod.service, "graph_accept_proposal",
-        lambda pid: ({"accepted": False, "reason": "not_pending", "id": pid}
-                     if pid == 2 else {"accepted": True, "id": pid}))
+        lambda pid, decided_by=None: (
+            {"accepted": False, "reason": "not_pending", "id": pid}
+            if pid == 2 else {"accepted": True, "id": pid}))
     out = _invoke("memory_graph_review",
                   {"action": "accept_link", "proposal_ids": [1, 2]})
     assert "note" not in out["results"][0]

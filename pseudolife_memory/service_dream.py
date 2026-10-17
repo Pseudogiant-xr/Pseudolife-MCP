@@ -3105,7 +3105,7 @@ class DreamOps:
                 "deep_dream": self.deep_dream_need(),
                 # Review-queue health: pending counts, judge modes and an
                 # attention flag. Also outside the lock; never raises.
-                "review_queue": self.review_queue_health(),
+                "review_queue": self.review_queue_health(include_agreement=True),
                 # Dream-stall signal: null while dreams are served; see
                 # DreamStallTracker. ``last_stall`` is the latest closed one.
                 "stall": stall_state["stall"],
@@ -3714,7 +3714,8 @@ class DreamOps:
         "judges_enabled", "judge_mode", "link_judge_mode", "junk_judge_mode",
         "curation_judge_mode", "candidate_judge_mode")
 
-    def review_queue_health(self) -> dict[str, Any]:
+    def review_queue_health(self, *, include_agreement: bool = False
+                            ) -> dict[str, Any]:
         """Cheap health signal for the review queues, beside
         ``deep_dream_need`` in ``dream_status``: pending rows per queue
         (merge, junk, link), the ages of the oldest pending merge and of the
@@ -3724,6 +3725,9 @@ class DreamOps:
         duplicate listing is not counted: it is recomputed from slot
         embeddings on demand and capped at ``curation_top_k`` per store, so
         it cannot pile up. Never raises: a failure is an ``error`` field.
+        ``include_agreement`` adds the ``judge_agreement`` block
+        (:meth:`judge_agreement`), which scans the window's decisions; the
+        status call asks for it, the session-start briefing does not.
 
         From 2026-09-11 to 09-29 the merge judge sat in "shadow" and the
         pending merge queue grew from ~100 rows to 1,016 while nothing
@@ -3775,7 +3779,8 @@ class DreamOps:
                     "oldest_merge_age_days": age,
                     "oldest_unjudged_merge_age_days": unjudged_age,
                     "judges": judges,
-                    "judge_agreement": self.judge_agreement(),
+                    **({"judge_agreement": self.judge_agreement()}
+                       if include_agreement else {}),
                     "attention": {"needed": bool(reasons), "reasons": reasons}}
         except Exception as exc:  # noqa: BLE001 — a status block never raises
             logger.warning("review-queue health failed: %s", exc)

@@ -93,16 +93,26 @@ def compute_judge_agreement(merge_rows: Iterable[dict], link_rows: Iterable[dict
     dream's retype pass, so they are not labels.
 
     "Distinct models" is the live gates' rule (``_stored_second_distinct``,
-    ``_tiebreak_refusal`` in service_dream): every vote in the pair or
-    majority must carry the model its endpoint reported serving, those
-    served names must differ, and so must the configured stamps; a vote
-    whose served name is unknown is never part of a pair, as the live gate
-    refuses it. Two things are not replayed: the merge ``low_differential``
-    exclusion (computed from the live graph at judging time), so
-    ``agreed_two.accept`` and ``majority_three.accept`` count a few rows
-    ``auto`` would skip; and a decided link row goes with either endpoint
-    when a later merge or junk delete takes it (``edge_proposals`` cascades),
-    so links are scored while both endpoints exist."""
+    ``_tiebreak_refusal`` in service_dream): a pair's two votes carry the
+    models their endpoints reported serving, those served names differ and
+    so do the configured stamps; a majority needs both earlier served names
+    known and a third served by a model other than every name heard (the
+    first two may share one). A vote whose served name is unknown is never
+    part of a pair, as the live gate refuses it; a first vote recorded
+    before v56 stamped it carries none, so its pair is not counted here,
+    though the live gate, reading the judging memo while the row is
+    pending, may still apply it until ``review_rejudge`` re-asks it. The
+    accept side also replays the row-shaped refusals of
+    ``_merge_accept_refusal`` from the audit row: an analyzer-filed
+    proposal, a name veto and a variant conflict are left for a human
+    whatever the votes say, so they are never counted as what ``auto``
+    would have applied. Not replayed: the merge ``low_differential``
+    exclusion and the dismissed-pair check (both computed from the live
+    graph at judging time), so ``agreed_two.accept`` and
+    ``majority_three.accept`` still count a few rows ``auto`` would skip;
+    and a decided link row goes with either endpoint when a later merge or
+    junk delete takes it (``edge_proposals`` cascades), so links are scored
+    while both endpoints exist."""
     labels: Counter[str] = Counter()
     scored = {"merge": 0, "junk": 0, "link": 0}
     unattributed_links = 0
@@ -131,11 +141,12 @@ def compute_judge_agreement(merge_rows: Iterable[dict], link_rows: Iterable[dict
         merge.score(votes, label, _merge_class)
         classes = _classes(votes, MERGE_OPINIONS, _merge_class)
         gates = {"accept": accept_gate, "reject": reject_gate}
+        refused = _accept_refused(row)
         pair = _agreed_pair(votes, classes, gates)
-        if pair:
+        if pair and not (refused and pair[0] == "accept"):
             merge_two.score(pair, label)
         majority = _majority(votes, classes, gates)
-        if majority:
+        if majority and not (refused and majority[0] == "accept"):
             merge_three.score(majority, label)
 
     for row in link_rows:
@@ -225,6 +236,21 @@ def _third_distinct(third: dict, first: dict, second: dict) -> bool:
                 and third.get("model") not in earlier)
 
 
+def _accept_refused(row: dict) -> bool:
+    """Whether the live accept path (``_merge_accept_refusal``) would have
+    left this merge for a human however the votes agreed: an analyzer-filed
+    proposal (``reason``), a name veto or a variant conflict between the
+    two names. All three are on the audit row, so the report replays them;
+    the reject side has no such gate."""
+    from pseudolife_memory.memory.graph_consolidation import variant_conflict
+    from pseudolife_memory.memory.graph_review import merge_veto
+    if str(row.get("reason") or "").startswith("analyzer-duplicate"):
+        return True
+    a = str(row.get("entity_display") or "")
+    b = str(row.get("into_display") or "")
+    return merge_veto(a, b) is not None or variant_conflict(a, b)
+
+
 def _agreed_pair(votes, classes, gates) -> tuple[str, list] | None:
     """``(class, [vote, vote])`` when the first two opinions agree on an
     accept or reject class, come from distinct models and clear the
@@ -243,9 +269,11 @@ def _agreed_pair(votes, classes, gates) -> tuple[str, list] | None:
 
 
 def _majority(votes, classes, gates) -> tuple[str, list] | None:
-    """``(class, majority votes)`` when all three opinions voted from
-    distinct models and two share an accept or reject class at a mean of
-    at least that class's gate; the shape the tiebreak applies."""
+    """``(class, majority votes)`` when all three opinions voted, both
+    earlier served names are known, the third came from a model other
+    than every name heard, and two votes share an accept or reject class
+    at a mean of at least that class's gate; the shape the tiebreak
+    applies."""
     if any(op not in votes for op in MERGE_OPINIONS):
         return None
     first, second, third = (votes[op] for op in MERGE_OPINIONS)
