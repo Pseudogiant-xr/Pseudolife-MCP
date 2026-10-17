@@ -1248,6 +1248,14 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             "coverage": cov}
 
 
+def default_scenarios(mode: str) -> list[str]:
+    """Every scenario, except in golden mode the live-only ones (a derived
+    template or a live_only flag), which refuse a replay."""
+    return [n for n, scn in SCENARIOS.items()
+            if mode != "golden" or not (getattr(scn, "mcp_extra_seed", False)
+                                        or getattr(scn, "live_only", False))]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=("live", "golden", "mutants"))
@@ -1259,8 +1267,7 @@ def main() -> int:
     ap.add_argument("--reuse-template", action="store_true")
     args = ap.parse_args()
     # Live-only scenarios (a derived template) stay out of default replay.
-    names = args.only or [n for n, scn in SCENARIOS.items()
-                          if args.mode != "golden" or not getattr(scn, "mcp_extra_seed", False)]
+    names = args.only or default_scenarios(args.mode)
     template = pg.name("pl_cf_w2d_template")
     if args.mode != "golden" and (not args.reuse_template or template not in pg.existing()):
         seed_template(template, args.paragraphs)

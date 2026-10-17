@@ -92,3 +92,11 @@ def test_stats_scenarios_refuse_golden_replay():
     for name in ("mcp-stats", "mcp-stats-continuum", "mcp-stats-capacity"):
         with pytest.raises(SystemExit, match="live only"):
             w2d_search.run_scenario(w2d_search.SCENARIOS[name](), None, "unused", "golden", False)
+
+
+def test_unfiltered_golden_runs_select_no_live_only_scenario():
+    golden = w2d_search.default_scenarios("golden")
+    assert golden and not any(
+        getattr(w2d_search.SCENARIOS[n], "live_only", False)
+        or getattr(w2d_search.SCENARIOS[n], "mcp_extra_seed", False) for n in golden)
+    assert set(w2d_search.default_scenarios("live")) == set(w2d_search.SCENARIOS)
