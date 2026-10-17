@@ -51,6 +51,7 @@ def register_vector(*args, **kwargs):
 
     return register(*args, **kwargs)
 
+
 # meta row holding the durable record of capacity-eviction true drops:
 # {"count", "last_at", "last_entry_id", "last_source", "last_superseded"}.
 # Written only by ``delete_evicted_entry``, in the same transaction as the

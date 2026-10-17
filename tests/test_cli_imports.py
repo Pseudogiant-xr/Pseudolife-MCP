@@ -14,6 +14,7 @@ _HELP_MODES = (
     "coordination-recovery", "board-audit", "briefing", "doctor", "tunnel",
     "connect", "invite", "test-login", "pair", "expose", "move", "update",
     "backup", "export", "import", "wait-mail", "lease", "maintainer",
+    "delegate-watch", "episode-start",
 )
 _HEAVY = ("torch", "sentence_transformers", "numpy", "transformers", "chromadb", "mcp", "pgvector")
 _PROBE = """
