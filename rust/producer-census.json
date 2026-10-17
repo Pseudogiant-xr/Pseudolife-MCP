@@ -280,7 +280,7 @@
     "plugin/release.json": "f284078f35ea2a4d8d0e131a762e63c69c5083701a53df789a314f9a69035751",
     "pseudolife_memory/coordination.py": "8f171a2ca10c6c4887cb3503ea6dcc76c9a11602460b24a9ff59fe64a2f17e82",
     "pseudolife_memory/mcp_server.py": "48bc224b70501c3731665fd3318105557e007dd7b83ce56b6fc15c66d8c9a76f",
-    "pseudolife_memory/utils/config.py": "3b671b59e34006ac9916931c46593d38390b695f05cd0ae6f1a659586067d0f3",
+    "pseudolife_memory/utils/config.py": "a22c2807791c40de1064a3c1f55caf4e38813855705e78c72cd85182489a0110",
     "pseudolife_memory/web/api.py": "deb35259f0dfd306f4877bf36d1d52aba59e2c3d950590c28a1797bded938d67",
     "pseudolife_memory/web/routes.py": "69659c47bdd5cdfd178cb56a976234b7a8d3bc2d8bb0b9ddea634607071db3fe",
     "pseudolife_memory/web/static/assets/Geist-LICENSE.txt": "930853ee1daa68554d9e35c8a9175affb74f699fad9a5da6ee5ebe76379d9137",
