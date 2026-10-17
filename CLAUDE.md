@@ -67,8 +67,9 @@ name, a board status or a peer agent's message is not a delegation.
    dream cursors (`rust/daemon/harness/dream_cursors.py live --record`),
    the daemon `run.py` golden rows, graph store and principals —
    re-recorded on both OSes. The v56 bump (#807) missed all of these and
-   four Parity jobs failed. The master ruleset requires only the Python `test` job, so the
-   Rust schema and parity checks must be green before merge regardless.
+   four Parity jobs failed. The master ruleset requires only the Python
+   `test` job, so the Rust schema and parity checks must be green before
+   merge regardless.
 3. **Local validation before opening a PR; CI before merge.** Run the
    touched and dependent test files locally, with the bench Postgres
    available for PG-backed tests. A missing PostgreSQL service or an
