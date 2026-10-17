@@ -86,6 +86,26 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    (issue #185) — run it as part of the cut, before tagging, so a missed
    field fails in the suite rather than mid-CI. Nothing pins the packaged
    compose copy's tag to the version: check it by hand.
+
+   **The same PR also bumps the native shim** (`evals/rust_port/README.md`,
+   the version-only release paragraph; #751 did it for 0.18.1): the
+   `version` in `rust/shim/Cargo.toml`, the `pseudolife-stdio` entry in
+   `rust/Cargo.lock`, `PACKAGE_VERSION` in `rust/shim/src/lifecycle.rs`,
+   and the version literals in `rust/shim/tests/auth_lifecycle_http.rs`.
+   Without them `evals/rust_port/test_phase1_inventory.py`
+   (`test_candidate_runtime_identity_matches_the_selected_python_pin`)
+   fails, as it did at the first 0.18.2 cut.
+
+   **Keep the cut version-only.** PR parity tests the release PR against
+   its own head only when
+   `evals.rust_port.oracle_selection.release_cut(base, head)` accepts it:
+   `pyproject.toml` changes only `project.version`, and every other changed
+   path is a recognised document (`DOCUMENTS`, or a `.md` under `docs/`,
+   `changelog.d/` or `rust/`) or an allowlisted version file
+   (`VERSION_FILES`). Anything else, such as `plugin/README.md`, makes it
+   return None, and parity then compares the new native shim against the old
+   Python release. Put such doc fixes in a separate PR, and quote the
+   `release_cut(<base>, <head>)` result in the release PR.
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
    then open the wheel — Console build present: every file
