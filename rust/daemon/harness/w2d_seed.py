@@ -138,8 +138,9 @@ def fact_extra(svc) -> None:
 
 
 # Graduation candidates (storage/postgres.py:2325): how many of the 8 seeded
-# sessions serve each of three entries. 8/8 and 5/8 pass the 0.6 share while
-# exactly 8 sessions searched; 4/8 never does.
+# sessions serve each of three entries. 8/8 passes the 0.6 share throughout;
+# 5/8 passes only while no other session has searched (the scenario's own
+# searches add one); 4/8 never does.
 STATS_SESSIONS = 8
 STATS_SERVED = (8, 5, 4)
 

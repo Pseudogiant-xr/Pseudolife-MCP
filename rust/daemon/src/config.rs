@@ -73,8 +73,8 @@ pub struct StartupBandSpec {
     pub max_entries: usize,
     pub retention_policy: String,
     /// The consolidation cadence (`MIRASBandSpec.update_interval`), served
-    /// by `memory_stats`.
-    pub update_interval: i64,
+    /// by `memory_stats` as configured (Python keeps a custom value raw).
+    pub update_interval: Value,
 }
 
 /// `RerankerConfig` (utils/config.py:208-252), the keys the search reads.
@@ -432,7 +432,7 @@ impl Default for MemoryConfig {
                 name: "flat".into(),
                 max_entries: 5250,
                 retention_policy: "balanced".into(),
-                update_interval: 1_000_000_000,
+                update_interval: Value::from(1_000_000_000),
             }],
             retention_boost: 1.0,
             surprise_threshold: 0.0,
@@ -771,6 +771,31 @@ impl Node {
             Node::Seq(_) => "a list",
             Node::Map(_) => "a mapping",
         }
+    }
+}
+
+/// A YAML value as JSON, for a setting served as configured.
+fn node_json(node: &Node) -> Value {
+    match node {
+        Node::Null => Value::Null,
+        Node::Bool(b) => Value::from(*b),
+        Node::Int(i) => Value::from(*i),
+        Node::Float(f) => Value::from(*f),
+        Node::Str(s) => Value::from(s.as_str()),
+        Node::MergeKey => Value::from("<<"),
+        Node::Seq(items) => Value::Array(items.iter().map(node_json).collect()),
+        Node::Map(entries) => Value::Object(
+            entries
+                .iter()
+                .map(|(k, v)| {
+                    let key = match k {
+                        Node::Str(s) => s.clone(),
+                        other => node_json(other).to_string(),
+                    };
+                    (key, node_json(v))
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -1486,7 +1511,7 @@ fn read_startup_bands(
             name: "flat".into(),
             max_entries: 5250,
             retention_policy: "balanced".into(),
-            update_interval: 1_000_000_000,
+            update_interval: Value::from(1_000_000_000),
         }]);
     }
     if preset != "custom" {
@@ -1497,7 +1522,7 @@ fn read_startup_bands(
                 name: name.clone(),
                 max_entries: [200, 250, 300, 400, 600, 1500, 1000, 1000][i],
                 retention_policy: if i < 5 { "balanced" } else { "surprise_heavy" }.into(),
-                update_interval: [1, 1, 2, 5, 15, 50, 200, 1000][i],
+                update_interval: Value::from([1, 1, 2, 5, 15, 50, 200, 1000][i]),
             })
             .collect());
     }
@@ -1524,7 +1549,8 @@ fn read_startup_bands(
             {
                 return Err(refuse("unknown band retention_policy"));
             }
-            let update_interval = want_int(fields, "update_interval", "memory.miras.bands[]", 1)?;
+            let update_interval =
+                lookup(fields, "update_interval").map_or(Value::from(1), node_json);
             Ok(StartupBandSpec {
                 name: name.clone(),
                 max_entries,
@@ -2079,6 +2105,20 @@ mod tests {
         );
         assert_eq!(c.memory.preset, "custom");
         assert_eq!(c.memory.bands, vec!["a", "band"]);
+        // `update_interval` is served as configured (default 1), never refused.
+        let intervals: Vec<Value> = c
+            .memory
+            .band_specs
+            .iter()
+            .map(|b| b.update_interval.clone())
+            .collect();
+        assert_eq!(intervals, vec![Value::from(1), Value::from(1)]);
+        let c = cfg(
+            "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: a\n        update_interval: '5'\n",
+        );
+        assert_eq!(c.memory.band_specs[0].update_interval, Value::from("5"));
+        let c = cfg("memory:\n  miras:\n    preset: continuum\n");
+        assert_eq!(c.memory.band_specs[7].update_interval, Value::from(1000));
         // A string `bands` is iterated by Python; harmless outside custom.
         assert_eq!(
             cfg("memory:\n  miras:\n    bands: abc\n").memory.bands,

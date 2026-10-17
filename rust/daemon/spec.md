@@ -473,9 +473,11 @@ fact-get template plus `--stats-extra`: retrieval events from eight sessions,
 a community, a graph digest) reads the stats before and after a dense hit, a
 slot query, a miss, a get and a store. `mcp-stats-continuum` reads them
 around two searches with eight bands. `mcp-stats-capacity` sizes one custom
-band one past the bank, so the warning reads "NN% full", then "full", and a
-second store evicts a true drop. The event and drop times are compared by
-presence and type. The `mcp-stats-no-tier-hits`, `mcp-stats-no-graduation`
+band one past the bank, so the warning reads "is NN% full" (the percentage
+rounds, so a large bank reads 100), then "full", and a second store evicts a
+true drop. The event and drop times are compared by presence and type, the
+answers key order and all, and `worst_sources` rows tied on their share in
+either order. The `mcp-stats-no-tier-hits`, `mcp-stats-no-graduation`
 and `mcp-stats-no-capacity-warning` mutants must be caught.
 
 ### Board tools over MCP (2026-10-16)

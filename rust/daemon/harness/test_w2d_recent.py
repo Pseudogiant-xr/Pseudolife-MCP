@@ -23,6 +23,45 @@ def test_recent_cases_are_compared_ordered():
     assert cases and all(c["tool"] == "memory_recent" for c in cases)
 
 
+def stats_answer(body):
+    return {"status": 200, "headers": {"content-type": "mcp"}, "json": body}
+
+
+def test_stats_answers_are_compared_key_order_and_all():
+    a = stats_answer({"bands": [], "total_memories": 1, "read_audit": {"x": 1, "y": 2}})
+    b = stats_answer({"total_memories": 1, "bands": [], "read_audit": {"y": 2, "x": 1}})
+    diffs, _ = w2d_search.compare(a, b, stats=True)
+    assert len(diffs) == 2 and all("key order" in d for d in diffs)
+    diffs, _ = w2d_search.compare(a, b)
+    assert not diffs
+
+
+def test_worst_sources_ties_align_but_a_real_order_difference_shows():
+    def answer(*rows):
+        return stats_answer({"bands": [], "total_memories": 0, "read_audit": {
+            "worst_sources": [{"source": s, "n": n, "never_read": k} for s, n, k in rows]}})
+    py = answer(("a", 5, 5), ("b", 10, 10), ("c", 5, 1))
+    tied = answer(("b", 10, 10), ("a", 5, 5), ("c", 5, 1))
+    diffs, _ = w2d_search.compare(py, tied, stats=True)
+    assert not diffs
+    wrong = answer(("c", 5, 1), ("a", 5, 5), ("b", 10, 10))
+    diffs, _ = w2d_search.compare(py, wrong, stats=True)
+    assert diffs
+
+
+def test_stats_clock_leaves_compare_presence_and_type_only():
+    a = stats_answer({"bands": [], "total_memories": 0,
+                      "retrieval_log": {"last_event_at": 1.5}, "last_true_drop": {"at": 2.5}})
+    b = stats_answer({"bands": [], "total_memories": 0,
+                      "retrieval_log": {"last_event_at": 9.5}, "last_true_drop": {"at": 7.25}})
+    diffs, _ = w2d_search.compare(a, b, stats=True)
+    assert not diffs
+    c = stats_answer({"bands": [], "total_memories": 0,
+                      "retrieval_log": {"last_event_at": None}, "last_true_drop": {"at": 7.25}})
+    diffs, _ = w2d_search.compare(a, c, stats=True)
+    assert diffs
+
+
 def candidates(*items):
     return {"status": 200, "headers": {"content-type": "mcp"},
             "json": {"record": None, "contenders": [], "candidates": [

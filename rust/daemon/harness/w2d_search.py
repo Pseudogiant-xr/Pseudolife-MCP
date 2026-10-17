@@ -734,9 +734,53 @@ def align_ties(py_list: list, rs_list: list, key: str = "id", *, ordered=False) 
     return rs, notes
 
 
-def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False) -> tuple[list[str], list[str]]:
+def key_order(a, b, path="") -> list[str]:
+    """Object key order, which diff() does not see (it walks sorted keys):
+    a memory_stats answer is compared key order and all."""
+    out = []
+    if isinstance(a, dict) and isinstance(b, dict):
+        if list(a) != list(b) and set(a) == set(b):
+            out.append(f"{path}: key order python {list(a)} vs rust {list(b)}")
+        for k in a:
+            if k in b:
+                out += key_order(a[k], b[k], f"{path}.{k}")
+    elif isinstance(a, list) and isinstance(b, list):
+        for i, (x, y) in enumerate(zip(a, b)):
+            out += key_order(x, y, f"{path}[{i}]")
+    return out
+
+
+def align_worst_sources(a: dict, b: dict) -> dict:
+    """read_audit.worst_sources orders by the never-read share with no
+    tie-break (storage/postgres.py:2519-2525), so rows tied on it are in an
+    unspecified order on either daemon: the Rust run is put in the Python
+    order within each tie."""
+    pa = (a.get("read_audit") or {}).get("worst_sources")
+    pb = (b.get("read_audit") or {}).get("worst_sources")
+    if not (isinstance(pa, list) and isinstance(pb, list)) or len(pa) != len(pb):
+        return b
+    share = lambda r: (r.get("never_read"), r.get("n"))  # noqa: E731
+    out = list(pb)
+    i = 0
+    while i < len(out):
+        j = i
+        while j + 1 < len(out) and share(out[j + 1])[0] * share(out[i])[1] \
+                == share(out[i])[0] * share(out[j + 1])[1]:
+            j += 1
+        want = pa[i:j + 1]
+        if sorted(map(json.dumps, want)) == sorted(map(json.dumps, out[i:j + 1])):
+            out[i:j + 1] = want
+        i = j + 1
+    b = dict(b)
+    b["read_audit"] = dict(b["read_audit"], worst_sources=out)
+    return b
+
+
+def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False,
+            stats=False) -> tuple[list[str], list[str]]:
     """``ordered``: the answer's entries are in an exact order with no scores
-    (memory_recent), so no tie alignment applies."""
+    (memory_recent), so no tie alignment applies. ``stats``: a memory_stats
+    answer, compared key order too, with worst_sources ties aligned."""
     diffs, notes = [], []
     if py["status"] != rs["status"]:
         diffs.append(f"status: python {py['status']} vs rust {rs['status']}")
@@ -748,6 +792,9 @@ def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False) -> tuple
     if py["status"] in (400, 500) and isinstance(a.get("error"), str) and isinstance(b.get("error"), str):
         a = dict(a, error="<free>")
         b = dict(b, error="<free>")
+    if stats and isinstance(a, dict) and isinstance(b, dict):
+        diffs += key_order(a, b)
+        b = align_worst_sources(a, b)
     if isinstance(a, dict) and isinstance(b, dict):
         for k in ("entries", "cortex", "candidates"):
             if isinstance(a.get(k), list) and isinstance(b.get(k), list):
@@ -1137,7 +1184,8 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             body = py_r.get("json")
             ordered = isinstance(body, dict) and body.get("query") in ordered_queries
             row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
-                                                 ordered=c.get("tool") == "memory_recent")
+                                                 ordered=c.get("tool") == "memory_recent",
+                                                 stats=c.get("tool") == "memory_stats")
     cov = coverage(py_seen, py_state)
     # The credit under test: the successor entry, labelled by a get (not a
     # stray label the warmup search's pointer session could earn).

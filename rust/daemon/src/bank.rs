@@ -467,13 +467,13 @@ mod startup_tests {
                 name: "hot".into(),
                 max_entries: 1,
                 retention_policy: "balanced".into(),
-                update_interval: 1,
+                update_interval: serde_json::Value::from(1),
             },
             StartupBandSpec {
                 name: "deep".into(),
                 max_entries: 1,
                 retention_policy: "balanced".into(),
-                update_interval: 1,
+                update_interval: serde_json::Value::from(1),
             },
         ];
         let seats = startup_seating(&entries, &bands, 100.0, 0.0);
@@ -645,19 +645,19 @@ mod startup_tests {
                 name: "hot".into(),
                 max_entries: 1,
                 retention_policy: "balanced".into(),
-                update_interval: 1,
+                update_interval: serde_json::Value::from(1),
             },
             StartupBandSpec {
                 name: "deep".into(),
                 max_entries: 1,
                 retention_policy: "balanced".into(),
-                update_interval: 1,
+                update_interval: serde_json::Value::from(1),
             },
             StartupBandSpec {
                 name: "last".into(),
                 max_entries: 0,
                 retention_policy: "balanced".into(),
-                update_interval: 1,
+                update_interval: serde_json::Value::from(1),
             },
         ];
         let (seats, moves) = seating_plan(&rows, &bands, 100.0, 0.0);
@@ -668,7 +668,7 @@ mod startup_tests {
             name: "flat".into(),
             max_entries: 0,
             retention_policy: "balanced".into(),
-            update_interval: 1,
+            update_interval: serde_json::Value::from(1),
         }];
         assert_eq!(
             seating_plan(&rows, &one_band, 100.0, 0.0),
@@ -793,13 +793,13 @@ mod startup_tests {
                     name: "hot".into(),
                     max_entries: 1,
                     retention_policy: "balanced".into(),
-                    update_interval: 1,
+                    update_interval: serde_json::Value::from(1),
                 },
                 StartupBandSpec {
                     name: "deep".into(),
                     max_entries: 1,
                     retention_policy: "balanced".into(),
-                    update_interval: 1,
+                    update_interval: serde_json::Value::from(1),
                 },
             ],
             ..MemoryConfig::default()
