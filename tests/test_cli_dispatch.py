@@ -8,8 +8,13 @@ first-contact papercut (2026-07-16 publish smoke test).
 
 from __future__ import annotations
 
+import ast
+import re
+from pathlib import Path
+
 import pytest
 
+from pseudolife_memory import cli
 from pseudolife_memory.cli import main
 
 
@@ -77,3 +82,53 @@ def test_help_lists_version(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         main()
     assert "--version" in capsys.readouterr().out
+
+
+# Modes main() dispatches but --help deliberately leaves out. `delegate-watch`
+# shipped in v0.18.2 without a help line; this list is the guard against the
+# next one.
+UNLISTED_MODES = {
+    "shim": "the no-argument mode by name",
+    "doorbell-prompt-seen": "the prompt hook the Codex doorbell installs, not run by hand",
+}
+
+
+def dispatched_modes() -> set[str]:
+    """Every mode string main() compares ``mode`` against (flags excluded)."""
+    tree = ast.parse(Path(cli.__file__).read_text(encoding="utf-8"))
+    body = next(node for node in tree.body
+                if isinstance(node, ast.FunctionDef) and node.name == "main")
+    modes: set[str] = set()
+    for node in ast.walk(body):
+        if not (isinstance(node, ast.Compare) and isinstance(node.left, ast.Name)
+                and node.left.id == "mode"):
+            continue
+        for op, right in zip(node.ops, node.comparators):
+            if isinstance(op, ast.Eq) and isinstance(right, ast.Constant):
+                modes.add(right.value)
+            elif isinstance(op, ast.In) and isinstance(right, (ast.Tuple, ast.List, ast.Set)):
+                modes.update(e.value for e in right.elts if isinstance(e, ast.Constant))
+    return {m for m in modes if isinstance(m, str) and not m.startswith("-")}
+
+
+def listed_modes() -> set[str]:
+    """The mode names --help lists: the indented entries under ``modes:``."""
+    section = cli._USAGE.split("\nmodes:\n", 1)[1].split("\n\n", 1)[0]
+    return {m.group(1) for line in section.splitlines()
+            if (m := re.match(r"  ([a-z][a-z-]*)\s", line))}
+
+
+def test_every_dispatched_mode_is_listed_in_help_or_exempt():
+    dispatched = dispatched_modes()
+    assert {"serve", "delegate-watch", "lease"} <= dispatched  # the parser sees the chain
+    assert dispatched - listed_modes() - set(UNLISTED_MODES) == set()
+
+
+def test_every_listed_mode_is_dispatched():
+    assert listed_modes() - dispatched_modes() == set()
+
+
+def test_exempt_modes_stay_dispatched_and_unlisted():
+    for mode in UNLISTED_MODES:
+        assert mode in dispatched_modes()
+        assert mode not in listed_modes()
