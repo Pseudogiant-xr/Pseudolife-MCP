@@ -748,7 +748,10 @@ def test_tiebreak_reject_records_its_third_judge_and_reopens_clean(svc):
     index = svc._storage.get_meta('automatic_review_decisions_v1')
     marker = decision_record(svc._storage, index['active'][f'merge:{pid}']['decision_id'])
     assert marker['third_model'] == 'stub-merge-judge-3' and marker['third_policy']
-    assert marker['second_model'] is None
+    # The second vote was taken on an earlier tick; its endpoint identity
+    # rides the row and lands in the decision beside the third's.
+    assert marker['second_model'] == 'stub-merge-judge-2' and marker['second_policy']
+    assert marker['second_policy'] != marker['third_policy']
     # The third endpoint starts serving another model: the reject reopens.
     from pseudolife_memory.memory.review_judgments import record_response_identity
     with svc._lock:
@@ -759,3 +762,30 @@ def test_tiebreak_reject_records_its_third_judge_and_reopens_clean(svc):
         'SELECT status, judge2_verdict, judge3_verdict, judge3_model '
         'FROM entity_proposals WHERE id=%s', (pid,)).fetchone()
     assert row[0] == 'pending' and row[1:] == (None, None, None)
+
+
+def test_tiebreak_reject_reopens_when_the_second_endpoint_changes_model(svc):
+    from pseudolife_memory.memory.review_decisions import decision_record
+    from pseudolife_memory.memory.review_judgments import record_response_identity
+    pid, first, third, out = _tiebroken(svc)
+    assert out['tiebreak_applied'] == 1
+    index = svc._storage.get_meta('automatic_review_decisions_v1')
+    marker = decision_record(svc._storage, index['active'][f'merge:{pid}']['decision_id'])
+    with svc._lock:
+        record_response_identity(svc, 'merge_second', marker['second_policy'], 'another-model')
+    again = svc.deep_dream_judge(first)
+    assert again['reconsideration']['reopened'] == 1
+    assert svc._storage.get_entity_proposal(pid)['status'] == 'pending'
+
+
+def test_a_stale_first_merge_verdict_clears_the_votes_endpoints(svc):
+    pid, first, _third, _out = _tiebroken(svc, tiebreak='shadow')
+    cols = ('judge2_served_model, judge2_policy, judge3_served_model, judge3_policy')
+    stored = svc._storage.conn.execute(
+        f'SELECT {cols} FROM entity_proposals WHERE id=%s', (pid,)).fetchone()
+    assert stored[0] == 'stub-merge-judge-2' and stored[2] == 'stub-merge-judge-3'
+    assert stored[1] and stored[3]
+    svc.config.memory.deep_dream.judge_snippet_max_chars = 300   # the policy moves
+    svc.deep_dream_judge(first)
+    assert svc._storage.conn.execute(
+        f'SELECT {cols} FROM entity_proposals WHERE id=%s', (pid,)).fetchone() == (None,) * 4

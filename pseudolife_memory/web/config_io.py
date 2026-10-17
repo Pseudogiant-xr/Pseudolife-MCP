@@ -454,13 +454,17 @@ KNOBS: list[dict[str, Any]] = [
              "judge itself is \"auto\". A retype is never applied. Rescoring "
              "the 2026-09-29 ladder (37 link rows) at that gate gave 7/7 and "
              "8/8 correct accepts and 6/6 and 7/7 correct rejects per "
-             "replicate; the panel is small, hence shadow."},
+             "replicate; the panel is small, hence shadow. Promoting it to "
+             "\"auto\" keeps the recorded votes: the next sweep applies the "
+             "gate to them with no model call."},
     {"path": "memory.deep_dream.link_two_vote_min_confidence",
      "group": "Deep dream", "label": "Link two-vote gate", "type": "float",
      "default": 0.7, "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
      "help": "Mean confidence two agreeing link votes need before the link "
              "judge's second opinion applies them (auto only). 0.7 is the "
-             "gate the 2026-09-29 ladder rescoring was measured at."},
+             "gate the 2026-09-29 ladder rescoring was measured at. Changing "
+             "it changes the judging policy: recorded verdicts in every review "
+             "queue are re-judged and automatic decisions reconsidered."},
     {"path": "memory.deep_dream.judge_tiebreak_mode", "group": "Deep dream",
      "label": "Merge judge tiebreak", "type": "enum",
      "options": ["off", "shadow", "auto"], "default": "shadow",
@@ -473,7 +477,9 @@ KNOBS: list[dict[str, Any]] = [
              "judge_reject_min_confidence_2 (0.7) reject, and two accepts at "
              "mean >= judge_accept_min_confidence (0.6) fold only while the "
              "merge judge is \"auto\" and the row is not low-differential. "
-             "Unmeasured by any ladder yet, hence shadow."},
+             "Unmeasured by any ladder yet, hence shadow. Promoting it to "
+             "\"auto\" keeps the recorded votes: the next sweep applies the "
+             "majority to them with no model call."},
     {"path": "memory.deep_dream.judge_third_model", "group": "Deep dream",
      "label": "Merge judge third model", "type": "string", "default": None,
      "restart": False,
@@ -483,7 +489,9 @@ KNOBS: list[dict[str, Any]] = [
              "third endpoint URL when set, else by the first opinion's "
              "endpoint. Empty = no third opinion is asked. A name equal to "
              "the first or the second model is skipped with no call, and a "
-             "third vote served by either of them applies nothing."},
+             "third vote served by either of them applies nothing. Setting it "
+             "changes the judging policy: recorded verdicts in every review "
+             "queue are re-judged and automatic decisions reconsidered."},
     {"path": "memory.deep_dream.judge_third_url", "group": "Deep dream",
      "label": "Merge judge third endpoint URL", "type": "string",
      "format": "url", "default": None, "restart": False,

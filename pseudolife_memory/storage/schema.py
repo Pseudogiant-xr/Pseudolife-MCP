@@ -1604,14 +1604,22 @@ def ensure_schema(conn) -> dict:
         # second retype's corrected relation). (5) The merge judge's THIRD
         # opinion, asked only on a row whose first two disagree on the
         # merge (the "split" rows), from a third model. NULL = not asked,
-        # exactly the pre-v56 behaviour.
+        # exactly the pre-v56 behaviour. Each later vote also keeps the endpoint it came from:
+        # judgeN_served_model is the model the endpoint REPORTED serving
+        # (NULL = it named none; judgeN_model falls back to the configured
+        # name), judgeN_policy the fingerprint of that endpoint's judging
+        # policy, so a decision taken on a later tick from votes recorded
+        # earlier can still be checked and reconsidered against them.
         for ddl in ("judge2_verdict TEXT", "judge2_confidence REAL",
                     "judge2_model TEXT", "judged2_at DOUBLE PRECISION",
-                    "judge2_relation TEXT"):
+                    "judge2_relation TEXT", "judge2_served_model TEXT",
+                    "judge2_policy TEXT"):
             cur.execute(
                 f"ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS {ddl}")
-        for ddl in ("judge3_verdict TEXT", "judge3_confidence REAL",
-                    "judge3_model TEXT", "judged3_at DOUBLE PRECISION"):
+        for ddl in ("judge2_served_model TEXT", "judge2_policy TEXT",
+                    "judge3_verdict TEXT", "judge3_confidence REAL",
+                    "judge3_model TEXT", "judged3_at DOUBLE PRECISION",
+                    "judge3_served_model TEXT", "judge3_policy TEXT"):
             cur.execute(
                 f"ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS {ddl}")
         cur.execute(

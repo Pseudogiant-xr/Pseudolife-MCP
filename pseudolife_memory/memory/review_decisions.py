@@ -408,11 +408,13 @@ def _reopen_proposal(storage, marker: dict) -> bool:
               "judge_model=NULL", "judged_at=NULL"]
     resets.extend(("judge2_verdict=NULL", "judge2_confidence=NULL",
                    "judge2_model=NULL", "judged2_at=NULL"))
+    resets.extend(("judge2_served_model=NULL", "judge2_policy=NULL"))
     if table == "edge_proposals":
         resets.extend(("judge_relation=NULL", "judge2_relation=NULL"))
     else:
         resets.extend(("judge3_verdict=NULL", "judge3_confidence=NULL",
-                       "judge3_model=NULL", "judged3_at=NULL"))
+                       "judge3_model=NULL", "judged3_at=NULL",
+                       "judge3_served_model=NULL", "judge3_policy=NULL"))
     with storage.transaction():
         current = (storage.get_proposal(marker["proposal_id"])
                    if marker["queue"] == "link"

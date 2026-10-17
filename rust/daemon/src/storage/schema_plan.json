@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "source_sha256": "6a0a690c78fc806396b50ff365dec2df4af787959a91177878d80194842d582f",
+  "source_sha256": "c5489b906120e520da2b01fa79d5c908d86fbf5691f55093994de8cfaf5828a0",
   "schema_version": 56,
   "embedding_dimension": 1024,
   "embedding_probe": "SELECT atttypmod FROM pg_attribute WHERE attrelid = to_regclass('public.entries') AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",
@@ -420,6 +420,26 @@
     },
     {
       "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_served_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE edge_proposals ADD COLUMN IF NOT EXISTS judge2_policy TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge2_served_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge2_policy TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
       "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge3_verdict TEXT",
       "parameters": []
     },
@@ -436,6 +456,16 @@
     {
       "op": "sql",
       "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judged3_at DOUBLE PRECISION",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge3_served_model TEXT",
+      "parameters": []
+    },
+    {
+      "op": "sql",
+      "sql": "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS judge3_policy TEXT",
       "parameters": []
     },
     {

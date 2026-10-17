@@ -987,9 +987,25 @@ above, under `auto-reject` or `auto`), and two accepts at mean >=
 that is not `low_differential`, behind the same guards as the two-vote
 accept (dismissed pairs, analyzer rows, name vetoes, snapshot first). Both
 need the third vote served by a model other than both earlier ones
-(`tiebreak_refused_same_model` counts the refusals). `tiebreak_applied`
+(`tiebreak_refused_same_model` counts the refusals), and the second vote's
+served model known: a second endpoint that named no model leaves only the
+configured name, so the tiebreak is refused with the vote kept
+(`tiebreak_refused_unknown_second`; split rows recorded before v56 carry no
+served model and need a `review_rejudge`). Each later vote keeps the
+endpoint it came from on the row (`judgeN_served_model`, `judgeN_policy`),
+and a tiebreak decision records both, so reconsideration reopens it when
+either endpoint later reports serving another model. `tiebreak_applied`
 counts what it applied (also inside `auto_rejected` / `auto_accepted`). No
 ladder has measured the third vote yet, which is why it ships in shadow.
+**Promoting a mode keeps the votes.** `judge_tiebreak_mode` and
+`link_judge_two_vote` decide what applies, not what a judge says, so they
+are not part of the judging policy: switching either from `shadow` to
+`auto` keeps every recorded vote, and the next tick applies the gates to
+those votes with no model call (a row refused once is left for a human).
+Switching back to `shadow` reopens none of the decisions `auto` took.
+Setting `judge_third_model` or `judge_third_url`, or changing
+`link_two_vote_min_confidence`, does change the policy: every queue's
+recorded verdicts are re-judged once and automatic decisions reconsidered.
 "Different" is decided on what the
 endpoints *served*, not the names they were asked for: a CLI shim answers a
 name outside its own family (a `claude-*` name on the Codex shim) with its
@@ -1033,7 +1049,8 @@ and 8/8 correct accepts and 6/6 and 7/7 correct rejects per replicate
 predates the current inflow, hence shadow. The row's `judge2` block (with
 `relation` for a retype) and a `| 2nd (<model>): … [agree|split]` note tail
 show it; the result counts `second_opinions`, `two_vote_applied` and
-`two_vote_refused_same_model`. Then the **junk judge**
+`two_vote_refused_same_model`. While first opinions wait, these second
+opinions take at most half of each batch. Then the **junk judge**
 (`junk_judge_mode`; `auto` deletes only under an evidence bar), the
 **store-curation judge** (`curation_judge_mode`; `auto-distinct` applies
 the reversible dismissal, `auto` also retires — never deletes — a losing

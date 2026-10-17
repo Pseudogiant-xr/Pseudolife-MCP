@@ -3423,14 +3423,16 @@ class PostgresStorage:
                 "judge_verdict", "judge_confidence", "judge_note",
                 "judge_model", "judged_at", "judge_relation",
                 "judge2_verdict", "judge2_confidence", "judge2_model",
-                "judged2_at", "judge2_relation")
+                "judged2_at", "judge2_relation", "judge2_served_model",
+                "judge2_policy")
         rows = self.conn.execute(
             "SELECT p.id, p.src_id, p.relation, p.dst_id, p.confidence, p.similarity, "
             "       p.rationale, p.source, p.created_at, p.status, "
             "       p.judge_verdict, p.judge_confidence, p.judge_note, "
             "       p.judge_model, p.judged_at, p.judge_relation, "
             "       p.judge2_verdict, p.judge2_confidence, p.judge2_model, "
-            "       p.judged2_at, p.judge2_relation, "
+            "       p.judged2_at, p.judge2_relation, p.judge2_served_model, "
+            "       p.judge2_policy, "
             "       s.display, d.display "
             "FROM edge_proposals p "
             "JOIN entities s ON s.id = p.src_id JOIN entities d ON d.id = p.dst_id "
@@ -3438,8 +3440,8 @@ class PostgresStorage:
         ).fetchall()
         out = []
         for r in rows:
-            d = dict(zip(cols, r[:21]))
-            d["src"], d["dst"] = r[21], r[22]
+            d = dict(zip(cols, r[:23]))
+            d["src"], d["dst"] = r[23], r[24]
             out.append(d)
         return out
 
@@ -3463,17 +3465,24 @@ class PostgresStorage:
                                      confidence: float | None,
                                      model: str | None,
                                      relation: str | None, at: float,
-                                     note: str | None = None) -> bool:
+                                     note: str | None = None,
+                                     served_model: str | None = None,
+                                     policy: str | None = None) -> bool:
         """Record the link judge's SECOND opinion on a still-pending row
         (schema v56); ``note`` replaces the combined judge_note when given.
-        ``relation`` is a second retype's corrected relation."""
+        ``relation`` is a second retype's corrected relation;
+        ``served_model`` / ``policy`` the endpoint it came from (kept when
+        a later call passes None, as a refusal note does)."""
         with self._txn():
             cur = self.conn.execute(
                 "UPDATE edge_proposals SET judge2_verdict=%s, "
                 "judge2_confidence=%s, judge2_model=%s, judged2_at=%s, "
-                "judge2_relation=%s, judge_note = COALESCE(%s, judge_note) "
+                "judge2_relation=%s, judge_note = COALESCE(%s, judge_note), "
+                "judge2_served_model = COALESCE(%s, judge2_served_model), "
+                "judge2_policy = COALESCE(%s, judge2_policy) "
                 "WHERE id=%s AND status='pending'",
-                (verdict, confidence, model, at, relation, note, proposal_id))
+                (verdict, confidence, model, at, relation, note, served_model,
+                 policy, proposal_id))
         return cur.rowcount > 0
 
     def record_curation_judgment(self, store: str, a_key: str, b_key: str, *,
@@ -3760,14 +3769,16 @@ class PostgresStorage:
                 "judge_note", "judge_model", "judged_at",
                 "judge2_verdict", "judge2_confidence", "judge2_model",
                 "judged2_at", "judge3_verdict", "judge3_confidence",
-                "judge3_model", "judged3_at")
+                "judge3_model", "judged3_at", "judge2_served_model",
+                "judge2_policy", "judge3_served_model", "judge3_policy")
         rows = self.conn.execute(
             "SELECT p.id, p.kind, p.entity_id, p.into_id, p.score, p.reason, p.status, "
             "       p.created_at, p.judge_verdict, p.judge_confidence, "
             "       p.judge_note, p.judge_model, p.judged_at, "
             "       p.judge2_verdict, p.judge2_confidence, p.judge2_model, "
             "       p.judged2_at, p.judge3_verdict, p.judge3_confidence, "
-            "       p.judge3_model, p.judged3_at, "
+            "       p.judge3_model, p.judged3_at, p.judge2_served_model, "
+            "       p.judge2_policy, p.judge3_served_model, p.judge3_policy, "
             "       e.display, i.display "
             "FROM entity_proposals p "
             "JOIN entities e ON e.id = p.entity_id "
@@ -3776,8 +3787,8 @@ class PostgresStorage:
         ).fetchall()
         out = []
         for r in rows:
-            d = dict(zip(cols, r[:21]))
-            d["entity"], d["into"] = r[21], r[22]
+            d = dict(zip(cols, r[:25]))
+            d["entity"], d["into"] = r[25], r[26]
             out.append(d)
         return out
 
@@ -3785,33 +3796,45 @@ class PostgresStorage:
                                             verdict: str,
                                             confidence: float | None,
                                             model: str | None, at: float,
-                                            note: str | None = None) -> bool:
+                                            note: str | None = None,
+                                            served_model: str | None = None,
+                                            policy: str | None = None) -> bool:
         """Record the merge judge's SECOND opinion on a still-pending row
-        (schema v35); ``note`` replaces the combined judge_note when given."""
+        (schema v35); ``note`` replaces the combined judge_note when given.
+        ``served_model`` / ``policy`` (v56) the endpoint it came from, kept
+        when a later call passes None, as a refusal note does."""
         with self._txn():
             cur = self.conn.execute(
                 "UPDATE entity_proposals SET judge2_verdict=%s, "
                 "judge2_confidence=%s, judge2_model=%s, judged2_at=%s, "
-                "judge_note = COALESCE(%s, judge_note) "
+                "judge_note = COALESCE(%s, judge_note), "
+                "judge2_served_model = COALESCE(%s, judge2_served_model), "
+                "judge2_policy = COALESCE(%s, judge2_policy) "
                 "WHERE id=%s AND status='pending'",
-                (verdict, confidence, model, at, note, proposal_id))
+                (verdict, confidence, model, at, note, served_model, policy,
+                 proposal_id))
         return cur.rowcount > 0
 
     def set_entity_proposal_third_judgment(self, proposal_id: int, *,
                                            verdict: str,
                                            confidence: float | None,
                                            model: str | None, at: float,
-                                           note: str | None = None) -> bool:
+                                           note: str | None = None,
+                                           served_model: str | None = None,
+                                           policy: str | None = None) -> bool:
         """Record the merge judge's THIRD opinion, the tiebreak on a split
         row (schema v56); ``note`` replaces the combined judge_note when
-        given."""
+        given; ``served_model`` / ``policy`` as for the second opinion."""
         with self._txn():
             cur = self.conn.execute(
                 "UPDATE entity_proposals SET judge3_verdict=%s, "
                 "judge3_confidence=%s, judge3_model=%s, judged3_at=%s, "
-                "judge_note = COALESCE(%s, judge_note) "
+                "judge_note = COALESCE(%s, judge_note), "
+                "judge3_served_model = COALESCE(%s, judge3_served_model), "
+                "judge3_policy = COALESCE(%s, judge3_policy) "
                 "WHERE id=%s AND status='pending'",
-                (verdict, confidence, model, at, note, proposal_id))
+                (verdict, confidence, model, at, note, served_model, policy,
+                 proposal_id))
         return cur.rowcount > 0
 
     def entity_fact_rows(self, entity_id: int, canonical: str,

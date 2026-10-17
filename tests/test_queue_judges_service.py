@@ -961,13 +961,14 @@ def test_an_unset_new_judge_knob_leaves_every_review_fingerprint_as_it_was(svc, 
     # Each knob added after 2026-09-14, with a value that is not its unset
     # default (v56 added the last five, 2026-10-17).
     later = {"judge_second_url": "http://127.0.0.1:8086/v1",
-             "link_judge_two_vote": "auto",
              "link_two_vote_min_confidence": 0.75,
-             "judge_tiebreak_mode": "auto",
              "judge_third_model": "claude-fable-5",
              "judge_third_url": "http://127.0.0.1:8087/v1"}
+    # The two v56 MODE knobs decide what applies, not what a judge says:
+    # never signed, in any value, so promoting one keeps the shadow votes.
+    modes = ("link_judge_two_vote", "judge_tiebreak_mode")
     before = {k: v for k, v in dataclasses.asdict(cfg).items()
-              if k not in later}
+              if k not in later and k not in modes}
     assert rj.signed_deep_dream(cfg) == before
     cfg.judge_second_url = None                     # the Console's clear
     cfg.judge_third_model = cfg.judge_third_url = None
@@ -977,10 +978,11 @@ def test_an_unset_new_judge_knob_leaves_every_review_fingerprint_as_it_was(svc, 
         setattr(cfg, key, value)
         assert rj.signed_deep_dream(cfg) == {**before, key: value}, key
         setattr(cfg, key, defaults[key])
-    # "off" is a setting, not the unset default: it is signed.
-    cfg.link_judge_two_vote = "off"
-    assert rj.signed_deep_dream(cfg) == {**before, "link_judge_two_vote": "off"}
-    cfg.link_judge_two_vote = "shadow"
+    for key in modes:
+        for value in ("off", "shadow", "auto"):
+            setattr(cfg, key, value)
+            assert rj.signed_deep_dream(cfg) == before, (key, value)
+        setattr(cfg, key, defaults[key])
     # All three fingerprint sites sign through that view.
     calls = []
     real = rj.signed_deep_dream
@@ -1753,6 +1755,7 @@ def test_judge_third_url_builds_the_third_opinion_on_its_own_endpoint(svc, monke
     ({"judged": 0, "third_opinions": 1}, True),
     ({"judged": 0, "third_opinions": 1, "tiebreak_refused_same_model": 1}, True),
     ({"judged": 0, "third_opinion_error": "HTTP Error 401"}, True),
+    ({"judged": 0, "tiebreak_refused_unknown_second": 1}, True),
 ])
 def test_sweep_logs_the_merge_judge_whenever_it_did_or_refused_something(caplog, result, logged):
     """The sweep logged the merge judge only when it judged or reopened
@@ -1828,3 +1831,113 @@ def test_sweep_logs_the_link_judge_whenever_it_did_or_refused_something(caplog, 
     lines = [r.getMessage() for r in caplog.records
              if r.getMessage().startswith("deep-dream judge_links: {")]
     assert bool(lines) is logged, lines
+
+
+# ── v56 review fixes (2026-10-17) ─────────────────────────────────────────
+
+class _UnservedSecond(_MergeJudge):
+    """A second endpoint whose reply named no model: only the configured
+    name is known, which is not a verified served identity."""
+    model = "stub-merge-judge-2"
+    served_model = None
+
+
+def test_tiebreak_auto_refuses_when_the_second_votes_served_model_is_unknown(svc):
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "auto-reject"
+    cfg.judge_second_opinion = True
+    cfg.judge_tiebreak_mode = "auto"
+    pair = ("chi svc", "chi harness")
+    pid = _propose(svc, *pair)
+    first = _MergeJudge({pair: ("accept", 0.7)})
+    svc.deep_dream_judge(first)
+    svc.deep_dream_judge(first, second_extractor=_UnservedSecond({pair: ("reject", 0.75)}))
+    row = _merge_row(svc, pid)
+    assert row["judge2_verdict"] == "reject" and row["judge2_served_model"] is None
+    out = svc.deep_dream_judge(first, third_extractor=_ThirdJudge({pair: ("reject", 0.9)}))
+    assert out["third_opinions"] == 1 and out["tiebreak_applied"] == 0
+    assert out["tiebreak_refused_unknown_second"] == 1
+    row = _merge_row(svc, pid)
+    assert row["status"] == "pending" and row["judge3_verdict"] == "reject"
+    assert "tiebreak needs the second vote's served model" in row["judge_note"]
+
+
+def test_tiebreak_skips_a_third_model_named_as_the_configured_second(svc):
+    pair = ("chi svc", "chi harness")
+    # Set first: the second model's name is part of the judging policy.
+    svc.config.memory.deep_dream.judge_second_model = "stub-merge-judge-9"
+    pid, first = _split(svc, pair, ("accept", 0.7), ("reject", 0.75), mode="auto-reject")
+
+    class _Named(_MergeJudge):
+        model = "stub-merge-judge-9"
+        served_model = "stub-merge-judge-9"
+
+    third = _Named({pair: ("reject", 0.9)})
+    out = svc.deep_dream_judge(first, third_extractor=third)
+    assert third.calls == 0 and out["third_opinion_skipped_same_model"] == 1
+
+
+def test_promoting_the_tiebreak_applies_recorded_votes_without_asking_again(svc):
+    pair = ("chi svc", "chi harness")
+    pid, first = _split(svc, pair, ("accept", 0.7), ("reject", 0.75),
+                        mode="auto-reject", tiebreak="shadow")
+    third = _ThirdJudge({pair: ("reject", 0.85)})
+    assert svc.deep_dream_judge(first, third_extractor=third)["tiebreak_applied"] == 0
+    calls = (first.calls, third.calls)
+    svc.config.memory.deep_dream.judge_tiebreak_mode = "auto"
+    out = svc.deep_dream_judge(first, third_extractor=third)
+    assert (first.calls, third.calls) == calls                  # nothing re-asked
+    assert out["tiebreak_applied"] == 1 and out["auto_rejected"] == 1
+    row = svc._storage.get_entity_proposal(pid)
+    assert row["status"] == "rejected" and row["decided_by"] == "dream-judge"
+
+
+def test_promoting_the_link_two_vote_applies_recorded_votes_without_asking_again(svc):
+    pids, first, out = _two_vote_links(svc, two_vote="shadow")
+    assert out["two_vote_applied"] == 0
+    seen = list(first.seen)
+    svc.config.memory.deep_dream.link_judge_two_vote = "auto"
+    second = _SecondLinkJudge({})
+    again = svc.deep_dream_judge_links(first, second_extractor=second)
+    assert first.seen == seen and second.seen == []             # nothing re-asked
+    assert again["two_vote_applied"] == 2
+    st = svc._storage
+    assert st.get_proposal(pids[("k-a", "uses", "k-b")])["status"] == "accepted"
+    assert st.get_proposal(pids[("l-a", "part-of", "l-b")])["status"] == "rejected"
+    # The rows below the mean gate or split stay pending, and a later tick
+    # finds nothing new to apply.
+    assert _pending_link(svc, pids[("m-a", "uses", "m-b")]) is not None
+    later = svc.deep_dream_judge_links(first, second_extractor=second)
+    assert later.get("two_vote_applied", 0) == 0
+
+
+def test_link_second_opinions_leave_first_opinions_half_the_batch(svc):
+    cfg = svc.config.memory.deep_dream
+    cfg.link_judge_mode = "shadow"
+    cfg.judge_second_opinion = True
+    cfg.link_judge_two_vote = "shadow"
+    olds = [(f"r{i}-a", "uses", f"r{i}-b") for i in range(4)]
+    for key in olds:
+        _link(svc, *key)
+    first = _ServedLinkJudge({key: ("accept", 0.7, None) for key in olds})
+    assert svc.deep_dream_judge_links(first, limit=4)["judged"] == 4
+    news = [(f"s{i}-a", "uses", f"s{i}-b") for i in range(4)]
+    for key in news:
+        _link(svc, *key)
+    first._v.update({key: ("accept", 0.9, None) for key in news})
+    out = svc.deep_dream_judge_links(first, limit=4,
+                                     second_extractor=_SecondLinkJudge(
+                                         {key: ("accept", 0.8, None) for key in olds}))
+    assert out["second_opinions"] == 2 and out["judged"] == 2
+
+
+def test_promoting_the_link_two_vote_still_refuses_one_model_asked_twice(svc):
+    pids, first, out = _two_vote_links(svc, two_vote="shadow", second="same")
+    svc.config.memory.deep_dream.link_judge_two_vote = "auto"
+    again = svc.deep_dream_judge_links(first)
+    assert again["two_vote_applied"] == 0 and again["two_vote_refused_same_model"] == 2
+    assert "two-vote apply needs a distinct second model" in \
+        _pending_link(svc, pids[("k-a", "uses", "k-b")])["judge_note"]
+    # Refused once, then left for a human: no refusal on every tick.
+    later = svc.deep_dream_judge_links(first)
+    assert later.get("two_vote_refused_same_model", 0) == 0

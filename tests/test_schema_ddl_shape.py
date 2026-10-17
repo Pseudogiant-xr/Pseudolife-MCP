@@ -192,10 +192,16 @@ _NULLABLE_COLUMNS = [
     ("edge_proposals", "judge2_model"),
     ("edge_proposals", "judged2_at"),
     ("edge_proposals", "judge2_relation"),
+    ("edge_proposals", "judge2_served_model"),    # v56: NULL = not reported
+    ("edge_proposals", "judge2_policy"),
+    ("entity_proposals", "judge2_served_model"),
+    ("entity_proposals", "judge2_policy"),
     ("entity_proposals", "judge3_verdict"),       # v56: the merge tiebreak
     ("entity_proposals", "judge3_confidence"),
     ("entity_proposals", "judge3_model"),
     ("entity_proposals", "judged3_at"),
+    ("entity_proposals", "judge3_served_model"),
+    ("entity_proposals", "judge3_policy"),
     ("dream_run_slots", "chronicle_event_id"),    # v28: NULL on non-event rows
     ("entries", "authority"),                     # v35: NULL = observation
     ("entries", "distortion_tolerance"),          # v35: NULL = unlabelled

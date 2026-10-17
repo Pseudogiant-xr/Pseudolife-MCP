@@ -2497,6 +2497,7 @@ def run_sweep_once(service) -> dict:
                    or judged.get("second_opinion_error")
                    or judged.get("third_opinions")
                    or judged.get("tiebreak_refused_same_model")
+                   or judged.get("tiebreak_refused_unknown_second")
                    or judged.get("third_opinion_error")):
         logger.info("deep-dream judge: %s", judged)
     if judged is not None:

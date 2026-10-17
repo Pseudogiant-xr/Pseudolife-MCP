@@ -37,13 +37,19 @@ def fingerprint(value) -> str:
 # string knob the Console's clear (None) too.
 _SIGNED_WHEN_SET = {
     "judge_second_url": ("", None),
-    # v56 (2026-10-17): the link second opinion and the merge tiebreak.
-    "link_judge_two_vote": ("shadow",),
+    # v56 (2026-10-17): the link two-vote gate and the merge tiebreak's
+    # third model and endpoint.
     "link_two_vote_min_confidence": (0.7,),
-    "judge_tiebreak_mode": ("shadow",),
     "judge_third_model": ("", None),
     "judge_third_url": ("", None),
 }
+# v56 MODE knobs, never signed in any value. A mode decides what applies,
+# not what a judge says: signing one would make promoting it from shadow to
+# auto clear every queue's recorded votes, the very shadow evidence the
+# promotion rests on. The judge re-applies its gates to the recorded votes
+# instead. The flip side: going back from auto to shadow reopens none of
+# the decisions auto took.
+_NEVER_SIGNED = ("link_judge_two_vote", "judge_tiebreak_mode")
 
 
 def signed_deep_dream(deep_dream) -> dict:
@@ -52,6 +58,8 @@ def signed_deep_dream(deep_dream) -> dict:
     for key, unset in _SIGNED_WHEN_SET.items():
         if key in view and view[key] in unset:
             view.pop(key)
+    for key in _NEVER_SIGNED:
+        view.pop(key, None)
     return view
 
 
@@ -304,7 +312,8 @@ class ReviewJudgments:
                         "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
                         "judged_at=NULL, judge_relation=NULL, "
                         "judge2_verdict=NULL, judge2_confidence=NULL, "
-                        "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL "
+                        "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL, "
+                        "judge2_served_model=NULL, judge2_policy=NULL "
                         "WHERE id=%s AND status='pending'", (p["id"],))
                 else:
                     self.storage.conn.execute(
@@ -312,7 +321,9 @@ class ReviewJudgments:
                         "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
                         "judged_at=NULL, judge2_verdict=NULL, judge2_confidence=NULL, "
                         "judge2_model=NULL, judged2_at=NULL, judge3_verdict=NULL, "
-                        "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL "
+                        "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL, "
+                        "judge2_served_model=NULL, judge2_policy=NULL, "
+                        "judge3_served_model=NULL, judge3_policy=NULL "
                         "WHERE id=%s AND status='pending'", (p["id"],))
                 for key in p:
                     if key.startswith("judge"):
@@ -343,6 +354,22 @@ class ReviewJudgments:
         if expected_model and getattr(response, "served_model", None) != expected_model:
             self.valid, self.batch = set(), {}
             return
+        ids = {p["id"] for p in batch}
+        pending = (self.storage.pending_proposals() if self.kind == "link"
+                   else self.storage.pending_entity_proposals())
+        live = [p for p in pending if p["id"] in ids]
+        signatures = self.signatures(live)
+        self.valid = {p["id"] for p in live
+                      if signatures[str(p["id"])] == self.expected.get(str(p["id"]))}
+        self.batch = {p["id"]: p for p in live}
+
+    def validate_recorded(self, batch):
+        """Re-sign ``batch`` for a decision taken from votes already on the
+        rows (v56: a mode promoted after the votes were recorded), with no
+        model call: only the evidence check, no response identity. Caller
+        keeps the lock to apply."""
+        self.second_policy = self.second_model = None
+        self.third_policy = self.third_model = None
         ids = {p["id"] for p in batch}
         pending = (self.storage.pending_proposals() if self.kind == "link"
                    else self.storage.pending_entity_proposals())
@@ -472,7 +499,8 @@ def requeue(service, queue="all", limit=32):
                                 "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
                                 "judged_at=NULL, judge_relation=NULL, "
                                 "judge2_verdict=NULL, judge2_confidence=NULL, "
-                                "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL "
+                                "judge2_model=NULL, judged2_at=NULL, judge2_relation=NULL, "
+                                "judge2_served_model=NULL, judge2_policy=NULL "
                                 "WHERE id=%s AND status='pending'", (p["id"],))
                         else:
                             storage.conn.execute(
@@ -480,7 +508,9 @@ def requeue(service, queue="all", limit=32):
                                 "judge_confidence=NULL, judge_note=NULL, judge_model=NULL, "
                                 "judged_at=NULL, judge2_verdict=NULL, judge2_confidence=NULL, "
                                 "judge2_model=NULL, judged2_at=NULL, judge3_verdict=NULL, "
-                                "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL "
+                                "judge3_confidence=NULL, judge3_model=NULL, judged3_at=NULL, "
+                                "judge2_served_model=NULL, judge2_policy=NULL, "
+                                "judge3_served_model=NULL, judge3_policy=NULL "
                                 "WHERE id=%s AND status='pending'", (p["id"],))
                         memo.pop(str(p["id"]), None)
                     storage.set_meta(memo_key, memo)
