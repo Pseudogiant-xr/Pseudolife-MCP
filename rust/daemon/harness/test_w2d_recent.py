@@ -78,3 +78,10 @@ def test_near_tied_similar_candidates_align_but_same_entity_order_is_exact():
     reordered = candidates(("b", None, "same_entity"), ("a", None, "same_entity"))
     diffs, _ = w2d_search.compare(same, reordered)
     assert diffs
+
+
+def test_importing_w2e_keeps_this_harness_name_guard():
+    import pgdisposable as pg
+    before = pg.DISPOSABLE_NAME.pattern
+    w2d_search.import_w2e()
+    assert pg.DISPOSABLE_NAME.pattern == before

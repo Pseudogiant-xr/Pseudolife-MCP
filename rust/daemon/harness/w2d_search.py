@@ -367,12 +367,21 @@ class McpTransportSession(Scenario):
                      [bearer(TOKEN), ("mcp-session-id", "")])]
 
 
+def import_w2e():
+    """w2e.py, for its store rules. Importing it sets pgdisposable's name
+    guard to the w2e prefix; this harness's own guard is put back."""
+    saved = pg.DISPOSABLE_NAME
+    import w2e
+    pg.DISPOSABLE_NAME = saved
+    return w2e
+
+
 def normalize_stores(state: dict) -> dict:
     """For a scenario that stores, w2e.py's rules: embeddings and surprises
     leave the rows for a numeric comparison by entry id (returned), wall-clock
     columns and meta keys become tokens, and episode ids are renamed by start
     order (each daemon mints its own)."""
-    import w2e
+    w2e = import_w2e()
     numeric = w2e.extract_numeric(state)
     emap = w2e.episode_map(state)
     for qualified, t in state["rows"].items():
@@ -1204,7 +1213,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     cov_fail = unmet(cov, scn.require)
     numeric_diffs = []
     if getattr(scn, "stores", False):
-        import w2e
+        w2e = import_w2e()
         tol = json.loads(w2e.TOLERANCE_FILE.read_text(encoding="utf-8"))
         nums = {side: normalize_stores(states[side]) for side in sides}
         if "python" in nums:
