@@ -85,3 +85,10 @@ def test_importing_w2e_keeps_this_harness_name_guard():
     before = pg.DISPOSABLE_NAME.pattern
     w2d_search.import_w2e()
     assert pg.DISPOSABLE_NAME.pattern == before
+
+
+def test_stats_scenarios_refuse_golden_replay():
+    import pytest
+    for name in ("mcp-stats", "mcp-stats-continuum", "mcp-stats-capacity"):
+        with pytest.raises(SystemExit, match="live only"):
+            w2d_search.run_scenario(w2d_search.SCENARIOS[name](), None, "unused", "golden", False)

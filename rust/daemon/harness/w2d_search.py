@@ -589,6 +589,7 @@ class McpStats(Scenario):
     seeded graduation candidates, a community and a graph digest."""
     name = "mcp-stats"
     stores = True
+    live_only = True
     mcp_extra_seed = True
     seed_flags = ("--mcp-extra", "--fact-extra", "--stats-extra")
     entry_ids = True
@@ -618,6 +619,7 @@ class McpStatsContinuum(Scenario):
     """memory_stats with the eight continuum bands: per-band hit rates and the
     v0.4 aliases (instant by name, short_term and long_term by position)."""
     name = "mcp-stats-continuum"
+    live_only = True
     config_yaml = "memory:\n  miras:\n    preset: continuum\n"
     require = {"stats.responses": 2, "stats.multiband": 2, "stats.hits": 1}
 
@@ -636,6 +638,7 @@ class McpStatsCapacity(Scenario):
     last_true_drop)."""
     name = "mcp-stats-capacity"
     stores = True
+    live_only = True
     require = {"stats.responses": 3, "stats.capacity_warning": 3, "stats.true_drops": 1,
                "stats.last_true_drop": 1}
 
@@ -1111,6 +1114,11 @@ def seed_episode(template: str) -> str | None:
 def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
     derived = None
+    if mode == "golden" and getattr(scn, "live_only", False):
+        # A recording keeps neither the oracle's numerics (store scenarios
+        # compare embeddings by value) nor its key order (sort_keys), and a
+        # configure() hook needs the live template.
+        raise SystemExit(f"{scn.name} runs live only")
     if getattr(scn, "mcp_extra_seed", False):
         if mode == "golden":
             # Its template is derived through the Python daemon; a recording
