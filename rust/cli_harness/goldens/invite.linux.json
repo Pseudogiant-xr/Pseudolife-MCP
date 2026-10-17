@@ -1,7 +1,8 @@
 {
  "row": "CLI-PAIRING",
  "platform": "linux",
- "oracle_commit": "846ccd38",
+ "oracle_commit": "ebf1957c7feccd6e43c56e2b84f2c51d46c657d6",
+ "oracle_commit_source": "git",
  "cases": {
   "usage-no-mode": {
    "home": null,
@@ -10,8 +11,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBnaXZlIG9uZSBvZjogYSBuYW1lIHRvIGludml0ZSwgLS1saXN0LCBvciAtLXJldm9rZSBOQU1FCg==",
    "window": [
-    1791579529.0406973,
-    1791579529.0801144
+    1792252986.1522815,
+    1792252986.3113446
    ],
    "arm": "python",
    "before": {
@@ -35,8 +36,8 @@
    "stdout": "ewogICJlcnJvciI6ICJnaXZlIG9uZSBvZjogYSBuYW1lIHRvIGludml0ZSwgLS1saXN0LCBvciAtLXJldm9rZSBOQU1FIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDIKfQo=",
    "stderr": "",
    "window": [
-    1791579529.1101804,
-    1791579529.1489503
+    1792252986.3454552,
+    1792252986.5026333
    ],
    "arm": "python",
    "before": {
@@ -60,8 +61,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBnaXZlIG9uZSBvZjogYSBuYW1lIHRvIGludml0ZSwgLS1saXN0LCBvciAtLXJldm9rZSBOQU1FCg==",
    "window": [
-    1791579529.179614,
-    1791579529.2207086
+    1792252986.5360177,
+    1792252986.6927593
    ],
    "arm": "python",
    "before": {
@@ -85,8 +86,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnTGFwdG9wJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzCg==",
    "window": [
-    1791579529.2542064,
-    1791579529.3015616
+    1792252986.726631,
+    1792252986.887771
    ],
    "arm": "python",
    "before": {
@@ -110,8 +111,8 @@
    "stdout": "ewogICJlcnJvciI6ICInYS9iJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDIKfQo=",
    "stderr": "",
    "window": [
-    1791579529.334324,
-    1791579529.3826656
+    1792252986.920846,
+    1792252987.1022775
    ],
    "arm": "python",
    "before": {
@@ -135,8 +136,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEnIGlzIG5vdCBhIHByaW5jaXBhbCBuYW1lOiBsb3dlcmNhc2UgbGV0dGVycywgZGlnaXRzLCAnLicsICdfJyBhbmQgJy0nLCBzdGFydGluZyB3aXRoIGEgbGV0dGVyIG9yIGRpZ2l0LCBhdCBtb3N0IDY0IGNoYXJhY3RlcnMK",
    "window": [
-    1791579529.4161446,
-    1791579529.4582016
+    1792252987.1369357,
+    1792252987.296624
    ],
    "arm": "python",
    "before": {
@@ -160,8 +161,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnLi4nIGlzIG5vdCBhIHByaW5jaXBhbCBuYW1lOiBsb3dlcmNhc2UgbGV0dGVycywgZGlnaXRzLCAnLicsICdfJyBhbmQgJy0nLCBzdGFydGluZyB3aXRoIGEgbGV0dGVyIG9yIGRpZ2l0LCBhdCBtb3N0IDY0IGNoYXJhY3RlcnMK",
    "window": [
-    1791579529.4903805,
-    1791579529.5359328
+    1792252987.3299308,
+    1792252987.4923062
    ],
    "arm": "python",
    "before": {
@@ -185,8 +186,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnZGFlbW9uJyBpcyByZXNlcnZlZDsgY2hvb3NlIGFub3RoZXIgbmFtZQo=",
    "window": [
-    1791579529.5679777,
-    1791579529.610611
+    1792252987.5263941,
+    1792252987.682729
    ],
    "arm": "python",
    "before": {
@@ -210,8 +211,8 @@
    "stdout": "ewogICJlcnJvciI6ICInbWFpbnRhaW5lcicgaXMgcmVzZXJ2ZWQ7IGNob29zZSBhbm90aGVyIG5hbWUiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1791579529.6424305,
-    1791579529.684437
+    1792252987.7163756,
+    1792252987.8725555
    ],
    "arm": "python",
    "before": {
@@ -235,8 +236,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBsYXB0b3AgYWxyZWFkeSBoYXMgYSB0b2tlbiBpbiBQU0VVRE9MSUZFX01DUF9UT0tFTlM7IGFuIGVudmlyb25tZW50IHByaW5jaXBhbCBrZWVwcyB3b3JraW5nIGFzIGl0IGlzLCBhbmQgYSBzdG9yZWQgb25lIG9mIHRoZSBzYW1lIG5hbWUgd291bGQgYmUgc2hhZG93ZWQgYnkgaXQK",
    "window": [
-    1791579529.7337394,
-    1791579529.7784753
+    1792252987.9190042,
+    1792252988.0785122
    ],
    "arm": "python",
    "before": {
@@ -260,8 +261,8 @@
    "stdout": "ewogICJlcnJvciI6ICJsYXB0b3AgaXMgbmFtZWQgaW4gUFNFVURPTElGRV9NQ1BfVElFUl9NQVA7IHJlbW92ZSBpdCB0aGVyZSBmaXJzdCwgb3IgY2hvb3NlIGFub3RoZXIgbmFtZSIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0Cn0K",
    "stderr": "",
    "window": [
-    1791579529.8282409,
-    1791579529.8726094
+    1792252988.126936,
+    1792252988.2864637
    ],
    "arm": "python",
    "before": {
@@ -285,8 +286,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBub3QgaW50ZXJhY3RpdmU6IHJlLXJ1biB3aXRoIC0teWVzIHRvIHJldm9rZQo=",
    "window": [
-    1791579529.9087856,
-    1791579529.9550402
+    1792252988.3199983,
+    1792252988.4784281
    ],
    "arm": "python",
    "before": {
@@ -310,8 +311,8 @@
    "stdout": "cHNldWRvbGlmZS1tY3AgaW52aXRlIDEK",
    "stderr": "",
    "window": [
-    1791579529.9868224,
-    1791579530.0300858
+    1792252988.5117047,
+    1792252988.6761584
    ],
    "arm": "python",
    "before": {
@@ -333,10 +334,10 @@
    "utc_offset": 39600,
    "exit": 4,
    "stdout": "",
-   "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IGh0dHA6Ly8xMjcuMC4wLjE6NTAxNzEvaGVhbHRoOiBzdGFydCBpdCAob3IgcGFzcyAtLXBvcnQpLCB0aGVuIHJlLXJ1bgo=",
+   "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IGh0dHA6Ly8xMjcuMC4wLjE6NDk5OTcvaGVhbHRoOiBzdGFydCBpdCAob3IgcGFzcyAtLXBvcnQpLCB0aGVuIHJlLXJ1bgo=",
    "window": [
-    1791579530.0630884,
-    1791579530.157601
+    1792252988.7093153,
+    1792252989.0037398
    ],
    "arm": "python",
    "before": {
@@ -345,7 +346,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "50171",
+   "argv_port": "49997",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -361,8 +362,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4K",
    "window": [
-    1791579530.2088206,
-    1791579530.2953598
+    1792252989.0521576,
+    1792252989.355038
    ],
    "requests": [
     {
@@ -379,7 +380,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "54693",
+   "argv_port": "56401",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -395,8 +396,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIGF0IHtEQUVNT059IGRvZXMgbm90IHJlcG9ydCBcImF1dGhcIjogdHJ1ZS4gU3RvcmVkIHByaW5jaXBhbHMgZG8gbm90IHR1cm4gYXV0aGVudGljYXRpb24gb246IGdpdmUgdGhlIGRhZW1vbiBhIHRva2VuIGZpcnN0IChkb2NzL2d1aWRlL3JlbW90ZS1iYW5rLm1kKSIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IGZhbHNlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1791579530.7975974,
-    1791579530.8854196
+    1792252989.8562953,
+    1792252990.1612594
    ],
    "requests": [
     {
@@ -413,7 +414,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "58801",
+   "argv_port": "50281",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -429,8 +430,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIGF0IHtEQUVNT059IGRvZXMgbm90IHJlcG9ydCAiYXV0aCI6IHRydWUuIFN0b3JlZCBwcmluY2lwYWxzIGRvIG5vdCB0dXJuIGF1dGhlbnRpY2F0aW9uIG9uOiBnaXZlIHRoZSBkYWVtb24gYSB0b2tlbiBmaXJzdCAoZG9jcy9ndWlkZS9yZW1vdGUtYmFuay5tZCkK",
    "window": [
-    1791579531.3894227,
-    1791579531.4712844
+    1792252990.6623769,
+    1792252990.9714131
    ],
    "requests": [
     {
@@ -447,7 +448,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "44901",
+   "argv_port": "49733",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -463,8 +464,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIDUyLCBvbGRlciB0aGFuIGludml0ZSAodjUzKTogdXBkYXRlIHRoZSBkYWVtb24gZmlyc3QK",
    "window": [
-    1791579531.974609,
-    1791579532.055492
+    1792252991.4740038,
+    1792252991.7744915
    ],
    "requests": [
     {
@@ -481,7 +482,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "42651",
+   "argv_port": "37043",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -497,8 +498,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIE5vbmUsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdCIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogbnVsbCwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791579532.5611308,
-    1791579532.6443336
+    1792252992.2772195,
+    1792252992.593024
    ],
    "requests": [
     {
@@ -515,7 +516,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "56881",
+   "argv_port": "60361",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -531,8 +532,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIDU1LCBvbGRlciB0aGFuIGludml0ZSAodjUzKTogdXBkYXRlIHRoZSBkYWVtb24gZmlyc3QK",
    "window": [
-    1791579533.147703,
-    1791579533.225336
+    1792252993.094809,
+    1792252993.3842316
    ],
    "requests": [
     {
@@ -549,7 +550,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "39289",
+   "argv_port": "49231",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -565,8 +566,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFRydWUsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdAo=",
    "window": [
-    1791579533.729429,
-    1791579533.8060353
+    1792252993.8877556,
+    1792252994.1830237
    ],
    "requests": [
     {
@@ -583,7 +584,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "45891",
+   "argv_port": "38277",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -599,8 +600,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIGhhcyBub3QgcmVwb3J0ZWQgd2hpY2ggYmFuayBpdCBzZXJ2ZXMgeWV0ICgvaGVhbHRoIGJhbmsgaXMgbnVsbCB1bnRpbCBpdHMgc3RvcmFnZSBoYXMgc3RhcnRlZCBhbmQgdGhlIGFnZW50IGJvYXJkIGhhcyBiZWVuIHVzZWQgb25jZSk6IHN0YXJ0IGEgc2Vzc2lvbiBhZ2FpbnN0IGl0LCB0aGVuIHJlLXJ1biIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6IG51bGwKICB9Cn0K",
    "stderr": "",
    "window": [
-    1791579534.309703,
-    1791579534.3952727
+    1792252994.6866872,
+    1792252994.9881964
    ],
    "requests": [
     {
@@ -617,7 +618,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "53261",
+   "argv_port": "39045",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -633,8 +634,8 @@
    "stdout": "ewogICJlcnJvciI6ICJubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4iLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1791579534.900887,
-    1791579534.9828749
+    1792252995.4902775,
+    1792252995.7928207
    ],
    "requests": [
     {
@@ -651,7 +652,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "52191",
+   "argv_port": "42629",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -667,8 +668,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4K",
    "window": [
-    1791579535.4881938,
-    1791579535.5784688
+    1792252996.2940896,
+    1792252996.5876818
    ],
    "requests": [
     {
@@ -685,7 +686,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "52367",
+   "argv_port": "33221",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -699,10 +700,10 @@
    "utc_offset": 39600,
    "exit": 4,
    "stdout": "",
-   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA0MzU0NSBzZXJ2ZXMgaXMgYmFuayAwMTIzNDU2Nzg5YWJjZGVmOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
+   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA0Nzg3MSBzZXJ2ZXMgaXMgYmFuayAwMTIzNDU2Nzg5YWJjZGVmOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1791579536.0816703,
-    1791579536.1758745
+    1792252997.0903902,
+    1792252997.4259446
    ],
    "requests": [
     {
@@ -719,7 +720,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "43545",
+   "argv_port": "47871",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -732,11 +733,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 4,
-   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgKG5vbmUpLCBidXQgdGhlIGRhZW1vbiBvbiBwb3J0IDM3NDM3IHNlcnZlcyBpcyBiYW5rIDdmODQwMjIzODM5NzM2NWM6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNCwKICAiZGFlbW9uIjogewogICAgImF1dGgiOiB0cnVlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
+   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgKG5vbmUpLCBidXQgdGhlIGRhZW1vbiBvbiBwb3J0IDM4ODk1IHNlcnZlcyBpcyBiYW5rIDdmODQwMjIzODM5NzM2NWM6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNCwKICAiZGFlbW9uIjogewogICAgImF1dGgiOiB0cnVlLAogICAgInNjaGVtYSI6IDU1LAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1791579536.7903945,
-    1791579536.8872206
+    1792252998.0350568,
+    1792252998.3873966
    ],
    "requests": [
     {
@@ -753,7 +754,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "37437",
+   "argv_port": "38895",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -769,8 +770,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGJhbmsgaGFzIG5vIHByaW5jaXBhbHMgdGFibGUgeWV0IChzY2hlbWEgdjUzKTogdXBkYXRlIHRoZSBkYWVtb24gYW5kIGxldCBpdCBzdGFydCwgdGhlbiByZS1ydW4K",
    "window": [
-    1791579537.4145327,
-    1791579537.505342
+    1792252998.89968,
+    1792252999.2558596
    ],
    "requests": [
     {
@@ -787,7 +788,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "47423",
+   "argv_port": "53753",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -803,8 +804,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFx1ZDgwMHgsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdAo=",
    "window": [
-    1791579537.9985304,
-    1791579538.075836
+    1792252999.7199807,
+    1792253000.021177
    ],
    "requests": [
     {
@@ -821,7 +822,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "41739",
+   "argv_port": "57609",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -837,8 +838,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFx1ZDgwMHgsIG9sZGVyIHRoYW4gaW52aXRlICh2NTMpOiB1cGRhdGUgdGhlIGRhZW1vbiBmaXJzdCIsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiA0LAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogIlx1ZDgwMHgiLAogICAgImJhbmsiOiAiN2Y4NDAyMjM4Mzk3MzY1YyIKICB9Cn0K",
    "stderr": "",
    "window": [
-    1791579538.5801382,
-    1791579538.6647253
+    1792253000.522741,
+    1792253000.827316
    ],
    "requests": [
     {
@@ -855,7 +856,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "40465",
+   "argv_port": "34391",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -869,10 +870,10 @@
    "utc_offset": 39600,
    "exit": 4,
    "stdout": "",
-   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCAzNjAwOSBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
+   "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA0Nzk0NyBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1791579539.1665857,
-    1791579539.2573168
+    1792253001.331844,
+    1792253001.6745179
    ],
    "requests": [
     {
@@ -889,7 +890,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "36009",
+   "argv_port": "47947",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -902,11 +903,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 4,
-   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA1ODcyOSBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogImJcdWRjMDAiCiAgfQp9Cg==",
+   "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IHRoZSBkYWVtb24gb24gcG9ydCA0ODY5NyBzZXJ2ZXMgaXMgYmFuayBiXHVkYzAwOiBpdCBpcyBhbm90aGVyIGRhdGFiYXNlLiBOb3RoaW5nIHdhcyBjaGFuZ2VkIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogImJcdWRjMDAiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791579539.7488549,
-    1791579539.8479714
+    1792253002.134929,
+    1792253002.4776692
    ],
    "requests": [
     {
@@ -923,7 +924,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "58729",
+   "argv_port": "48697",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -939,8 +940,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGUgZGFlbW9uIHJ1bnMgc2NoZW1hIFsnXFx1ZDgwMCcsIHsnXFx1ZGMwMCc6IDF9XSwgb2xkZXIgdGhhbiBpbnZpdGUgKHY1Myk6IHVwZGF0ZSB0aGUgZGFlbW9uIGZpcnN0IiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiBbCiAgICAgICJcdWQ4MDAiLAogICAgICB7CiAgICAgICAgIlx1ZGMwMCI6IDEKICAgICAgfQogICAgXSwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791579540.3380234,
-    1791579540.4241595
+    1792253002.9450834,
+    1792253003.2397437
    ],
    "requests": [
     {
@@ -957,7 +958,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "44431",
+   "argv_port": "60267",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -973,8 +974,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgZGFlbW9uIGF0IHtEQUVNT059IGRvZXMgbm90IHJlcG9ydCAiYXV0aCI6IHRydWUuIFN0b3JlZCBwcmluY2lwYWxzIGRvIG5vdCB0dXJuIGF1dGhlbnRpY2F0aW9uIG9uOiBnaXZlIHRoZSBkYWVtb24gYSB0b2tlbiBmaXJzdCAoZG9jcy9ndWlkZS9yZW1vdGUtYmFuay5tZCkK",
    "window": [
-    1791579540.927706,
-    1791579541.0212255
+    1792253003.741021,
+    1792253004.040577
    ],
    "requests": [
     {
@@ -991,7 +992,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "44357",
+   "argv_port": "54913",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1005,10 +1006,10 @@
    "utc_offset": 39600,
    "exit": 1,
    "stdout": "",
-   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjIzLCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAxNzcsIGluIG1haW4KICAgIHN5cy5leGl0KGludml0ZV9tYWluKHN5cy5hcmd2WzI6XSkpCiAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvaW52aXRlX2NsaS5weSIsIGxpbmUgNTQyLCBpbiBtYWluCiAgICByZXR1cm4gX2xvY2FsKGFyZ3MsIHJlcG9ydCwgZHNuKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAyOTYsIGluIF9sb2NhbAogICAgaGVhbHRoLCByZWZ1c2FsID0gX2RhZW1vbl9jaGVjayhhcmdzLnBvcnQsIHJlcG9ydCwgbmVlZF9hdXRoPVRydWUpCiAgICAgICAgICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAyMjQsIGluIF9kYWVtb25fY2hlY2sKICAgIGhlYWx0aCA9IHByb2JlX2hlYWx0aChsb2NhbCkKICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAxMDAsIGluIHByb2JlX2hlYWx0aAogICAgcmV0dXJuIGV4cG9zZV9jbGkucHJvYmVfaGVhbHRoKHVybCwgZXhwb3NlX2NsaS5MT0NBTF9IRUFMVEhfVElNRU9VVF9TKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDE0NiwgaW4gcHJvYmVfaGVhbHRoCiAgICByZXR1cm4gZmV0Y2hfaGVhbHRoKHVybCwgdGltZW91dClbMV0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDEzNywgaW4gZmV0Y2hfaGVhbHRoCiAgICBwYXlsb2FkID0ganNvbi5sb2Fkcyhib2R5LmRlY29kZSgidXRmLTgiKSkKICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vX19pbml0X18ucHkiLCBsaW5lIDM0NiwgaW4gbG9hZHMKICAgIHJldHVybiBfZGVmYXVsdF9kZWNvZGVyLmRlY29kZShzKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie1BZVEhPTn0vbGliL3B5dGhvbjMuMTEvanNvbi9kZWNvZGVyLnB5IiwgbGluZSAzMzcsIGluIGRlY29kZQogICAgb2JqLCBlbmQgPSBzZWxmLnJhd19kZWNvZGUocywgaWR4PV93KHMsIDApLmVuZCgpKQogICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vZGVjb2Rlci5weSIsIGxpbmUgMzUzLCBpbiByYXdfZGVjb2RlCiAgICBvYmosIGVuZCA9IHNlbGYuc2Nhbl9vbmNlKHMsIGlkeCkKICAgICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgpSZWN1cnNpb25FcnJvcjogbWF4aW11bSByZWN1cnNpb24gZGVwdGggZXhjZWVkZWQgd2hpbGUgZGVjb2RpbmcgYSBKU09OIGFycmF5IGZyb20gYSB1bmljb2RlIHN0cmluZwo=",
+   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjI2LCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAxNzcsIGluIG1haW4KICAgIHN5cy5leGl0KGludml0ZV9tYWluKHN5cy5hcmd2WzI6XSkpCiAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvaW52aXRlX2NsaS5weSIsIGxpbmUgNTQyLCBpbiBtYWluCiAgICByZXR1cm4gX2xvY2FsKGFyZ3MsIHJlcG9ydCwgZHNuKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAyOTYsIGluIF9sb2NhbAogICAgaGVhbHRoLCByZWZ1c2FsID0gX2RhZW1vbl9jaGVjayhhcmdzLnBvcnQsIHJlcG9ydCwgbmVlZF9hdXRoPVRydWUpCiAgICAgICAgICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAyMjQsIGluIF9kYWVtb25fY2hlY2sKICAgIGhlYWx0aCA9IHByb2JlX2hlYWx0aChsb2NhbCkKICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9pbnZpdGVfY2xpLnB5IiwgbGluZSAxMDAsIGluIHByb2JlX2hlYWx0aAogICAgcmV0dXJuIGV4cG9zZV9jbGkucHJvYmVfaGVhbHRoKHVybCwgZXhwb3NlX2NsaS5MT0NBTF9IRUFMVEhfVElNRU9VVF9TKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDE0NiwgaW4gcHJvYmVfaGVhbHRoCiAgICByZXR1cm4gZmV0Y2hfaGVhbHRoKHVybCwgdGltZW91dClbMV0KICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2V4cG9zZV9jbGkucHkiLCBsaW5lIDEzNywgaW4gZmV0Y2hfaGVhbHRoCiAgICBwYXlsb2FkID0ganNvbi5sb2Fkcyhib2R5LmRlY29kZSgidXRmLTgiKSkKICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vX19pbml0X18ucHkiLCBsaW5lIDM0NiwgaW4gbG9hZHMKICAgIHJldHVybiBfZGVmYXVsdF9kZWNvZGVyLmRlY29kZShzKQogICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie1BZVEhPTn0vbGliL3B5dGhvbjMuMTEvanNvbi9kZWNvZGVyLnB5IiwgbGluZSAzMzcsIGluIGRlY29kZQogICAgb2JqLCBlbmQgPSBzZWxmLnJhd19kZWNvZGUocywgaWR4PV93KHMsIDApLmVuZCgpKQogICAgICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntQWVRIT059L2xpYi9weXRob24zLjExL2pzb24vZGVjb2Rlci5weSIsIGxpbmUgMzUzLCBpbiByYXdfZGVjb2RlCiAgICBvYmosIGVuZCA9IHNlbGYuc2Nhbl9vbmNlKHMsIGlkeCkKICAgICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgpSZWN1cnNpb25FcnJvcjogbWF4aW11bSByZWN1cnNpb24gZGVwdGggZXhjZWVkZWQgd2hpbGUgZGVjb2RpbmcgYSBKU09OIGFycmF5IGZyb20gYSB1bmljb2RlIHN0cmluZwo=",
    "window": [
-    1791579541.5212274,
-    1791579541.5999868
+    1792253004.541753,
+    1792253004.8414667
    ],
    "requests": [
     {
@@ -1025,7 +1026,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "46699",
+   "argv_port": "43039",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1041,8 +1042,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBoZWFsdGh5IGRhZW1vbiBhbnN3ZXJzIGF0IHtEQUVNT059L2hlYWx0aDogc3RhcnQgaXQgKG9yIHBhc3MgLS1wb3J0KSwgdGhlbiByZS1ydW4K",
    "window": [
-    1791579542.1027749,
-    1791579542.1843483
+    1792253005.3438795,
+    1792253005.642316
    ],
    "requests": [
     {
@@ -1059,7 +1060,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "49793",
+   "argv_port": "42905",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -1075,8 +1076,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiAnJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzCg==",
    "window": [
-    1791579542.6720088,
-    1791579542.714011
+    1792253006.1300488,
+    1792253006.2840853
    ],
    "arm": "python",
    "before": {
@@ -1100,8 +1101,8 @@
    "stdout": "ewogICJlcnJvciI6ICInJyBpcyBub3QgYSBwcmluY2lwYWwgbmFtZTogbG93ZXJjYXNlIGxldHRlcnMsIGRpZ2l0cywgJy4nLCAnXycgYW5kICctJywgc3RhcnRpbmcgd2l0aCBhIGxldHRlciBvciBkaWdpdCwgYXQgbW9zdCA2NCBjaGFyYWN0ZXJzIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDIKfQo=",
    "stderr": "",
    "window": [
-    1791579542.746755,
-    1791579542.7890918
+    1792253006.3177571,
+    1792253006.4724948
    ],
    "arm": "python",
    "before": {
@@ -1125,8 +1126,8 @@
    "stdout": "ewogICJlcnJvciI6ICJ0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IC0tYmFuayBpcyBiYW5rIDAxMjM0NTY3ODlhYmNkZWY6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1791579542.8207822,
-    1791579542.9169729
+    1792253006.5053763,
+    1792253006.8405786
    ],
    "arm": "python",
    "before": {
@@ -1150,8 +1151,8 @@
    "stdout": "bm8gc3RvcmVkIHByaW5jaXBhbHMK",
    "stderr": "",
    "window": [
-    1791579543.089707,
-    1791579543.173441
+    1792253007.0315423,
+    1792253007.3259423
    ],
    "arm": "python",
    "before": {
@@ -1175,8 +1176,8 @@
    "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogW10sCiAgImV4aXQiOiAwLAogICJwcmluY2lwYWxzIjogW10KfQo=",
    "stderr": "",
    "window": [
-    1791579543.2046854,
-    1791579543.2963517
+    1792253007.3587363,
+    1792253007.6866052
    ],
    "arm": "python",
    "before": {
@@ -1200,8 +1201,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGJhbmsgaGFzIG5vIHByaW5jaXBhbHMgdGFibGUgeWV0IChzY2hlbWEgdjUzKTogdXBkYXRlIHRoZSBkYWVtb24gYW5kIGxldCBpdCBzdGFydCwgdGhlbiByZS1ydW4K",
    "window": [
-    1791579543.3508472,
-    1791579543.4353843
+    1792253007.7342582,
+    1792253008.0306408
    ],
    "arm": "python",
    "before": {
@@ -1225,8 +1226,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgKG5vbmUpLCBidXQgLS1iYW5rIGlzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YzogaXQgaXMgYW5vdGhlciBkYXRhYmFzZS4gTm90aGluZyB3YXMgY2hhbmdlZAo=",
    "window": [
-    1791579543.4602156,
-    1791579543.551081
+    1792253008.05689,
+    1792253008.3860476
    ],
    "arm": "python",
    "before": {
@@ -1250,8 +1251,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBicmF2byBpcyBhbHJlYWR5IHBhaXJlZDsgcGFzcyAtLXJlcGxhY2UgdG8gZ2l2ZSBpdCBhIG5ldyBjb2RlIChpdHMgY3VycmVudCB0b2tlbiBrZWVwcyB3b3JraW5nIHVudGlsIHRoZSBuZXcgY29kZSBpcyByZWRlZW1lZCksIG9yIC0tcmV2b2tlIGJyYXZvIGZpcnN0LiBOb3RoaW5nIHdhcyBjaGFuZ2VkCg==",
    "window": [
-    1791579543.7480333,
-    1791579546.3167768
+    1792253008.6052852,
+    1792253008.9791784
    ],
    "requests": [
     {
@@ -1268,55 +1269,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "58197",
+   "argv_port": "57125",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -1325,8 +1326,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -1347,8 +1348,8 @@
    "stdout": "ewogICJlcnJvciI6ICJicmF2byBpcyBhbHJlYWR5IHBhaXJlZDsgcGFzcyAtLXJlcGxhY2UgdG8gZ2l2ZSBpdCBhIG5ldyBjb2RlIChpdHMgY3VycmVudCB0b2tlbiBrZWVwcyB3b3JraW5nIHVudGlsIHRoZSBuZXcgY29kZSBpcyByZWRlZW1lZCksIG9yIC0tcmV2b2tlIGJyYXZvIGZpcnN0LiBOb3RoaW5nIHdhcyBjaGFuZ2VkIiwKICAibm90ZXMiOiBbXSwKICAiZXhpdCI6IDQsCiAgImRhZW1vbiI6IHsKICAgICJhdXRoIjogdHJ1ZSwKICAgICJzY2hlbWEiOiA1NSwKICAgICJiYW5rIjogIjdmODQwMjIzODM5NzM2NWMiCiAgfQp9Cg==",
    "stderr": "",
    "window": [
-    1791579547.9491153,
-    1791579550.5172124
+    1792253009.59753,
+    1792253009.9580593
    ],
    "requests": [
     {
@@ -1365,55 +1366,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "39943",
+   "argv_port": "57137",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -1422,8 +1423,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -1444,8 +1445,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IC0tYmFuayBpcyBiYW5rIDAxMjM0NTY3ODlhYmNkZWY6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQK",
    "window": [
-    1791579551.21376,
-    1791579551.309667
+    1792253010.59188,
+    1792253010.9559083
    ],
    "requests": [
     {
@@ -1462,55 +1463,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "33685",
+   "argv_port": "37807",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -1519,8 +1520,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -1538,11 +1539,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogWwogICAgImFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uIgogIF0sCiAgImV4aXQiOiAwLAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6ICI3Zjg0MDIyMzgzOTczNjVjIgogIH0sCiAgInByaW5jaXBhbCI6ICJ6dWx1LjEiLAogICJzdGF0ZSI6ICJuZXciLAogICJjb2RlIjogIlM4NFItSlBNVi1DTTExIiwKICAiZXhwaXJlc19hdCI6IDE3OTE1ODA0NTQuMTI0MjA0LAogICJ0aWVyIjogbnVsbCwKICAiYm9hcmQiOiB0cnVlLAogICJ1cmwiOiAidSIsCiAgInBhaXJfY29tbWFuZCI6ICJwc2V1ZG9saWZlLW1jcCBwYWlyIHUgUzg0Ui1KUE1WLUNNMTEiCn0K",
+   "stdout": "ewogICJlcnJvciI6IG51bGwsCiAgIm5vdGVzIjogWwogICAgImFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uIgogIF0sCiAgImV4aXQiOiAwLAogICJkYWVtb24iOiB7CiAgICAiYXV0aCI6IHRydWUsCiAgICAic2NoZW1hIjogNTUsCiAgICAiYmFuayI6ICI3Zjg0MDIyMzgzOTczNjVjIgogIH0sCiAgInByaW5jaXBhbCI6ICJ6dWx1LjEiLAogICJzdGF0ZSI6ICJuZXciLAogICJjb2RlIjogIlg0RlgtWERCVy1QS0tNIiwKICAiZXhwaXJlc19hdCI6IDE3OTIyNTM5MTEuOTg2MjkzLAogICJ0aWVyIjogbnVsbCwKICAiYm9hcmQiOiB0cnVlLAogICJ1cmwiOiAidSIsCiAgInBhaXJfY29tbWFuZCI6ICJwc2V1ZG9saWZlLW1jcCBwYWlyIHUgWDRGWC1YREJXLVBLS00iCn0K",
    "stderr": "",
    "window": [
-    1791579551.9707656,
-    1791579554.468528
+    1792253011.6149619,
+    1792253012.0038972
    ],
    "requests": [
     {
@@ -1559,7 +1560,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "50493",
+   "argv_port": "57813",
    "ttl": 900,
    "seed_rows": [],
    "db": {
@@ -1600,14 +1601,14 @@
      "merge_decisions": [],
      "meta": [
       "{\"key\": \"coordination_bank_id\", \"value\": \"fixture-invite-bank\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1791579554.124771, \"principal\": \"zulu.1\"}"
+      "{\"at\": 1792253011.986778, \"principal\": \"zulu.1\"}"
      ],
      "principals": [
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"84e2735b065089bf7108378922b0097af7539f0c29f8fa3739874a84f62ecdb8\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1791579554.124236, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580454.124204, \"paired_code_hash\": null}"
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"c6feac380ee9ab2c5ee7bb03d824decc218081cfeedafc77c398fc861387bf30\", \"paired_at\": null, \"principal\": \"zulu.1\", \"created_at\": 1792253011.986322, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253911.986293, \"paired_code_hash\": null}"
      ],
      "relations": [],
      "retrieval_events": [],
@@ -3064,6 +3065,54 @@
      ],
      [
       "edge_proposals",
+      "judge2_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_relation",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_confidence",
       "real",
       "float4",
@@ -3096,9 +3145,25 @@
      ],
      [
       "edge_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_verdict",
       "text",
       "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judged2_at",
+      "double precision",
+      "float8",
       "YES",
       null
      ],
@@ -3464,7 +3529,63 @@
      ],
      [
       "entity_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_verdict",
       "text",
       "text",
       "YES",
@@ -3496,6 +3617,14 @@
      ],
      [
       "entity_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge_verdict",
       "text",
       "text",
@@ -3505,6 +3634,14 @@
      [
       "entity_proposals",
       "judged2_at",
+      "double precision",
+      "float8",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judged3_at",
       "double precision",
       "float8",
       "YES",
@@ -4764,6 +4901,14 @@
       "text",
       "text",
       "NO",
+      null
+     ],
+     [
+      "merge_decisions",
+      "votes",
+      "jsonb",
+      "jsonb",
+      "YES",
       null
      ],
      [
@@ -7781,8 +7926,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBzdG9yZWQgcHJpbmNpcGFsIGlzIG5hbWVkIG5vYm9keQo=",
    "window": [
-    1791579554.737309,
-    1791579554.8276722
+    1792253012.7713656,
+    1792253013.0627973
    ],
    "arm": "python",
    "before": {
@@ -7797,48 +7942,48 @@
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -7847,8 +7992,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -7869,8 +8014,8 @@
    "stdout": "ewogICJlcnJvciI6ICJubyBzdG9yZWQgcHJpbmNpcGFsIGlzIG5hbWVkIGRlZmF1bHQiLAogICJub3RlcyI6IFtdLAogICJleGl0IjogNAp9Cg==",
    "stderr": "",
    "window": [
-    1791579555.0309198,
-    1791579555.114112
+    1792253013.2986798,
+    1792253013.605562
    ],
    "arm": "python",
    "before": {
@@ -7885,48 +8030,48 @@
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -7935,8 +8080,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -7957,8 +8102,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGlzIGRhdGFiYXNlIGhvbGRzIGJhbmsgN2Y4NDAyMjM4Mzk3MzY1YywgYnV0IC0tYmFuayBpcyBiYW5rIDAxMjM0NTY3ODlhYmNkZWY6IGl0IGlzIGFub3RoZXIgZGF0YWJhc2UuIE5vdGhpbmcgd2FzIGNoYW5nZWQK",
    "window": [
-    1791579555.3253098,
-    1791579555.419155
+    1792253013.957377,
+    1792253014.2930272
    ],
    "arm": "python",
    "before": {
@@ -7973,48 +8118,48 @@
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -8023,8 +8168,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8045,8 +8190,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBkYXRhYmFzZSBmb3VuZDogc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCwgb3IgcnVuIHRoaXMgb24gdGhlIGRhZW1vbidzIGhvc3QgKGEgRG9ja2VyIGluc3RhbGwgcnVucyBpdCBpbiB0aGUgZGFlbW9uIGNvbnRhaW5lcikK",
    "window": [
-    1791579555.6463022,
-    1791579555.6875224
+    1792253014.6598136,
+    1792253014.813886
    ],
    "requests": [],
    "arm": "python",
@@ -8056,55 +8201,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "41855",
+   "argv_port": "54331",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -8113,8 +8258,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8135,8 +8280,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBjb3VsZCBub3QgY29ubmVjdCB0byB0aGUgYmFuaydzIGRhdGFiYXNlIChPcGVyYXRpb25hbEVycm9yKQo=",
    "window": [
-    1791579556.1437886,
-    1791579556.2334526
+    1792253015.662624,
+    1792253015.974769
    ],
    "requests": [
     {
@@ -8153,55 +8298,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "44733",
+   "argv_port": "42645",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -8210,8 +8355,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8232,8 +8377,8 @@
    "stdout": "",
    "stderr": "aW52aXRlOiBubyBkYXRhYmFzZSBmb3VuZDogc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCwgb3IgcnVuIHRoaXMgb24gdGhlIGRhZW1vbidzIGhvc3QgKGEgRG9ja2VyIGluc3RhbGwgcnVucyBpdCBpbiB0aGUgZGFlbW9uIGNvbnRhaW5lcikK",
    "window": [
-    1791579556.9102683,
-    1791579556.9501064
+    1792253016.783092,
+    1792253016.9415731
    ],
    "requests": [],
    "arm": "python",
@@ -8243,55 +8388,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "58335",
+   "argv_port": "60655",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -8300,8 +8445,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8319,11 +8464,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBQUTdFLUpHQjctS0I4OCAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTA5IDIxOjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIDxkYWVtb24tdXJsPiBQUTdFLUpHQjctS0I4OAogIG9yIHJ1biB0aGUgaW5zdGFsbGVyIHRoZXJlIGFuZCBhbnN3ZXIgMiwgZ2l2aW5nIHRoaXMgY29kZSB3aGVyZSBpdCBhc2tzIGZvciB0aGUgdG9rZW4KdGhlIGRhZW1vbiBpcyBub3QgZXhwb3NlZCBvbiB0aGUgdGFpbG5ldCBoZXJlOyBwdXQgaXRzIFVSTCBpbiBwbGFjZSBvZiA8ZGFlbW9uLXVybD4gKGBwc2V1ZG9saWZlLW1jcCBleHBvc2UgdGFpbHNjYWxlYCBleHBvc2VzIGl0KSwgb3IgcGFzcyAtLXVybAphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBYWDhILTg3VFgtTVhWSyAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTE3IDE2OjE4IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIDxkYWVtb24tdXJsPiBYWDhILTg3VFgtTVhWSwogIG9yIHJ1biB0aGUgaW5zdGFsbGVyIHRoZXJlIGFuZCBhbnN3ZXIgMiwgZ2l2aW5nIHRoaXMgY29kZSB3aGVyZSBpdCBhc2tzIGZvciB0aGUgdG9rZW4KdGhlIGRhZW1vbiBpcyBub3QgZXhwb3NlZCBvbiB0aGUgdGFpbG5ldCBoZXJlOyBwdXQgaXRzIFVSTCBpbiBwbGFjZSBvZiA8ZGFlbW9uLXVybD4gKGBwc2V1ZG9saWZlLW1jcCBleHBvc2UgdGFpbHNjYWxlYCBleHBvc2VzIGl0KSwgb3IgcGFzcyAtLXVybAphbiBpbnZpdGVkIG1hY2hpbmUgY2FuIHJlYWQgYW5kIHdyaXRlIHRoZSB3aG9sZSBiYW5rIGFuZCB1c2UgdGhlIGFnZW50IGJvYXJkLCBidXQgbm90IGNoYW5nZSB0aGUgZGFlbW9uJ3MgY29uZmlndXJhdGlvbgo=",
    "stderr": "",
    "window": [
-    1791579557.4060671,
-    1791579560.4615202
+    1792253017.851852,
+    1792253018.230137
    ],
    "requests": [
     {
@@ -8344,55 +8489,55 @@
     "tools": "0o755",
     "tools/tailscale": "0o644"
    },
-   "argv_port": "45443",
+   "argv_port": "32985",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -8401,8 +8546,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -8446,19 +8591,19 @@
      "merge_decisions": [],
      "meta": [
       "{\"key\": \"coordination_bank_id\", \"value\": \"fixture-invite-bank\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1791579560.013379, \"principal\": \"laptop\"}"
+      "{\"at\": 1792253018.212473, \"principal\": \"laptop\"}"
      ],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1791579529.001679, \"principal\": \"bravo\", \"created_at\": 1791579528.995421, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1791579529.00874, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791583129.008738, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1791579529.006992, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791579469.006989, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"8f0f15a803c2c337c176c7fc0b35f7ba6ff8e12e8cb1160e15c9cb3af22b5129\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1791579560.012896, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580460.012863, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1791579528.993331, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580428.993299, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1791579529.003802, \"revoked_at\": 1791579529.005226, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1792252986.109478, \"principal\": \"bravo\", \"created_at\": 1792252986.10078, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1792252986.116416, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792256586.116414, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1792252986.114672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792252926.11467, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"3a06c503fb1be8953f72a89f9de62d0b773d8be81fd86e37bcdc71aac844f9e8\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1792253018.211995, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253918.211969, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1792252986.098913, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253886.098885, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1792252986.111565, \"revoked_at\": 1792252986.112905, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "relations": [],
      "retrieval_events": [],
@@ -9915,6 +10060,54 @@
      ],
      [
       "edge_proposals",
+      "judge2_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_relation",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_confidence",
       "real",
       "float4",
@@ -9947,9 +10140,25 @@
      ],
      [
       "edge_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_verdict",
       "text",
       "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judged2_at",
+      "double precision",
+      "float8",
       "YES",
       null
      ],
@@ -10315,7 +10524,63 @@
      ],
      [
       "entity_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_verdict",
       "text",
       "text",
       "YES",
@@ -10347,6 +10612,14 @@
      ],
      [
       "entity_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge_verdict",
       "text",
       "text",
@@ -10356,6 +10629,14 @@
      [
       "entity_proposals",
       "judged2_at",
+      "double precision",
+      "float8",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judged3_at",
       "double precision",
       "float8",
       "YES",
@@ -11615,6 +11896,14 @@
       "text",
       "text",
       "NO",
+      null
+     ],
+     [
+      "merge_decisions",
+      "votes",
+      "jsonb",
+      "jsonb",
+      "YES",
       null
      ],
      [
@@ -14633,11 +14922,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBHTkVRLTdDRTMtNTk1SiAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTA5IDIxOjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgR05FUS03Q0UzLTU5NUoKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCm5vdGU6IGxhcHRvcCBpcyBhbHJlYWR5IGxpc3RlZCBpbiBjb29yZGluYXRpb24uYWxsb3dlZF9wcmluY2lwYWxzOyB0aGUgaW52aXRlIGdpdmVzIGl0IGEgdG9rZW4KYW4gaW52aXRlZCBtYWNoaW5lIGNhbiByZWFkIGFuZCB3cml0ZSB0aGUgd2hvbGUgYmFuayBhbmQgdXNlIHRoZSBhZ2VudCBib2FyZCwgYnV0IG5vdCBjaGFuZ2UgdGhlIGRhZW1vbidzIGNvbmZpZ3VyYXRpb24K",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA5MjdQLUtXTkUtNzhYRSAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTE3IDE2OjE4IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgOTI3UC1LV05FLTc4WEUKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCm5vdGU6IGxhcHRvcCBpcyBhbHJlYWR5IGxpc3RlZCBpbiBjb29yZGluYXRpb24uYWxsb3dlZF9wcmluY2lwYWxzOyB0aGUgaW52aXRlIGdpdmVzIGl0IGEgdG9rZW4KYW4gaW52aXRlZCBtYWNoaW5lIGNhbiByZWFkIGFuZCB3cml0ZSB0aGUgd2hvbGUgYmFuayBhbmQgdXNlIHRoZSBhZ2VudCBib2FyZCwgYnV0IG5vdCBjaGFuZ2UgdGhlIGRhZW1vbidzIGNvbmZpZ3VyYXRpb24K",
    "stderr": "",
    "window": [
-    1791579561.170653,
-    1791579563.7615943
+    1792253018.9979398,
+    1792253019.3865356
    ],
    "requests": [
     {
@@ -14658,55 +14947,55 @@
     "data": "0o755",
     "data/config.yaml": "0o644"
    },
-   "argv_port": "34363",
+   "argv_port": "35859",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -14715,8 +15004,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -14760,19 +15049,19 @@
      "merge_decisions": [],
      "meta": [
       "{\"key\": \"coordination_bank_id\", \"value\": \"fixture-invite-bank\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1791579563.375168, \"principal\": \"laptop\"}"
+      "{\"at\": 1792253019.369236, \"principal\": \"laptop\"}"
      ],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1791579529.001679, \"principal\": \"bravo\", \"created_at\": 1791579528.995421, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1791579529.00874, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791583129.008738, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1791579529.006992, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791579469.006989, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"532fcbb38e3aef580749e20859938deff9f50c735a2dfeba1e95dec3ea556ff4\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1791579563.374615, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580463.374581, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1791579528.993331, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580428.993299, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1791579529.003802, \"revoked_at\": 1791579529.005226, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1792252986.109478, \"principal\": \"bravo\", \"created_at\": 1792252986.10078, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1792252986.116416, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792256586.116414, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1792252986.114672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792252926.11467, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"2a18913a72d9120ed71433835dd0940aaadac0bbe515d2895d6a6781fbb73c0a\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1792253019.368804, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253919.368776, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1792252986.098913, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253886.098885, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1792252986.111565, \"revoked_at\": 1792252986.112905, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "relations": [],
      "retrieval_events": [],
@@ -16229,6 +16518,54 @@
      ],
      [
       "edge_proposals",
+      "judge2_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_relation",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_confidence",
       "real",
       "float4",
@@ -16261,9 +16598,25 @@
      ],
      [
       "edge_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_verdict",
       "text",
       "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judged2_at",
+      "double precision",
+      "float8",
       "YES",
       null
      ],
@@ -16629,7 +16982,63 @@
      ],
      [
       "entity_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_verdict",
       "text",
       "text",
       "YES",
@@ -16661,6 +17070,14 @@
      ],
      [
       "entity_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge_verdict",
       "text",
       "text",
@@ -16670,6 +17087,14 @@
      [
       "entity_proposals",
       "judged2_at",
+      "double precision",
+      "float8",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judged3_at",
       "double precision",
       "float8",
       "YES",
@@ -17929,6 +18354,14 @@
       "text",
       "text",
       "NO",
+      null
+     ],
+     [
+      "merge_decisions",
+      "votes",
+      "jsonb",
+      "jsonb",
+      "YES",
       null
      ],
      [
@@ -20947,11 +21380,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBSVkVHLVcxUjUtVEIzTSAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTA5IDIxOjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgUlZFRy1XMVI1LVRCM00KICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICAwWTUzLUNIRUotSjU2ViAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTE3IDE2OjE4IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgMFk1My1DSEVKLUo1NlYKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "dG9rZW4tbWFwIGVudHJ5ICMxIG1hbGZvcm1lZCAod2FudCB0b2tlbjpwcmluY2lwYWwpIOKAlCBza2lwcGVkOyB0aGF0IHRva2VuIHdpbGwgbm90IGF1dGhlbnRpY2F0ZQo=",
    "window": [
-    1791579564.4300933,
-    1791579567.1526852
+    1792253020.0351846,
+    1792253020.3996081
    ],
    "requests": [
     {
@@ -20968,55 +21401,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "53689",
+   "argv_port": "39705",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -21025,8 +21458,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -21070,19 +21503,19 @@
      "merge_decisions": [],
      "meta": [
       "{\"key\": \"coordination_bank_id\", \"value\": \"fixture-invite-bank\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1791579566.749812, \"principal\": \"laptop\"}"
+      "{\"at\": 1792253020.382866, \"principal\": \"laptop\"}"
      ],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1791579529.001679, \"principal\": \"bravo\", \"created_at\": 1791579528.995421, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1791579529.00874, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791583129.008738, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1791579529.006992, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791579469.006989, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"794139615349b5aa323c5794c0a9b9344bf54c595aa16dae27543b039774f7e0\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1791579566.749178, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580466.749105, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1791579528.993331, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580428.993299, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1791579529.003802, \"revoked_at\": 1791579529.005226, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1792252986.109478, \"principal\": \"bravo\", \"created_at\": 1792252986.10078, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1792252986.116416, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792256586.116414, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1792252986.114672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792252926.11467, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"c938f27f811c5b2f7874c53cc2a9666e0773d16e649427c475b8840c682a492a\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1792253020.382381, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253920.382353, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1792252986.098913, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253886.098885, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1792252986.111565, \"revoked_at\": 1792252986.112905, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "relations": [],
      "retrieval_events": [],
@@ -22539,6 +22972,54 @@
      ],
      [
       "edge_proposals",
+      "judge2_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_relation",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_confidence",
       "real",
       "float4",
@@ -22571,9 +23052,25 @@
      ],
      [
       "edge_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_verdict",
       "text",
       "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judged2_at",
+      "double precision",
+      "float8",
       "YES",
       null
      ],
@@ -22939,7 +23436,63 @@
      ],
      [
       "entity_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_verdict",
       "text",
       "text",
       "YES",
@@ -22971,6 +23524,14 @@
      ],
      [
       "entity_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge_verdict",
       "text",
       "text",
@@ -22980,6 +23541,14 @@
      [
       "entity_proposals",
       "judged2_at",
+      "double precision",
+      "float8",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judged3_at",
       "double precision",
       "float8",
       "YES",
@@ -24239,6 +24808,14 @@
       "text",
       "text",
       "NO",
+      null
+     ],
+     [
+      "merge_decisions",
+      "votes",
+      "jsonb",
+      "jsonb",
+      "YES",
       null
      ],
      [
@@ -27256,8 +27833,8 @@
    "stdout": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXBsYWNlXSBbLS11cmwgVVJMXSBbLS1wb3J0IFBPUlRdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tYmFuayBGSU5HRVJQUklOVF0gWy0tbGlzdF0gWy0tcmV2b2tlIE5BTUVdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0teWVzXSBbLS1qc29uXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFtuYW1lXQoKR2l2ZSBhbm90aGVyIG1hY2hpbmUgaXRzIG93biBwcmluY2lwYWwgb24gdGhpcyBiYW5rOiBwcmludHMgYSBzaG9ydC1saXZlZCwKc2luZ2xlLXVzZSBwYWlyaW5nIGNvZGUgZm9yIGBwc2V1ZG9saWZlLW1jcCBwYWlyYC4gRXhpdCBjb2RlczogMCBkb25lLCAxIHRoZQpkYXRhYmFzZSBmYWlsZWQsIDIgdXNhZ2Ugb3Igbm90IGNvbmZpcm1lZCwgNCByZWZ1c2VkIGJlZm9yZSBhbnkgY2hhbmdlLgoKcG9zaXRpb25hbCBhcmd1bWVudHM6CiAgbmFtZSAgICAgICAgICAgICAgICAgIHRoZSBuZXcgbWFjaGluZSdzIHByaW5jaXBhbCwgZS5nLiBsYXB0b3AKCm9wdGlvbnM6CiAgLWgsIC0taGVscCAgICAgICAgICAgIHNob3cgdGhpcyBoZWxwIG1lc3NhZ2UgYW5kIGV4aXQKICAtLXRpZXIge21pbmltYWwsY29yZSxmdWxsfQogICAgICAgICAgICAgICAgICAgICAgICBpdHMgZGVmYXVsdCB0b29sc2V0IHRpZXIgKGRlZmF1bHQ6IHRoZSBkYWVtb24ncykKICAtLWJvYXJkICAgICAgICAgICAgICAgYWRtaXQgaXQgdG8gdGhlIGFnZW50IGJvYXJkIChhIG5ldyBwcmluY2lwYWwncwogICAgICAgICAgICAgICAgICAgICAgICBkZWZhdWx0KQogIC0tbm8tYm9hcmQgICAgICAgICAgICBkbyBub3QgYWRtaXQgaXQgdG8gdGhlIGFnZW50IGJvYXJkCiAgLS1leHBpcmVzIEVYUElSRVMgICAgIGhvdyBsb25nIHRoZSBjb2RlIGxpdmVzOiAxNW0gKGRlZmF1bHQpLCBhdCBtb3N0IDI0aAogIC0tcmVwbGFjZSAgICAgICAgICAgICBnaXZlIGEgcGFpcmVkIHByaW5jaXBhbCBhIG5ldyBjb2RlIChpdHMgdG9rZW4gd29ya3MKICAgICAgICAgICAgICAgICAgICAgICAgdW50aWwgcmVkZWVtZWQpCiAgLS11cmwgVVJMICAgICAgICAgICAgIHRoZSBkYWVtb24gVVJMIHRvIHByaW50IChkZWZhdWx0OiBleHBvc2Ugc3RhdHVzKQogIC0tcG9ydCBQT1JUICAgICAgICAgICB0aGUgbG9jYWwgZGFlbW9uJ3MgcG9ydCAoZGVmYXVsdDogUFNFVURPTElGRV9NQ1BfUE9SVCwKICAgICAgICAgICAgICAgICAgICAgICAgZWxzZSA4NzY1KQogIC0tYmFuayBGSU5HRVJQUklOVCAgICByZWZ1c2UgdW5sZXNzIHRoZSBkYXRhYmFzZSBob2xkcyB0aGlzIGJhbmsgKC9oZWFsdGgncwogICAgICAgICAgICAgICAgICAgICAgICBiYW5rKQogIC0tbGlzdCAgICAgICAgICAgICAgICBsaXN0IHN0b3JlZCBwcmluY2lwYWxzCiAgLS1yZXZva2UgTkFNRSAgICAgICAgIHJldm9rZSBhIHN0b3JlZCBwcmluY2lwYWwKICAtLXllcyAgICAgICAgICAgICAgICAgcmV2b2tlIHdpdGhvdXQgYXNraW5nCiAgLS1qc29uICAgICAgICAgICAgICAgIG9uZSBKU09OIHJlcG9ydCBvbiBzdGRvdXQK",
    "stderr": "",
    "window": [
-    1791579567.6929657,
-    1791579567.7410197
+    1792253021.0504222,
+    1792253021.2066028
    ],
    "requests": [],
    "arm": "python",
@@ -27267,55 +27844,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "52317",
+   "argv_port": "45141",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -27324,8 +27901,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -27346,8 +27923,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXBsYWNlXSBbLS11cmwgVVJMXSBbLS1wb3J0IFBPUlRdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tYmFuayBGSU5HRVJQUklOVF0gWy0tbGlzdF0gWy0tcmV2b2tlIE5BTUVdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0teWVzXSBbLS1qc29uXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFtuYW1lXQpwc2V1ZG9saWZlLW1jcCBpbnZpdGU6IGVycm9yOiBhcmd1bWVudCAtLWV4cGlyZXM6IC0tZXhwaXJlcyBtdXN0IGJlIGJldHdlZW4gMSBtaW51dGUgYW5kIDI0IGhvdXJzCg==",
    "window": [
-    1791579568.2025528,
-    1791579568.2436073
+    1792253021.566566,
+    1792253021.719798
    ],
    "requests": [],
    "arm": "python",
@@ -27357,55 +27934,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "58797",
+   "argv_port": "35407",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -27414,8 +27991,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -27436,8 +28013,8 @@
    "stdout": "",
    "stderr": "dXNhZ2U6IHBzZXVkb2xpZmUtbWNwIGludml0ZSBbLWhdIFstLXRpZXIge21pbmltYWwsY29yZSxmdWxsfV0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1ib2FyZCB8IC0tbm8tYm9hcmRdIFstLWV4cGlyZXMgRVhQSVJFU10KICAgICAgICAgICAgICAgICAgICAgICAgICAgICBbLS1yZXBsYWNlXSBbLS11cmwgVVJMXSBbLS1wb3J0IFBPUlRdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0tYmFuayBGSU5HRVJQUklOVF0gWy0tbGlzdF0gWy0tcmV2b2tlIE5BTUVdCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgWy0teWVzXSBbLS1qc29uXQogICAgICAgICAgICAgICAgICAgICAgICAgICAgIFtuYW1lXQpwc2V1ZG9saWZlLW1jcCBpbnZpdGU6IGVycm9yOiBhcmd1bWVudCAtLXRpZXI6IGludmFsaWQgY2hvaWNlOiAnd3JpdGVyJyAoY2hvb3NlIGZyb20gJ21pbmltYWwnLCAnY29yZScsICdmdWxsJykK",
    "window": [
-    1791579568.7103307,
-    1791579568.7674973
+    1792253022.1699424,
+    1792253022.3697972
    ],
    "requests": [],
    "arm": "python",
@@ -27447,55 +28024,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "45291",
+   "argv_port": "37227",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -27504,8 +28081,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -27523,11 +28100,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA4OU5aLUc4NjktVEVLOCAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTA5IDIxOjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHYgODlOWi1HODY5LVRFSzgKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA4Tkc4LU5ZSDItUlk3NiAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTE3IDE2OjE4IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHYgOE5HOC1OWUgyLVJZNzYKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "",
    "window": [
-    1791579569.2134275,
-    1791579572.3897884
+    1792253023.0558,
+    1792253023.4326878
    ],
    "requests": [
     {
@@ -27544,55 +28121,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "34661",
+   "argv_port": "37993",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -27601,8 +28178,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -27646,19 +28223,19 @@
      "merge_decisions": [],
      "meta": [
       "{\"key\": \"coordination_bank_id\", \"value\": \"fixture-invite-bank\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1791579571.956394, \"principal\": \"laptop\"}"
+      "{\"at\": 1792253023.415323, \"principal\": \"laptop\"}"
      ],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1791579529.001679, \"principal\": \"bravo\", \"created_at\": 1791579528.995421, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1791579529.00874, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791583129.008738, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1791579529.006992, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791579469.006989, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"928bceaf0566adcf8d3b2258b59e618e556d4a0f507d68636d8bddf93a93a071\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1791579571.955908, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580471.955874, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1791579528.993331, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580428.993299, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1791579529.003802, \"revoked_at\": 1791579529.005226, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1792252986.109478, \"principal\": \"bravo\", \"created_at\": 1792252986.10078, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1792252986.116416, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792256586.116414, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1792252986.114672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792252926.11467, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1792252986.098913, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253886.098885, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"e816318bd94525f97561ee0c314c04e5eb4442dec1d24797eab5f47ca8ac2aff\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1792253023.414695, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253923.414661, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1792252986.111565, \"revoked_at\": 1792252986.112905, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "relations": [],
      "retrieval_events": [],
@@ -29115,6 +29692,54 @@
      ],
      [
       "edge_proposals",
+      "judge2_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_relation",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_confidence",
       "real",
       "float4",
@@ -29147,9 +29772,25 @@
      ],
      [
       "edge_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_verdict",
       "text",
       "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judged2_at",
+      "double precision",
+      "float8",
       "YES",
       null
      ],
@@ -29515,7 +30156,63 @@
      ],
      [
       "entity_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_verdict",
       "text",
       "text",
       "YES",
@@ -29547,6 +30244,14 @@
      ],
      [
       "entity_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge_verdict",
       "text",
       "text",
@@ -29556,6 +30261,14 @@
      [
       "entity_proposals",
       "judged2_at",
+      "double precision",
+      "float8",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judged3_at",
       "double precision",
       "float8",
       "YES",
@@ -30815,6 +31528,14 @@
       "text",
       "text",
       "NO",
+      null
+     ],
+     [
+      "merge_decisions",
+      "votes",
+      "jsonb",
+      "jsonb",
+      "YES",
       null
      ],
      [
@@ -33829,11 +34550,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA5N1JQLTJWVDQtTlo1MCAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTA5IDIxOjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgOTdSUC0yVlQ0LU5aNTAKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA4RjI4LUhKME0tSDk5WCAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTE3IDE2OjE4IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgOEYyOC1ISjBNLUg5OVgKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "",
    "window": [
-    1791579572.9925923,
-    1791579575.7409105
+    1792253024.0873234,
+    1792253024.4536307
    ],
    "requests": [
     {
@@ -33850,55 +34571,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "51311",
+   "argv_port": "36363",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -33907,8 +34628,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -33952,19 +34673,19 @@
      "merge_decisions": [],
      "meta": [
       "{\"key\": \"coordination_bank_id\", \"value\": \"fixture-invite-bank\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1791579575.296878, \"principal\": \"laptop\"}"
+      "{\"at\": 1792253024.435831, \"principal\": \"laptop\"}"
      ],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1791579529.001679, \"principal\": \"bravo\", \"created_at\": 1791579528.995421, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1791579529.00874, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791583129.008738, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1791579529.006992, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791579469.006989, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"0b5b06c29251c314cbbf803d138d8b88fcdce47698e116837fda23534eb19b8f\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1791579575.296412, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580475.29638, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1791579528.993331, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580428.993299, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1791579529.003802, \"revoked_at\": 1791579529.005226, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1792252986.109478, \"principal\": \"bravo\", \"created_at\": 1792252986.10078, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1792252986.116416, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792256586.116414, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1792252986.114672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792252926.11467, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"58531ed0cd8153b3bdba061fb66c4fb1b7b377c8c2f1e424f11defb431141698\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1792253024.435351, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253924.435319, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1792252986.098913, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253886.098885, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1792252986.111565, \"revoked_at\": 1792252986.112905, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "relations": [],
      "retrieval_events": [],
@@ -35421,6 +36142,54 @@
      ],
      [
       "edge_proposals",
+      "judge2_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_relation",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_confidence",
       "real",
       "float4",
@@ -35453,9 +36222,25 @@
      ],
      [
       "edge_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_verdict",
       "text",
       "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judged2_at",
+      "double precision",
+      "float8",
       "YES",
       null
      ],
@@ -35821,7 +36606,63 @@
      ],
      [
       "entity_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_verdict",
       "text",
       "text",
       "YES",
@@ -35853,6 +36694,14 @@
      ],
      [
       "entity_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge_verdict",
       "text",
       "text",
@@ -35862,6 +36711,14 @@
      [
       "entity_proposals",
       "judged2_at",
+      "double precision",
+      "float8",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judged3_at",
       "double precision",
       "float8",
       "YES",
@@ -37121,6 +37978,14 @@
       "text",
       "text",
       "NO",
+      null
+     ],
+     [
+      "merge_decisions",
+      "votes",
+      "jsonb",
+      "jsonb",
+      "YES",
       null
      ],
      [
@@ -40135,11 +41000,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICBBVlhRLTJCV0YtTTVLOSAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTA5IDIxOjE0IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgQVZYUS0yQldGLU01SzkKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
+   "stdout": "bGFwdG9wOiBpbnZpdGVkOyB0aWVyIHRoZSBkYWVtb24gZGVmYXVsdCwgYWdlbnQgYm9hcmQgb24KICBjb2RlICAgICA0ODFILVNZMDUtNjBTNSAgIHNpbmdsZSB1c2UsIGV4cGlyZXMgaW4gMTUgbWluICgyMDI2LTEwLTE3IDE2OjE4IFVUQykKICBvbiB0aGUgbmV3IG1hY2hpbmU6ICBwc2V1ZG9saWZlLW1jcCBwYWlyIHUgNDgxSC1TWTA1LTYwUzUKICBvciBydW4gdGhlIGluc3RhbGxlciB0aGVyZSBhbmQgYW5zd2VyIDIsIGdpdmluZyB0aGlzIGNvZGUgd2hlcmUgaXQgYXNrcyBmb3IgdGhlIHRva2VuCmFuIGludml0ZWQgbWFjaGluZSBjYW4gcmVhZCBhbmQgd3JpdGUgdGhlIHdob2xlIGJhbmsgYW5kIHVzZSB0aGUgYWdlbnQgYm9hcmQsIGJ1dCBub3QgY2hhbmdlIHRoZSBkYWVtb24ncyBjb25maWd1cmF0aW9uCg==",
    "stderr": "",
    "window": [
-    1791579576.253746,
-    1791579579.066879
+    1792253025.1028216,
+    1792253025.477523
    ],
    "requests": [
     {
@@ -40156,55 +41021,55 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "59991",
+   "argv_port": "41887",
    "ttl": 900,
    "seed_rows": [
     {
      "tier": "core",
      "board": true,
      "code_hash": null,
-     "paired_at": 1791579529.001679,
+     "paired_at": 1792252986.109478,
      "principal": "bravo",
-     "created_at": 1791579528.995421,
+     "created_at": 1792252986.10078,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b"
+     "paired_code_hash": "85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4"
     },
     {
      "tier": "full",
      "board": true,
-     "code_hash": "cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b",
+     "code_hash": "fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1791579529.00874,
+     "created_at": 1792252986.116416,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791583129.008738,
+     "code_expires_at": 1792256586.116414,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
-     "code_hash": "09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb",
+     "code_hash": "e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1791579529.006992,
+     "created_at": 1792252986.114672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791579469.006989,
+     "code_expires_at": 1792252926.11467,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
-     "code_hash": "dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325",
+     "code_hash": "d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1791579528.993331,
+     "created_at": 1792252986.098913,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1791580428.993299,
+     "code_expires_at": 1792253886.098885,
      "paired_code_hash": null
     },
     {
@@ -40213,8 +41078,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1791579529.003802,
-     "revoked_at": 1791579529.005226,
+     "created_at": 1792252986.111565,
+     "revoked_at": 1792252986.112905,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -40258,19 +41123,19 @@
      "merge_decisions": [],
      "meta": [
       "{\"key\": \"coordination_bank_id\", \"value\": \"fixture-invite-bank\"}",
-      "{\"key\": \"schema_version\", \"value\": 55}"
+      "{\"key\": \"schema_version\", \"value\": 56}"
      ],
      "outcome_signals": [],
      "pl_cf_clock": [
-      "{\"at\": 1791579578.682998, \"principal\": \"laptop\"}"
+      "{\"at\": 1792253025.460954, \"principal\": \"laptop\"}"
      ],
      "principals": [
-      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1791579529.001679, \"principal\": \"bravo\", \"created_at\": 1791579528.995421, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"99bd057d29f8cfeb59af0593c35eae5c7f9e4f3b2fe3ce6dc785617ce8ef3e8b\"}",
-      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"cc6aca86a0c95be5f71e1e6f65564d95fd5c5934dd52c8520c2282a8b340c20b\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1791579529.00874, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791583129.008738, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": false, \"code_hash\": \"09aa4b591fb32b6c6d3fa6caaeb014ab6711cece4c09a3f5415d298107a549cb\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1791579529.006992, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791579469.006989, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"b26f5353bd0b2c404206fad86e2551a56dd0b6d5c0109f0016e65842cb0a31db\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1791579578.682415, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580478.682381, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": \"dbf972f6f0c8eea8f6cd34874fc764fca6b34549589a62c20a9b326f4fb12325\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1791579528.993331, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1791580428.993299, \"paired_code_hash\": null}",
-      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1791579529.003802, \"revoked_at\": 1791579529.005226, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
+      "{\"tier\": \"core\", \"board\": true, \"code_hash\": null, \"paired_at\": 1792252986.109478, \"principal\": \"bravo\", \"created_at\": 1792252986.10078, \"revoked_at\": null, \"token_hash\": \"217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d\", \"code_expires_at\": null, \"paired_code_hash\": \"85c86362428a19466fbb4bf26924eac3a3e8d02cff604fdb8a1214a6cf614ad4\"}",
+      "{\"tier\": \"full\", \"board\": true, \"code_hash\": \"fe39d5ae6902d4a74c87941b4259d9f53b19a2ca64aab8fc327be40cfcf29f69\", \"paired_at\": null, \"principal\": \"a-rather-long-principal-name.x\", \"created_at\": 1792252986.116416, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792256586.116414, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": false, \"code_hash\": \"e1f8f58c9c4da4a4409a5d45c1990a12632914161363163061829d44ff4e6539\", \"paired_at\": null, \"principal\": \"delta\", \"created_at\": 1792252986.114672, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792252926.11467, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"756de865b3c90edd2212e1f3fbf5c45273bdb4719a35d6a728bd779ce2f770b7\", \"paired_at\": null, \"principal\": \"laptop\", \"created_at\": 1792253025.460272, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253925.460212, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": \"d04beaae5d15562b197db4e038445fda81aa561ba584a2445fa30e193035125d\", \"paired_at\": null, \"principal\": \"alpha\", \"created_at\": 1792252986.098913, \"revoked_at\": null, \"token_hash\": null, \"code_expires_at\": 1792253886.098885, \"paired_code_hash\": null}",
+      "{\"tier\": null, \"board\": true, \"code_hash\": null, \"paired_at\": null, \"principal\": \"charlie\", \"created_at\": 1792252986.111565, \"revoked_at\": 1792252986.112905, \"token_hash\": null, \"code_expires_at\": null, \"paired_code_hash\": null}"
      ],
      "relations": [],
      "retrieval_events": [],
@@ -41727,6 +42592,54 @@
      ],
      [
       "edge_proposals",
+      "judge2_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_relation",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_confidence",
       "real",
       "float4",
@@ -41759,9 +42672,25 @@
      ],
      [
       "edge_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
       "judge_verdict",
       "text",
       "text",
+      "YES",
+      null
+     ],
+     [
+      "edge_proposals",
+      "judged2_at",
+      "double precision",
+      "float8",
       "YES",
       null
      ],
@@ -42127,7 +43056,63 @@
      ],
      [
       "entity_proposals",
+      "judge2_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge2_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge2_verdict",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_confidence",
+      "real",
+      "float4",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_policy",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judge3_verdict",
       "text",
       "text",
       "YES",
@@ -42159,6 +43144,14 @@
      ],
      [
       "entity_proposals",
+      "judge_served_model",
+      "text",
+      "text",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
       "judge_verdict",
       "text",
       "text",
@@ -42168,6 +43161,14 @@
      [
       "entity_proposals",
       "judged2_at",
+      "double precision",
+      "float8",
+      "YES",
+      null
+     ],
+     [
+      "entity_proposals",
+      "judged3_at",
       "double precision",
       "float8",
       "YES",
@@ -43427,6 +44428,14 @@
       "text",
       "text",
       "NO",
+      null
+     ],
+     [
+      "merge_decisions",
+      "votes",
+      "jsonb",
+      "jsonb",
+      "YES",
       null
      ],
      [
