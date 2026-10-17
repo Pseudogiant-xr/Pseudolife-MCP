@@ -40,6 +40,12 @@ tool tier: if your client does not list them, call
      reasons}`. When `attention.needed` is true, tell the user the reason
      before triaging: a judge left in `shadow`/`off`, or one configured
      but not running, keeps refilling the queue this session clears.
+     Its `judge_agreement` block scores every recorded judge vote
+     against the human or agent decision that followed (per queue and
+     opinion: `voted`, `agree`, `precision`; `agreed_two` and
+     `majority_three` for what the two-vote and tiebreak gates would
+     have applied). When a judge mode is in `shadow`, report that
+     number with the queue counts: it is what a promotion rests on.
 2. ONLY when no extractor endpoint is configured (primary and fallback
    both null) or both are unreachable: you are this deployment's only
    cortex writer — run the manual extraction pass:
