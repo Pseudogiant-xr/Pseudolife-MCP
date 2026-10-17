@@ -405,7 +405,7 @@ def _reopen_proposal(storage, marker: dict) -> bool:
     table = "edge_proposals" if marker["queue"] == "link" else "entity_proposals"
     resets = ["status='pending'", "decided_by=NULL", "decided_at=NULL",
               "judge_verdict=NULL", "judge_confidence=NULL", "judge_note=NULL",
-              "judge_model=NULL", "judged_at=NULL"]
+              "judge_model=NULL", "judged_at=NULL", "judge_served_model=NULL"]
     resets.extend(("judge2_verdict=NULL", "judge2_confidence=NULL",
                    "judge2_model=NULL", "judged2_at=NULL"))
     resets.extend(("judge2_served_model=NULL", "judge2_policy=NULL"))
