@@ -121,7 +121,11 @@ def vote_endpoint_moved(service, kind, row, opinion, cache=None) -> bool:
             cache[key] = now
     else:
         now = cache[key]
-    return bool(now and now != row.get(f"judge{n}_served_model"))
+    # Both names must be known: a reply that named no model leaves the
+    # vote's served model empty, and calling that moved would clear and
+    # re-ask it every tick; the unknown-identity refusal handles it instead.
+    stored = row.get(f"judge{n}_served_model")
+    return bool(now and stored and now != stored)
 
 
 def _without_tail(note, marker):

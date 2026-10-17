@@ -875,3 +875,20 @@ def test_the_apply_paths_hold_the_moved_endpoint_rule_on_their_own(svc, monkeypa
     _endpoint_now_serves(svc, 'link_second', policy)
     svc.config.memory.deep_dream.link_judge_two_vote = 'auto'
     assert svc.deep_dream_judge_links(lfirst).get('two_vote_applied', 0) == 0
+
+
+def test_a_vote_with_no_recorded_served_model_is_not_moved():
+    """Only two KNOWN names that differ make a later vote moved. A vote
+    whose reply named no model is stored with no served model; calling it
+    moved would clear and re-ask it every tick (one model call per row per
+    tick) instead of leaving it to the existing unknown-identity refusal."""
+    from types import SimpleNamespace
+
+    from pseudolife_memory.memory.review_judgments import vote_endpoint_moved
+
+    meta = {"review_response_identity_v1_merge_second": {"policy": "p", "model": "model-b"}}
+    svc = SimpleNamespace(_storage=SimpleNamespace(get_meta=meta.get))
+    row = {"judge2_policy": "p"}
+    assert vote_endpoint_moved(svc, "merge", {**row, "judge2_served_model": None}, "second") is False
+    assert vote_endpoint_moved(svc, "merge", {**row, "judge2_served_model": "model-b"}, "second") is False
+    assert vote_endpoint_moved(svc, "merge", {**row, "judge2_served_model": "model-a"}, "second") is True
