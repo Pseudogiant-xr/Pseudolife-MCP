@@ -4126,9 +4126,27 @@ the oldest one no judge has recorded a verdict on
 (`oldest_unjudged_merge_age_days`), the
 configured mode of every judge (`judges_enabled`, `judge_mode`,
 `link_judge_mode`, `junk_judge_mode`, `curation_judge_mode`,
-`candidate_judge_mode`) and `attention: {needed, reasons}`. It costs two
-aggregate queries and never fails the status call (a failure is an
-`error` field). The store-curation listing is not counted: it is
+`candidate_judge_mode`), `attention: {needed, reasons}` and, since schema
+v56, `judge_agreement`: how often each recorded judge vote agreed with the
+decision a human (Console) or agent (`memory_graph_review`) later took on
+the same row, over the last 90 days. It is the number a judge mode in
+`shadow` is promoted to `auto` on. Per queue (`merge`, `junk`, `link`) and
+per opinion (`judge`, `judge2`, `judge3`): `voted`, `agree`, `abstain`
+(a `leave`), `precision` and `by_verdict`. `merge.agreed_two` and
+`link.agreed_two` score the rows whose first two opinions agreed from
+distinct models at the two-vote gates (`judge_accept_min_confidence`,
+`judge_reject_min_confidence_2`, `link_two_vote_min_confidence`), what
+the two-vote gates would have applied; `merge.majority_three` the rows
+whose 2-of-3 majority cleared its gate, what the tiebreak would have
+applied (the `low_differential` exclusion is not replayed, so the accept
+side counts a few rows `auto` would skip). `scored` counts the decisions
+read, `labels` who took them; decisions the judges applied themselves
+(`dream-judge`, `dream-auto`) are not labels. Merge and junk votes come
+from the snapshot `merge_decisions.votes` keeps from the moment of the
+decision (an accepted merge deletes its proposal row), so decisions from
+before v56 are not scored; link votes stay on their rows. The health
+block costs two aggregate queries plus that scan and never fails the
+status call (a failure is an `error` field). The store-curation listing is not counted: it is
 recomputed on demand and capped at `curation_top_k` per store, so it
 cannot pile up. Attention covers the merge queue, the one that piled
 up; the junk and link counts are reported only. It is needed when the

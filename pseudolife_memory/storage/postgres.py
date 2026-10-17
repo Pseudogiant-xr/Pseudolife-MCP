@@ -3933,19 +3933,65 @@ class PostgresStorage:
     def record_merge_decision(self, proposal_id: int | None, entity_display: str,
                               into_display: str | None, status: str,
                               score: float | None, reason: str | None,
-                              decided_by: str, decided_at: float) -> int:
+                              decided_by: str, decided_at: float,
+                              votes: dict | None = None) -> int:
         """Durable audit row for a merge decision. Denormalized on purpose:
         an accepted merge deletes the folded entity (and its proposal row via
-        CASCADE), so the audit must not reference either."""
+        CASCADE), so the audit must not reference either. ``votes`` (v56) is
+        the proposal's judge-vote snapshot (:func:`proposal_votes`), kept
+        here for the same reason: the judge-agreement report scores votes
+        against decisions, and the accepted rows' votes go with the row."""
         with self._txn():
             row = self.conn.execute(
                 "INSERT INTO merge_decisions "
                 "(proposal_id, entity_display, into_display, status, score, "
-                " reason, decided_by, decided_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                " reason, decided_by, decided_at, votes) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (proposal_id, entity_display, into_display, status, score,
-                 reason, decided_by, decided_at)).fetchone()
+                 reason, decided_by, decided_at,
+                 Jsonb(votes) if votes else None)).fetchone()
         return int(row[0])
+
+    _PROPOSAL_VOTE_COLUMNS = (
+        "judge_verdict", "judge_confidence", "judge_model", "judge_note",
+        "judge2_verdict", "judge2_confidence", "judge2_model",
+        "judge2_served_model", "judge3_verdict", "judge3_confidence",
+        "judge3_model", "judge3_served_model")
+
+    def entity_proposal_votes(self, proposal_id: int) -> dict | None:
+        """The judge votes an entity proposal carries right now, as the
+        audit snapshots them (:func:`proposal_votes`); None when the row is
+        gone or no opinion was recorded."""
+        from pseudolife_memory.memory.judge_agreement import proposal_votes
+        cols = self._PROPOSAL_VOTE_COLUMNS
+        r = self.conn.execute(
+            f"SELECT {', '.join(cols)} FROM entity_proposals WHERE id = %s",
+            (proposal_id,)).fetchone()
+        return proposal_votes(dict(zip(cols, r))) if r else None
+
+    def judge_vote_decisions(self, since: float) -> dict[str, list[dict]]:
+        """The decided rows the judge-agreement report scores, decided at or
+        after ``since``: merge and junk decisions that carry a vote
+        snapshot (v56 rows; older audit rows have none and are skipped),
+        and decided link proposals whose row still holds its votes."""
+        merge_cols = ("status", "decided_by", "decided_at", "into_display",
+                      "votes")
+        merges = [dict(zip(merge_cols, r)) for r in self.conn.execute(
+            "SELECT status, decided_by, decided_at, into_display, votes "
+            "FROM merge_decisions "
+            "WHERE votes IS NOT NULL AND decided_at >= %s "
+            "  AND status IN ('accepted', 'rejected')",
+            (float(since),)).fetchall()]
+        link_cols = ("status", "decided_by", "decided_at",
+                     "judge_verdict", "judge_confidence", "judge_model",
+                     "judge2_verdict", "judge2_confidence", "judge2_model",
+                     "judge2_served_model")
+        links = [dict(zip(link_cols, r)) for r in self.conn.execute(
+            f"SELECT {', '.join(link_cols)} FROM edge_proposals "
+            "WHERE judge_verdict IS NOT NULL AND decided_at >= %s "
+            "  AND status IN ('accepted', 'rejected', 'retyped')",
+            (float(since),)).fetchall()]
+        return {"merge": merges, "link": links}
 
     def junk_accepted_displays(self) -> list[str]:
         """Displays of every entity ever deleted as junk (reviewed or
