@@ -173,6 +173,7 @@ async fn track(db: &Client, slots: &[SlotKey], knobs: &CortexKnobs, now: f64) {
     if knobs.read_tracking
         && let Err(e) = bump_slot_reads(db, slots, now).await
     {
+        crate::read::stats::record_slot_read_error();
         eprintln!("slot-read telemetry failed: {e:#}");
     }
 }
