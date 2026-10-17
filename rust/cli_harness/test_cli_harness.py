@@ -1713,6 +1713,7 @@ def test_mutant_source_copy_drops_files_the_checkout_no_longer_has(tmp_path, mon
     write(source / "shim" / "src" / "cli" / "doctor" / "mod.rs", "new")
     write(source / "shim" / "src" / "main.rs")
     write(source / "daemon" / "src" / "lib.rs")
+    write(source / "daemon" / "src" / "storage" / "mod.rs")
     write(source / "cli_harness" / "rows" / "mail.py")
     copy = target / "mutant-src" / "rust"
     stale = [copy / "shim" / "src" / "cli" / "doctor.rs",
@@ -1721,6 +1722,7 @@ def test_mutant_source_copy_drops_files_the_checkout_no_longer_has(tmp_path, mon
     for path in stale:
         write(path, "stale")
     write(copy / "shim" / "src" / "cli" / "doctor" / "mod.rs", "old")
+    write(copy / "daemon" / "src" / "storage", "was a file")
     ignored = [copy / "target" / "debug" / "keep", copy / "shim" / "target" / "keep",
                copy / "cli_harness" / "keep.py", copy / "shim" / "__pycache__" / "keep.pyc"]
     for path in ignored:
@@ -1736,6 +1738,7 @@ def test_mutant_source_copy_drops_files_the_checkout_no_longer_has(tmp_path, mon
     assert [p for p in stale if p.exists()] == []
     assert not (copy / "shim" / "src" / "gone").exists()
     assert (copy / "daemon" / "src" / "lib.rs").read_text(encoding="utf-8") == "x"
+    assert (copy / "daemon" / "src" / "storage" / "mod.rs").read_text(encoding="utf-8") == "x"
     assert (copy / "shim" / "src" / "cli" / "doctor" / "mod.rs").read_text(encoding="utf-8") == "new"
     assert all(p.read_text(encoding="utf-8") == "keep" for p in ignored)
     # Cargo must see the mutated file as newer than any earlier build.
