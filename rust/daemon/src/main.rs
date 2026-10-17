@@ -15,12 +15,17 @@ mod embed;
 mod embedding_math;
 #[cfg_attr(not(feature = "harness"), allow(dead_code))]
 mod episodes;
+mod fact_resolve;
+mod fact_set;
+mod freshness;
 mod graph_read;
 #[cfg(feature = "harness")]
 mod harness_route;
 mod health;
 mod heap_trim;
+mod hlc;
 mod http;
+mod junk_names;
 mod labels;
 mod maintenance;
 mod mcp;
@@ -37,6 +42,7 @@ mod release_check;
 mod routes;
 mod search;
 mod service;
+mod set_members;
 mod slots;
 mod startup;
 mod static_files;

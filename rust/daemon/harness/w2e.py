@@ -6,10 +6,13 @@ usage:
   python w2e.py golden  --rust-bin PATH [--only NAME ...] [--out FILE]
   python w2e.py calibrate --rust-bin PATH [--out FILE]   (no tolerances: records them)
   python w2e.py mutants --rust-bin PATH_BUILT_WITH_FEATURES_HARNESS_MUTANTS [--only NAME ...]
+                        [--mutants NAME ...]   (default: every entry of MUTANTS)
 
-Any Rust build serves ``memory_store`` on ``/mcp`` (``--features mutants``
-adds the deliberate breaks). Each scenario prepares one template bank through the
-Python daemon's own write path (seed calls only, never hand-written rows),
+Any Rust build serves ``memory_store``, ``memory_fact_set``,
+``memory_set_add``, ``memory_set_remove`` and ``memory_fact_resolve`` on
+``/mcp`` (``--features mutants`` adds the deliberate breaks). Each scenario prepares
+one template bank through the Python daemon's own write path (seed calls
+only, never hand-written rows, except the declared ``sql`` seed op below),
 clones it for each side, starts both daemons, then sends every operation to
 both. After every operation it compares:
 
@@ -28,9 +31,27 @@ Normalizers (declared, spec "Free for W1 and W2"):
 * generic session titles keep their shape, not their minute;
 * ``entries.embedding`` and ``entries.surprise`` are compared numerically
   per entry id against tolerances set from a measurement
-  (``goldens/w2e-tolerance.json``), then replaced by a token;
+  (``goldens/w2e-tolerance.json``), then replaced by a token; so is
+  ``facts.embedding`` per fact id, against the same embedding tolerances
+  (both sides rewrite a slot's rows in the same order, so fact ids match);
+* the canonical-fact clocks: ``facts`` ``asserted_at``, ``last_confirmed``,
+  ``superseded_at``, ``tx_time``, ``valid_time`` and ``hlc_phys`` (the HLC's
+  wall-clock milliseconds; ``hlc_logical`` stays exact),
+  ``outcome_signals.created_at``, ``entities.created_at`` and each
+  ``cortex_supersession_log`` row's ``timestamp`` keep only null-or-not;
+* in responses, the same record clocks keep only null-or-not, and a record's
+  ``age`` may differ by one step ("just now" / "1 minute ago"), since the
+  two daemons answer seconds apart;
 * rows are compared as sorted sets (row order is the primary key's order,
   which renamed ids change), except that entry ids themselves must match.
+
+Seed operations may also be ``{"op": "sql"}``: a statement run on the
+template only, for state no tool writes (``entity_kinds``, which only an
+out-of-process backfill fills). With ``"after_stop": true`` it runs once
+the seeding daemon has stopped, for ``facts`` rows: the Python daemon's
+exit flush rewrites ``facts`` from its resident cortex and would drop rows
+it never loaded (the set-cap scenario's hundred members, with NULL
+embeddings so that no cosine decides the cap).
 
 Exit status: 0 only when no response and no bank state differs.
 Environment: ``ORT_DYLIB_PATH`` and ``PSEUDOLIFE_DAEMON_ONNX_DIR`` for the
@@ -64,7 +85,12 @@ AUTH = ("Authorization", f"Bearer {TOKEN}")
 # (table, column) holding wall-clock seconds (value or list of values).
 CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_at"),
          ("episodes", "ended_at"), ("client_sessions", "started_at"),
-         ("client_sessions", "ended_at"), ("client_sessions", "start_times")}
+         ("client_sessions", "ended_at"), ("client_sessions", "start_times"),
+         ("facts", "asserted_at"), ("facts", "last_confirmed"), ("facts", "superseded_at"),
+         ("facts", "tx_time"), ("facts", "valid_time"), ("facts", "hlc_phys"),
+         ("outcome_signals", "created_at"), ("entities", "created_at")}
+# Record keys in tool answers holding wall-clock seconds.
+RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time"}
 # meta key -> paths (keys) inside its JSON value that are wall-clock.
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -72,7 +98,17 @@ GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # store-cancellable is w2e_shutdown.py's control: over MCP every call runs
 # detached from its connection, so only the shutdown drain can observe it.
 MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "store-surprise-raw",
-           "mcp-store-no-session"]
+           "mcp-store-no-session",
+           # memory_fact_set (spec FS1-FS12): caught by the fact-set-* scenarios.
+           "mcp-fact-set-no-supersede", "mcp-fact-set-no-confirm-reinforce",
+           "mcp-fact-set-no-correction-signal", "mcp-fact-set-no-entity-mint",
+           # memory_set_add / memory_set_remove (spec SA1-SA11): caught by
+           # the set-* scenarios.
+           "mcp-set-add-no-convert", "mcp-set-add-no-cosine-dedup", "mcp-set-remove-noop",
+           # memory_fact_resolve (spec FR1-FR8): caught by the fact-resolve-*
+           # scenarios.
+           "mcp-fact-resolve-no-user-tier", "mcp-fact-resolve-reject-noop",
+           "mcp-fact-resolve-no-set-guard"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -160,6 +196,33 @@ def store(text, headers=(), **kw) -> dict:
 
 def sess(s: str) -> tuple[str, str]:
     return ("X-PL-Session", s)
+
+
+def fact(entity, attribute, value, headers=(), **kw) -> dict:
+    return {"op": "tool", "name": "memory_fact_set",
+            "args": {"entity": entity, "attribute": attribute, "value": value, **kw},
+            "headers": list(headers)}
+
+
+def tool(name, headers=(), **args) -> dict:
+    return {"op": "tool", "name": name, "args": args, "headers": list(headers)}
+
+
+def set_add(entity, attribute, member, headers=()) -> dict:
+    return tool("memory_set_add", headers, entity=entity, attribute=attribute, member=member)
+
+
+def set_remove(entity, attribute, member, headers=()) -> dict:
+    return tool("memory_set_remove", headers, entity=entity, attribute=attribute, member=member)
+
+
+def resolve(entity, attribute, accept) -> dict:
+    return tool("memory_fact_resolve", entity=entity, attribute=attribute, accept=accept)
+
+
+def sql(statement: str, after_stop: bool = False) -> dict:
+    """Seed-only: a statement run on the template (see the module docstring)."""
+    return {"op": "sql", "sql": statement, "after_stop": after_stop}
 
 
 SLOT_TEXTS = [
@@ -323,6 +386,299 @@ SCENARIOS: dict[str, dict] = {
 }
 
 
+# memory_fact_set (spec FS1-FS12). Every branch of cortex_write the MCP tool
+# reaches, against a template seeded through the Python daemon's own tools.
+SCENARIOS.update({
+    "fact-set-branches": {
+        "config": None,
+        "seed": [
+            # A session root for the episode handle and the correction signal.
+            store("Session note that opens the fs-a root.", [sess("fs-a")]),
+            fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9),
+            fact("dev box", "os", "Debian 12"),
+            fact("pipeline", "schedule", "the deploy pipeline runs nightly on the bench box",
+                 origin="action"),
+            # The value names an entity nobody has minted yet: its
+            # object_entity_id stays NULL until "Billing API" is minted.
+            fact("dev box", "runs", "Billing API"),
+        ],
+        "ops": [
+            # inserted; the subject's entity is minted
+            fact("Build Server", "hostname", "ci-box-2"),
+            # confirmed: case and separators fold to the slot, the agent tier reinforces
+            fact("build_server", "Hostname", "ci-box-2"),
+            # confirmed: a user restatement adds the user tier
+            fact("dev box", "os", " debian 12 ", origin="user", confidence=0.5),
+            # compression echo: confirms the richer value and logs it
+            fact("pipeline", "schedule", "deploy pipeline runs nightly"),
+            # superseded by a user write: correction signal under the fs-a leaf
+            fact("Payments DB", "host", "10.0.0.9", [sess("fs-a")], origin="user",
+                 confidence=0.9),
+            # tier_downgrade: an agent write parks a contender
+            fact("Payments DB", "host", "10.0.0.7"),
+            # the same value refreshes the contender (action tier added)
+            fact("payments db", "host", "10.0.0.7 ", origin="action", confidence=0.6),
+            # below_confidence_margin: a new value replaces the contender
+            fact("Payments DB", "host", "10.0.0.8", origin="user", confidence=0.5),
+            # the contender's value at full weight supersedes and settles the contest;
+            # no session: the signal has no episode
+            fact("Payments DB", "host", "10.0.0.8", origin="user", confidence=0.9),
+            # minting "billing-api" relinks the seeded row's object_entity_id
+            fact("Billing API", "owner", "payments team"),
+            # a junk-shaped subject keeps the fact but mints no entity
+            fact("236 memories", "status", "archived"),
+            fact("LOCAL master = 8e2b992", "state", "pushed"),
+            # episode handles: valid (session from the root), unknown (warning), empty
+            fact("Dev Box", "kernel", "6.8", episode="@root:fs-a:12"),
+            fact("Dev Box", "shell", "zsh", episode="ffffffffffff"),
+            fact("Dev Box", "editor", "vim", episode=""),
+            fact("Dev Box", "pager", "less", episode="abc"),
+            # explicit freshness and labels, then a confirm that restates one label
+            fact("dev box", "tz", "UTC", freshness_class="volatile", authority="directive",
+                 distortion_tolerance="constraint"),
+            fact("dev box", "tz", "UTC", authority="quoted"),
+            fact("dev box", "locale", "en_AU", freshness_class="slow",
+                 authority="observation", distortion_tolerance="preference"),
+            fact("dev box", "timezone", "Australia/Hobart", freshness_class="evergreen",
+                 distortion_tolerance="episodic"),
+            # auto labels inferred from the value
+            fact("dev box", "rule", "Never run the full suite natively on Windows."),
+            fact("dev box", "doc", "According to the docs, the bank volume is external."),
+            # a header session wins over the handle's; the signal takes the handle's episode
+            fact("Dev Box", "editor", "emacs", [sess("fs-b")], origin="user",
+                 episode="@root:fs-a:12"),
+            # an integer confidence binds as a float; agent under user parks
+            fact("Dev Box", "editor", "vim", confidence=1),
+            fact("dev box", "editor", "nano", origin="action", confidence=0),
+        ],
+    },
+    "fact-set-newer-wins": {
+        "config": "memory:\n  cortex:\n    protect_provenance: false\n",
+        "seed": [fact("db", "host", "a", origin="user", confidence=0.9)],
+        "ops": [
+            # tier ignored: an agent write supersedes (no correction signal)
+            fact("db", "host", "b"),
+            # below the margin: contested, the current answered twice, nothing parked
+            fact("db", "host", "c", confidence=0.1),
+            fact("db", "host", "c", origin="user", confidence=0.1),
+            fact("db", "host", "d", origin="user", confidence=0.9),
+        ],
+    },
+    "fact-set-tuned": {
+        "config": ("memory:\n  lessons:\n    enabled: false\n  cortex:\n"
+                   "    supersede_confidence_margin: 0.5\n    reinforce_rate: 0.5\n"),
+        "seed": [fact("db", "host", "a", origin="user", confidence=0.9)],
+        "ops": [
+            # within the wider margin: superseded; lessons off, so no signal row
+            fact("db", "host", "b", origin="user", confidence=0.45),
+            # reinforce_rate 0.5
+            fact("db", "host", "b", origin="user", confidence=0.1),
+            fact("db", "host", "c", origin="user", confidence=0.1),
+        ],
+    },
+    "fact-set-freshness-auto": {
+        "config": None,
+        "seed": [
+            sql("INSERT INTO entity_kinds (entity_norm, kind, origin, confidence, decided_at) "
+                "VALUES ('payments-db', 'system', 'manual', 1.0, 0), "
+                "('release-0-9', 'artifact', 'manual', 1.0, 0)"),
+        ],
+        "ops": [
+            fact("Payments DB", "status", "up"),
+            fact("payments_db", "deployment-date", "2026-10-01"),
+            fact("Payments DB", "schema version", "58"),
+            fact("Payments DB", "owner", "payments team"),
+            fact("release 0.9", "status", "shipped"),
+            fact("unknown thing", "status", "fine"),
+            fact("Payments DB", "status", "degraded", freshness_class="evergreen"),
+        ],
+    },
+    "fact-set-set-slot": {
+        "config": None,
+        "seed": [
+            tool("memory_set_add", entity="dev box", attribute="users", member="alice"),
+            tool("memory_set_add", entity="dev box", attribute="groups", member="admins"),
+            tool("memory_set_remove", entity="dev box", attribute="groups", member="admins"),
+        ],
+        "ops": [
+            # a slot with current members refuses (invalid_argument, nothing written)
+            fact("Dev Box", "Users", "bob"),
+            # only a removed member: the scalar lands beside the audit row
+            fact("dev box", "groups", "ops"),
+        ],
+    },
+})
+
+
+# memory_set_add / memory_set_remove (spec SA1-SA11). Every branch the MCP
+# tools reach. A member's embedding is that of "{entity} {attribute}
+# {member}"; the cosines quoted below were measured with the daemon's
+# Qwen3-Embedding-0.6B (fp32 torch, CPU), all far from the 0.9 dedup line.
+SET_CAP_MEMBERS = (
+    "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm, value, status, "
+    "confidence, asserted_at, last_confirmed, kind, value_norm) "
+    "SELECT 'cap box', 'tags', 'cap-box', 'tags', v, 'current', 0.7, 1000.0 + g, 1000.0 + g, "
+    "'member', v FROM (SELECT g, 'tag-' || lpad(g::text, 3, '0') AS v "
+    "FROM generate_series(0, 99) AS g) AS s ORDER BY g")
+
+SCENARIOS.update({
+    "set-add-branches": {
+        "config": None,
+        "seed": [
+            # a labelled volatile user scalar, and an agent contender beside it
+            fact("Home Lab", "services", "Jellyfin media server", origin="user", confidence=0.9,
+                 freshness_class="volatile", authority="directive",
+                 distortion_tolerance="constraint"),
+            fact("Home Lab", "services", "Pi-hole DNS ad blocker"),
+        ],
+        "ops": [
+            # converts the scalar (dropped class and labels on the log row), adds
+            # the member (cosine 0.71 to the old value) and settles the contender
+            set_add("home lab", "Services", "Pi-hole DNS ad blocker", [sess("sa-a")]),
+            # the old scalar's value is a member now: confirmed by value
+            set_add("Home Lab", "services", "  jellyfin MEDIA server "),
+            # confirmed by cosine (0.99 to the converted member)
+            set_add("Home Lab", "services", "Jellyfin media streaming server"),
+            # added (cosine 0.81 and 0.67 to the two members)
+            set_add("Home Lab", "services", "Nextcloud file sync"),
+            # blank members are refused with a note; the subject is minted all the same
+            set_add("Home Lab", "services", "   "),
+            set_add("Bike Rack", "bikes", ""),
+            # a real subject is minted, a junk-shaped one is not
+            set_add("Garden Shed", "tools", "cordless hedge trimmer"),
+            set_add("236 memories", "tags", "archived snapshot"),
+            # removed by normalised value; then not found, and an empty slot
+            set_remove("HOME LAB", "services", "nextcloud FILE sync "),
+            set_remove("Home Lab", "services", "Nextcloud file sync"),
+            set_remove("nobody", "things", "anything"),
+            # re-added after its removal: a new row beside the removed one
+            set_add("Home Lab", "services", "Nextcloud file sync"),
+        ],
+    },
+    "set-add-aggregate": {
+        "config": None,
+        "seed": [
+            fact("Aquarium", "fish count", "32", origin="user"),
+            fact("Aquarium", "budget", "$1,500"),
+        ],
+        "ops": [
+            # the same total confirms the scalar
+            set_add("aquarium", "Fish Count", " 32 "),
+            # anything else parks a contender; the same value refreshes it, a new
+            # one replaces it
+            set_add("Aquarium", "fish count", "neon tetra"),
+            set_add("Aquarium", "fish count", "Neon Tetra "),
+            set_add("Aquarium", "fish count", "guppy"),
+            set_add("Aquarium", "budget", "new canister filter"),
+        ],
+    },
+    "set-cap": {
+        "config": None,
+        "seed": [sql(SET_CAP_MEMBERS, after_stop=True)],
+        "ops": [
+            # a hundred current members: capped, logged, nothing written but the log
+            set_add("Cap Box", "tags", "volcanic basalt sample"),
+            # dedup runs before the cap
+            set_add("cap box", "tags", "TAG-007"),
+            # a removal makes room (the slot's rows are rewritten again; the
+            # confirm above already marked it dirty)
+            set_remove("cap box", "tags", "tag-000"),
+            set_add("Cap Box", "tags", "volcanic basalt sample"),
+            # cosine 0.66 to the one embedded member: capped again
+            set_add("cap box", "tags", "medieval lute tablature"),
+        ],
+    },
+})
+
+
+# memory_fact_resolve (spec FR1-FR8). Every branch service.cortex_resolve
+# reaches over MCP. Contenders are parked through the Python daemon's own
+# tools: memory_fact_set at a weaker tier or below the confidence margin
+# (protect_provenance is on by default), and memory_set_add's aggregate park.
+# A contender with no current scalar exists only once memory_set_add has
+# converted the scalar it was parked against; removing every member then
+# leaves it parked at a slot with neither a current scalar nor members. The
+# member cosines (measured as for the set-* scenarios) sit far below the 0.9
+# dedup line: 0.81 (Home Lab), 0.81 (Garden Shed), 0.80 (Bike Rack).
+SCENARIOS.update({
+    "fact-resolve-scalar": {
+        "config": None,
+        "seed": [
+            # a user scalar; an agent contender, replaced by a second one
+            fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9,
+                 authority="directive"),
+            fact("Payments DB", "host", "10.0.0.6"),
+            fact("Payments DB", "host", "10.0.0.7"),
+            # a user contender parked below the confidence margin
+            fact("Build Server", "hostname", "ci-box-2", origin="user", confidence=0.9),
+            fact("Build Server", "hostname", "ci-box-3", origin="user", confidence=0.5),
+            # an agent contender under an action scalar
+            fact("dev box", "os", "Debian 12", origin="action"),
+            fact("dev box", "os", "Debian 13"),
+        ],
+        "ops": [
+            # nothing parked: no_contender with the raw arguments (the accept
+            # still ticks the clock)
+            resolve("Nobody", "thing", True),
+            # accept: the old current superseded, the contender promoted with
+            # the user tier and the old value as supersedes_value
+            resolve("payments db", "Host", True),
+            # nothing left to resolve, either way
+            resolve("Payments DB", "host", True),
+            resolve("Payments DB", "host", False),
+            # the promoted record holds the slot: a restatement confirms it
+            fact("Payments DB", "host", "10.0.0.7"),
+            # the user tier is already there; accept binds laxly ("yes" is
+            # true, so the contender is promoted)
+            resolve("Build Server", "hostname", "yes"),
+            # reject, bound laxly (0 is false, so the contender is retired
+            # rather than promoted); the kept current is answered twice
+            resolve("Dev Box", "OS", 0),
+            # nothing left to resolve; "no" binds to false
+            resolve("dev box", "os", "no"),
+        ],
+    },
+    "fact-resolve-set-slot": {
+        "config": None,
+        "seed": [
+            # a contender parked against a scalar that then converts to a set
+            fact("Home Lab", "services", "Jellyfin media server", origin="user",
+                 confidence=0.9),
+            fact("Home Lab", "services", "Pi-hole DNS ad blocker"),
+            set_add("Home Lab", "services", "Nextcloud file sync"),
+            # the same, then every member removed: no current, no members;
+            # the contender replaced one, so it carries a supersedes_value
+            fact("Garden Shed", "tools", "cordless drill", origin="user", confidence=0.9),
+            fact("Garden Shed", "tools", "hedge trimmer"),
+            fact("Garden Shed", "tools", "leaf blower"),
+            set_add("Garden Shed", "tools", "pressure washer"),
+            set_remove("Garden Shed", "tools", "cordless drill"),
+            set_remove("Garden Shed", "tools", "pressure washer"),
+            fact("Bike Rack", "bikes", "road bike", origin="user", confidence=0.9),
+            fact("Bike Rack", "bikes", "gravel bike"),
+            set_add("Bike Rack", "bikes", "kids balance bike"),
+            set_remove("Bike Rack", "bikes", "road bike"),
+            set_remove("Bike Rack", "bikes", "kids balance bike"),
+            # a member parked by the aggregate guard
+            fact("Aquarium", "fish count", "32", origin="user"),
+            set_add("Aquarium", "fish count", "neon tetra"),
+        ],
+        "ops": [
+            # accept at a slot with current members: slot_holds_set, nothing written
+            resolve("home lab", "Services", True),
+            # reject is allowed there: current null, the retired contender answered
+            resolve("Home Lab", "services", False),
+            # accept with no current: the contender keeps its own supersedes_value
+            resolve("garden shed", "tools", True),
+            # reject with no current
+            resolve("Bike Rack", "bikes", False),
+            # the parked member replaces the protected total
+            resolve("Aquarium", "Fish Count", True),
+        ],
+    },
+})
+
+
 # ── per-side argument templates ───────────────────────────────────────────
 
 def resolve_args(args: dict, dsn: str) -> dict:
@@ -369,6 +725,39 @@ def extract_numeric(state: dict) -> dict:
         row[i_emb] = "<embedding>" if emb is not None else None
         row[i_s] = "<surprise>" if row[i_s] is not None else None
     return out
+
+
+def extract_fact_numeric(state: dict) -> dict:
+    """Pull fact embeddings out by fact id, leaving tokens."""
+    t = _table(state, "facts")
+    out = {}
+    i_id, i_emb = _col(t, "id"), _col(t, "embedding")
+    if i_id is None or i_emb is None:
+        return out
+    for row in t["rows"]:
+        emb = row[i_emb]
+        out[row[i_id]] = [float(x) for x in emb.strip("[]").split(",")] if emb else None
+        row[i_emb] = "<embedding>" if emb is not None else None
+    return out
+
+
+def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
+    diffs = []
+    for fid in sorted(set(py) & set(rs)):
+        ea, eb = py[fid], rs[fid]
+        if (ea is None) != (eb is None):
+            diffs.append(f"facts[{fid}].embedding: python/rust presence mismatch")
+        elif ea is not None and len(ea) != len(eb):
+            diffs.append(f"facts[{fid}].embedding: length python {len(ea)} vs rust {len(eb)}")
+        elif ea:
+            mad = max(abs(x - y) for x, y in zip(ea, eb))
+            cos = sum(x * y for x, y in zip(ea, eb)) / (
+                math.sqrt(sum(x * x for x in ea)) * math.sqrt(sum(y * y for y in eb)))
+            stats["max_abs_diff"] = max(stats.get("max_abs_diff", 0.0), mad)
+            stats["min_cosine"] = min(stats.get("min_cosine", 1.0), cos)
+            if tol and (mad > tol["embedding_max_abs_diff"] or cos < tol["embedding_min_cosine"]):
+                diffs.append(f"facts[{fid}].embedding: max abs diff {mad:.3e}, cosine {cos:.9f}")
+    return diffs
 
 
 def episode_map(state: dict) -> dict[str, str]:
@@ -429,6 +818,7 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
     state = w1a.scrub_declared_rows(state, before)["state"]
     state = dbstate.normalize(state, w1a.DB_NONDETERMINISTIC, before)
     numeric = extract_numeric(state)
+    numeric["facts"] = extract_fact_numeric(state)
     emap = episode_map(state)
     for qualified, t in state["rows"].items():
         name = qualified.split(".", 1)[1]
@@ -446,6 +836,9 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
                               for k, x in value.items()}
                 elif key == "deferred_empty_roots" and isinstance(value, dict):
                     row[1] = {k: _clock(x) for k, x in value.items()}
+                elif key == "cortex_supersession_log" and isinstance(value, list):
+                    row[1] = [{**x, "timestamp": _clock(x.get("timestamp"))}
+                              if isinstance(x, dict) else x for x in value]
         t["rows"] = [_rename(r, emap) for r in t["rows"]]
         if name != "entries":
             t["rows"].sort(key=lambda r: json.dumps(r, sort_keys=True))
@@ -472,7 +865,9 @@ def state_diff(a: dict, b: dict) -> list[str]:
 
 
 def compare_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
-    diffs = []
+    diffs = compare_fact_numeric(py.get("facts", {}), rs.get("facts", {}), tol, stats)
+    py = {k: v for k, v in py.items() if k != "facts"}
+    rs = {k: v for k, v in rs.items() if k != "facts"}
     for eid in sorted(set(py) | set(rs)):
         a, b = py.get(eid), rs.get(eid)
         if a is None or b is None:
@@ -501,8 +896,47 @@ def compare_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     return diffs
 
 
+AGE = re.compile(r"^(?:just now|(\d+) (minute|hour|day)s? ago)$")
+AGE_STEP = {"minute": 1, "hour": 2, "day": 3}
+
+
+def _age_step(text):
+    m = AGE.match(text) if isinstance(text, str) else None
+    if not m:
+        return None
+    return (0, 0) if m.group(1) is None else (AGE_STEP[m.group(2)], int(m.group(1)))
+
+
+def _age_adjacent(x, y) -> bool:
+    """One step apart: the same unit one apart, or across a unit boundary
+    ("just now" / "1 minute ago", "59 minutes ago" / "1 hour ago", ...)."""
+    a, b = _age_step(x), _age_step(y)
+    if a is None or b is None:
+        return False
+    a, b = sorted((a, b))
+    if a[0] == b[0]:
+        return b[1] - a[1] == 1
+    return (a, b) in {((0, 0), (1, 1)), ((1, 59), (2, 1)), ((2, 23), (3, 1))}
+
+
+def normalize_records(a, b):
+    """Record clocks keep null-or-not; an ``age`` one step apart compares equal."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in set(a) & set(b):
+            if k in RESPONSE_CLOCK:
+                a[k], b[k] = _clock(a[k]), _clock(b[k])
+            elif k == "age" and a[k] != b[k] and _age_adjacent(a[k], b[k]):
+                a[k] = b[k] = "<age>"
+            else:
+                normalize_records(a[k], b[k])
+    elif isinstance(a, list) and isinstance(b, list):
+        for x, y in zip(a, b):
+            normalize_records(x, y)
+
+
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     a, b = json.loads(json.dumps(py)), json.loads(json.dumps(rs))
+    normalize_records(a, b)
     out = []
     va, vb = a.get("value"), b.get("value")
     if isinstance(va, dict) and isinstance(vb, dict) and "surprise" in va and "surprise" in vb:
@@ -535,6 +969,11 @@ def side_env(scn: dict, dsn: str, extra: dict | None = None) -> dict:
 def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
     if op["op"] == "sleep":
         time.sleep(op["s"])
+        return {"isError": False, "value": None}
+    if op["op"] == "sql":
+        import psycopg
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(op["sql"])
         return {"isError": False, "value": None}
     if op["op"] == "http":
         body = json.dumps(op["body"]).encode() if "body" in op else None
@@ -582,11 +1021,16 @@ def prepare_template(scn: dict, tag: str, root: Path, owned: list[str]) -> str:
         mcp = Mcp(d.port)
         mcp.init()
         for op in scn["seed"]:
+            if op.get("after_stop"):
+                continue
             r = run_op(op, d.port, mcp, dsn)
             if r and r["isError"]:
                 raise RuntimeError(f"seed op failed: {op} -> {r}")
     finally:
         d.stop()
+    for op in scn["seed"]:
+        if op.get("after_stop"):
+            run_op(op, 0, None, dsn)
     return template
 
 
@@ -666,7 +1110,8 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 
 
 # Tables the write path touches: recorded every step (the rest only at init).
-WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions")
+WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions", "facts", "entities",
+                "outcome_signals")
 
 
 def pack(state: dict, full: bool) -> dict:
@@ -683,8 +1128,8 @@ def pack_numeric(numeric: dict, seen: set) -> dict:
     import struct
     out = {}
     for eid, v in numeric.items():
-        if eid in seen:
-            continue
+        if eid == "facts" or eid in seen:
+            continue  # fact embeddings are compared live only (declared)
         seen.add(eid)
         emb = v["embedding"]
         out[str(eid)] = {"surprise": v["surprise"], "embedding_f32": base64.b64encode(
@@ -740,7 +1185,11 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                 row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
             unpack_numeric(rec["numeric_new"], numeric)
             row["diffs"] += compare_numeric(numeric, nr, tol, stats)
-            row["diffs"] += [f"db {x}" for x in state_diff(rec["state"], pack(sr, full=i == 0))]
+            got = pack(sr, full=i == 0)
+            if i:
+                # Recordings that predate a write table are compared on theirs.
+                got["rows"] = {k: v for k, v in got["rows"].items() if k in rec["state"]["rows"]}
+            row["diffs"] += [f"db {x}" for x in state_diff(rec["state"], got)]
             steps.append(row)
     finally:
         d.stop()
@@ -754,6 +1203,7 @@ def main() -> int:
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--record", action="store_true")
+    ap.add_argument("--mutants", nargs="*", choices=MUTANTS)
     args = ap.parse_args()
     args.rust_bin = args.rust_bin.resolve()
     root = run_root()
@@ -762,7 +1212,7 @@ def main() -> int:
     results = []
     if args.mode == "mutants":
         caught = {}
-        for m in MUTANTS:
+        for m in args.mutants or MUTANTS:
             diffs = 0
             for n in names:
                 r = run_scenario(n, args.rust_bin, root, "live", False, tol, mutant=m)

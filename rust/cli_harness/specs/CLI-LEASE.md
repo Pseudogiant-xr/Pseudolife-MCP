@@ -7,19 +7,23 @@ expect/ttl/purpose/worktree/no-board options, `lease break NAME`,
 `docs/guide/configuration.md`, and `evals/qwen_server.ps1`'s lease helpers.
 The core check/list/run row keeps its own acceptance.
 
-The operator corpus has 36 Windows and 35 Linux cases. It covers missing,
+The operator corpus has 37 Windows and 36 Linux cases. It covers missing,
 free and held leases; FIFO handoff; preservation of a separately held OS
 lock; delegate replacement and coordinator-role handoff; unique/ambiguous
 prefixes and unknown recipients; default/day durations and Unicode project
 names; active listeners/rings and warnings; alias/help/refusal/output
-behavior; PID lifetime, local contention and mirror renewal. Four failure
+behavior; PID lifetime, local contention and mirror renewal. Five failure
 cases install a trigger in each arm's own bank after seeding: an audit
 INSERT the server refuses inside the block (a FIFO break), a COMMIT the
-server refuses (a FIFO break), and a session the server ends at COMMIT: the
-backend terminates itself in a deferred trigger before the commit record,
-so the client's answer is FATAL 57P01 (a held break, and a coordinator
-handoff by delegate; named `*-commit-lost` after transfer's identical
-fixture). Each oracle arm must exit 1 with its expected failure class and
+server refuses (a FIFO break, and a coordinator handoff by delegate), and a
+session the server ends at COMMIT: the backend terminates itself in a
+deferred trigger before the commit record, so the client's answer is FATAL
+57P01 (a held break, and a coordinator handoff by delegate; named
+`*-commit-lost` after transfer's identical fixture). The first two kinds
+print the certain `nothing was changed` line; an ended session prints the
+COMMIT-outcome-unknown line, because a FATAL, PANIC or missing answer leaves
+the client unable to tell whether the commit happened. Each oracle arm must
+exit 1 with its expected failure line and class and
 every coordination row exactly as seeded; sequences may only advance,
 because a FIFO grant's fence `nextval` is not rolled back, and a FIFO
 case's fence must have advanced, proving the block reached the grant. The candidate's rows and exact
@@ -49,11 +53,15 @@ Named rules extend the shared core rules:
 - `lease-fixture-pid` associates the actual watched fixture PID in streams,
   requests and state, verifying raw chains before recalculating hashes.
 - `lease-native-pg-diagnostics` (the `native-pg-diagnostics` rule) maps
-  only the oracle arm's single whole stderr line `<break|delegate> failed
-  (<class>); nothing was changed`, with exit 1 and the class the case
-  expects (`RaiseException` or `AdminShutdown`), to the candidate's
-  `(PostgreSQL transaction failed)`. Any other line, class, exit or arm
-  stays raw.
+  only the oracle arm's single whole stderr failure line of the kind the
+  case expects, with exit 1 and the class the case expects. A refused
+  COMMIT or audit INSERT expects `<break|delegate> failed (RaiseException);
+  nothing was changed`, mapped to the candidate's `(PostgreSQL transaction
+  failed)`. An ended session expects ``<break|delegate> lost the answer to
+  its COMMIT (AdminShutdown); it may have been committed: run
+  `pseudolife-mcp lease list` before retrying``, mapped to the candidate's
+  `(PostgreSQL session ended)`. Any other line, line kind, class, exit or
+  arm stays raw.
 - `lease-launcher-owned` associates only a validated bound executable/leading
   argv and owned process IDs in its route records. Every other route field,
   stream and file stays compared; immutable fixture inputs are verified
@@ -61,10 +69,12 @@ Named rules extend the shared core rules:
   spelling, either pwsh 7's literal non-ASCII or the escaped form, so a
   non-ASCII installation path associates.
 
-Six real source mutants cover hold status, break holder removal,
+Eight real source mutants cover hold status, break holder removal,
 delegate duration, designate deprecation, a swallowed audit-insert failure
-(break then reports success on a rolled-back bank) and an ignored COMMIT
-result (delegate then reports a grant that never committed). Pure CPU controls reject clock,
+(break then reports success on a rolled-back bank), an ignored COMMIT
+result (delegate then reports a grant that never committed), a lost COMMIT
+answer reported as certainly rolled back, and a refused COMMIT reported as
+an unknown outcome. Pure CPU controls reject clock,
 duration, audit-prefix/hash and PID tampering.
 
 External DSNs and retained container transport are admitted. Native embedded

@@ -211,6 +211,13 @@ pub(super) async fn command(args: &Args, arguments: &[String]) -> i32 {
             ));
             1
         }
+        Err(store::Error::CommitUnknown) => {
+            say(&format!(
+                "{} lost the answer to its COMMIT (PostgreSQL session ended); it may have been committed: run `pseudolife-mcp lease list` before retrying",
+                args.action
+            ));
+            1
+        }
         Err(store::Error::Clock) => {
             say(&format!(
                 "{} failed (system clock unavailable); nothing was changed",

@@ -480,6 +480,148 @@ answers key order and all, and `worst_sources` rows tied on their share in
 either order. The `mcp-stats-no-tier-hits`, `mcp-stats-no-graduation`
 and `mcp-stats-no-capacity-warning` mutants must be caught.
 
+### memory_fact_set over MCP (2026-10-17)
+
+`fact_set.rs` (the tool and `service.cortex_write`), `stores/cortex_write.rs`
+(the engine), `stores/cortex_sync.rs` (persistence), `hlc.rs`,
+`junk_names.rs`, `freshness.rs`; registered in `mcp::dispatch::registry`.
+Python: `mcp_server.py:1692-1747`; `service.py` `cortex_write`
+(3916-4040), `_save_cortex` (3746), `_ensure_subject_entity` (1859),
+`_emit_correction_signal` (4961); `memory/cortex.py` `write_fact` (438-619)
+and helpers; `storage/sync.py` `sync_cortex_slots` (225).
+
+| # | Exact item | Source |
+|---|---|---|
+| FS1 | Bound arguments: `entity`, `attribute`, `value` (non-blank, passed unstripped), `origin` (user/action/agent; omitted is `"agent"`), `confidence` (0..1, default 0.8; an integer binds as a float), `episode`, `freshness_class` (default `"auto"`), `authority` and `distortion_tolerance` (default `"auto"`). No projection. Not read-only: an internal failure carries `mutation: "unknown"`. | `mcp_server.py:249-275, 763, 1692-1747` |
+| FS2 | `resolve_authority` / `resolve_distortion` on the raw `value`, before the lock: `"auto"` is the inferred label or inherit-unless-restated, an explicit value restates it. | `service.py:3970-3971`; `labels.py:235-251` |
+| FS3 | Under the service lock (Rust: `Ready.write`, held to the answer). `"auto"` freshness is `resolve_class(kind, _norm_key(attribute))`, `kind` from `entity_kinds` keyed by `_norm_key(entity)`, read once per process (`SELECT entity_norm, kind FROM entity_kinds`) and cached; only a `system` entity's state attribute (not an event) is `volatile`. The stored class goes through `_norm_freshness` (unknown is `evergreen`). | `service.py:3903-3914, 3972-3977`; `freshness.py:114-127`; `postgres.py:1932-1936`; `cortex.py:62` |
+| FS4 | Two document-side encodes (no query prefix), in order: the claim `f"{entity} {attribute} {value}".strip()` and the slot `f"{entity} {attribute}".strip()`. The slot embedding is resident only (never persisted). | `service.py:3979-3981`; `cortex.py:302` |
+| FS5 | Writer: a named principal, else `X-PL-Writer`, else `PSEUDOLIFE_WRITER_ID`, else `unknown`. Session: `X-PL-Session`, else the live active-session pointer, else the legacy transport id. An episode handle (8+ characters; an open root, a reaped root reopened inside the resume window, or a tombstone recreated) sets the session to its root's key unless a header session is present; a non-empty handle that resolves nothing adds `episode_warning`. | `service.py:974-985, 3982-3988, 6799` |
+| FS6 | The service HLC ticks after identity and before `write_fact` (so a refused write still advances it). It is seeded from the highest stamp among `facts`, `world_facts` and `lessons` and `meta.coordination_hlc_highwater`; Rust observes the startup high-water mark before each tick, which equals Python's observe at reseed. | `service.py:1642-1669, 3998`; `hlc.py:40-56` |
+| FS7 | `write_fact`: a slot with current set members raises; the tool answers `invalid_argument` with `slot holds a set; use memory_set_add / memory_set_remove` and nothing is written. Else the slot is marked dirty. No current scalar: insert (then settle a parked contender holding the same value). Same `_norm_value` as the current: confirm. A compression echo (strictly shorter, 3+ ASCII tokens, 75% contained, no negator, no novel digit token): log `confirm/compression_echo`, then confirm. Confirm: stance cleared, labels inherit-unless-restated, `last_confirmed` and `tx_time` = now, the tier unioned into `support` (a direct write clears its `dream:<tier>` mark), confidence `min(1, max(c + (1 - c) * reinforce_rate, confidence))`, slot embedding backfilled when absent, HLC, writer and session when non-empty; `valid_time` unchanged. | `cortex.py:97-122, 438-560, 621-656, 658-710` |
+| FS8 | A conflict: `tier_ok` is `not protect_provenance` or the write's tier rank (user 3, action 2, agent 1) at least the current origin's. Supersede when `tier_ok` and `_should_supersede` (the write's HLC not below the current's, the wall clock breaking an HLC tie, and `confidence >= current - margin`): the old record superseded (`superseded_at`, `superseded_by_value`), log `supersede/newer_wins`, insert with `supersedes_value` and labels inherited from the old, settle a matching contender (its non-assistant tiers carried, log `resolved/contender_value_now_current`). Otherwise the reason is `tier_downgrade` or `below_confidence_margin`; with `protect_provenance` off the value is dropped (log `contested/<reason>`, the answer names the current); on, `_contend`: a contender with the same value is refreshed like a confirm (log `contested/contender_confirmed`), else the prior contender is superseded and a new `contested` record parks (labels from the current, `supersedes_value` = the prior contender's value), log `contested/<reason>`. | `cortex.py:597-619, 715-729, 1222-1361` |
+| FS9 | An audit row is `{entity, attribute, old_value, new_value, decision, reason, confidence_delta: round(new - anchor, 4), timestamp, writer_id, session_id}` anchored on the current (the contender for a settle); the resident log is seeded from `meta.cortex_supersession_log`, capped at 200 in place, and marks the meta dirty. Config read at store build: `memory.cortex.protect_provenance` (true), `supersede_confidence_margin` (0.15), `reinforce_rate` (0.34). | `cortex.py:148, 731-751`; `service.py:1568-1573`; `sync.py:312-313` |
+| FS10 | After the write, the subject's graph node: skipped when `junk_name_reason(entity)` (empty, concat artifact, bare number, status word, bare date, count prefix, dump file, image tag, command string, hash status, action prefix, status shard, metric reading, list artifact, 7+ tokens); else `norm_name(entity)`, and when `find_entity` misses, `ensure_entity(n, display=entity.strip())`, whose mint relinks orphaned fact and lesson rows. A failure is an internal error after the resident write. | `service.py:1859-1874`; `graph_consolidation.py:439-552`; `postgres.py:2732-2756` |
+| FS11 | `_save_cortex`: every record of every dirty slot in record order as `_record_to_row` (keys re-normalised, `origin` or NULL, sorted `support` and `provenance`, `value_norm` only on member rows), `entity_id` / `object_entity_id` by `find_entity(norm_name(entity / value))`, then one transaction: `DELETE` the slots, one `INSERT` per row (new ids). Those slots are then clean. With the meta dirty: `meta_set` of the newest 200 log rows, then `advance_dream_cursor` (the stored cursor locked, the larger kept), a transaction each. A failure counts in `/health` `persist_errors` and answers `internal_error` with `mutation: "unknown"`; unpersisted marks are kept. Hydration keeps the load-time healing's dirty marks for the next save. | `service.py:3746-3761`; `sync.py:170-245, 314`; `postgres.py:122-138, 1807-1854, 2665-2709`; `cortex.py:1969-1975` |
+| FS12 | A `superseded` write whose `origin` is `user`, with `memory.lessons.enabled` (default true): one `outcome_signals` row `(entity, 'correction', entity, "{attribute}: {old} → {new}", NULL, 'action', episode, now)` in its own transaction, the episode being the handle's root, else the open leaf of the session; a failure is logged and swallowed. The answer is `{"action", ...record}` (`_cortex_record_to_dict` with `age` and the stale policy), plus `current` (the slot's current record, or null) when `contested`, then `episode_warning`. | `service.py:297-344, 4024-4040, 4946-4974`; `postgres.py:2001-2012` |
+
+Readers (`memory_fact_get`, the cortex block of `memory_search` and
+`/api/search`) take a snapshot of the resident cortex and never hold its
+lock across an await; the writer mutates it in place under `Ready.write`.
+Not reachable over MCP, so not ported: the quarantine park
+(`force_contend`), the dream guards and tier marks (`dream=True`) and the
+assistant-origin park (`support="assistant"`), see `divergences.md`.
+
+`harness/w2e.py live --only fact-set-branches fact-set-newer-wins
+fact-set-tuned fact-set-freshness-auto fact-set-set-slot` compares every
+answer and the full bank after each call, on templates seeded through the
+Python daemon (plus one seed-only SQL insert into `entity_kinds`): insert,
+confirm, compression echo, user supersession with its correction signal,
+tier-downgrade and below-margin contenders (refresh and replacement), the
+settle, entity minting with an object relink, junk subjects, episode handles
+(valid, unknown, empty, short, with a header), every freshness and label
+option, newer-wins with `protect_provenance: false`, a tuned margin and
+reinforce rate with lessons off, `"auto"` freshness from `entity_kinds`, and
+the set-slot refusal beside a slot holding only a removed member. The
+`mcp-fact-set-no-supersede`, `mcp-fact-set-no-confirm-reinforce`,
+`mcp-fact-set-no-correction-signal` and `mcp-fact-set-no-entity-mint`
+mutants must be caught. The engine is also checked offline against write
+sequences recorded from `memory/cortex.py`
+(`harness/gen_w2e_cortex_write_goldens.py`), and `junk_name_reason` against
+`harness/gen_w2e_junk_names_goldens.py`.
+
+### memory_set_add and memory_set_remove over MCP (2026-10-17)
+
+`set_members.rs` (the tools, `service.set_add` and `service.set_remove`),
+`stores/cortex_members.rs` (the engine), reusing `fact_set.rs`'s
+embedding, entity mint and save, and `stores/cortex_write.rs`'s contend,
+settle and audit log; registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py:679-684, 721-733, 1750-1782`; `service.py` `set_add`
+(4042-4098) and `set_remove` (4100-4133); `memory/cortex.py` `add_member`
+(754-1032), `_insert_member` (1034-1081), `remove_member` (1083-1135).
+
+| # | Exact item | Source |
+|---|---|---|
+| SA1 | Bound arguments: `entity`, `attribute`, `member`, each a required plain string with no minimum length, passed raw (blank included). No projection. Neither tool is read-only: an internal failure carries `mutation: "unknown"`. Errors map as for `memory_fact_set`. | `mcp_server.py:1750-1782` |
+| SA2 | The answer is `{action, entity, attribute, member, members_count}` echoing the raw arguments, `members_count` the slot's current members after the call; `_noted(..., key="action")` then appends `note` only for `member_invalid`, `member_capped` (the text names `MAX_CURRENT_MEMBERS`, 100), `member_not_found` and `member_remove_refused` (unreachable here, SA11). | `service.py:4092-4098, 4127-4133`; `mcp_server.py:679-684, 721-733` |
+| SA3 | `set_add` under the service lock (Rust: `Ready.write`, held to the answer): one document-side encode of `f"{entity} {attribute} {member}".strip()`, made even for a blank member; writer and session as FS5 (no episode handle); the service HLC ticks before `add_member`, so an invalid or capped add still advances it. `add_member` gets `confidence=0.7`, no provenance, `support=None`, `dream=False`. | `service.py:4042-4091` |
+| SA4 | A member whose `_norm_value` (strip, casefold) is empty answers `member_invalid`: nothing dirty, nothing logged. | `cortex.py:846-852` |
+| SA5 | A current scalar whose stripped value is number-led (`^[$€£]?[+-]?\d`, `\d` the Unicode decimal digits) is protected: the slot is dirty; the same `_norm_value` confirms the scalar (`last_confirmed` = now, confidence `min(1, max(c + (1 - c) * reinforce_rate, 0.7))`; `tx_time`, HLC, writer, session, labels untouched) and answers `confirmed`; any other member is parked by `_contend` with reason `member_add_blocked_aggregate` (FS8: no tier, `evergreen`, labels inherited from the scalar, the scalar's resident slot embedding, the new HLC, `tx_time` = `valid_time` = now; a contender of the same value is refreshed with `contested/contender_confirmed`) and answers `contested`. | `cortex.py:118-127, 862-888, 1238-1329` |
+| SA6 | Any other current scalar converts, one way: the slot is dirty, the scalar `superseded` (`superseded_at` = now, `superseded_by_value` = `"(converted to set)"`) and out of the current index; the log row `convert_to_set/member_add_to_scalar` is anchored on it (new value the member, `confidence_delta` = round(0.7 - c, 4)) and gains `dropped_freshness_class` (a class other than `evergreen`), `dropped_authority` and `dropped_distortion_tolerance` (non-empty labels). The old value becomes the first member: the scalar's entity, attribute, value, polarity, embedding, confidence, provenance, support, writer and session; `asserted_at` = `last_confirmed` = `tx_time` = `valid_time` = the scalar's `asserted_at`; the new HLC; `evergreen`; no labels, no stance, no slot embedding. | `cortex.py:936-970, 1034-1081` |
+| SA7 | Dedup over the current members in insertion order (the converted one included): the same `_norm_value`, or a float32 cosine `m @ e / (m.norm() * e.norm() + 1e-12)` of at least `MEMBER_DEDUP_COSINE` (0.9; 0.0 for a member with no embedding). The first match is refreshed: slot dirty, `last_confirmed` = now, confidence `min(1, max(c, 0.7))`, nothing else; answers `member_confirmed`. | `cortex.py:150-157, 972-994` |
+| SA8 | With 100 or more current members: one log row `member_capped/max_current_members` anchored on the rejected value (`old_value` = `new_value` = the member, `confidence_delta` 0.0, the writer and session), nothing dirty; answers `member_capped`. | `cortex.py:158-162, 1010-1023` |
+| SA9 | Otherwise the slot is dirty and a member row is appended: kind `member`, `current`, the entity, attribute and member as passed, polarity `+`, confidence 0.7, empty support and provenance, `asserted_at` = `last_confirmed` = `tx_time` = `valid_time` = now, the HLC, writer and session, `evergreen`, the claim embedding; then a parked contender of the same value is settled (FS8, its non-assistant tiers carried to the member); answers `member_added`. | `cortex.py:1024-1032, 1034-1081, 1331-1361` |
+| SA10 | After `add_member`, whatever its action: `_ensure_subject_entity(entity)` (FS10; a blank, invalid or capped add can still mint the subject), then `_save_cortex` (FS11: member rows carry `value_norm` = `_norm_value(value)`, so the rewrite satisfies the one-current-member-per-value unique index). | `service.py:4087-4091`; `sync.py:170-209`; `schema.py:1565-1578` |
+| SA11 | `set_remove` under the service lock: no encode, no HLC tick, no writer resolution, no entity mint. `remove_member` takes the first current member (insertion order) whose `_norm_value` matches; none answers `member_not_found` and changes nothing. A match: slot dirty, `status` = `removed`, `superseded_at` = now, out of the member index (the row is kept), log `member_removed/user_removed` anchored on it with the raw `member` as `new_value`, `confidence_delta` 0.0, writer and session null; answers `member_removed`. Then `_save_cortex` and the SA2 answer. The removal refusal needs a support tier or `dream`, which the tool never passes. | `service.py:4100-4133`; `cortex.py:1083-1135` |
+
+Not reachable over MCP, so not ported: the assistant-origin guards, the
+conversion tier guard, the dream direct-write guard and tier mark, and the
+removal refusal (`divergences.md`).
+
+`harness/w2e.py live --only set-add-branches set-add-aggregate set-cap`
+compares every answer and the full bank after each call, on templates
+seeded through the Python daemon (the cap's hundred members are one
+seed-only SQL insert with NULL embeddings, run after the seeding daemon
+stops, since its exit flush rewrites `facts` from its resident cortex):
+the conversion of a labelled
+volatile scalar with its dropped-label log row, the member it adds and the
+contender it settles; re-adding the old value (by value) and a near
+synonym (by cosine); a plain add; blank members (the subject minted all
+the same); real and junk-shaped subjects; removal by normalised value, a
+repeat, an empty slot, and a re-add beside the removed row; the aggregate
+guard's confirm, park, refresh and replacement, with a currency-led total;
+the cap, dedup before it, room made by a removal and the cap again. The
+`mcp-set-add-no-convert`, `mcp-set-add-no-cosine-dedup` and
+`mcp-set-remove-noop` mutants must be caught. The engine is also checked
+offline against `add_member` / `remove_member` sequences recorded from
+`memory/cortex.py` (`harness/gen_w2e_cortex_write_goldens.py`: members,
+aggregate, aggregate_newer_wins, cap), including Unicode-digit and
+superscript aggregates and exact slot indexes.
+
+### memory_fact_resolve over MCP (2026-10-17)
+
+`fact_resolve.rs` (the tool and `service.cortex_resolve`),
+`stores/cortex_resolve.rs` (the engine), reusing `fact_set.rs`'s save and
+`stores/cortex_write.rs`'s contender index, tier mark and audit log;
+registered in `mcp::dispatch::registry`. Python: `mcp_server.py:1785-1801`;
+`service.py` `cortex_resolve` (4465-4528); `memory/cortex.py` `resolve`
+(1417-1513).
+
+| # | Exact item | Source |
+|---|---|---|
+| FR1 | Bound arguments: `entity` and `attribute` (required plain strings, passed raw) and `accept` (a required lax boolean: `true`/`false`, 0/1 and the pydantic string spellings). No projection, no `_noted`. Not read-only: an internal failure carries `mutation: "unknown"`. The service gets `support="user"`, `dream=False`, `expect_value=None`. | `mcp_server.py:1785-1801`; `service.py:4465-4467` |
+| FR2 | Under the service lock (Rust: `Ready.write`, held to the answer). The service HLC ticks only when `accept` is true, before the store is consulted, so an accept that finds no contender or a set slot still advances it; a reject never ticks. No embedding, no writer or session, no entity mint, no correction signal. | `service.py:4492-4502` |
+| FR3 | The contender is the first record at the slot (`_norm_key` of both parts) whose status is `contested`, in record order. None: the answer is `{"resolved": false, "reason": "no_contender", "entity", "attribute"}` with the raw arguments; nothing changes. | `cortex.py:1463-1471`; `service.py:4503-4505` |
+| FR4 | An accept at a slot with current members (the scalar the contender was parked against has since converted to a set) is refused before anything is marked: `{"resolved": false, "reason": "slot_holds_set", "entity", "attribute"}`, nothing dirty, nothing saved. A reject there is allowed (FR6). | `cortex.py:1472-1473`; `service.py:4506-4508` |
+| FR5 | Accept: the slot is dirty. The current scalar (the slot's entry in the current index, if any) becomes `superseded` with `superseded_at` = now and `superseded_by_value` = the contender's value. The contender becomes `current`; `_norm_support("user") or "agent"` is marked (a direct tier clears its `dream:<tier>` provenance mark) and unioned into `support`; `last_confirmed` = `tx_time` = now; the fresh HLC stamp replaces its own; `supersedes_value` = the old current's value when there was one, else its own is kept; `asserted_at`, `valid_time`, confidence, labels, writer and session are unchanged. The current index names the contender. Log `resolved/accepted` anchored on the old current, or the contender when there is none (`new_value` the contender's value, `confidence_delta` = round(contender - anchor, 4), writer and session null). The action is `superseded`, naming the contender. | `cortex.py:1486-1508, 227-234, 731-751` |
+| FR6 | Reject: the slot is dirty; the contender becomes `retired` with `superseded_at` = now (`superseded_by_value` untouched); log `resolved/rejected` anchored as FR5. The action is `contested` (as Python names it), naming the current scalar, or the contender when the slot has none (a set slot, or one whose members were all removed). | `cortex.py:1509-1513` |
+| FR7 | After FR5 or FR6: `_save_cortex` (FS11), then the answer `{"resolved": true, "accepted": accept, "action", "current", "record"}`: `current` is `lookup(entity, attribute)` (the slot's current scalar, null for a set slot or an empty one) and `record` the named record, both as `_cortex_record_to_dict` with `age` and the stale policy (FS12). | `service.py:297-344, 4517-4528` |
+| FR8 | `refused_direct` (`dream=True` only) and `refused_changed` (`expect_value` only), with their `direct_write` and `contender_changed` answers, are unreachable over MCP and not ported (`divergences.md`). | `cortex.py:1477-1485`; `service.py:4509-4516` |
+
+`harness/w2e.py live --only fact-resolve-scalar fact-resolve-set-slot`
+compares every answer and the full bank after each call, on templates whose
+contenders are parked through the Python daemon's own tools: no contender
+(an accept, which ticks); an accept over a labelled user scalar of a
+replacement agent contender (supersedes_value the old value), the repeat
+answering no contender either way, and a restatement that confirms the
+promoted record; an accept of a user contender parked below the margin; a
+reject under an action scalar, then a lax `accept: 0`; at a converted set
+slot, the accept refused with `slot_holds_set` and the reject allowed;
+after every member is removed, an accept with no current (the contender
+keeps its own supersedes_value) and a reject with no current; and an
+accept of a member parked by the aggregate guard over the protected total.
+The `mcp-fact-resolve-no-user-tier`, `mcp-fact-resolve-reject-noop` and
+`mcp-fact-resolve-no-set-guard` mutants must be caught. The engine is also
+checked offline against `resolve` sequences recorded from
+`memory/cortex.py` (`harness/gen_w2e_cortex_write_goldens.py`: resolve),
+which each of the three mutants fails, and which checks the HLC stamp an
+accept writes. A tick that writes no stamp (a reject, had it ticked, or an
+accept with nothing to resolve) shows only in the logical counter of a
+stamp written in the same millisecond, which the harness's calls, seconds
+apart, never produce; so no mutant targets FR2's reject side. The lax
+`accept` binding is checked where it decides the outcome: `"yes"` promotes
+a contender and `0` retires one.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
