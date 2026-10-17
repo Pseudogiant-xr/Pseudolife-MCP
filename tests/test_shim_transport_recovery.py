@@ -95,6 +95,18 @@ class _Fixture:
                     self._reply_sse([{"jsonrpc": "2.0", "method": "notifications/message",
                                       "params": {"data": "b" * size}}])
                     return
+                if self.path.startswith("/truncated"):
+                    # Headers promise a body the server never finishes: what a
+                    # daemon dropping the connection mid-response looks like.
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Content-Length", "4096")
+                    self.end_headers()
+                    self.wfile.write(b"event: message\n")
+                    self.wfile.flush()
+                    self.close_connection = True
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    return
                 self._reply(405, {})
 
             def do_POST(self) -> None:
@@ -170,6 +182,18 @@ class _Fixture:
                         return
                     if fault == "commit_401":
                         self._reply(401, {"error": BODY_MARKER})
+                        return
+                    if fault == "body_cut":
+                        # The tool ran and a JSON result started, then the
+                        # connection dropped inside the promised body.
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", "4096")
+                        self.end_headers()
+                        self.wfile.write(b'{"jsonrpc": "2.0", "id": ')
+                        self.wfile.flush()
+                        self.close_connection = True
+                        self.connection.shutdown(socket.SHUT_RDWR)
                         return
                     if fault == "sse_cut":
                         # Headers went out, the tool ran, no result event
@@ -1008,31 +1032,164 @@ def test_large_tool_results_survive_the_client_sse_event_cap(tmp_path, upstream)
     asyncio.run(asyncio.wait_for(drive(), timeout=40))
 
 
-def test_listen_and_resume_streams_get_the_wider_event_limit(upstream):
-    """Since mcp 2.2 the SDK opens its listen stream and resumes a cut
-    response through ``sse_within_origin`` (imported by name into the client
-    module), which builds ``httpx2.EventSource(response)`` with the 1 MiB
-    default: neither the module's ``EventSource`` rebind nor a wrapper on
-    the http client's ``sse`` method reaches it. The shim rebinds that name
-    too. This drives the very function the transport calls, so an SDK that
-    moves the path again fails here instead of capping silently."""
+def _installed_sdk_line() -> str:
+    """The client-module surface the installed mcp SDK has: 2.2 added
+    ``sse_within_origin`` and ``stream_within_origin`` to it."""
     from mcp.client import streamable_http
-    from mcp.shared import _httpx_utils
 
+    return "2.2" if hasattr(streamable_http, "sse_within_origin") else "2.1"
+
+
+def _fake_client_module(line: str):
+    """A stand-in for the other SDK line's ``mcp.client.streamable_http``,
+    holding the names the shim and these tests read. 2.1.1 imports
+    ``EventSource`` from httpx2 and reads SSE through ``client.sse`` and POSTs
+    through ``client.stream``, both httpx2's own methods. 2.2.0 adds
+    ``stream_within_origin`` and ``sse_within_origin``, copied here from
+    ``mcp/shared/_httpx_utils.py`` 2.2.0 without the same-origin redirect
+    loop (no request here is redirected): a GET sent through ``client.send``
+    with ``stream=True``, read by ``httpx2.EventSource(response)`` at its
+    1 MiB default."""
+    import types
+
+    import httpx2
+
+    module = types.ModuleType(f"fake_mcp_{line.replace('.', '_')}_streamable_http")
+    module.httpx2 = httpx2
+    module.EventSource = httpx2.EventSource
+    module.create_mcp_http_client = lambda **kw: httpx2.AsyncClient(**kw)
+    if line == "2.2":
+        @asynccontextmanager
+        async def stream_within_origin(client, method, url, **kwargs):
+            request = client.build_request(method, url, **kwargs)
+            response = await client.send(request, stream=True, follow_redirects=False)
+            try:
+                yield response
+            finally:
+                await response.aclose()
+
+        @asynccontextmanager
+        async def sse_within_origin(client, url, *, headers=None):
+            merged = httpx2.Headers({"Accept": "text/event-stream", "Cache-Control": "no-store"})
+            merged.update(headers or {})
+            async with stream_within_origin(client, "GET", url, headers=merged) as response:
+                yield httpx2.EventSource(response)
+
+        module.stream_within_origin = stream_within_origin
+        module.sse_within_origin = sse_within_origin
+    return module
+
+
+def _client_module(line: str):
+    """The real client module when the installed SDK is on ``line``, else a
+    faithful fake of that line's surface (``_fake_client_module``)."""
+    from mcp.client import streamable_http
+
+    return streamable_http if _installed_sdk_line() == line else _fake_client_module(line)
+
+
+@asynccontextmanager
+async def _listen_stream(module, http, url):
+    """Open an SSE stream the way that line's transport opens its listen
+    stream and resumes a cut response: ``client.sse`` on 2.1,
+    ``sse_within_origin`` (looked up on the module at call time) on 2.2."""
+    if hasattr(module, "sse_within_origin"):
+        async with module.sse_within_origin(http, url, headers={}) as source:
+            yield source
+    else:
+        async with http.sse(url, headers={}) as source:
+            yield source
+
+
+@pytest.mark.parametrize("line", ["2.1", "2.2"])
+def test_listen_and_resume_streams_get_the_wider_event_limit(upstream, line):
+    """mcp 2.1 opens its listen stream and resumes a cut response through
+    the http client's own ``sse`` method, which passes httpx2's 1 MiB default
+    explicitly; since 2.2 it goes through ``sse_within_origin`` (imported by
+    name into the client module), which builds ``httpx2.EventSource(response)``
+    at that default. Rebinding the module's ``EventSource`` reaches neither.
+    A host updating from 0.18.1 runs this shim on 2.1 until its next client
+    step, so the shim widens whichever path the installed SDK has. The
+    installed line runs the SDK's real functions; the other line a faithful
+    fake of its surface."""
+    module = _client_module(line)
     size = 1_400_000
     url = f"{upstream.url}/bulk?bytes={size}"
 
     async def drive():
-        async with streamable_http.create_mcp_http_client() as http:
-            # The cap is real: the SDK's own helper refuses the event.
+        async with module.create_mcp_http_client() as http:
+            # The cap is real on this line's path before the shim touches it.
+            original = getattr(module, "sse_within_origin", None)
+            original = getattr(original, "_pseudolife_original", original)
             with pytest.raises(Exception) as caught:
-                async with _httpx_utils.sse_within_origin(http, url) as source:
-                    [event async for event in source]
+                if original is not None:
+                    async with original(http, url) as source:
+                        [event async for event in source]
+                else:
+                    async with http.sse(url) as source:
+                        [event async for event in source]
             assert "byte limit" in str(caught.value)
-            shim._widen_sse_event_limit(streamable_http)
-            async with streamable_http.sse_within_origin(http, url) as source:
+            # What _proxy does: once per process, then per upstream client.
+            shim._widen_sse_event_limit(module)
+            shim._adapt_client_to_sdk_line(http, module, shim._UpstreamAttempt())
+            async with _listen_stream(module, http, url) as source:
                 events = [event async for event in source]
         assert len(events) == 1
+        assert len(json.loads(events[0].data)["params"]["data"]) == size
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=40))
+
+
+@pytest.mark.parametrize("line", ["2.1", "2.2"])
+def test_a_response_cut_mid_body_is_a_connection_failure_on_the_2_1_path(upstream, line):
+    """mcp 2.1 sends every POST through the http client's ``stream`` method
+    and reads the body inside it, so a daemon dropping the connection
+    mid-body raises after ``send`` has returned, where the ``send`` wrapper
+    cannot see it; when the SDK then swallows the error (its ``post_writer``
+    logs a notification's failure and stops), only a wrapper on ``stream``
+    has recorded it. On 2.1 the shim classifies it as a connection failure.
+    On 2.2 the transport never calls ``client.stream`` (it sends through
+    ``stream_within_origin``, which calls ``client.send``), and the client's
+    own ``stream`` is left as httpx2 built it."""
+    module = _client_module(line)
+    attempt = shim._UpstreamAttempt()
+    url = f"{upstream.url}/truncated"
+
+    async def drive():
+        async with module.create_mcp_http_client() as http:
+            shim._adapt_client_to_sdk_line(http, module, attempt)
+            if line == "2.2":
+                assert "stream" not in vars(http) and "sse" not in vars(http)
+                return
+            with pytest.raises(Exception) as caught:
+                async with http.stream("GET", url) as response:
+                    await response.aread()
+            assert shim._transport_failure_kind(caught.value) == "connection_failure"
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=20))
+    assert attempt.transport_failure == (None if line == "2.2" else "connection_failure")
+
+
+def test_on_mcp_2_2_the_2_1_client_wrappers_do_not_replace_the_module_rebinding(upstream):
+    """The near miss: on a 2.2 surface the shim installs neither 2.1 client
+    wrapper, and the large listen-stream event still arrives through the
+    module's widened ``sse_within_origin``, which is what the 2.2 transport
+    calls. Wrapping ``client.sse`` there would look like a fix and reach
+    nothing."""
+    module = _client_module("2.2")
+    size = 1_400_000
+    url = f"{upstream.url}/bulk?bytes={size}"
+
+    async def drive():
+        shim._widen_sse_event_limit(module)
+        widened = module.sse_within_origin
+        async with module.create_mcp_http_client() as http:
+            shim._adapt_client_to_sdk_line(http, module, shim._UpstreamAttempt())
+            assert "sse" not in vars(http) and "stream" not in vars(http)
+            assert module.sse_within_origin is widened
+            assert widened._pseudolife_event_limit == shim._SSE_EVENT_LIMIT_BYTES
+            async with module.sse_within_origin(http, url, headers={}) as source:
+                events = [event async for event in source]
         assert len(json.loads(events[0].data)["params"]["data"]) == size
 
     asyncio.run(asyncio.wait_for(drive(), timeout=40))
@@ -1058,6 +1215,33 @@ def test_stream_cut_after_dispatch_is_reported_as_a_lost_response(tmp_path, upst
             assert BODY_MARKER not in str(caught.value)
 
     asyncio.run(asyncio.wait_for(drive(), timeout=8))
+
+
+def test_a_call_cut_mid_body_keeps_an_unknown_outcome_on_the_installed_sdk(tmp_path, upstream):
+    """The whole proxy on whichever SDK line is installed (measured the same
+    on 2.1.1 and 2.2.0, 2026-10-17): a daemon that drops the connection
+    inside a tool result's JSON body is a connection failure with an unknown
+    outcome, and the write is never replayed. A request's transport error
+    escapes the SDK raw on both lines, so this holds without the 2.1
+    ``stream`` wrapper; that wrapper is for failures the SDK swallows (a
+    notification's POST), pinned by
+    ``test_a_response_cut_mid_body_is_a_connection_failure_on_the_2_1_path``."""
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+    stderr = tmp_path / "stderr.log"
+    upstream.fault_method = "tools/call"
+    upstream.fault = "body_cut"
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, stderr) as client:
+            with pytest.raises(Exception) as caught:
+                await client.call_tool("write", {"label": "once"})
+            return _error_data(caught.value)
+
+    data = asyncio.run(asyncio.wait_for(drive(), timeout=8))
+    assert data == {"classification": "connection_failure", "phase": "call",
+                    "operation_outcome": "unknown"}, data
+    assert upstream.writes == 1
 
 
 def test_closed_connection_code_maps_to_response_lost():
