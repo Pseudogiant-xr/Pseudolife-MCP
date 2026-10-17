@@ -3,6 +3,7 @@
 pub mod chronicle;
 pub mod cortex_search;
 pub mod embed_cache;
+pub mod fact_get;
 pub mod identity;
 pub mod mcp_reads;
 pub mod mcp_search;
