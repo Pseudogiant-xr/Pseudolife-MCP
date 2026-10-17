@@ -267,7 +267,7 @@ fn finish(mode: &str, outcome: Outcome) -> Option<ExitCode> {
         Outcome::SchemaDeferred => (
             emit(
                 &mut io::stderr().lock(),
-                "pseudolife-stdio: import into a bank not at this build's schema (55) is deferred in this candidate (needs native ensure_schema)\n",
+                "pseudolife-stdio: import into a bank not at this build's schema (56) is deferred in this candidate (needs native ensure_schema)\n",
             ),
             1,
         ),

@@ -639,6 +639,21 @@ class DeepDreamConfig:
     judge_second_url: str | None = ""
     judge_reject_min_confidence_2: float = 0.7   # two-vote mean gate
     judge_accept_min_confidence: float = 0.6     # two-vote mean gate ("auto" only)
+    # Merge tiebreak (2026-10-17): a THIRD opinion on the rows whose first
+    # two disagree on the merge (the "split" rows: 67 of the live queue that
+    # day), from a model other than both. "auto" applies a 2-of-3 majority
+    # through the two-vote gates above: two reject-class votes at mean >=
+    # judge_reject_min_confidence_2 reject, and two accepts at mean >=
+    # judge_accept_min_confidence fold only under judge_mode "auto" on a
+    # non-low-differential row. No ladder has measured the third vote yet,
+    # so it ships in shadow: verdicts are recorded and nothing applies.
+    judge_tiebreak_mode: str = "shadow"  # off | shadow | auto
+    # Empty = no third opinion is asked (a third model must be named).
+    judge_third_model: str | None = ""
+    # Empty = the first opinion's endpoint (judge_url, else the dream
+    # extractor) with judge_third_model swapped in; set = an endpoint of its
+    # own. Its bearer key is env-only, PSEUDOLIFE_JUDGE_THIRD_API_KEY.
+    judge_third_url: str | None = ""
     # Link judge over pending edge_proposals. Edges are reversible
     # (memory_graph_unrelate / supersede), which is why this is the one
     # queue whose accepts may ship auto: the 2026-09-02 panel accepted 23,
@@ -646,6 +661,22 @@ class DeepDreamConfig:
     link_judge_mode: str = "shadow"      # off | shadow | auto
     link_accept_min_confidence: float = 0.8
     link_reject_min_confidence: float = 0.8
+    # Link second opinion (2026-10-17): a row whose first accept or reject
+    # sits below the single-vote gate above is judged once more in a fresh
+    # batch by the merge judge's second model (judge_second_model /
+    # judge_second_url; asked only while judge_second_opinion is on). On
+    # the live bank that day none of 435 pending link rows reached the 0.8
+    # single-vote gate. Rescoring the 2026-09-29 ladder artifacts
+    # (evals/results/queue-judge-ladder-20260929-{opus55,sonnet55}.json,
+    # links queue, 37 rows) with two agreeing votes at mean >= 0.7 gave
+    # 7/7 and 8/8 correct accepts and 6/6 and 7/7 correct rejects per
+    # replicate, against 3 accepts + 5 rejects at the single 0.8 gate. The
+    # panel is small and predates the current inflow, so the default is
+    # "shadow" (record, apply nothing). "auto" applies two agreeing accepts
+    # or rejects from DIFFERENT models at mean >= the gate, and only while
+    # link_judge_mode is "auto"; "off" asks no second opinion.
+    link_judge_two_vote: str = "shadow"  # off | shadow | auto
+    link_two_vote_min_confidence: float = 0.7
     # Junk judge over pending junk proposals (the evidence-bearing rows the
     # zero-structure auto-delete skipped). Deletes stay behind an evidence
     # bar even in auto: degree <= junk_max_auto_degree and at most the one

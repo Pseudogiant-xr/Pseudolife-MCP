@@ -970,8 +970,51 @@ other disagreement (an accept or a leave against a reject or relate, or an
 accept against a leave) stamps `split` on the note and leaves the row for a
 human. `judge_mode: auto` goes one step further and folds a pair when two
 independent accepts from different models agree on a row that is not
-`low_differential` at mean >= `judge_accept_min_confidence` — the only path
-that ever auto-applies an accept. "Different" is decided on what the
+`low_differential` at mean >= `judge_accept_min_confidence` — with the
+tiebreak's 2-of-3 accept below, the only paths that ever auto-apply an
+accept. A `split` row gets a **third opinion** (schema v56,
+`judge_tiebreak_mode`, default `shadow`) on a later sweep, in a fresh batch,
+from `judge_third_model` — on the first opinion's endpoint unless
+`judge_third_url` points it at its own, whose bearer key is env-only
+(`PSEUDOLIFE_JUDGE_THIRD_API_KEY`). It is asked only when a third model is
+set (else the result counts `third_opinion_skipped_unconfigured`) and that
+name is neither the first's nor the second's (else
+`third_opinion_skipped_same_model`, no call). The note gains a
+`| 3rd (<model>): <verdict> <conf> [2-1 reject | 2-1 accept | no majority]`
+tail and the review payloads a `judge3` block. In `auto` a 2-of-3 majority
+applies through the two-vote gates: two reject-class votes at mean >=
+`judge_reject_min_confidence_2` reject (filing a relate vote's link as
+above, under `auto-reject` or `auto`), and two accepts at mean >=
+`judge_accept_min_confidence` fold only under `judge_mode: auto` on a row
+that is not `low_differential`, behind the same guards as the two-vote
+accept (dismissed pairs, analyzer rows, name vetoes, snapshot first). Both
+need the third vote served by a model other than both earlier ones
+(`tiebreak_refused_same_model` counts the refusals), and the second vote's
+served model known: a second endpoint that named no model leaves only the
+configured name, so the tiebreak is refused with the vote kept
+(`tiebreak_refused_unknown_second`; split rows recorded before v56 carry no
+served model and need a `review_rejudge`). Each later vote keeps the
+endpoint it came from on the row (`judgeN_served_model`, `judgeN_policy`),
+and a tiebreak decision records both, so reconsideration reopens it when
+either endpoint later reports serving another model. `tiebreak_applied`
+counts what it applied (also inside `auto_rejected` / `auto_accepted`). No
+ladder has measured the third vote yet, which is why it ships in shadow.
+**Promoting a mode keeps the votes.** `judge_tiebreak_mode` and
+`link_judge_two_vote` decide what applies, not what a judge says, so they
+are not part of the judging policy: switching either from `shadow` to
+`auto` keeps every recorded vote, and the next tick applies the gates to
+those votes with no model call. A row the gate refused for a lasting reason
+(no distinct model, an unknown second served model, a name veto, a variant
+conflict, an analyzer-filed row) is left for a human; a graph-snapshot
+failure instead sends the row back to its first opinion next tick. A
+recorded second or third vote whose endpoint has since reported serving
+another model is cleared and asked again, never applied (a cleared second
+vote takes the merge third with it).
+Switching back to `shadow` reopens none of the decisions `auto` took.
+Setting `judge_third_model` or `judge_third_url`, or changing
+`link_two_vote_min_confidence`, does change the policy: every queue's
+recorded verdicts are re-judged once and automatic decisions reconsidered.
+"Different" is decided on what the
 endpoints *served*, not the names they were asked for: a CLI shim answers a
 name outside its own family (a `claude-*` name on the Codex shim) with its
 launch default, which on 2026-09-03 turned a configured `claude-fable-5`
@@ -991,13 +1034,31 @@ it, the rows keep waiting, and the result counts them
 2 of 129 verdicts on the 2026-08-16 ladder, so little is lost. The sweep logs the merge judge's
 result whenever a tick judged, reconsidered, took second opinions,
 refused a same-model reject, saw a served-model mismatch or lost its
-second endpoint. Since 2026-09-02 the other queues have judges too, each riding the
+second endpoint, and (v56) whenever it took third opinions, refused one or
+lost the third endpoint. Since 2026-09-02 the other queues have judges too, each riding the
 same sweep as a bounded batch, all but one defaulting to `shadow`: the
 **link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
 edges and applies rejects, each at its own gate — a *retype* is only
 recorded, with its corrected relation on the row, for a reviewer to apply,
 because the first ladder scored the judge's relation choice at 0/1; edges
-are reversible, which is why this queue may run auto), the **junk judge**
+are reversible, which is why this queue may run auto). Since schema v56 a
+link row whose first accept or reject sat below its 0.8 gate (none of the
+435 pending link rows on the live bank reached it on 2026-10-17) also gets
+a **second opinion** in a fresh batch from the merge judge's second model
+and endpoint (`link_judge_two_vote`, default `shadow`; asked only while
+`judge_second_opinion` is on, and skipped with no call when the
+configuration makes it the first model again). In `auto`, and only while
+`link_judge_mode` is `auto`, two agreeing accepts or rejects from different
+models at mean >= `link_two_vote_min_confidence` (0.7) apply; a retype never
+does. Rescoring the 2026-09-29 ladder's 37 link rows at that gate gave 7/7
+and 8/8 correct accepts and 6/6 and 7/7 correct rejects per replicate
+(`evals/results/queue-judge-ladder-20260929-{opus55,sonnet55}.json`), against
+3 accepts and 5 rejects at the single 0.8 gate; the panel is small and
+predates the current inflow, hence shadow. The row's `judge2` block (with
+`relation` for a retype) and a `| 2nd (<model>): … [agree|split]` note tail
+show it; the result counts `second_opinions`, `two_vote_applied` and
+`two_vote_refused_same_model`. While first opinions wait, these second
+opinions take at most half of each batch. Then the **junk judge**
 (`junk_judge_mode`; `auto` deletes only under an evidence bar), the
 **store-curation judge** (`curation_judge_mode`; `auto-distinct` applies
 the reversible dismissal, `auto` also retires — never deletes — a losing
