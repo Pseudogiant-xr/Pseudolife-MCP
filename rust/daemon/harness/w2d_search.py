@@ -397,6 +397,9 @@ def normalize_stores(state: dict) -> dict:
                     row[1] = {k: (w2e._clock(x) if k in w2e.META_CLOCK[key] else x)
                               for k, x in value.items()}
         t["rows"] = [w2e._rename(r, emap) for r in t["rows"]]
+        if name != "entries":
+            # Rows dumped in random-id order are re-sorted once renamed.
+            t["rows"].sort(key=lambda r: json.dumps(r, sort_keys=True))
     return numeric
 
 
