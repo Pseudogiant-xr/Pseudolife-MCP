@@ -218,8 +218,9 @@ The live `store-reaper` case creates an empty session through a filtered
 store, waits for idle close and compares the full episode and deferred-root
 state with Python. Native coverage also checks that handle touches postpone
 reaping and that a sweep publishes its tombstone to the same owner.
-Nonempty-session automatic titles, standalone episode APIs and tensor
-autosave/exit persistence remain named follow-ups in `divergences.md`.
+The standalone episode tools share this state ("Episode tools over MCP").
+Nonempty-session automatic titles and tensor autosave/exit persistence
+remain named follow-ups in `divergences.md`.
 
 
 # Contract spec: coordination board (slice W2-F)
@@ -621,6 +622,61 @@ stamp written in the same millisecond, which the harness's calls, seconds
 apart, never produce; so no mutant targets FR2's reject side. The lax
 `accept` binding is checked where it decides the outcome: `"yes"` promotes
 a contender and `0` retires one.
+
+### Episode tools over MCP (2026-10-18)
+
+`episode_tools.rs` (the four tools and the service bodies), on the episode
+log and handle resolver of `episodes.rs` (W2, W3), plus the board naming in
+`board/store.rs` (`Store::title_name`, `Store::title_names`) and
+`board/mod.rs` (`Board::title_names`); registered in
+`mcp::dispatch::registry`. Python: `mcp_server.py:2431-2494`; `service.py`
+`_episode_to_dict` (6283-6294), `episode_start` (6296-6336), `episode_end`
+(6338-6394), `_resolve_episode_handle` (6799-6879), `set_session_title`
+(6950-6979), `_retitle_session` (6981-7016), `_retitle_locked` (7029-7048),
+`episode_summary` (7229-7285); `memory/episodes.py` `start_nested`,
+`end_episode`, `end_leaf`, `open_subtree_leaf` (135-216);
+`coordination.py` `title_board_names` (1040-1050); `storage/coordination.py`
+`_title_name` (1432-1441) and `title_names` (2657-2685);
+`harness_names.py` `clean_name` (78-86).
+
+| # | Exact item | Source |
+|---|---|---|
+| EP1 | Bound arguments: `memory_episode_start(title, hint=None, episode=None)`, `memory_episode_end(episode=None)`, `memory_session_title(title, episode=None)`, `memory_episode_summary(id)`; strings passed raw, and an empty `episode` means no handle. No projection and no `_noted`, except that `memory_episode_summary` compacts `recent_entries` (EP11). The three writers are not read-only (an internal failure carries `mutation: "unknown"`) and run to completion detached from the request, as `memory_fact_set` does; the summary is read-only. Each runs under the service lock (Rust: `Ready.write`). | `mcp_server.py:2431-2494` |
+| EP2 | An episode answers as `_episode_to_dict`: `id`, `title`, `started_at`, `ended_at`, `hint`, `closed_by_new_start`, `session_key`, `parent_id`, in that order. | `service.py:6283-6294` |
+| EP3 | Start with a handle: the handle resolves as W2.3 (`resume=True`: a closed or swept root reopens). The parent is the root's open leaf strictly below it (`open_subtree_leaf`: the key's open leaf when its parent chain reaches the root and it is not the root), else the root itself; the key is the root's. Without a resolved handle: the session is the caller's (`X-PL-Session`, then the live active-session pointer, then the legacy transport id; an invalid TTL setting is the `invalid_argument` prose), its root opens lazily as W2.2, and there is no explicit parent. | `service.py:6311-6331`; `episodes.py:204-216` |
+| EP4 | `start_nested`: with no explicit parent, the key's open leaf (with a key) or the global current leaf (without one) is the parent; the new episode (`uuid4().hex`, `started_at` now, the hint, `closed_by_new_start` false) takes the key, or else the parent's, and becomes current; a parentless start is a root. Then the W2.4 sweep. An unknown handle adds `episode_warning: "unknown or closed episode handle"`. | `episodes.py:135-159`; `service.py:6332-6336` |
+| EP5 | End with a handle: it resolves with `resume=False` (an open keyed root only, still touched; a closed or swept root is never reopened); a miss answers `{"closed": null, "reason": "unknown or closed episode handle"}`. The subtree's open leaf (EP3) is closed exactly (`end_episode`: `ended_at` now; when it was current, current pops to its parent if that is open, else none), then the sweep, and the episode answers. No leaf below the root answers `{}` with no write. | `service.py:6362-6378`; `episodes.py:161-170` |
+| EP6 | End without a handle: the session as EP3. The candidate is the key's open leaf, or the global current leaf without a key. None answers `{}`. A candidate whose key differs from the session (including a keyed leaf when there is no session) answers `{"closed": null, "reason": "no owned open session"}`. A keyed root (only the session root is open) answers `{}`: the session root is never closed here. Otherwise `end_leaf` closes it (with no key and nothing open, current clears), the sweep runs, and the closed episode answers (`{}` if none). | `service.py:6379-6394`; `episodes.py:172-181` |
+| EP7 | Title: the title is `str.strip()`ped; empty answers `{"ok": false, "reason": "empty title"}` before any lookup. A resolved handle (W2.3, `resume=True`) retitles its root (EP9). A handle that does not resolve answers `{"ok": false, "reason": "unknown or closed episode handle"}`. Without one, no session answers `{"ok": false, "reason": "no session id on this request"}`; else the first open root with the session key is retitled; failing that, a root the idle reaper closed within the session-resume window reopens (W2.2) and is retitled; failing that, `start_session(title, key)` opens a root under the title (an open non-root leaf for the key is returned untitled, as Python's). Then the sweep, and `{"ok": true, "id", "title"}` with the stripped title. | `service.py:6981-7016` |
+| EP8 | After the write lock is released (still inside the detached task), a successful title names the board rows registered under the root's session key and root id (`title_board_names`): only when the board is enabled, under the coordination lock once the storage tier is up, as the request's bearer principal (none names nothing; a failure is logged and never fails the retitle). | `service.py:6950-6979`; `coordination.py:1040-1050` |
+| EP9 | Retitle (`_retitle_locked`): the episode's title, and every resident entry attributed to it whose `episode_title` differs takes the title in memory and in its row (`UPDATE entries SET episode_title`, one transaction each; a failure is logged and skips that row). | `service.py:7029-7048`; `storage/postgres.py:946-960` |
+| EP10 | Board naming (`title_names`): the name is `clean_name(title)` (every Unicode category C character a space, whitespace runs collapsed, cut to 120 characters; blank is none), refused when it names a reserved sender or is shaped like a credential. With a name, a principal and at least one non-empty key: one transaction updates `name`, `name_source='title'` and `name_set_at` (the board clock) on rows with `episode` among the sorted distinct keys, non-empty episode, a credential, `name_source` `''` or `'title'`, a different name and the principal, then appends one `update` event per changed row in agent-id order (actor `daemon`, the row's principal, agent and scope; payload `{"fields": {name, name_source}, "before": {name, name_source}}`). | `storage/coordination.py:1432-1441, 1462-1467, 2657-2685`; `harness_names.py:78-86` |
+| EP11 | Summary: an unknown id answers `{"found": false, "id"}`. Else the resident entries attributed to the id (exactly; no subtree), walked band by band and stably sorted newest `timestamp` first; `entry_count`; `tag_distribution` and `source_distribution` as `{tag or source, count}` in `(-count, key)` order; and the newest twenty as `_entry_to_dict` with supersession annotated over every resident entry, then compacted by `_compact_entry`. `{"found": true, <EP2 keys>, "entry_count", "tag_distribution", "source_distribution", "recent_entries"}`. A list or object tag fails with Python's `unhashable type` text as `invalid_argument`. No side effects. | `service.py:7229-7285`; `mcp_server.py:2477-2494` |
+| EP12 | Not reproduced: distributions over non-string tags (declared in `divergences.md`); automatic content titles on idle close (the reaper follow-up). | `service.py:7050` |
+
+`harness/w2e.py live --only episode-lifecycle session-title` compares every
+answer and the full bank after each call, on templates seeded through the
+Python daemon (stores opening session roots, a root closed through the
+session-end hook, three board rows registered under the sessions, and the
+active-session pointer from the session-start hook). Lifecycle: nesting
+twice under a session and popping back to the root (the third end answers
+`{}`), a handle that anchors to its own root while another session's
+sub-episode is the global current leaf, its handle-scoped ends, an unknown
+handle that degrades to a header session whose root opens lazily, ends
+refusing unknown and short handles, an end with no session against another
+session's current leaf, an empty title, an end with nothing open, a title
+with no session, three summaries (a root, a nested sub-episode, an unknown
+id), and a closed root whose handle an end refuses and a start reopens.
+Titles: a retitle that rewrites the root's entry stamps and names the
+unnamed board row (not the agent-named one, nor another session's), its
+idempotent repeat, an empty title, a handle retitle, unknown and short
+handles, the pointer's root, a new session's root, a closed root resumed by
+its key, a reserved name that retitles but names no row, a start and end
+through the pointer, and a summary whose tag counts disagree with tag
+order. The `mcp-episode-start-no-anchor`, `mcp-episode-end-pops-root`,
+`mcp-session-title-no-entry-stamp`, `mcp-session-title-no-board` and
+`mcp-episode-summary-count-order` mutants must be caught. Native tests cover
+the episode primitives and the title name's cleaning against Python's.
 
 ### Board tools over MCP (2026-10-16)
 

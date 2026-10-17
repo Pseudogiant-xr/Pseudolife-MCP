@@ -656,6 +656,91 @@ impl Store {
         .scope(&row.project, &row.task)
     }
 
+    /// `_title_name` (v55): the name a session title gives, or None when it
+    /// gives none. `harness_names.clean_name` makes one line of at most
+    /// `MAX_NAME` characters (every control or format character becomes a
+    /// space, whitespace runs collapse); a blank one, or one naming a
+    /// reserved sender or shaped like a credential, names nothing.
+    pub fn title_name(title: &str) -> Option<String> {
+        let spaced: String = title
+            .chars()
+            .map(|c| if text::category_c(c) { ' ' } else { c })
+            .collect();
+        let name: String = text::collapse_spaces(&spaced)
+            .chars()
+            .take(MAX_NAME)
+            .collect();
+        if name.is_empty() || text::reserved_name(&name) || looks_like_secret(&name) {
+            return None;
+        }
+        Some(name)
+    }
+
+    /// `title_names` (v55): name the rows registered under any of `episodes`
+    /// (the session keys a `memory_session_title` rename resolved) after
+    /// `title`, source `title`: only credentialed rows of `principal` whose
+    /// name no agent or harness set and which do not already carry it, one
+    /// `update` event per changed row (by agent id) by the daemon. Returns
+    /// how many changed; without a principal it names nothing.
+    pub async fn title_names(
+        &self,
+        client: &mut tokio_postgres::Client,
+        episodes: &[String],
+        title: &str,
+        principal: Option<&str>,
+    ) -> Result<usize> {
+        let name = Self::title_name(title);
+        let mut episodes: Vec<String> =
+            episodes.iter().filter(|e| !e.is_empty()).cloned().collect();
+        episodes.sort();
+        episodes.dedup();
+        let (Some(name), Some(principal)) = (name, principal) else {
+            return Ok(0);
+        };
+        if episodes.is_empty() {
+            return Ok(0);
+        }
+        let now = now();
+        let tx = client.transaction().await?;
+        let rows = tx
+            .query(
+                "UPDATE coordination_agents a SET name=$1,name_source='title',name_set_at=$2 \
+                 FROM coordination_agents b WHERE a.agent_id=b.agent_id \
+                 AND a.episode=ANY($3) AND a.episode<>'' AND a.credential_hash IS NOT NULL \
+                 AND a.name_source IN ('','title') AND a.name<>$1 AND a.principal=$4 \
+                 RETURNING a.agent_id,a.principal,a.project,a.task,b.name,b.name_source",
+                &[&name, &now, &episodes, &principal],
+            )
+            .await?;
+        let mut changed: Vec<(String, String, String, String, String, String)> = rows
+            .iter()
+            .map(|r| {
+                let s = |i: usize| r.get::<_, Option<String>>(i).unwrap_or_default();
+                (s(0), s(1), s(2), s(3), s(4), s(5))
+            })
+            .collect();
+        changed.sort_by(|x, y| x.0.cmp(&y.0));
+        let events = changed
+            .iter()
+            .map(
+                |(agent, row_principal, project, task, before_name, before_source)| {
+                    Event::new(
+                        "update",
+                        &json!({"fields": {"name": name, "name_source": "title"},
+                            "before": {"name": before_name, "name_source": before_source}}),
+                    )
+                    .actor("daemon")
+                    .principal(row_principal)
+                    .agent(agent)
+                    .scope(project, task)
+                },
+            )
+            .collect();
+        append(&tx, events, now, None).await?;
+        super::db::commit(tx).await?;
+        Ok(changed.len())
+    }
+
     /// `_fields`: validate the given fields in their order, returning them
     /// with `park_reason` "" as null and `park_expires` as a float.
     pub fn fields(given: &[(String, Value)]) -> Result<Vec<(String, Value)>> {
@@ -2033,6 +2118,22 @@ mod proof_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_title_names_one_clean_bounded_line_or_nothing() {
+        assert_eq!(
+            Store::title_name("  Pseudolife-MCP \t- rust\u{200b}port\n").as_deref(),
+            Some("Pseudolife-MCP - rust port")
+        );
+        // Truncation can leave a trailing space, as Python's slice does.
+        let long = format!("{} tail", "a".repeat(MAX_NAME - 1));
+        let name = Store::title_name(&long).unwrap();
+        assert_eq!(name.chars().count(), MAX_NAME);
+        assert!(name.ends_with(' '));
+        assert_eq!(Store::title_name(" \u{7} \t"), None);
+        assert_eq!(Store::title_name("maintainer notes"), None);
+        assert_eq!(Store::title_name("daemon"), None);
+    }
 
     #[test]
     fn done_status_matches_python_word_boundaries() {

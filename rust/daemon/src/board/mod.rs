@@ -103,4 +103,28 @@ impl Board {
         let client = conn.client().await?;
         f(&self.store, client).await
     }
+
+    /// `coordination.title_board_names`: name the board rows of a retitled
+    /// session (`Store::title_names`) under the coordination lock, once the
+    /// storage tier is up; a disabled board names nothing. The caller has
+    /// released the write lock and ignores any failure.
+    pub async fn title_names(
+        &self,
+        episodes: &[String],
+        title: &str,
+        principal: Option<&str>,
+    ) -> Result<usize> {
+        if !self.config.enabled {
+            return Ok(0);
+        }
+        self.service
+            .storage_tier()
+            .await
+            .map_err(error::BoardError::Internal)?;
+        let mut conn = self.conn.lock().await;
+        let client = conn.client().await?;
+        self.store
+            .title_names(client, episodes, title, principal)
+            .await
+    }
 }
