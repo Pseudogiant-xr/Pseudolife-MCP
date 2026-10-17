@@ -15,11 +15,14 @@ names; active listeners/rings and warnings; alias/help/refusal/output
 behavior; PID lifetime, local contention and mirror renewal. Four failure
 cases install a trigger in each arm's own bank after seeding: an audit
 INSERT the server refuses inside the block (a FIFO break), a COMMIT the
-server refuses (a FIFO break), and a COMMIT whose own backend is terminated
-so the client gets FATAL and no answer (a held break, and a coordinator
-handoff by delegate). Each oracle arm must exit 1 with every coordination
-row exactly as seeded; sequences may only advance, because a FIFO grant's
-fence `nextval` is not rolled back. The candidate's rows and exact
+server refuses (a FIFO break), and a session the server ends at COMMIT: the
+backend terminates itself in a deferred trigger before the commit record,
+so the client's answer is FATAL 57P01 (a held break, and a coordinator
+handoff by delegate; named `*-commit-lost` after transfer's identical
+fixture). Each oracle arm must exit 1 with its expected failure class and
+every coordination row exactly as seeded; sequences may only advance,
+because a FIFO grant's fence `nextval` is not rolled back, and a FIFO
+case's fence must have advanced, proving the block reached the grant. The candidate's rows and exact
 sequence positions are compared with the oracle's. Three owned
 fake-Docker executables check inspect/exec argv, inherited binary streams,
 stdin and container exit status. One Windows-only CPU launcher case invokes
@@ -54,7 +57,9 @@ Named rules extend the shared core rules:
 - `lease-launcher-owned` associates only a validated bound executable/leading
   argv and owned process IDs in its route records. Every other route field,
   stream and file stays compared; immutable fixture inputs are verified
-  before removal.
+  before removal. The bound span must occur exactly five times in one JSON
+  spelling, either pwsh 7's literal non-ASCII or the escaped form, so a
+  non-ASCII installation path associates.
 
 Six real source mutants cover hold status, break holder removal,
 delegate duration, designate deprecation, a swallowed audit-insert failure
@@ -69,12 +74,11 @@ native PostgreSQL diagnostic classes replace interpreter exception names.
 Noncanonical argparse/path shapes remain excluded.
 
 Declared scope of the failure outcomes. Both implementations print
-`nothing was changed` for every database failure, including a COMMIT whose
-answer was lost; in the lost-answer fixture the server rolls back, so the
-line is true there, but neither client can know it in general. That wording
-is the oracle's (`lease_cli.py` `_operator`), so a change follows Python
-first. A transport cut after the server commits and before its answer
-arrives is not reproduced. Cancelling the host CLI while a retained
+`nothing was changed` for every database failure, including one raised by
+COMMIT itself; in the session-ended fixture the server rolls back, so the
+line is true there, but after a transport cut neither client can know it.
+That wording is the oracle's (`lease_cli.py` `_operator`), so a change
+follows Python first. Transport loss around COMMIT is not reproduced. Cancelling the host CLI while a retained
 container transport runs is not exercised: the transaction then runs in the
 container's own Python oracle, and the native side only relays argv,
 streams and exit status, which the fake-Docker cases compare. There is no per-row

@@ -7,4 +7,4 @@
   and container transport are covered.
 - Prove that a failed `lease break` or `lease delegate` leaves the bank
   untouched in both implementations: an audit write the server refuses, a
-  refused COMMIT and a COMMIT whose answer is lost all roll back.
+  refused COMMIT and a session the server ends at COMMIT all roll back.

@@ -263,8 +263,9 @@ _FAULTS = {
     # The server refuses the COMMIT itself (an ERROR at COMMIT: rolled back).
     "commit-refused": ("AFTER INSERT ON coordination_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW",
                        "RAISE EXCEPTION 'harness: refused at commit';"),
-    # The CLI's own backend ends at COMMIT: its client gets FATAL and no
-    # answer. The server never commits, so the bank must be unchanged.
+    # The CLI's own backend ends itself at COMMIT, before the commit record:
+    # the client's answer is FATAL 57P01 and the server rolls back. Named
+    # after transfer's identical fixture; it is not a transport cut.
     "commit-lost": ("AFTER INSERT ON coordination_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW",
                     "PERFORM pg_terminate_backend(pg_backend_pid()); PERFORM pg_sleep(5);"),
 }
@@ -359,6 +360,14 @@ def operator_case(identifier, argv, scenario="missing", events=(), local=False, 
                 # sequence positions, are left to the comparison.
                 final, seeded = obs["db"]["final"], arm.state["before"]
                 assert obs["exit"] == 1, obs["exit"]
+                # Not vacuous: the oracle reached the fault (its own class in
+                # the failure line), and a FIFO block got past the grant's
+                # nextval before failing.
+                failed = _FAILED.match(base64.b64decode(obs["stderr"]))
+                assert failed and failed.group(2).decode() == failure_class, obs["stderr"]
+                if scenario == "queue":
+                    fence = "coordination_lease_fence"
+                    assert (final["sequences"][fence] or 0) > (seeded["sequences"][fence] or 0), fence
                 assert final["tables"] == seeded["tables"], f"oracle: {fault} changed coordination rows"
                 assert final["sequences"].keys() == seeded["sequences"].keys()
                 assert all(seeded["sequences"][key] is None

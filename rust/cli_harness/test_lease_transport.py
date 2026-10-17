@@ -75,3 +75,36 @@ def test_modified_fixture_input_is_preserved_and_refused(tmp_path):
     with pytest.raises(AssertionError, match="fixture input changed"):
         lease_transport._remove_inputs(arm)
     assert path.read_bytes() == b"changed"
+
+
+UNICODE_BINDING = {"File": "D:\\Programme\\Caf\u00e9\\pseudolife-stdio.exe", "Lead": ["-m", "caf\u00e9"]}
+
+
+def _routes(literal):
+    # pwsh 7 ConvertTo-Json -Compress spells non-ASCII literally; json.dumps
+    # (ensure_ascii) escapes it. Both must associate.
+    line = json.dumps(UNICODE_BINDING, separators=(",", ":"), ensure_ascii=not literal)
+    return ((line + "\n") * 5).encode("utf-8")
+
+
+@pytest.mark.parametrize("literal", [True, False], ids=["pwsh-literal", "escaped"])
+def test_unicode_launcher_paths_associate_in_either_json_spelling(literal):
+    raw = lease_transport._associate_routes(_routes(literal), UNICODE_BINDING)
+    assert raw == (b'{"File":"<bound-cli>","Lead":["<bound-prefix>"]}\n' * 5)
+
+
+@pytest.mark.parametrize("change", ["four-routes", "six-routes", "mixed", "other-path"])
+def test_unicode_route_near_misses_refuse(change):
+    raw = _routes(True)
+    if change == "four-routes":
+        raw = b"\n".join(raw.split(b"\n")[1:])
+    elif change == "six-routes":
+        raw = raw + raw.split(b"\n")[0] + b"\n"
+    elif change == "mixed":
+        lines = raw.split(b"\n")
+        lines[0] = _routes(False).split(b"\n")[0]
+        raw = b"\n".join(lines)
+    else:
+        raw = raw.replace("Caf\u00e9".encode(), b"Cafe", 1)
+    with pytest.raises(AssertionError):
+        lease_transport._associate_routes(raw, UNICODE_BINDING)

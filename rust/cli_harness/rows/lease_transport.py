@@ -199,18 +199,27 @@ def _launcher_after(arm, obs):
     # Associate only the route fields validated above; raw golden files must
     # not embed the machine's interpreter or candidate installation paths.
     route_path = arm.home / 'routes.jsonl'
-    raw = route_path.read_bytes()
-    for name, value, marker in (('File', binding['File'], '<bound-cli>'),
-                                 ('Lead', binding['Lead'], ['<bound-prefix>'])):
-        old = ('"' + name + '":' + json.dumps(value, separators=(',', ':'))).encode()
-        new = ('"' + name + '":' + json.dumps(marker, separators=(',', ':'))).encode()
-        assert raw.count(old) == 5
-        raw = raw.replace(old, new)
-    route_path.write_bytes(raw)
+    route_path.write_bytes(_associate_routes(route_path.read_bytes(), binding))
     obs['launcher_binding'] = {'File': '<bound-cli>', 'Lead': ['<bound-prefix>']}
     helper, original = arm.state['helper']
     assert helper.read_bytes() == original, 'shipped helper changed during the arm'
     _remove_inputs(arm)
+
+
+def _associate_routes(raw, binding):
+    """Replace the five bound File/Lead spans with their markers. pwsh 7's
+    ConvertTo-Json writes non-ASCII text literally (as UTF-8) where
+    json.dumps escapes it, so exactly one of the two spellings must occur
+    five times; anything else refuses."""
+    for name, value, marker in (('File', binding['File'], '<bound-cli>'),
+                                 ('Lead', binding['Lead'], ['<bound-prefix>'])):
+        spans = {('"' + name + '":' + json.dumps(value, separators=(',', ':'), ensure_ascii=ascii)
+                  ).encode() for ascii in (False, True)}
+        found = [span for span in spans if raw.count(span) == 5]
+        assert len(found) == 1 and sum(raw.count(span) for span in spans) == 5, name
+        new = ('"' + name + '":' + json.dumps(marker, separators=(',', ':'))).encode()
+        raw = raw.replace(found[0], new)
+    return raw
 
 
 @normalize.rule('lease-launcher-owned')

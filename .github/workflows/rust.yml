@@ -486,6 +486,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease --golden --candidate $candidate -v
           exit $LASTEXITCODE
+      # Local 2026-10-17, 36/35 cases: Windows live 101s + golden 43s,
+      # WSL live 67s + golden 39s, controls under 1s; ten minutes is about
+      # four times the slower platform.
       - name: CLI lease operator differential harness
         if: matrix.suite == 'cli'
         timeout-minutes: 10
