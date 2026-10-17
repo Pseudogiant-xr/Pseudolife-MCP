@@ -43,10 +43,37 @@ def _target() -> Path:
     return Path(os.environ.get("CARGO_TARGET_DIR", RUST / "target"))
 
 
+IGNORE = shutil.ignore_patterns("target", "cli_harness", "__pycache__")
+
+
+def _prune(source: Path, copy: Path) -> None:
+    """Remove what the copy holds and the checkout no longer does.
+
+    copytree only adds and overwrites, so a target dir reused across master
+    moves kept files the tree had since moved: a stale ``doctor.rs`` beside
+    the new ``doctor/mod.rs`` failed every mutant build with E0761. Ignored
+    names are left alone, as copytree leaves them.
+    """
+    names = os.listdir(copy)
+    skipped = IGNORE(str(copy), names)
+    for name in names:
+        if name in skipped:
+            continue
+        src, dst = source / name, copy / name
+        if dst.is_dir() and not dst.is_symlink():
+            if src.is_dir():
+                _prune(src, dst)
+            else:
+                shutil.rmtree(dst)
+        elif not src.is_file():
+            dst.unlink()
+
+
 def _sync_source(mutants: list[Mutant]) -> Path:
     copy = _target() / "mutant-src" / "rust"
-    ignore = shutil.ignore_patterns("target", "cli_harness", "__pycache__")
-    shutil.copytree(RUST, copy, dirs_exist_ok=True, ignore=ignore)
+    if copy.is_dir():
+        _prune(RUST, copy)
+    shutil.copytree(RUST, copy, dirs_exist_ok=True, ignore=IGNORE)
     now = time.time()
     # Copies keep the original mtime; a file a previous mutant changed must
     # look newer than the last build or Cargo would reuse the mutant binary.
