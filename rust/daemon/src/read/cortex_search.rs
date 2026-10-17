@@ -100,7 +100,7 @@ impl Default for CortexKnobs {
 // ---- freshness (memory/freshness.py) and age (memory/context_builder.py) ----
 
 /// `freshness.normalize_class`: unknown classes read as volatile.
-fn normalize_class(c: &str) -> &'static str {
+pub(crate) fn normalize_class(c: &str) -> &'static str {
     let c = crate::stores::cortex::py_casefold(c.trim_matches(crate::stores::cortex::py_isspace));
     match c.as_str() {
         "evergreen" => "evergreen",
@@ -118,7 +118,7 @@ pub(crate) fn ttl(c: &str) -> Option<f64> {
 }
 
 /// `freshness.decay_factor`.
-fn decay_factor(c: &str, age: f64) -> f64 {
+pub(crate) fn decay_factor(c: &str, age: f64) -> f64 {
     let class = normalize_class(c);
     let Some(ttl) = ttl(class) else {
         return 1.0;
@@ -196,7 +196,7 @@ pub fn relative_time(timestamp: f64, now: f64) -> String {
 // ---- record serialisation (service.py:272-358) ----
 
 /// `_apply_stale_policy` (`service.py:272`).
-fn apply_stale_policy(d: &mut Map<String, Value>, policy: &str) {
+pub(crate) fn apply_stale_policy(d: &mut Map<String, Value>, policy: &str) {
     if d.get("stale") != Some(&Value::Bool(true)) || policy == "annotate" {
         return;
     }

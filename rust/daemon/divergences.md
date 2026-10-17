@@ -37,13 +37,11 @@ tool's answers by value.
 | Tool | Body owner | Missing service prerequisite |
 |---|---|---|
 | `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred by decision (PARITY.md, "Graph traversal deferred by decision"). |
-| `memory_world_search` | W2-D | No resident world-cortex search service. |
 | `memory_lesson_search` | W2-D | No resident lesson search or lesson-search telemetry service. |
 | `memory_history` | W2-D | Slot mode (`attribute` given) is served (spec HI1-HI7); chain mode (`attribute` omitted) answers this stub: it merges the lesson store, which has no Rust port yet, with the graph's entity, alias and entry reads. It lands with the lesson store (task H). |
 | `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
-| `memory_world_set` | W2-E | No world-fact mutation service. |
 | `memory_supersede` | W2-E | No supersession service, audit lineage or resident publication. |
 | `memory_reinstate` | W2-E | No reinstatement decision service. |
 | `memory_forget` | W2-E | No forget/cascade service. |
@@ -63,7 +61,8 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_fact_resolve`, `memory_stats`, `memory_episode_start`,
 `memory_episode_end`, `memory_session_title`, `memory_episode_summary`,
 `memory_outcome`, `memory_reinforce`, `memory_history` in slot mode (its
-chain mode keeps the stub, row above), `memory_agents` and `memory_message`. The two board tools
+chain mode keeps the stub, row above), `memory_world_set`,
+`memory_world_search`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -282,11 +281,11 @@ The remaining write work is deliberately split into subsequent increments:
 
 | Item | Remaining behavior | Owner / reason |
 |---|---|---|
-| Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save), `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) and `memory_fact_resolve` (spec FR1-FR8: contender promotion and retirement) are served; world facts remain unimplemented; slot extraction here is a pure text operation, not a canonical write | W2-E world-fact increment (`memory_world_set`) |
+| Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save), `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) and `memory_fact_resolve` (spec FR1-FR8: contender promotion and retirement) are served, and so are world facts (`memory_world_set`, spec WD1-WD12); slot extraction here is a pure text operation, not a canonical write | the world store's retire/restore/forget and console reads (no MCP tool reaches them) |
 | Lessons | `memory_outcome` (signals, attribution and the `used_ids` label; spec OC1-OC12) and `memory_reinforce` are served; the lesson store, lesson search and the dream's lesson synthesis remain unimplemented | W2-E lessons increment (`memory_lesson_search`), W3-H (dream) |
 | Episode titles on idle close | `memory_episode_start`, `memory_episode_end`, `memory_session_title` and `memory_episode_summary` are served (spec EP1-EP12) on the state store-driven open/resume and empty-root reaping share; automatic content titles on idle close remain unimplemented | W2-E reaper follow-up; content titles also rewrite entry stamps |
 | Autosave and clean-exit flush | Background scheduling exists, but changed-state saving and exit flush remain no-ops; store rows write through, while counters, surprise history and band weights do not survive restart via `weights.pt` | W2-E persistence increment; the Python tensor format and recovery contract need a separate proof |
-| Resident cortex refresh | `memory_fact_set`, `memory_set_add`, `memory_set_remove` and `memory_fact_resolve` update the resident cortex in place (readers take snapshots); the world and lesson stores have no write path, and auto-promotion stays disabled | W2-E world, lesson and auto-promotion increments |
+| Resident cortex refresh | `memory_fact_set`, `memory_set_add`, `memory_set_remove` and `memory_fact_resolve` update the resident cortex in place (readers take snapshots), and `memory_world_set` the resident world store; the lesson store has no write path, and auto-promotion stays disabled | W2-E lesson and auto-promotion increments |
 | Frozen store catalog snapshots | Original store recordings predate the catalog instrument's `column_types`, owner/comment and sequence-bound representations; replay retains and reports initialization differences | Historical recordings are retained unchanged; live Python comparison is the current-source proof, not a waiver of frozen replay differences |
 | New reaper recording's startup state | The live fixture inherits Python-seeded relation timestamps, curation metadata and dream acknowledgement state; a fresh Rust-only replay does not reproduce that seed state | W3-H startup/dream integration; the new recording is retained unchanged and its replay differences are reported separately from the matching live reaper behavior |
 | Unicode runtime | Label, meta-filter and slot regexes retain the existing Unicode-14 assigned-character contract; newer assigned characters may follow Rust's newer tables | Explicitly retained runtime substitution; no comparator or frozen expectation is weakened |
