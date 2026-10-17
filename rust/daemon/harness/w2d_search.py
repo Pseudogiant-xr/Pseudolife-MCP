@@ -85,7 +85,9 @@ MUTANTS = {"search-skip-event": "log-off-control", "search-no-access-bump": "def
            "mcp-fact-get-no-alias-retry": "mcp-fact-get",
            "mcp-fact-get-no-candidates": "mcp-fact-get",
            "mcp-fact-get-no-lean": "mcp-fact-get",
-           "mcp-get-no-db-bump": "mcp-get", "mcp-get-no-use-credit": "mcp-get"}
+           "mcp-get-no-db-bump": "mcp-get", "mcp-get-no-use-credit": "mcp-get",
+           "mcp-stats-no-tier-hits": "mcp-stats", "mcp-stats-no-graduation": "mcp-stats",
+           "mcp-stats-no-capacity-warning": "mcp-stats-capacity"}
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2d_[a-z0-9_]{1,40}")
 
 
@@ -365,6 +367,57 @@ class McpTransportSession(Scenario):
                      [bearer(TOKEN), ("mcp-session-id", "")])]
 
 
+def import_w2e():
+    """w2e.py, for its store rules. Importing it sets pgdisposable's name
+    guard to the w2e prefix; this harness's own guard is put back."""
+    saved = pg.DISPOSABLE_NAME
+    import w2e
+    pg.DISPOSABLE_NAME = saved
+    return w2e
+
+
+def normalize_stores(state: dict) -> dict:
+    """For a scenario that stores, w2e.py's rules: embeddings and surprises
+    leave the rows for a numeric comparison by entry id (returned), wall-clock
+    columns and meta keys become tokens, and episode ids are renamed by start
+    order (each daemon mints its own)."""
+    w2e = import_w2e()
+    numeric = w2e.extract_numeric(state)
+    emap = w2e.episode_map(state)
+    for qualified, t in state["rows"].items():
+        name = qualified.split(".", 1)[1]
+        for idx, col in enumerate(t["columns"]):
+            if (name, col) in w2e.CLOCK:
+                for row in t["rows"]:
+                    row[idx] = w2e._clock(row[idx])
+        if name == "meta":
+            for row in t["rows"]:
+                key, value = row
+                if key in w2e.META_CLOCK and isinstance(value, dict):
+                    row[1] = {k: (w2e._clock(x) if k in w2e.META_CLOCK[key] else x)
+                              for k, x in value.items()}
+        t["rows"] = [w2e._rename(r, emap) for r in t["rows"]]
+        if name != "entries":
+            # Rows dumped in random-id order are re-sorted once renamed.
+            t["rows"].sort(key=lambda r: json.dumps(r, sort_keys=True))
+    return numeric
+
+
+def scrub_meta_clock(state: dict) -> None:
+    """META_CLOCK keys inside meta values: a number becomes a token."""
+    meta = state["rows"].get("public.meta") or {}
+    cols = meta.get("columns") or []
+    if "key" not in cols or "value" not in cols:
+        return
+    k, v = cols.index("key"), cols.index("value")
+    for row in meta.get("rows") or []:
+        value = row[v]
+        for name in META_CLOCK.get(row[k], ()):
+            if isinstance(value, dict) and isinstance(value.get(name), (int, float)) \
+                    and not isinstance(value.get(name), bool):
+                value[name] = f"<{name}>"
+
+
 def scrub_transport(state: dict, ids: list) -> None:
     """Each arm's own mcp-session-id becomes ``<transport-N>`` (call order)."""
     names = {sid: f"<transport-{i}>" for i, sid in enumerate(ids) if sid}
@@ -530,10 +583,90 @@ class McpGet(Scenario):
         ]
 
 
+class McpStats(Scenario):
+    """memory_stats over MCP (spec MS1-MS6): the vital signs before and after
+    searches that hit and miss, a get (a database read) and a store, with
+    seeded graduation candidates, a community and a graph digest."""
+    name = "mcp-stats"
+    stores = True
+    live_only = True
+    mcp_extra_seed = True
+    seed_flags = ("--mcp-extra", "--fact-extra", "--stats-extra")
+    entry_ids = True
+    require = {"stats.responses": 2, "stats.graduation": 1, "stats.hits": 1,
+               "stats.worst_sources": 1, "stats.communities": 1, "stats.digest": 1,
+               "stats.interactions": 1, "stats.reads": 1}
+
+    def cases(self):
+        session = [("X-PL-Session", "sess-stats")]
+        stats = lambda n: mcp_case(n, {}, tool="memory_stats")  # noqa: E731
+        return [
+            stats("stats before"),
+            mcp_case("dense hit", {"query": "deploy the daemon", "top_k": 3}, session),
+            mcp_case("slot query", {"query": "what cpu does the dev box have", "top_k": 3},
+                     session),
+            mcp_case("nothing near", {"query": "zqxv plorbnik wuzzle", "top_k": 3}, session),
+            mcp_case("get counts a read", {"entry_id": "<traced-entry>"}, session,
+                     tool="memory_get"),
+            mcp_case("store counts an interaction",
+                     {"text": "The stats probe watched the vital signs of the bank move.",
+                      "source": "session-notes"}, session, tool="memory_store"),
+            stats("stats after"),
+        ]
+
+
+class McpStatsContinuum(Scenario):
+    """memory_stats with the eight continuum bands: per-band hit rates and the
+    v0.4 aliases (instant by name, short_term and long_term by position)."""
+    name = "mcp-stats-continuum"
+    live_only = True
+    config_yaml = "memory:\n  miras:\n    preset: continuum\n"
+    require = {"stats.responses": 2, "stats.multiband": 2, "stats.hits": 1}
+
+    def cases(self):
+        stats = lambda n: mcp_case(n, {}, tool="memory_stats")  # noqa: E731
+        return [stats("continuum stats before"),
+                mcp_case("continuum search", {"query": "deploy the daemon", "top_k": 4}),
+                mcp_case("continuum search 2", {"query": "harness evidence", "top_k": 4}),
+                stats("continuum stats after")]
+
+
+class McpStatsCapacity(Scenario):
+    """memory_stats at capacity: one custom band sized one past the seeded
+    bank, so the warning reads "NN% full", then "full" after a store, and a
+    second store evicts a true drop (the counter, the durable record and
+    last_true_drop)."""
+    name = "mcp-stats-capacity"
+    stores = True
+    live_only = True
+    require = {"stats.responses": 3, "stats.capacity_warning": 3, "stats.true_drops": 1,
+               "stats.last_true_drop": 1}
+
+    def configure(self, template: str) -> None:
+        import psycopg
+        with psycopg.connect(pg.dsn(template)) as conn:
+            n = conn.execute("SELECT count(*) FROM entries").fetchone()[0]
+        self.config_yaml = ("memory:\n  miras:\n    preset: custom\n    bands:\n"
+                            f"      - name: flat\n        max_entries: {n + 1}\n"
+                            "        retention_policy: balanced\n")
+
+    def cases(self):
+        stats = lambda n: mcp_case(n, {}, tool="memory_stats")  # noqa: E731
+        store = lambda n, t: mcp_case(n, {"text": t, "source": "session-notes"},  # noqa: E731
+                                      tool="memory_store")
+        return [stats("one short of full"),
+                store("fills the band", "A capacity probe parked the blue kayak by the shed."),
+                stats("full"),
+                store("evicts a true drop",
+                      "A second capacity probe tuned the old upright piano in the hall."),
+                stats("after the drop")]
+
+
 SCENARIOS = {s.name: s for s in (Default, Timeline, Contiguity, RrfPool, MarginGate, LogOff,
                                   LogOffControl, Continuum, HideSuperseded, ConfidenceFloor,
                                   PointerExpired, ConfidenceRounding, McpSearch,
-                                  McpTransportSession, McpRecent, McpFactGet, McpGet)}
+                                  McpTransportSession, McpRecent, McpFactGet, McpGet,
+                                  McpStats, McpStatsContinuum, McpStatsCapacity)}
 
 
 # ---- comparison ----------------------------------------------------------------------
@@ -548,9 +681,18 @@ def kind(v) -> str:
     return type(v).__name__
 
 
+# Wall-clock leaves of a memory_stats answer: each daemon writes its own
+# event and drop times, so only their presence and type are compared.
+CLOCK_LEAVES = (".retrieval_log.last_event_at", ".last_true_drop.at")
+# Wall-clock keys inside meta values (as w2e.py's META_CLOCK).
+META_CLOCK = {"capacity_true_drops": {"last_at"}}
+
+
 def diff(a, b, path="", tol_keys=("score",)) -> list[str]:
     """Strict by-value diff: types must match (True is not 1, 1 is not 1.0),
     floats exact except the declared float leaves."""
+    if path.endswith(CLOCK_LEAVES) and kind(a) == kind(b) == "float":
+        return []
     if kind(a) != kind(b):
         return [f"{path}: python {kind(a)} {json.dumps(a)[:160]} vs rust {kind(b)} {json.dumps(b)[:160]}"]
     if isinstance(a, dict):
@@ -607,9 +749,53 @@ def align_ties(py_list: list, rs_list: list, key: str = "id", *, ordered=False) 
     return rs, notes
 
 
-def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False) -> tuple[list[str], list[str]]:
+def key_order(a, b, path="") -> list[str]:
+    """Object key order, which diff() does not see (it walks sorted keys):
+    a memory_stats answer is compared key order and all."""
+    out = []
+    if isinstance(a, dict) and isinstance(b, dict):
+        if list(a) != list(b) and set(a) == set(b):
+            out.append(f"{path}: key order python {list(a)} vs rust {list(b)}")
+        for k in a:
+            if k in b:
+                out += key_order(a[k], b[k], f"{path}.{k}")
+    elif isinstance(a, list) and isinstance(b, list):
+        for i, (x, y) in enumerate(zip(a, b)):
+            out += key_order(x, y, f"{path}[{i}]")
+    return out
+
+
+def align_worst_sources(a: dict, b: dict) -> dict:
+    """read_audit.worst_sources orders by the never-read share with no
+    tie-break (storage/postgres.py:2519-2525), so rows tied on it are in an
+    unspecified order on either daemon: the Rust run is put in the Python
+    order within each tie."""
+    pa = (a.get("read_audit") or {}).get("worst_sources")
+    pb = (b.get("read_audit") or {}).get("worst_sources")
+    if not (isinstance(pa, list) and isinstance(pb, list)) or len(pa) != len(pb):
+        return b
+    share = lambda r: (r.get("never_read"), r.get("n"))  # noqa: E731
+    out = list(pb)
+    i = 0
+    while i < len(out):
+        j = i
+        while j + 1 < len(out) and share(out[j + 1])[0] * share(out[i])[1] \
+                == share(out[i])[0] * share(out[j + 1])[1]:
+            j += 1
+        want = pa[i:j + 1]
+        if sorted(map(json.dumps, want)) == sorted(map(json.dumps, out[i:j + 1])):
+            out[i:j + 1] = want
+        i = j + 1
+    b = dict(b)
+    b["read_audit"] = dict(b["read_audit"], worst_sources=out)
+    return b
+
+
+def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False,
+            stats=False) -> tuple[list[str], list[str]]:
     """``ordered``: the answer's entries are in an exact order with no scores
-    (memory_recent), so no tie alignment applies."""
+    (memory_recent), so no tie alignment applies. ``stats``: a memory_stats
+    answer, compared key order too, with worst_sources ties aligned."""
     diffs, notes = [], []
     if py["status"] != rs["status"]:
         diffs.append(f"status: python {py['status']} vs rust {rs['status']}")
@@ -621,6 +807,9 @@ def compare(py: dict, rs: dict, *, timeline_fired=False, ordered=False) -> tuple
     if py["status"] in (400, 500) and isinstance(a.get("error"), str) and isinstance(b.get("error"), str):
         a = dict(a, error="<free>")
         b = dict(b, error="<free>")
+    if stats and isinstance(a, dict) and isinstance(b, dict):
+        diffs += key_order(a, b)
+        b = align_worst_sources(a, b)
     if isinstance(a, dict) and isinstance(b, dict):
         for k in ("entries", "cortex", "candidates"):
             if isinstance(a.get(k), list) and isinstance(b.get(k), list):
@@ -733,9 +922,30 @@ def coverage(responses: list[dict], state: dict) -> dict:
                     "correct_with": 0, "candidates_same": 0, "candidates_similar": 0,
                     "entity_ref": 0, "re_verify": 0, "source_entries": 0, "misses": 0,
                     "checks": 0},
-           "get": {"found": 0, "faded": 0, "replaced_by": 0, "consolidated": 0, "uses": 0}}
+           "get": {"found": 0, "faded": 0, "replaced_by": 0, "consolidated": 0, "uses": 0},
+           "stats": {"responses": 0, "graduation": 0, "hits": 0, "worst_sources": 0,
+                     "communities": 0, "digest": 0, "interactions": 0, "reads": 0,
+                     "multiband": 0, "capacity_warning": 0, "true_drops": 0,
+                     "last_true_drop": 0}}
     for r in responses:
         body = r.get("json") or {}
+        if isinstance(body, dict) and "bands" in body and "total_memories" in body:
+            # A memory_stats answer.
+            sc = cov["stats"]
+            audit = body.get("read_audit") or {}
+            sc["responses"] += 1
+            sc["graduation"] += bool(audit.get("graduation_candidates"))
+            sc["hits"] += any(b.get("hit_count") for b in body.get("bands") or [])
+            sc["worst_sources"] += bool(audit.get("worst_sources"))
+            sc["communities"] += bool(body.get("communities"))
+            sc["digest"] += body.get("graph_digest_at") is not None
+            sc["interactions"] += bool(body.get("interaction_count"))
+            sc["reads"] += bool((audit.get("entries") or {}).get("reads_total"))
+            sc["multiband"] += len(body.get("bands") or []) > 1
+            sc["capacity_warning"] += body.get("capacity_warning") is not None
+            sc["true_drops"] += bool(body.get("true_drops"))
+            sc["last_true_drop"] += body.get("last_true_drop") is not None
+            continue
         if isinstance(body, dict) and ("found" in body or "faded" in body):
             # A memory_get answer.
             gc = cov["get"]
@@ -904,6 +1114,11 @@ def seed_episode(template: str) -> str | None:
 def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: bool) -> dict:
     tag = scn.name.replace("-", "_")
     derived = None
+    if mode == "golden" and getattr(scn, "live_only", False):
+        # A recording keeps neither the oracle's numerics (store scenarios
+        # compare embeddings by value) nor its key order (sort_keys), and a
+        # configure() hook needs the live template.
+        raise SystemExit(f"{scn.name} runs live only")
     if getattr(scn, "mcp_extra_seed", False):
         if mode == "golden":
             # Its template is derived through the Python daemon; a recording
@@ -911,6 +1126,8 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             raise SystemExit(f"{scn.name} runs live only (derived template)")
         derived = template = derive_template(template, tag,
                                              getattr(scn, "seed_flags", ("--mcp-extra",)))
+    if hasattr(scn, "configure"):
+        scn.configure(template)
     episode = seed_episode(template) if mode != "golden" else None
     ids = entry_placeholders(template) if getattr(scn, "entry_ids", False) else {}
     if ids and None in ids.values():
@@ -972,6 +1189,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
     declared = {}
     for side in sides:
         st = dbstate.normalize(dbstate.dump(pg.dsn(dbs[side])), CLOCK_COLUMNS)
+        scrub_meta_clock(st)
         scrub_transport(st, transport[side])
         declared[side] = scrub(st)
         states[side] = st
@@ -986,7 +1204,8 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             body = py_r.get("json")
             ordered = isinstance(body, dict) and body.get("query") in ordered_queries
             row["diffs"], row["notes"] = compare(py_r, rs_r, timeline_fired=ordered,
-                                                 ordered=c.get("tool") == "memory_recent")
+                                                 ordered=c.get("tool") == "memory_recent",
+                                                 stats=c.get("tool") == "memory_stats")
     cov = coverage(py_seen, py_state)
     # The credit under test: the successor entry, labelled by a get (not a
     # stray label the warmup search's pointer session could earn).
@@ -1003,7 +1222,14 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         1 for c, r in zip(scn.cases(), py_seen)
         if c.get("nonempty") and ((r.get("json") or {}).get("entries") or []))
     cov_fail = unmet(cov, scn.require)
-    db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"])
+    numeric_diffs = []
+    if getattr(scn, "stores", False):
+        w2e = import_w2e()
+        tol = json.loads(w2e.TOLERANCE_FILE.read_text(encoding="utf-8"))
+        nums = {side: normalize_stores(states[side]) for side in sides}
+        if "python" in nums:
+            numeric_diffs = w2e.compare_numeric(nums["python"], nums["rust"], tol, {})
+    db_diffs = bank_diff(json.loads(json.dumps(py_state)), states["rust"]) + numeric_diffs
     if record:
         GOLDENS.mkdir(parents=True, exist_ok=True)
         (GOLDENS / f"{scn.name}.json").write_text(json.dumps({
@@ -1022,6 +1248,14 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
             "coverage": cov}
 
 
+def default_scenarios(mode: str) -> list[str]:
+    """Every scenario, except in golden mode the live-only ones (a derived
+    template or a live_only flag), which refuse a replay."""
+    return [n for n, scn in SCENARIOS.items()
+            if mode != "golden" or not (getattr(scn, "mcp_extra_seed", False)
+                                        or getattr(scn, "live_only", False))]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=("live", "golden", "mutants"))
@@ -1033,8 +1267,7 @@ def main() -> int:
     ap.add_argument("--reuse-template", action="store_true")
     args = ap.parse_args()
     # Live-only scenarios (a derived template) stay out of default replay.
-    names = args.only or [n for n, scn in SCENARIOS.items()
-                          if args.mode != "golden" or not getattr(scn, "mcp_extra_seed", False)]
+    names = args.only or default_scenarios(args.mode)
     template = pg.name("pl_cf_w2d_template")
     if args.mode != "golden" and (not args.reuse_template or template not in pg.existing()):
         seed_template(template, args.paragraphs)

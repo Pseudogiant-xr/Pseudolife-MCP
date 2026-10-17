@@ -117,7 +117,7 @@ class MIRASConfig:
         # Importing inside __post_init__ to dodge a circular import:
         # presets.py types its return as MIRASBandSpec, which lives here.
         if self.preset != "custom":
-            from pseudolife_memory.memory.miras.presets import preset_bands  # noqa: PLC0415
+            from pseudolife_memory.utils.miras_presets import preset_bands  # noqa: PLC0415
             self.bands = preset_bands(self.preset)
         elif not self.bands:
             raise ValueError(
