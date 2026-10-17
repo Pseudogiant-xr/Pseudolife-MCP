@@ -37,10 +37,10 @@ pub fn is_aggregate_value(value: &str) -> bool {
 }
 
 /// The sum of float32 products, accumulated in f64 and rounded once to
-/// f32: torch's float32 `dot` and `norm` round each product to f32 and sum
-/// with a reduction whose order this cannot reproduce; f64 accumulation
-/// lands within one f32 step of it (measured on 2,000 unit 1024-vectors:
-/// 37% identical, the rest at most 4.5e-8 apart in the cosine).
+/// f32: torch's float32 `dot` and `norm` run a BLAS reduction (FMA, its own
+/// summation order) that this cannot reproduce; f64 accumulation lands
+/// within one f32 step of it (measured on 2,000 unit 1024-vectors: 37%
+/// identical, the rest at most 4.5e-8 apart in the cosine).
 fn sum_products(a: &[f32], b: &[f32]) -> f32 {
     a.iter()
         .zip(b)

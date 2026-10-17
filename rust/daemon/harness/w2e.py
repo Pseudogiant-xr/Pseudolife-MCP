@@ -572,7 +572,8 @@ SCENARIOS.update({
             set_add("Cap Box", "tags", "volcanic basalt sample"),
             # dedup runs before the cap
             set_add("cap box", "tags", "TAG-007"),
-            # a removal makes room (the slot's hundred rows are rewritten)
+            # a removal makes room (the slot's rows are rewritten again; the
+            # confirm above already marked it dirty)
             set_remove("cap box", "tags", "tag-000"),
             set_add("Cap Box", "tags", "volcanic basalt sample"),
             # cosine 0.66 to the one embedded member: capped again
