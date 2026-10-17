@@ -65,10 +65,9 @@ pub struct MemoryConfig {
     /// `memory.lessons.enabled` (default on): gates the correction signal a
     /// user-origin supersession records (`service.py:4961`).
     pub lessons_enabled: bool,
-    /// `memory.lessons.top_k` (5): `lesson_search`'s width when a caller
-    /// passes none.
-    pub lessons_top_k: i64,
     /// `memory.lessons.min_confidence` (0.0): `lesson_search`'s score floor.
+    /// (`memory.lessons.top_k` is never read over MCP: the binder always
+    /// passes a width.)
     pub lessons_min_confidence: f64,
     pub compaction_enabled: bool,
     pub compaction_keep_per_slot: i64,
@@ -467,7 +466,6 @@ impl Default for MemoryConfig {
             retrieval_log_use_window_seconds: 3600.0,
             retrieval_retention_days: 365.0,
             lessons_enabled: true,
-            lessons_top_k: 5,
             lessons_min_confidence: 0.0,
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
@@ -1386,7 +1384,6 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(l) = section(m, "lessons", "memory.")? {
             memory.lessons_enabled = want_bool(l, "enabled", "memory.lessons", true)?;
-            memory.lessons_top_k = want_int(l, "top_k", "memory.lessons", 5)?;
             memory.lessons_min_confidence = want_float(l, "min_confidence", "memory.lessons", 0.0)?;
         }
         if let Some(r) = section(m, "compaction", "memory.")? {

@@ -780,7 +780,7 @@ Python: `memory/lessons.py` (`LessonRecord`, `current_records`, `search`
 |---|---|---|
 | LS1 | Hydration at init: every `lessons` row in id order (`confidence` as its REAL text, `support`/`provenance` as their string items). No Rust path writes lessons, so the store is fixed after init. | `sync.py:474-505`; `postgres.py:1998-2008` |
 | LS2 | `memory_lesson_search(query, top_k=5, verbose=False)`; read-only (no `mutation` on an internal failure). Under the service lock (Rust: `Ready.write`, which the log's session resolution needs). | `mcp_server.py:2062-2093` |
-| LS3 | The width is `top_k` (the config's `memory.lessons.top_k` only when none is passed, which MCP never does); the floor is `max(0.0, memory.lessons.min_confidence)`. | `service.py:5353-5354` |
+| LS3 | The width is `top_k` (the binder always passes one, so the config's `memory.lessons.top_k` is never read over MCP); the floor is `max(0.0, memory.lessons.min_confidence)`. | `service.py:5353-5354` |
 | LS4 | The query embedding; current lessons with an embedding scored by f32 cosine against the normalised query, at or above the floor, stably sorted by descending score, cut to the width; a stored vector of another length fails (torch raises). | `lessons.py:220-238`; `service.py:5355-5356` |
 | LS5 | Each hit as `_lesson_record_to_dict` (`task, aspect, lesson, about, polarity, outcome, status, confidence` (4 places), `origin`, sorted `provenance`, `asserted_at, last_confirmed, supersedes_value, superseded_by_value, superseded_at`) plus `score` (4 places). | `service.py:411-430, 5357-5358` |
 | LS6 | `re_verify`: with any personal-cortex record (the change index: per normalised entity, the latest `max(asserted_at, superseded_at or 0)` over every record), each row's name (`about`, else `task`, stripped) keys the index directly, else through its graph entity (`find_entity(norm_name(name))`, keyed by its canonical); a change after `max(asserted_at, last_confirmed)` adds `re_verify: true` and `re_verify_reason: "facts about <name> changed since this lesson"`. No index, no graph lookup. | `service.py:5399-5443` |
@@ -801,9 +801,13 @@ after each call, on a template whose facts, graph alias (`bearer tokens` ->
 lessons (one superseded) are SQL seeds with embeddings copied from entries
 the Python daemon stored: compact, verbose and `top_k=1` searches, with
 `re_verify` direct and through the alias; a session's search (its
-`lesson_search_events` row); and chains for an entity with facts, an edge
-and an about-named lesson, for one whose alias names widen the keys, for an
-unknown entity and for a blank one. The `mcp-lesson-search-no-graph-resolve`,
+`lesson_search_events` row, whose scores compare within one rounding unit);
+chains for an entity with facts (one superseded), an edge and an
+about-named lesson, for one whose alias names widen the keys, for a lesson
+matched by its task, for an unknown entity and for a blank one; and, in
+`lessons-config`, the `min_confidence` floor with the retrieval log off (no
+event row). Not exercised: chain entry events (the seeded facts trace no
+entries) and shadowed aliases. The `mcp-lesson-search-no-graph-resolve`,
 `mcp-lesson-search-no-log` and `mcp-history-chain-no-lessons` mutants must be
 caught.
 

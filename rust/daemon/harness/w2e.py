@@ -44,8 +44,10 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``hlc_phys`` keep only null-or-not; ``retrieved_at`` (column and answer)
   does only when it lies within a day of now (a write without one takes the
   clock), and an explicit past value compares exactly;
-* a search ``score`` in a response compares within 1.5e-4: the two embedders
-  agree to the measured tolerance, and the score is rounded to 4 places;
+* a search ``score`` in a response, and each ``score`` in a
+  ``lesson_search_events.served`` list, compares within 1.5e-4: the two
+  embedders agree to the measured tolerance, and scores are rounded to 4
+  places;
 * the canonical-fact clocks: ``facts`` ``asserted_at``, ``last_confirmed``,
   ``superseded_at``, ``tx_time``, ``valid_time`` and ``hlc_phys`` (the HLC's
   wall-clock milliseconds; ``hlc_logical`` stays exact),
@@ -1015,6 +1017,9 @@ SCENARIOS.update({
             tool("memory_alias", entity="auth tokens", alias="bearer tokens"),
             tool("memory_graph_relate", src="blue-green pipeline", relation="uses",
                  dst="Jenkins"),
+            # a user rewrite supersedes: the chain's superseded event
+            fact("blue-green pipeline", "status", "decommissioned", origin="user",
+                 confidence=0.9),
             lesson_row("deploy engine to host", "approach", "deploy-engine-to-host", "approach",
                        "Deploy through the blue-green pipeline, never by hand.",
                        "blue-green pipeline", "+", "success", "current", LESSON_TEXTS[0]),
@@ -1039,8 +1044,24 @@ SCENARIOS.update({
             history_chain("blue-green pipeline"),
             # alias names widen the keys: the bearer-tokens lesson joins
             history_chain("auth tokens"),
+            # a lesson matched by its task key
+            history_chain("deploy engine to host"),
             history_chain("Nobody at all"),
             history_chain("   "),
+        ],
+    },
+})
+
+
+SCENARIOS.update({
+    # The score floor and a disabled retrieval log: lessons under 0.55 are cut
+    # and no lesson_search_events row is written.
+    "lessons-config": {
+        "config": "memory:\n  lessons:\n    min_confidence: 0.55\n"
+                  "  retrieval_log:\n    enabled: false\n",
+        "seed": SCENARIOS["lessons"]["seed"],
+        "ops": [
+            lesson_search("deploy and rotate and test", [sess("sess-l")], top_k=5),
         ],
     },
 })
@@ -1223,6 +1244,38 @@ def extract_fact_numeric(state: dict, table: str = "facts") -> dict:
     return out
 
 
+def extract_lesson_scores(state: dict) -> dict:
+    """Pull each ``lesson_search_events.served`` score out by row id, leaving
+    tokens (compared within ``SCORE_TOLERANCE``)."""
+    t = _table(state, "lesson_search_events")
+    if t is None:
+        return {}
+    i_id, i_served = _col(t, "id"), _col(t, "served")
+    out = {}
+    for row in t["rows"]:
+        served = row[i_served]
+        if isinstance(served, list):
+            out[row[i_id]] = [x.get("score") if isinstance(x, dict) else None for x in served]
+            row[i_served] = [{**x, "score": "<score>"} if isinstance(x, dict) else x
+                             for x in served]
+    return out
+
+
+def compare_lesson_scores(py: dict, rs: dict, stats: dict) -> list[str]:
+    diffs = []
+    for rid in sorted(set(py) & set(rs)):
+        for i, (a, b) in enumerate(zip(py[rid], rs[rid])):
+            if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+                if a != b:
+                    diffs.append(f"lesson_search_events[{rid}].served[{i}].score: {a} vs {b}")
+                continue
+            d = abs(a - b)
+            stats["lesson_score_max_diff"] = max(stats.get("lesson_score_max_diff", 0.0), d)
+            if d > SCORE_TOLERANCE:
+                diffs.append(f"lesson_search_events[{rid}].served[{i}].score: {a} vs {b}")
+    return diffs
+
+
 def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict,
                          table: str = "facts") -> list[str]:
     diffs = []
@@ -1310,6 +1363,7 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
     numeric = extract_numeric(state)
     numeric["facts"] = extract_fact_numeric(state)
     numeric["world_facts"] = extract_fact_numeric(state, "world_facts")
+    numeric["lesson_scores"] = extract_lesson_scores(state)
     emap = episode_map(state)
     for qualified, t in state["rows"].items():
         name = qualified.split(".", 1)[1]
@@ -1362,8 +1416,11 @@ def compare_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     diffs = compare_fact_numeric(py.get("facts", {}), rs.get("facts", {}), tol, stats)
     diffs += compare_fact_numeric(py.get("world_facts", {}), rs.get("world_facts", {}), tol,
                                   stats, "world_facts")
-    py = {k: v for k, v in py.items() if k not in ("facts", "world_facts")}
-    rs = {k: v for k, v in rs.items() if k not in ("facts", "world_facts")}
+    diffs += compare_lesson_scores(py.get("lesson_scores", {}), rs.get("lesson_scores", {}),
+                                   stats)
+    skip = ("facts", "world_facts", "lesson_scores")
+    py = {k: v for k, v in py.items() if k not in skip}
+    rs = {k: v for k, v in rs.items() if k not in skip}
     for eid in sorted(set(py) | set(rs)):
         a, b = py.get(eid), rs.get(eid)
         if a is None or b is None:
@@ -1646,7 +1703,7 @@ def pack_numeric(numeric: dict, seen: set) -> dict:
     import struct
     out = {}
     for eid, v in numeric.items():
-        if eid in ("facts", "world_facts") or eid in seen:
+        if eid in ("facts", "world_facts", "lesson_scores") or eid in seen:
             continue  # fact embeddings are compared live only (declared)
         seen.add(eid)
         emb = v["embedding"]

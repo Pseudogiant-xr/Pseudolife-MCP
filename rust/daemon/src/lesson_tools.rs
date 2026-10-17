@@ -148,12 +148,10 @@ fn mcp_memory_lesson_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -
             .to_string();
         let m = &app.service.config.memory;
         // The binder admits any integer >= 1; past usize, everything.
-        let top_k = match a.get("top_k") {
-            Some(v) => v
-                .as_u64()
-                .map_or(usize::MAX, |n| usize::try_from(n).unwrap_or(usize::MAX)),
-            None => usize::try_from(m.lessons_top_k.max(0)).unwrap_or(0),
-        };
+        let top_k = a.get("top_k").map_or(5, |v| {
+            v.as_u64()
+                .map_or(usize::MAX, |n| usize::try_from(n).unwrap_or(usize::MAX))
+        });
         let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(false);
         let floor = 0.0f64.max(m.lessons_min_confidence);
         let log = m.retrieval_log_enabled;
