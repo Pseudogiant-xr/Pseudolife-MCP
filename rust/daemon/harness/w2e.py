@@ -134,7 +134,7 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-reinforce-no-use-credit",
            # memory_history slot mode (spec HI1-HI7): caught by history-slot.
            "mcp-history-ignore-as-of", "mcp-history-set-unsorted",
-           "mcp-history-set-no-removed"]
+           "mcp-history-set-no-removed", "mcp-history-asserted-order"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -833,6 +833,12 @@ SCENARIOS.update({
             set_add("Home Lab", "hosts", "beta"),
             set_remove("Home Lab", "hosts", "alpha"),
             set_add("Home Lab", "hosts", "gamma"),
+            # a contender parked below the margin, then the current value
+            # restated: its re-confirmation moves its tx_time past the
+            # contender's, so transaction order differs from assertion order
+            fact("Build Server", "hostname", "ci-box-2", origin="user", confidence=0.9),
+            fact("Build Server", "hostname", "ci-box-3", origin="user", confidence=0.5),
+            fact("Build Server", "hostname", "ci-box-2", origin="user", confidence=0.9),
         ],
         "ops": [
             history("Payments DB", "host"),
@@ -845,13 +851,16 @@ SCENARIOS.update({
             history("Payments DB", "host", as_of="2000-01-01"),
             history("Payments DB", "host", as_of=0.0),
             # float spellings: NaN keeps nothing, infinity everything; both
-            # echo as null
+            # echo as null in structured content (the text block differs,
+            # declared)
             history("Payments DB", "host", as_of="nan"),
             history("Payments DB", "host", as_of="inf"),
             # set slot: adds and the removal in time order
             history("Home Lab", "hosts"),
             history("home lab", "Hosts", as_of="9999-12-31T00:00:00+00:00"),
             history("Home Lab", "hosts", as_of="1970-01-02"),
+            # transaction time orders the chain, not assertion time
+            history("Build Server", "hostname"),
             # an empty slot
             history("Nobody", "nothing"),
             # refused at binding

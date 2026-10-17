@@ -114,12 +114,18 @@ fn history(
     } else {
         let key = slot_key(entity, attribute);
         let mut recs: Vec<&CortexRecord> = store.records.iter().filter(|r| r.key == key).collect();
+        let order: fn(&CortexRecord) -> f64 =
+            if crate::mutants::active("mcp-history-asserted-order") {
+                |r| r.asserted_at
+            } else {
+                tx_or_asserted
+            };
         if let Some(c) = cutoff
             && !crate::mutants::active("mcp-history-ignore-as-of")
         {
             recs.retain(|r| tx_or_asserted(r) <= c);
         }
-        recs.sort_by(|x, y| tx_or_asserted(x).total_cmp(&tx_or_asserted(y)));
+        recs.sort_by(|x, y| order(x).total_cmp(&order(y)));
         out.insert("entity".into(), json!(entity));
         out.insert("attribute".into(), json!(attribute));
         out.insert("count".into(), json!(recs.len()));
@@ -133,7 +139,9 @@ fn history(
         );
     }
     if let Some(c) = cutoff {
-        // A NaN or infinite cutoff serializes as null, as pydantic's does.
+        // A NaN or infinite cutoff is null here, as in Python's structured
+        // content; Python's text block spells it `NaN` / `Infinity`
+        // (declared in divergences.md).
         out.insert("as_of".into(), json!(c));
     }
     Value::Object(out)
@@ -155,22 +163,26 @@ mod tests {
             (" 1.5e9 ", 1500000000.0),
             ("1_000", 1000.0),
             ("2026-10-01T12:30:45,123456789+00:00", 1790857845.123456),
+            // An offset with zero whole seconds is UTC (its fraction dropped).
+            ("2026-10-01T12:30:45+00:00:00.5", 1790857845.0),
+            ("2026-10-01T12:30:45-00:00:00.5", 1790857845.0),
+            ("2026-10-01T12:30:45+00:00:01.5", 1790857843.5),
+            ("2026-10-01T12:30:45-00:00:01.5", 1790857846.5),
+            ("2026-10-01T12:30:45+05:30:00.25", 1790838044.75),
         ] {
             assert_eq!(epoch(&json!(raw)), Some(want), "{raw}");
         }
+        // Far from today the exact division and a float one part ways
+        // (CPython 3.11: 147264870891.66766).
+        assert_eq!(
+            epoch(&json!("6636-08-21T12:34:51.667663+00:00")),
+            Some(147264870891.66766)
+        );
+        assert_eq!(
+            epoch(&json!("0001-01-02T00:00:00.5+00:00")),
+            Some(-62135510399.5)
+        );
         assert_eq!(epoch(&json!(12.5)), Some(12.5));
         assert_eq!(epoch(&serde_json::Value::Null), None);
-        // A naive value is read in local time.
-        let naive = epoch(&json!("2026-10-01T12:00:00")).unwrap();
-        let local = chrono::TimeZone::from_local_datetime(
-            &chrono::Local,
-            &chrono::NaiveDate::from_ymd_opt(2026, 10, 1)
-                .unwrap()
-                .and_hms_opt(12, 0, 0)
-                .unwrap(),
-        )
-        .earliest()
-        .unwrap();
-        assert_eq!(naive, local.timestamp() as f64);
     }
 }

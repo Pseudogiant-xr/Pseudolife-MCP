@@ -69,25 +69,42 @@ impl Parsed {
         chrono::Datelike::day(&self.date)
     }
 
-    /// `datetime.timestamp()`: microseconds since the epoch over 10**6,
-    /// as CPython's `total_seconds` divides them. A naive value takes the
-    /// local offset; at a DST fold the earlier instant (`fold=0`); a time a
-    /// spring-forward gap skips is not reproduced (declared,
-    /// MCP-BIND-AS-OF-PYTHON).
+    /// `datetime.timestamp()` (CPython `datetime_timestamp`). Aware: the
+    /// microseconds since the epoch over 10**6 as an exact integer
+    /// division, correctly rounded (`delta_total_seconds`). Naive: local
+    /// seconds since the epoch plus `microsecond / 1e6` in doubles; at a
+    /// DST fold the earlier instant, in a spring-forward gap the offset in
+    /// force before it (`fold=0`).
     fn timestamp(&self) -> Option<f64> {
         let [h, m, s, us] = self.clock;
         let wall = NaiveDateTime::new(self.date, NaiveTime::from_hms_opt(h, m, s)?);
-        let seconds = match self.offset_us {
-            Some(offset) => {
-                let utc_us = wall.and_utc().timestamp() * 1_000_000 + i64::from(us) - offset;
-                return Some(utc_us as f64 / 1e6);
-            }
-            None => chrono::Local
-                .from_local_datetime(&wall)
-                .earliest()?
-                .timestamp(),
+        let Some(offset) = self.offset_us else {
+            let seconds = match chrono::Local.from_local_datetime(&wall).earliest() {
+                Some(t) => t.timestamp(),
+                None => {
+                    // A skipped wall time: the day-earlier offset, the one
+                    // before the transition.
+                    let before = chrono::Local
+                        .from_local_datetime(&(wall - chrono::Duration::days(1)))
+                        .earliest()?
+                        .offset()
+                        .local_minus_utc();
+                    wall.and_utc().timestamp() - i64::from(before)
+                }
+            };
+            return Some(seconds as f64 + f64::from(us) / 1e6);
         };
-        Some((seconds * 1_000_000 + i64::from(us)) as f64 / 1e6)
+        let utc_us = i128::from(wall.and_utc().timestamp()) * 1_000_000 + i128::from(us)
+            - i128::from(offset);
+        // The exact decimal quotient, which `parse` rounds correctly.
+        let (sign, mag) = if utc_us < 0 {
+            ("-", -utc_us)
+        } else {
+            ("", utc_us)
+        };
+        format!("{sign}{}.{:06}", mag / 1_000_000, mag % 1_000_000)
+            .parse()
+            .ok()
     }
 }
 
@@ -276,8 +293,15 @@ fn time(b: &[u8], start: usize) -> Option<([u32; 4], Option<i64>)> {
     // timezone(): strictly inside one day; the parts are not range-checked.
     let offset_us =
         (u64::from(h) * 3600 + u64::from(m) * 60 + u64::from(s)) * 1_000_000 + u64::from(us);
-    (rv == 0 && clock && offset_us < 86_400_000_000)
-        .then_some((parts, Some(sign * offset_us as i64)))
+    // `tzinfo_from_isoformat_results`: an offset whose whole seconds are
+    // zero is UTC, its microseconds dropped.
+    let whole = u64::from(h) * 3600 + u64::from(m) * 60 + u64::from(s);
+    let offset = if whole == 0 {
+        0
+    } else {
+        sign * offset_us as i64
+    };
+    (rv == 0 && clock && offset_us < 86_400_000_000).then_some((parts, Some(offset)))
 }
 
 /// `datetime.fromisoformat(value)`, when it succeeds.
