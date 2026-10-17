@@ -175,6 +175,8 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
     let mut timeline_rank: Vec<&str> = Vec::new();
     let mut via_map: HashMap<&str, &'static str> = HashMap::new();
     let mut pool_size = 0usize;
+    // `hit_band_names` (cms.py:1096-1366): bands with a pool candidate.
+    let mut hit_bands: HashSet<&str> = HashSet::new();
 
     // ── Pool 1: dense, per band, recency-weighted by depth ──
     for (depth, members) in by_band.iter().enumerate() {
@@ -229,6 +231,7 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
                 neural.push((idx, relevance * src * sup));
                 dense_rank_src.push((&e.text, relevance));
                 seen.insert(&e.text);
+                hit_bands.insert(name);
                 comps.insert(
                     e.text.clone(),
                     obj(json!({
@@ -281,6 +284,9 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
             neural.push((idx, score));
             slot_rank.push(&e.text);
             seen.insert(&e.text);
+            if !e.band.is_empty() {
+                hit_bands.insert(&e.band);
+            }
             comps.insert(
                 e.text.clone(),
                 obj(json!({"channel": "slot", "slot": score, "surprise": 0.0, "band": e.band})),
@@ -342,6 +348,9 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
             }
             neural.push((i, injected));
             seen.insert(&e.text);
+            if !e.band.is_empty() {
+                hit_bands.insert(&e.band);
+            }
             comps.insert(
                 e.text.clone(),
                 obj(json!({"channel": "bm25", "bm25": s, "surprise": 0.0, "band": e.band})),
@@ -374,6 +383,9 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
             );
             via_map.insert(&e.text, "timeline");
             timeline_rank.push(&e.text);
+            if !e.band.is_empty() {
+                hit_bands.insert(&e.band);
+            }
         }
     }
 
@@ -402,6 +414,11 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -
             };
             *score = fused.get(e.text.as_str()).copied().unwrap_or(0.0) * src * sup;
         }
+    }
+
+    // The per-band instrumentation `memory_stats` serves (cms.py:1430-1437).
+    if p.count_access {
+        crate::read::stats::record_query(hit_bands.iter().copied());
     }
 
     // Stable sort: ties keep the insertion order (band walk, slot, BM25, timeline).

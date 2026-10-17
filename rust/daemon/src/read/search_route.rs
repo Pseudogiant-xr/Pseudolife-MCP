@@ -419,6 +419,7 @@ async fn log_event(
     match res {
         Ok(row) => Some(row.get(0)),
         Err(e) => {
+            crate::read::stats::record_retrieval_log_error();
             eprintln!("retrieval-event log failed: {e}");
             None
         }
@@ -583,6 +584,7 @@ pub async fn search_with_facts(
             && let Err(e) =
                 cortex_search::attach_served_facts(ready.storage.client(), id, &facts).await
         {
+            crate::read::stats::record_retrieval_log_error();
             eprintln!("attach_served_facts failed: {e}");
         }
         return Ok((out, facts));
