@@ -10,6 +10,9 @@ never on the command line, so it stays out of process listings)
        python w2d_seed.py --mcp-extra --fact-extra  (also memory_fact_get's:
        an aliased entity with a shadowed alias, a set with a removed member,
        an emptied set, a stale fact and trace rows)
+       python w2d_seed.py --mcp-extra --fact-extra --stats-extra  (also
+       memory_stats's: retrieval events from 8 sessions for graduation
+       candidates, a community row and a graph digest)
 
 The corpus is paragraphs of this repository's public docs, plus crafted
 entries for every search channel: an assistant-sourced note, tagged notes,
@@ -134,6 +137,40 @@ def fact_extra(svc) -> None:
                          (attribute, entry, now + 3600))
 
 
+# Graduation candidates (storage/postgres.py:2325): how many of the 8 seeded
+# sessions serve each of three entries. 8/8 and 5/8 pass the 0.6 share while
+# exactly 8 sessions searched; 4/8 never does.
+STATS_SESSIONS = 8
+STATS_SERVED = (8, 5, 4)
+
+
+def stats_extra() -> None:
+    """What memory_stats needs beyond the other extras, where no write path
+    exists without a dream sweep: retrieval events from eight distinct
+    sessions (an hour old, inside the 30-day window), one community and a
+    graph digest."""
+    import json
+    import time
+
+    import psycopg
+    now = time.time()
+    with psycopg.connect(os.environ["PSEUDOLIFE_MCP_DATABASE_URL"], autocommit=True) as conn:
+        ids = [r[0] for r in conn.execute(
+            "SELECT id FROM entries WHERE source = 'docs' ORDER BY id LIMIT %s",
+            (len(STATS_SERVED),)).fetchall()]
+        for s in range(STATS_SESSIONS):
+            served = [{"entry_id": e, "rank": i, "score": 0.9}
+                      for i, (e, n) in enumerate(zip(ids, STATS_SERVED)) if s < n]
+            conn.execute(
+                "INSERT INTO retrieval_events (query_text, origin, session_id, served, created_at) "
+                "VALUES (%s, 'search', %s, %s, %s)",
+                (f"graduation probe {s}", f"grad-session-{s}", json.dumps(served), now - 3600))
+        conn.execute("INSERT INTO communities (id, label, size, cohesion, computed_at) "
+                     "VALUES (1, 'deploy tooling', 3, 0.5, %s)", (now - 7200,))
+        conn.execute("INSERT INTO meta (key, value) VALUES ('graph_digest', %s)",
+                     (json.dumps({"computed_at": 1791000000.25, "communities": 1}),))
+
+
 def main() -> int:
     dsn = os.environ["PSEUDOLIFE_MCP_DATABASE_URL"]
     limit = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 150
@@ -146,6 +183,8 @@ def main() -> int:
         mcp_extra(svc)
         if "--fact-extra" in sys.argv:
             fact_extra(svc)
+        if "--stats-extra" in sys.argv:
+            stats_extra()
         print("mcp extra seeded")
         return 0
     stored = 0

@@ -450,6 +450,34 @@ traced entry, a get from another session, and two faded ids, with
 `entries.access_count` and `retrieval_uses` in the compared bank state; the
 `mcp-get-no-db-bump` and `mcp-get-no-use-credit` mutants must be caught.
 
+### memory_stats over MCP (2026-10-17)
+
+`read/stats.rs`. Python: `mcp_server.py:1423-1428`; `service.py` `stats`
+(3402-3480); `memory/cms.py` `stats` (2811-2875), `capacity_warning`
+(2774-2809), `retrieve` instrumentation (1086-1437), `_on_band_evict`
+(2748); `storage/postgres.py` `retrieval_log_health` (2451),
+`read_audit` (2481), `graduation_report` (2325).
+
+| # | Exact item | Source |
+|---|---|---|
+| MS1 | The CMS block, in order: `bands` (per band `name, size, capacity, update_interval, retention_policy, hit_rate` = `round(hits / max(1, queries), 4)`, `hit_count`), `preset`, `total_memories`, `interaction_count`, `logical_turn_count` (0), `retrieval_queries`, `true_drops`, `capacity_warning`, `weights_reset`, `slot_index_shadow_divergences`, the `instant`/`short_term`/`long_term` `_bank_size` and `_bank_capacity` aliases (by name, else `bands[0]`, `bands[1]` or `bands[0]`, `bands[-1]`), `reference_bank_size`, `reference_document_count`. Band `update_interval`: flat 1,000,000,000; continuum 1, 1, 2, 5, 15, 50, 200, 1000; custom as configured (default 1). | `cms.py:253-258, 2811-2875`; `miras/presets.py:38-100` |
+| MS2 | The process counters. `retrieval_queries` counts each ranking with `count_access` (`memory_search`, `/api/search`; not the warmup probe); a band's `hit_count` counts the rankings whose candidate pool held one of its entries: a dense candidate at or above the floor, or a slot, BM25 or timeline injection. `true_drops` counts capacity evictions out of the last band. `retrieval_log.write_errors` counts swallowed failures of the search event write, the served-facts attach (including a zero row count) and the `memory_get` use credit; `read_audit.slot_read_write_errors` counts swallowed slot-read bumps. | `cms.py:1086-1437, 2748`; `service.py:4154, 5975, 6035-6040, 6068` |
+| MS3 | `capacity_warning`: null unless the last band's fill (`size / capacity`, capacity above 0) is at least 0.8; else `{band, size, capacity, fill: round(fill, 3), message}`, the message naming the band by `repr`, sizes with thousands separators, and "is full: ..." at capacity or "is NN% full: ..." (`{fill:.0%}`) below it. | `cms.py:162, 2774-2809` |
+| MS4 | `communities` (the `communities` row count) and `graph_digest_at` (`computed_at` of the `graph_digest` meta value, null when absent or falsy; a truthy non-object fails the call, as Python's `.get` raises); then `true_drops_total` = `int(count)` of the `capacity_true_drops` record (0 without one) and `last_true_drop` = its `last_at, last_entry_id, last_source, last_superseded` as `at, entry_id, source, superseded` (null without a record); any failure in that pair serves both as null. | `service.py:3409-3433`; `postgres.py:49, 2717` |
+| MS5 | `retrieval_log`: `events, last_event_at, uses, lesson_searches` (on failure `events, uses, lesson_searches, last_event_at` null and `unavailable: true`), then `enabled` and `write_errors`. `read_audit`: `entries` (`total, never_read, never_read_pct, reads_total, reads_median, top_decile_read_share, by_age` with 14- and 45-day buckets), `worst_sources` (at least 5 entries, five worst never-read shares), `slots`, `reinforcements` (on failure `{unavailable: true}`); then `graduation_candidates` (30-day window, at least 8 sessions, share at least 0.6, ten rows, text cut to 200 characters; `[]` on its own failure), `slot_tracking_enabled`, `slot_read_write_errors`. | `service.py:3434-3478`; `postgres.py:2325-2381, 2451-2575` |
+| MS6 | The MCP layer serves the dict as is; `memory_stats` is read-only (no `mutation` on failure). | `mcp_server.py:315-320, 1423-1428` |
+
+`harness/w2d_search.py --only mcp-stats mcp-stats-continuum
+mcp-stats-capacity` compares three scenarios. `mcp-stats` (7 calls on the
+fact-get template plus `--stats-extra`: retrieval events from eight sessions,
+a community, a graph digest) reads the stats before and after a dense hit, a
+slot query, a miss, a get and a store. `mcp-stats-continuum` reads them
+around two searches with eight bands. `mcp-stats-capacity` sizes one custom
+band one past the bank, so the warning reads "NN% full", then "full", and a
+second store evicts a true drop. The event and drop times are compared by
+presence and type. The `mcp-stats-no-tier-hits`, `mcp-stats-no-graduation`
+and `mcp-stats-no-capacity-warning` mutants must be caught.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

@@ -72,6 +72,9 @@ pub struct StartupBandSpec {
     pub name: String,
     pub max_entries: usize,
     pub retention_policy: String,
+    /// The consolidation cadence (`MIRASBandSpec.update_interval`), served
+    /// by `memory_stats`.
+    pub update_interval: i64,
 }
 
 /// `RerankerConfig` (utils/config.py:208-252), the keys the search reads.
@@ -429,6 +432,7 @@ impl Default for MemoryConfig {
                 name: "flat".into(),
                 max_entries: 5250,
                 retention_policy: "balanced".into(),
+                update_interval: 1_000_000_000,
             }],
             retention_boost: 1.0,
             surprise_threshold: 0.0,
@@ -1482,6 +1486,7 @@ fn read_startup_bands(
             name: "flat".into(),
             max_entries: 5250,
             retention_policy: "balanced".into(),
+            update_interval: 1_000_000_000,
         }]);
     }
     if preset != "custom" {
@@ -1492,6 +1497,7 @@ fn read_startup_bands(
                 name: name.clone(),
                 max_entries: [200, 250, 300, 400, 600, 1500, 1000, 1000][i],
                 retention_policy: if i < 5 { "balanced" } else { "surprise_heavy" }.into(),
+                update_interval: [1, 1, 2, 5, 15, 50, 200, 1000][i],
             })
             .collect());
     }
@@ -1518,10 +1524,12 @@ fn read_startup_bands(
             {
                 return Err(refuse("unknown band retention_policy"));
             }
+            let update_interval = want_int(fields, "update_interval", "memory.miras.bands[]", 1)?;
             Ok(StartupBandSpec {
                 name: name.clone(),
                 max_entries,
                 retention_policy,
+                update_interval,
             })
         })
         .collect()
