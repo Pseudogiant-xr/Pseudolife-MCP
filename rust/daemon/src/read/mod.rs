@@ -9,6 +9,7 @@ pub mod mcp_reads;
 pub mod mcp_search;
 pub mod rerank;
 pub mod search_route;
+pub mod stats;
 
 use crate::http::App;
 
