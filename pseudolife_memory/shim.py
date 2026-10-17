@@ -266,7 +266,8 @@ _RESPONSE_LOST_MESSAGE = (
 # event source: the module-level ``EventSource`` used for a POST's response
 # stream, and (since mcp 2.2) the module-level ``sse_within_origin`` used for
 # the listen stream and for resuming a cut response, which builds its own
-# ``httpx2.EventSource`` with the default limit. 16 MiB is far above any tool
+# ``httpx2.EventSource`` with the default limit (on mcp 2.1, the http client's
+# own ``sse`` method: ``_adapt_client_to_sdk_line``). 16 MiB is far above any tool
 # result the daemon emits and still bounds a runaway stream.
 _SSE_EVENT_LIMIT_BYTES = 16 * 1024 * 1024
 
@@ -299,6 +300,63 @@ def _widen_sse_event_limit(streamable_http) -> None:
         sse_within_origin._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
         sse_within_origin._pseudolife_original = within
         streamable_http.sse_within_origin = sse_within_origin
+
+
+def _widen_client_sse_limit(http) -> None:
+    """Wrap one http client's ``sse`` method (mcp 2.1's listen-stream and
+    resumption path) so its event sources carry ``_SSE_EVENT_LIMIT_BYTES``
+    unless the caller chose a limit. Idempotent per client."""
+    original = getattr(http, "sse", None)
+    if original is None or getattr(original, "_pseudolife_event_limit", None) == _SSE_EVENT_LIMIT_BYTES:
+        return
+
+    def sse(*args, **kwargs):
+        kwargs.setdefault("max_event_size", _SSE_EVENT_LIMIT_BYTES)
+        return original(*args, **kwargs)
+
+    sse._pseudolife_event_limit = _SSE_EVENT_LIMIT_BYTES
+    http.sse = sse
+
+
+def _observe_client_stream(http, attempt: _UpstreamAttempt) -> None:
+    """Wrap one http client's ``stream`` method (mcp 2.1's POST path) so a
+    failure while the SDK reads a response body, after ``send`` returned,
+    is classified before the SDK normalizes it."""
+    import asyncio
+    import contextlib
+
+    original_stream = getattr(http, "stream", None)
+    if original_stream is None:
+        return
+
+    @contextlib.asynccontextmanager
+    async def observed_stream(*args, **kwargs):
+        try:
+            async with original_stream(*args, **kwargs) as response:
+                yield response
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            attempt.note_transport_failure(_transport_failure_kind(exc))
+            raise
+
+    http.stream = observed_stream
+
+
+def _adapt_client_to_sdk_line(http, streamable_http, attempt: _UpstreamAttempt) -> None:
+    """Install the per-client wrappers only mcp 2.1 needs. 2.1 reads the
+    listen stream and resumed responses through the client's ``sse`` method
+    and sends POSTs through its ``stream`` method; 2.2 sends all of them
+    through ``sse_within_origin`` / ``stream_within_origin`` in the client
+    module, which ``_widen_sse_event_limit`` and the ``send`` wrapper cover.
+    A host updating from 0.18.1 runs this shim on 2.1 until its next client
+    step (that release's update installs its own, older SDK range), so each
+    wrapper is chosen by whether the module has the 2.2 name that replaced
+    its path, not by version string."""
+    if getattr(streamable_http, "sse_within_origin", None) is None:
+        _widen_client_sse_limit(http)
+    if getattr(streamable_http, "stream_within_origin", None) is None:
+        _observe_client_stream(http, attempt)
 
 
 def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
@@ -1513,6 +1571,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                         attempt.note_transport_failure(_transport_failure_kind(exc))
                         raise
                 http.send = observed_send
+            _adapt_client_to_sdk_line(http, streamable_http, attempt)
             async with streamable_http.streamable_http_client(
                 url + "/mcp", http_client=http,
             ) as (read, write):
