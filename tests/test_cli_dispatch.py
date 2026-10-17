@@ -89,7 +89,7 @@ def test_help_lists_version(monkeypatch, capsys):
 # next one.
 UNLISTED_MODES = {
     "shim": "the no-argument mode by name",
-    "doorbell-prompt-seen": "the prompt hook the Codex doorbell installs, not run by hand",
+    "doorbell-prompt-seen": "the doorbell helper the plugin's prompt hook runs, not run by hand",
 }
 
 
