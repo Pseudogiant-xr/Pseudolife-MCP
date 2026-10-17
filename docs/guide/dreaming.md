@@ -948,7 +948,8 @@ payloads' `judge` / `judge2` blocks carry it as `relation`. When an
 automatic reject applies and a relate vote was one of its votes, the sweep
 also files that relation (the more confident vote's, if both related) as a
 link proposal with source `merge-judge-relate`, through the ordinary filing
-gate, unless the relation is not a registered one or an edge or link
+gate, unless the relation is not a registered one, is the untyped
+`related-to` (since 2026-10-17), or an edge or link
 proposal already joins the pair (so a reject reopened by a new link's
 evidence change never files a second one). A filing that fails is logged
 and never undoes the reject. The link judge then settles the proposal at

@@ -802,6 +802,24 @@ def test_an_unregistered_vocabulary_relation_files_no_link(svc):
     assert _pending_links(svc) == []
 
 
+def test_an_untyped_related_to_relate_files_no_link(svc):
+    """``related-to`` names no relationship: on the live bank (2026-10-17)
+    274 of the 381 links the relate path had filed were related-to, and the
+    link judge reached its 0.8 gate on none of them, so they only piled up
+    in the review queue. The merge is still rejected; a typed relation on
+    the other vote is still filed."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    plain = _propose(svc, "phi a", "phi b")
+    typed = _propose(svc, "chi module", "chi concept")
+    judge = _StubJudge({("phi a", "phi b"): ("relate", 0.9, "related-to"),
+                        ("chi module", "chi concept"): ("relate", 0.9, "implements")})
+    out = svc.deep_dream_judge(judge)
+    assert out["auto_rejected"] == 2 and out["relate_links_filed"] == 1
+    assert svc._storage.get_entity_proposal(plain)["status"] == "rejected"
+    assert _pending_links(svc) == [
+        ("chi module", "implements", "chi concept", "merge-judge-relate")]
+
+
 def test_public_link_proposals_resolve_by_name_not_id(svc):
     """The by-id filing is internal to the merge judge: a public proposal
     carrying stale ids (a spread candidate row) still files by its names."""

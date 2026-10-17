@@ -4054,7 +4054,8 @@ class DreamOps:
         that orientation, by entity id. Caller holds the lock.
 
         Files nothing when the relation is not a registered one (the filing
-        gate would silently file it as related-to), or when an edge or any
+        gate would silently file it as related-to), when it is the untyped
+        related-to itself, or when an edge or any
         link proposal already joins the pair: an accepted link changes both
         sides' evidence, so reconsideration reopens the reject and the
         judge sees the pair again — without this the loop would stack one
@@ -4065,6 +4066,12 @@ class DreamOps:
             return
         conf, relation = max(relates, key=lambda item: item[0])
         if relation not in {r["name"] for r in self._graph.load_relations()}:
+            return
+        # related-to names no relationship. Measured 2026-10-17 on the live
+        # bank: 274 of the 381 links this path had filed were related-to, and
+        # the link judge reached its 0.8 gate on none of them, so they only
+        # piled up in the review queue. Typed relations still file.
+        if relation == "related-to":
             return
         g = self._storage.load_graph()
         disp = {ent["id"]: ent["display"] for ent in g["entities"]}
