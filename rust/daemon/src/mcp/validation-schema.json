@@ -1,0 +1,2436 @@
+{
+  "handlers": {
+    "definitions": {
+      "Annotations": {
+        "properties": {
+          "audience": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "user",
+                    "assistant"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastModified": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "AudioContent": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "type": {
+            "const": "audio",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "mimeType"
+        ],
+        "type": "object"
+      },
+      "BlobResourceContents": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blob": {
+            "type": "string"
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri",
+          "blob"
+        ],
+        "type": "object"
+      },
+      "CallToolRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequestParamsMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "inputResponses": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/CreateMessageResult"
+                    },
+                    {
+                      "$ref": "#/$defs/CreateMessageResultWithTools"
+                    },
+                    {
+                      "$ref": "#/$defs/ListRootsResult"
+                    },
+                    {
+                      "$ref": "#/$defs/ElicitResult"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "requestState": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ClientCapabilities": {
+        "properties": {
+          "elicitation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElicitationCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "experimental": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "extensions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roots": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RootsCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sampling": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SamplingCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tasks": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ClientTasksCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ClientTasksCapability": {
+        "properties": {
+          "cancel": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TasksCancelCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "list": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TasksListCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requests": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ClientTasksRequestsCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ClientTasksRequestsCapability": {
+        "properties": {
+          "elicitation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TasksElicitationCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sampling": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TasksSamplingCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "CreateMessageResult": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextContent"
+              },
+              {
+                "$ref": "#/$defs/ImageContent"
+              },
+              {
+                "$ref": "#/$defs/AudioContent"
+              }
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "type": "string"
+          },
+          "stopReason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "endTurn",
+                  "stopSequence",
+                  "maxTokens",
+                  "toolUse"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "role",
+          "content",
+          "model"
+        ],
+        "type": "object"
+      },
+      "CreateMessageResultWithTools": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextContent"
+              },
+              {
+                "$ref": "#/$defs/ImageContent"
+              },
+              {
+                "$ref": "#/$defs/AudioContent"
+              },
+              {
+                "$ref": "#/$defs/ToolUseContent"
+              },
+              {
+                "$ref": "#/$defs/ToolResultContent"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/TextContent"
+                    },
+                    {
+                      "$ref": "#/$defs/ImageContent"
+                    },
+                    {
+                      "$ref": "#/$defs/AudioContent"
+                    },
+                    {
+                      "$ref": "#/$defs/ToolUseContent"
+                    },
+                    {
+                      "$ref": "#/$defs/ToolResultContent"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "type": "string"
+          },
+          "stopReason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "endTurn",
+                  "stopSequence",
+                  "maxTokens",
+                  "toolUse"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "role",
+          "content",
+          "model"
+        ],
+        "type": "object"
+      },
+      "ElicitResult": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "enum": [
+              "accept",
+              "decline",
+              "cancel"
+            ],
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "ElicitationCapability": {
+        "properties": {
+          "form": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FormElicitationCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/UrlElicitationCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "EmbeddedResource": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TextResourceContents"
+              },
+              {
+                "$ref": "#/$defs/BlobResourceContents"
+              }
+            ]
+          },
+          "type": {
+            "const": "resource",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource"
+        ],
+        "type": "object"
+      },
+      "FormElicitationCapability": {
+        "properties": {},
+        "type": "object"
+      },
+      "GetPromptRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequestParamsMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "inputResponses": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/CreateMessageResult"
+                    },
+                    {
+                      "$ref": "#/$defs/CreateMessageResultWithTools"
+                    },
+                    {
+                      "$ref": "#/$defs/ListRootsResult"
+                    },
+                    {
+                      "$ref": "#/$defs/ElicitResult"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "requestState": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "Icon": {
+        "properties": {
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sizes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "src": {
+            "type": "string"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "light",
+                  "dark"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "src"
+        ],
+        "type": "object"
+      },
+      "ImageContent": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "type": {
+            "const": "image",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "mimeType"
+        ],
+        "type": "object"
+      },
+      "Implementation": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "icons": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/Icon"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "websiteUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "type": "object"
+      },
+      "InitializeRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequestParamsMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "capabilities": {
+            "$ref": "#/$defs/ClientCapabilities"
+          },
+          "clientInfo": {
+            "$ref": "#/$defs/Implementation"
+          },
+          "protocolVersion": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "capabilities",
+          "clientInfo"
+        ],
+        "type": "object"
+      },
+      "ListRootsResult": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roots": {
+            "items": {
+              "$ref": "#/$defs/Root"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "roots"
+        ],
+        "type": "object"
+      },
+      "PaginatedRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequestParamsMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ReadResourceRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequestParamsMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "inputResponses": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/CreateMessageResult"
+                    },
+                    {
+                      "$ref": "#/$defs/CreateMessageResultWithTools"
+                    },
+                    {
+                      "$ref": "#/$defs/ListRootsResult"
+                    },
+                    {
+                      "$ref": "#/$defs/ElicitResult"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requestState": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri"
+        ],
+        "type": "object"
+      },
+      "RequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequestParamsMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RequestParamsMeta": {
+        "additionalProperties": true,
+        "properties": {
+          "progressToken": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ResourceLink": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "icons": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/Icon"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "const": "resource_link",
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "uri"
+        ],
+        "type": "object"
+      },
+      "Root": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uri": {
+            "format": "uri",
+            "minLength": 1,
+            "type": "string",
+            "x-allowed-schemes": [
+              "file"
+            ]
+          }
+        },
+        "required": [
+          "uri"
+        ],
+        "type": "object"
+      },
+      "RootsCapability": {
+        "properties": {
+          "listChanged": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SamplingCapability": {
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SamplingContextCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SamplingToolsCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SamplingContextCapability": {
+        "properties": {},
+        "type": "object"
+      },
+      "SamplingToolsCapability": {
+        "properties": {},
+        "type": "object"
+      },
+      "TaskMetadata": {
+        "properties": {
+          "ttl": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "TasksCancelCapability": {
+        "properties": {},
+        "type": "object"
+      },
+      "TasksCreateElicitationCapability": {
+        "properties": {},
+        "type": "object"
+      },
+      "TasksCreateMessageCapability": {
+        "properties": {},
+        "type": "object"
+      },
+      "TasksElicitationCapability": {
+        "properties": {
+          "create": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TasksCreateElicitationCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "TasksListCapability": {
+        "properties": {},
+        "type": "object"
+      },
+      "TasksSamplingCapability": {
+        "properties": {
+          "createMessage": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TasksCreateMessageCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "TextContent": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "const": "text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "TextResourceContents": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri",
+          "text"
+        ],
+        "type": "object"
+      },
+      "ToolResultContent": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextContent"
+                },
+                {
+                  "$ref": "#/$defs/ImageContent"
+                },
+                {
+                  "$ref": "#/$defs/AudioContent"
+                },
+                {
+                  "$ref": "#/$defs/ResourceLink"
+                },
+                {
+                  "$ref": "#/$defs/EmbeddedResource"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "isError": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "structuredContent": {},
+          "toolUseId": {
+            "type": "string"
+          },
+          "type": {
+            "const": "tool_result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "toolUseId"
+        ],
+        "type": "object"
+      },
+      "ToolUseContent": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "const": "tool_use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "id",
+          "input"
+        ],
+        "type": "object"
+      },
+      "UrlElicitationCapability": {
+        "properties": {},
+        "type": "object"
+      }
+    },
+    "params": {
+      "initialize": {
+        "$ref": "#/$defs/InitializeRequestParams"
+      },
+      "ping": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "prompts/get": {
+        "$ref": "#/$defs/GetPromptRequestParams"
+      },
+      "prompts/list": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PaginatedRequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "resources/list": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PaginatedRequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "resources/read": {
+        "$ref": "#/$defs/ReadResourceRequestParams"
+      },
+      "resources/templates/list": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PaginatedRequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "tools/call": {
+        "$ref": "#/$defs/CallToolRequestParams"
+      },
+      "tools/list": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PaginatedRequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  },
+  "handshake_versions": [
+    "2024-11-05",
+    "2025-03-26",
+    "2025-06-18",
+    "2025-11-25"
+  ],
+  "notifications": {
+    "definitions": {
+      "CancelledNotificationParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "NotificationParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ProgressNotificationParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "type": "number"
+          },
+          "progressToken": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "progress",
+          "progressToken"
+        ],
+        "type": "object"
+      }
+    },
+    "params": {
+      "notifications/cancelled": {
+        "$ref": "#/$defs/CancelledNotificationParams"
+      },
+      "notifications/initialized": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/NotificationParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "notifications/progress": {
+        "$ref": "#/$defs/ProgressNotificationParams"
+      },
+      "notifications/roots/list_changed": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/NotificationParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  },
+  "requests": {
+    "definitions": {
+      "Argument": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
+      "CallToolRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ClientCapabilities": {
+        "properties": {
+          "elicitation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Elicitation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "experimental": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roots": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Roots"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sampling": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Sampling"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tasks": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Tasks"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "CompleteRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "argument": {
+            "$ref": "#/$defs/Argument"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Context"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PromptReference"
+              },
+              {
+                "$ref": "#/$defs/ResourceTemplateReference"
+              }
+            ]
+          }
+        },
+        "required": [
+          "argument",
+          "ref"
+        ],
+        "type": "object"
+      },
+      "Context": {
+        "properties": {
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "Elicitation": {
+        "properties": {
+          "form": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "Elicitation1": {
+        "properties": {
+          "create": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "GetPromptRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "Icon": {
+        "properties": {
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sizes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "src": {
+            "type": "string"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "light",
+                  "dark"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "src"
+        ],
+        "type": "object"
+      },
+      "Implementation": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "icons": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/Icon"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "websiteUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "type": "object"
+      },
+      "InitializeRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "capabilities": {
+            "$ref": "#/$defs/ClientCapabilities"
+          },
+          "clientInfo": {
+            "$ref": "#/$defs/Implementation"
+          },
+          "protocolVersion": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capabilities",
+          "clientInfo",
+          "protocolVersion"
+        ],
+        "type": "object"
+      },
+      "Meta": {
+        "additionalProperties": true,
+        "properties": {
+          "progressToken": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "PaginatedRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "PromptReference": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "const": "ref/prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "type": "object"
+      },
+      "ReadResourceRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri"
+        ],
+        "type": "object"
+      },
+      "RequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "Requests": {
+        "properties": {
+          "elicitation": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Elicitation1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sampling": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Sampling1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ResourceTemplateReference": {
+        "properties": {
+          "type": {
+            "const": "ref/resource",
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "uri"
+        ],
+        "type": "object"
+      },
+      "Roots": {
+        "properties": {
+          "listChanged": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "Sampling": {
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "Sampling1": {
+        "properties": {
+          "createMessage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SetLevelRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "level": {
+            "enum": [
+              "alert",
+              "critical",
+              "debug",
+              "emergency",
+              "error",
+              "info",
+              "notice",
+              "warning"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "type": "object"
+      },
+      "SubscribeRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri"
+        ],
+        "type": "object"
+      },
+      "TaskMetadata": {
+        "properties": {
+          "ttl": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "Tasks": {
+        "properties": {
+          "cancel": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "list": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requests": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Requests"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "UnsubscribeRequestParams": {
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Meta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri"
+        ],
+        "type": "object"
+      }
+    },
+    "params": {
+      "completion/complete": {
+        "$ref": "#/$defs/CompleteRequestParams"
+      },
+      "initialize": {
+        "$ref": "#/$defs/InitializeRequestParams"
+      },
+      "logging/setLevel": {
+        "$ref": "#/$defs/SetLevelRequestParams"
+      },
+      "ping": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "prompts/get": {
+        "$ref": "#/$defs/GetPromptRequestParams"
+      },
+      "prompts/list": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PaginatedRequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "resources/list": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PaginatedRequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "resources/read": {
+        "$ref": "#/$defs/ReadResourceRequestParams"
+      },
+      "resources/subscribe": {
+        "$ref": "#/$defs/SubscribeRequestParams"
+      },
+      "resources/templates/list": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PaginatedRequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "resources/unsubscribe": {
+        "$ref": "#/$defs/UnsubscribeRequestParams"
+      },
+      "tools/call": {
+        "$ref": "#/$defs/CallToolRequestParams"
+      },
+      "tools/list": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PaginatedRequestParams"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  },
+  "sealed_state_methods": [
+    "prompts/get",
+    "resources/read",
+    "tools/call"
+  ],
+  "source": {
+    "mcp": "2.2.0",
+    "mcp-types": "2.2.0",
+    "pydantic": "2.14.0",
+    "pydantic-core": "2.50.0"
+  }
+}

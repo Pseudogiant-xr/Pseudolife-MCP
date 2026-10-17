@@ -78,12 +78,16 @@ WRITES = [("memory_agents", {"action": "update", "status": "reviewing"}),
           ("memory_agents", {"action": "claim", "lease": "claim:src"}),
           ("memory_agents", {"action": "release", "lease": "claim:src"}),
           ("memory_message", {"action": "send", "to": "all", "text": "hi", "request_id": "r1"}),
-          ("memory_message", {"action": "ack", "message_id": "m1"})]
+          ("memory_message", {"action": "ack", "message_id": "m1"}),
+          # A receive with ack acknowledges the parent's mail, like ack.
+          ("memory_message", {"action": "receive", "ack": True}),
+          ("memory_message", {"action": "receive", "limit": 5, "ack": "true"})]
 READS = [("memory_agents", {"action": "list"}),
          ("memory_agents", {}),                       # action defaults to list
          ("memory_agents", {"action": "list", "project": "x"}),
          ("memory_message", {"action": "receive"}),
          ("memory_message", {"action": "receive", "after": "abc:3"}),
+         ("memory_message", {"action": "receive", "ack": False}),
          # history is read-only: no ack, no delivery, no wake.
          ("memory_message", {"action": "history"}),
          ("memory_message", {"action": "history", "peer": "a1", "limit": 5})]
@@ -139,6 +143,78 @@ def test_a_parent_message_quoting_agent_id_is_still_the_parents(tmp_path):
     assert _run(_env(tmp_path), _payload("memory_message", tool_input, child=False)) == ""
 
 
+@pytest.mark.parametrize("tool,tool_input", [
+    ("memory_agents", {"action": "update", "agent_id": "bcbdca6ceeb7436eb31e96f488c8068a",
+                       "status": "merging"}),
+    ("memory_agents", {"agent_id": "a1", "action": "update"}),
+    ("memory_message", {"action": "ack", "message_id": "m1", "extra": {"agent_id": "a1"}}),
+    ("memory_agents", {"action": "update", "children": [{"agent_id": "a1"}]}),
+], ids=["argument", "first-argument", "nested-object", "in-array"])
+def test_a_parents_call_carrying_an_agent_id_argument_is_still_the_parents(tmp_path, tool, tool_input):
+    """Only Claude Code's own top-level key marks a subagent. A parent that
+    guesses an agent_id argument (2026-10-15: a main session did, after a
+    compaction) gets the daemon's unknown-parameter error, not a denial that
+    tells it it is a subagent and sends it chasing the wrong cause."""
+    assert _run(_env(tmp_path), _payload(tool, tool_input, child=False)) == ""
+
+
+def test_a_subagent_is_found_whatever_the_key_order(tmp_path):
+    payload = json.loads(_payload("memory_agents", {"action": "update", "agent_id": "a1"},
+                                  child=False))
+    payload.update(agent_id=CHILD, agent_type="general-purpose")    # after tool_input
+    assert _denied(_run(_env(tmp_path), json.dumps(payload)))
+
+
+@pytest.mark.parametrize("tool_input", [
+    {"extra": {"action": "list"}, "action": "update", "status": "x"},
+    {"action": "update", "status": "x", "extra": {"action": "list"}},
+], ids=["nested-first", "nested-last"])
+def test_an_action_inside_a_nested_object_is_not_the_calls_action(tmp_path, tool_input):
+    reason = _denied(_run(_env(tmp_path), _payload("memory_agents", tool_input)))
+    assert "memory_agents(action=update)" in reason
+
+
+def test_an_ack_inside_a_nested_object_is_not_the_calls_ack(tmp_path):
+    tool_input = {"action": "receive", "extra": {"ack": True}}
+    assert _run(_env(tmp_path), _payload("memory_message", tool_input)) == ""
+
+
+def test_the_largest_valid_write_is_still_read(tmp_path):
+    """Every argument of every write at its widest: the step cap below must
+    sit well above it."""
+    tool_input = {"action": "update", "project": "p", "task": "t", "status": "s",
+                  "name": "n", "expect": 60, "children": [f"c{i}" for i in range(8)],
+                  "park_reason": "waiting_peer", "park_needs": "n", "park_clear_by": "anyone",
+                  "park_resume": "r", "park_expires": 1.5, "lease": None, "path": None,
+                  "worktree": None, "repository_id": None}
+    assert _denied(_run(_env(tmp_path), _payload("memory_agents", tool_input)))
+
+
+def test_a_payload_too_long_for_any_valid_call_is_let_through(tmp_path):
+    """Walking costs time per value, and 4,000 values took 5.9 s on Git
+    Bash (review, 2026-10-15), past hooks.json's 5 s. No board call has
+    that many (children holds at most 8, every other argument is a scalar),
+    and the daemon refuses unknown arguments by name, so the guard stops
+    counting and lets such a call through to that refusal."""
+    tool_input = {"action": "send", "to": "all", "request_id": "r1", "text": "x",
+                  "tags": ["x"] * 4000}
+    assert _run(_env(tmp_path), _payload("memory_message", tool_input)) == ""
+
+
+def test_raw_utf8_pretty_printed_crlf_input_is_read(tmp_path):
+    """Claude Code sends raw UTF-8; the walker's offsets must agree with
+    the regex engine's, whatever the layout. A string ending in a backslash
+    sits right before the action."""
+    tool_input = {"text": "é ✓ 漢字 " + chr(92), "to": "all", "request_id": "r1",
+                  "action": "send"}
+    payload = json.loads(_payload("memory_message", tool_input))
+    raw = json.dumps(payload, ensure_ascii=False, indent=2).replace("\n", "\r\n").encode()
+    result = subprocess.run([bash_exe(), str(HOOK)], input=raw, env=_env(tmp_path),
+                            capture_output=True, timeout=120)
+    assert result.returncode == 0 and result.stderr == b"", result
+    assert "memory_message(action=send)" in _denied(result.stdout.decode())
+
+
 @pytest.mark.parametrize("stdin", [
     "", "not json", "{", '{"agent_id":"a1"}',
     # No tool_input at all, or one Claude Code did not send as an object.
@@ -146,7 +222,11 @@ def test_a_parent_message_quoting_agent_id_is_still_the_parents(tmp_path):
     '{"agent_id":"a1","tool_name":"mcp__pseudolife-memory__memory_agents","tool_input":"update"}',
     # An empty agent id is no subagent.
     '{"agent_id":"","tool_name":"mcp__pseudolife-memory__memory_agents","tool_input":{"action":"update"}}',
-], ids=["empty", "text", "brace", "no-tool", "no-input", "string-input", "empty-agent"])
+    # Cut off mid-payload: not JSON, whatever its first keys say.
+    '{"agent_id":"a1","tool_name":"mcp__pseudolife-memory__memory_agents","tool_input":{"action":"update"',
+    '{"agent_id":"a1","tool_name":"mcp__pseudolife-memory__memory_agents","tool_input":{"action":"upd',
+], ids=["empty", "text", "brace", "no-tool", "no-input", "string-input", "empty-agent",
+        "unclosed-object", "unclosed-string"])
 def test_a_payload_it_cannot_read_is_allowed(tmp_path, stdin):
     assert _run(_env(tmp_path), stdin) == ""
 

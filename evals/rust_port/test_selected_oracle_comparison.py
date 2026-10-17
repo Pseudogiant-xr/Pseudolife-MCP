@@ -72,7 +72,7 @@ def test_current_candidate_byte_mutation_still_fails(selected_eof):
 def startup_case():
     contract = json.loads(Path(phase1.__file__).with_name("stdio_startup_contract.json").read_text())
     stderr = expected_stderr(contract, "version-mismatch", "fixture-origin")
-    result = {"stderr_b64": base64.b64encode(stderr.replace(b"0.17.0", b"0.18.0")).decode(),
+    result = {"stderr_b64": base64.b64encode(stderr.replace(b"0.18.0", b"0.19.0")).decode(),
               "stdout_frames_b64": ["initialize-frame"], "exit_code": 0}
     return contract, result, [{"method": "GET", "path": "/health"}]
 

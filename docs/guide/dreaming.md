@@ -777,9 +777,9 @@ superseded-row compaction. Design doc:
 poisoning-amplifier path with a defense keyed on *who wrote*, never on
 what the text says (the MAFIA result in `SECURITY.md` closes the argument
 that content inspection can defend this path). When on, a **scalar** claim
-whose backing entry is agent-tier — its `source` maps to origin `agent` —
-and outside `memory.dream.trusted_sources` never takes `current`
-directly:
+whose backing entry is agent-tier — its `source` maps to origin `agent`,
+or it cites a user-stated note that fails the citation check — and outside
+`memory.dream.trusted_sources` never takes `current` directly:
 
 - it **parks** via the ordinary contender machinery (visible as
   `contested` in `memory_fact_get`, `quarantine:low_trust` in its
@@ -791,9 +791,15 @@ directly:
   **and only when the witness's tier is not below the standing current's
   origin**: the two-man rule is never weaker than the provenance guard
   it reinforces, so two agent witnesses cannot supersede a user-stated
-  fact. The same witness restating merely re-confirms the parked value;
-  an automated promotion is stamped agent-supported (a literal, never
-  the claim's own origin field), and never as a user act.
+  fact, and no promotion replaces a value a direct (non-dream) user or
+  action write set. The witness's tier here is the tier a direct write of
+  the same claim would get: its note's `source` tag, kept only when the
+  note passes the citation check ("Provenance contenders" in
+  [memory-model.md](memory-model.md)), and lowered to `assistant` for an
+  assistant-stated claim. The same witness restating merely re-confirms
+  the parked value; an automated promotion adds that same tier to the
+  value's support (never the claim's own origin field), so a value a
+  user-sourced note confirms is as protected as one it wrote directly.
 
 Run results carry `quarantine_parked` / `quarantine_held` /
 `quarantine_promoted`; parks and promotions are journaled (a promotion

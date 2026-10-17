@@ -44,9 +44,10 @@ no current-head execution is inferred.
 
 The maintainer's 2026-10-08 policy makes the oracle follow master after each
 batch of production merges; production changes are never held for the port.
-The selected target is master `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1` (the #637
-squash commit, Python 0.17.0, schema 55), with 425 test files and 191 scoped
-functions. Fresh both-OS runtime validation, exact-head CI and independent review
+The selected target is master `1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4` (the v0.18.0
+release commit, #742, Python 0.18.0, schema 55), with 426 test files and 191 scoped
+functions. The previous target, `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1` (the #637 squash
+commit, Python 0.17.0), keeps its #642 evidence. Fresh both-OS runtime validation, exact-head CI and independent review
 remain pending; historical receipts keep their identities. Rust merges remain
 paused until this re-pin merges after green Parity, including the differential
 judge. Streams may retain captures against their frozen images without treating
@@ -1089,7 +1090,7 @@ claim. The earlier local `doorbell-line-ratio-counts.json` remains private
 historical evidence for the removed compatibility model.
 
 The selected oracle targets master
-`686b3f95c4a4d4e6c2d81e1b76be9901945a8da1` (0.17.0, schema 55); the #637 squash target is selected and new-pin acceptance remains pending. Scoped CLI-VERSION is ported: the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) executed merged master `df2dbf8a`, tree `28823784`, after #608 and #600 merged. Its exact source/image identities remain separate from this documentation carrier, whose independent review and hosted checks remain required. Historical `5220b5ee` and earlier receipts retain their identities and failures.
+`1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4` (0.18.0, schema 55); the v0.18.0 release target is selected and new-pin acceptance remains pending. The previous target `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1` (0.17.0) keeps its #642 evidence. Scoped CLI-VERSION is ported: the [final both-OS CPU proof](../evals/results/rust-phase2d-version-df2dbf8a/README.md) executed merged master `df2dbf8a`, tree `28823784`, after #608 and #600 merged. Its exact source/image identities remain separate from this documentation carrier, whose independent review and hosted checks remain required. Historical `5220b5ee` and earlier receipts retain their identities and failures.
 Historical phase 1 close-out evidence retains
 `f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54).
 The historical phase 1 pin is `0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53);
@@ -1102,7 +1103,7 @@ Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
 Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
-The selected re-pin manifests enumerate 425 test files, all 191 current-pin function mappings in the nine scoped files and 18 routed nodes (10 public stdio and 8 CLI). The historical `74b5998c` ten-stdio attempt passes five and fails five in both arms with shared HTTP 500 fixture errors; it does not isolate a Rust failure. Only an unchanged Python idle-gap diagnostic established missing offline model files; the other four shared failures were not independently diagnosed. Published `95d5402d` hosted Parity passes all 18 candidate nodes per OS; historical `5220b5ee` CLI captures cover the subsequent console/warm changes; final merged-master `df2dbf8a` proof now supplies scoped CLI-VERSION acceptance below. The evidence carrier retains its own review/check gates. Historical ac0c64a1 outcomes do not prove acceptance. Phase 1 source at a3e95642 is integrated and #560 is merged; its eight-node full-suite receipts retain their own source and ELF bindings.
+The selected re-pin manifests enumerate 426 test files, all 191 current-pin function mappings in the nine scoped files and 18 routed nodes (10 public stdio and 8 CLI). The historical `74b5998c` ten-stdio attempt passes five and fails five in both arms with shared HTTP 500 fixture errors; it does not isolate a Rust failure. Only an unchanged Python idle-gap diagnostic established missing offline model files; the other four shared failures were not independently diagnosed. Published `95d5402d` hosted Parity passes all 18 candidate nodes per OS; historical `5220b5ee` CLI captures cover the subsequent console/warm changes; final merged-master `df2dbf8a` proof now supplies scoped CLI-VERSION acceptance below. The evidence carrier retains its own review/check gates. Historical ac0c64a1 outcomes do not prove acceptance. Phase 1 source at a3e95642 is integrated and #560 is merged; its eight-node full-suite receipts retain their own source and ELF bindings.
 
 Historical version candidate and shared CLI fixture evidence at `62e4f590` includes independent code approval and local release evidence on both platforms: 26 passing public cases and 104 rejected controls per OS, plus 240 paired timing samples and eight untimed controls across bare/installed layouts. Windows installed timing regressed beyond the observed floors; the full measurements retain that result. The [version evidence packet](https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/2d29b6e5782b5943f472ffaf3b0ebb89d8cab9e5/evals/results/rust-phase2b-version-62e4f590/README.md) preserves exact code/oracle/runtime/binary/helper identities and cleanup. Required hosted CI and independent review/checks of the evidence/documentation successor remain pending; CLI-VERSION stays deferred. Earlier 0.16.1 captures remain historical prototypes. Raw comparison receipts stay private and hosted artifacts use allowlisted projections.
 

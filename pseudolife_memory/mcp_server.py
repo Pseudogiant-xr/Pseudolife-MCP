@@ -188,7 +188,13 @@ def build_streamable_http_app():
     """Build the SDK's streamable-HTTP Starlette app with the selected
     transport-security policy (v2 moved the setting from the server
     constructor to this call)."""
-    return mcp.streamable_http_app(transport_security=_TRANSPORT_SECURITY)
+    # Session lifetime stays as on mcp 2.1 (maintainer decision 2026-10-16):
+    # mcp 2.2.0's defaults close a stateful session after 1800 s idle and
+    # answer 503 past 10,000 live sessions; None turns both off. Adopting
+    # limits is a separate decision (and the Rust daemon's parity row
+    # MCP-LIVE-SESSIONS in rust/daemon/divergences.md moves with it).
+    return mcp.streamable_http_app(transport_security=_TRANSPORT_SECURITY,
+                                   session_idle_timeout=None, max_sessions=None)
 
 
 from pseudolife_memory.toolset_tiers import (
@@ -622,6 +628,13 @@ def memory_message(
     peer: Annotated[str | None, Field(
         description="history: exact peer agent id; omit for all your "
                     "retained mail.")] = None,
+    # Strict: the plugin's subagent guard matches "ack": true, and a lax
+    # boolean would turn 1 or "yes" into true past it (review, 2026-10-14).
+    ack: Annotated[bool, Field(
+        strict=True,
+        description="receive: true also acknowledges the mail returned, "
+                    "in a compact result; default false. Never from a "
+                    "subagent sharing its parent's address.")] = False,
 ) -> dict[str, Any]:
     """Mail between agent sessions: send, receive, ack or history. send
     needs to, text and request_id; ack needs message_id (one or
@@ -640,7 +653,8 @@ def memory_message(
     for the identical send after an uncertain result; the same id with
     changed inputs is refused request_conflict - use a new one.
 
-    receive: pending mail; read fully, then ack (read, not done).
+    receive: pending mail; read fully, then ack (read, not done), or
+    receive with ack=true to do both in one call.
     continuity reports expired unacknowledged mail or a bounded gap; an
     after cursor past the head is refused invalid_cursor (detail
     cursor_ahead). history: your retained sent/received mail, read-only,
@@ -651,7 +665,8 @@ def memory_message(
     return dispatch(service, action, {k: v for k, v in {
         "to": to, "text": text, "request_id": request_id, "reply_to": reply_to,
         "after": after, "message_id": message_id, "clears": clears,
-        "urgent": urgent or None, "limit": limit, "peer": peer}.items() if v is not None})
+        "urgent": urgent or None, "limit": limit, "peer": peer,
+        "ack": ack or None}.items() if v is not None})
 
 
 # ── Refusal notes and argument checks ─────────────────────────────────────

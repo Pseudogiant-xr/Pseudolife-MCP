@@ -22,13 +22,15 @@ pub struct Ready {
     #[allow(dead_code)]
     pub storage: Arc<Storage>,
     pub embedder: Arc<Embedder>,
-    pub bank: Arc<Bank>,
-    /// Lock order: Service.inner, then sessions, then the storage writer.
-    /// A holder of a later lock must never acquire an earlier one.
-    pub sessions: tokio::sync::Mutex<crate::background_sessions::Sessions>,
+    pub bank: Arc<std::sync::RwLock<Bank>>,
+    /// Lock order: Service.inner, then write, then the storage writer.
+    /// Stores and background reaping share this episode state and lock.
+    pub write: tokio::sync::Mutex<crate::episodes::WriteState>,
+    pub writes: crate::store::WriteTasks,
     /// Complete durable startup inputs for the read/write slices.
     #[allow(dead_code)] // W2-D/E adopt these inputs when their stores land.
     pub startup: Arc<StartupState>,
+    pub cortex: Arc<crate::stores::cortex::CortexStore>,
 }
 
 /// Lock-free view for `/health` (it never waits on init, spec L7).
@@ -51,6 +53,7 @@ struct Inner {
 }
 
 pub struct Service {
+    pub writes: crate::store::WriteTasks,
     pub session_dream: Arc<dyn crate::background_sessions::SessionDream>,
     pub release_check: Arc<crate::release_check::ReleaseCheck>,
     pub config: Config,
@@ -79,6 +82,7 @@ impl Service {
             .and_then(|v| v.parse().ok())
             .unwrap_or(4);
         Service {
+            writes: crate::store::WriteTasks::default(),
             session_dream: Arc::new(crate::background_sessions::DeferredSessionDream),
             release_check: Arc::new(crate::release_check::ReleaseCheck::default()),
             config,
@@ -165,9 +169,26 @@ impl Service {
         Ok(storage)
     }
 
+    /// `_ensure_tier(full=False)` for the board, without embedding or hydration.
+    pub async fn storage_tier(&self) -> Result<Arc<Storage>, String> {
+        // Embedding and hydration keep inner locked after storage is usable.
+        // Heartbeats and mailbox calls must not wait for that unrelated tier.
+        if let Some(storage) = self.snapshot().storage {
+            return Ok(storage);
+        }
+        let mut inner = self.inner.lock().await;
+        self.ensure_storage(&mut inner).await
+    }
+
     /// `_ensure_init`, run in its own task: a request whose client goes
     /// away mid-init drops only its wait, never the init itself (which
     /// writes to the shared writer session).
+    /// The initialized service state, without initializing it (Python's
+    /// `self._cms is None` check under the service lock).
+    pub async fn ready_if_initialized(&self) -> Option<Arc<Ready>> {
+        self.inner.lock().await.ready.clone()
+    }
+
     pub async fn ensure_init(self: &Arc<Self>) -> Result<Arc<Ready>, String> {
         let me = self.clone();
         tokio::spawn(async move { me.ensure_init_inner().await })
@@ -225,14 +246,14 @@ impl Service {
                 embedder.embedding_dim(),
             )
             .await?;
-            let sessions = crate::background_sessions::Sessions::hydrate(storage.client())
-                .await
-                .map_err(anyhow::Error::msg)?;
-            Ok::<_, anyhow::Error>((bank, startup, sessions))
+            let write = crate::episodes::from_startup(&startup)?;
+            let cortex =
+                crate::stores::cortex::hydrate(storage.client(), embedder.embedding_dim()).await?;
+            Ok::<_, anyhow::Error>((bank, startup, write, cortex))
         }
         .await;
         match candidate {
-            Ok((bank, startup, sessions)) => {
+            Ok((bank, startup, write, cortex)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -243,9 +264,11 @@ impl Service {
                 let ready = Arc::new(Ready {
                     storage,
                     embedder,
-                    bank: Arc::new(bank),
-                    sessions: tokio::sync::Mutex::new(sessions),
+                    bank: Arc::new(std::sync::RwLock::new(bank)),
+                    write: tokio::sync::Mutex::new(write),
+                    writes: self.writes.clone(),
                     startup: Arc::new(startup),
+                    cortex: Arc::new(cortex),
                 });
                 inner.ready = Some(ready.clone());
                 // Python publishes every loaded store before the late reseed.
@@ -312,7 +335,10 @@ impl Service {
                 return;
             }
             match self.ensure_init_inner().await {
-                Ok(_) => return,
+                Ok(ready) => {
+                    crate::read::search_route::warmup_probe(self, &ready).await;
+                    return;
+                }
                 Err(e) => {
                     if *stop.borrow() {
                         return;
@@ -395,9 +421,12 @@ impl crate::background::Duties for Service {
             let ready = self.ensure_init_inner().await?;
             // All session mutation is serialized with service operations.
             let _service_lock = self.inner.lock().await;
-            let mut sessions = ready.sessions.lock().await;
+            let mut write = ready.write.lock().await;
+            let sessions = &mut write.log;
             let entries: Vec<_> = ready
                 .bank
+                .read()
+                .unwrap()
                 .entries
                 .iter()
                 .filter_map(|e| {
@@ -436,7 +465,7 @@ impl crate::background::Duties for Service {
                 },
             );
             sessions.persist_reap(ready.storage.client(), &result).await;
-            drop(sessions);
+            drop(write);
             drop(_service_lock);
             if let Some(error) = result.failure {
                 return Err(error);
@@ -483,6 +512,340 @@ mod tests {
         let inner = service.inner.lock().await;
         assert_eq!(inner.failures, 1);
         assert!(inner.storage.is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a disposable board database through board.boundary"]
+    async fn board_heartbeat_during_paused_initialization() {
+        let dsn =
+            std::env::var("PL_W2F_BOARD_DSN").expect("board.boundary supplies the disposable DSN");
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|n| n.starts_with("pl_cf_w2f_"))
+        );
+        assert_eq!(parsed.get_ports(), &[5434]);
+        assert!(
+            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(h)] if h == "127.0.0.1")
+        );
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::new(),
+            dsn.clone(),
+            true,
+        ));
+        let board = crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn,
+            service.clone(),
+            Arc::new(crate::auth::PrincipalStore::new()),
+        );
+        let params = |v: Value| v.as_object().unwrap().clone();
+        let mut headers = std::collections::HashMap::new();
+        let registered = board
+            .dispatch(
+                "register",
+                params(json!({"label": "codex"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        headers.insert(
+            "x-pl-agent".into(),
+            registered["agent_id"].as_str().unwrap().into(),
+        );
+        headers.insert(
+            "x-pl-agent-key".into(),
+            registered["credential"].as_str().unwrap().into(),
+        );
+        let attached = board
+            .dispatch(
+                "attach",
+                params(json!({"attachment_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        // Initialization owns this same mutex throughout embedding and hydration,
+        // after ensure_storage has published the usable storage snapshot.
+        let initializing = service.inner.lock().await;
+        let heartbeat = tokio::time::timeout(
+            Duration::from_secs(2),
+            board.dispatch(
+                "heartbeat",
+                params(json!({"attachment_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "generation": attached["generation"], "active": true})),
+                &headers,
+                "default",
+            ),
+        )
+        .await;
+        drop(initializing);
+        let result = heartbeat
+            .expect("heartbeat waited behind full service initialization")
+            .unwrap();
+        assert_eq!(result["agent_id"], registered["agent_id"]);
+        assert!(
+            result["lease_until"].as_f64().unwrap() >= attached["lease_until"].as_f64().unwrap()
+        );
+        drop(board);
+        let storage = service.inner.lock().await.storage.take().unwrap();
+        service.update(|s| s.storage = None);
+        Arc::try_unwrap(storage)
+            .ok()
+            .expect("storage released")
+            .close()
+            .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a disposable board database through board.boundary"]
+    async fn board_send_refuses_an_incomplete_clock_seed() {
+        let dsn = std::env::var("PL_W2F_BOARD_DSN").expect("owned board fixture DSN");
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|n| n.starts_with("pl_cf_w2f_"))
+        );
+        assert_eq!(parsed.get_ports(), &[5434]);
+        assert!(
+            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(h)] if h == "127.0.0.1")
+        );
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::new(),
+            dsn.clone(),
+            true,
+        ));
+        let board = crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn.clone(),
+            service.clone(),
+            Arc::new(crate::auth::PrincipalStore::new()),
+        );
+        let params = |v: Value| v.as_object().unwrap().clone();
+        let mut headers = std::collections::HashMap::new();
+        let sender = board
+            .dispatch(
+                "register",
+                params(json!({"label": "sender"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        let recipient = board
+            .dispatch(
+                "register",
+                params(json!({"label": "recipient"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        headers.insert(
+            "x-pl-agent".into(),
+            sender["agent_id"].as_str().unwrap().into(),
+        );
+        headers.insert(
+            "x-pl-agent-key".into(),
+            sender["credential"].as_str().unwrap().into(),
+        );
+        let storage = service.storage_tier().await.unwrap();
+        let future = (crate::board::store::now() * 1000.0) as i64 + 3_600_000;
+        storage.client().execute(
+            "INSERT INTO facts(entity,attribute,entity_norm,attribute_norm,value,status,confidence,asserted_at,last_confirmed,hlc_phys,hlc_logical) VALUES ('clock','fixture','clock','fixture','future','current',1,0,0,$1,7)",
+            &[&future],
+        ).await.unwrap();
+        // A real query timeout hides a persisted high-water mark from the
+        // first seed attempt. No schema mutation or production bank is used.
+        let (mut locker, connection) = tokio_postgres::connect(&dsn, tokio_postgres::NoTls)
+            .await
+            .unwrap();
+        let driver = tokio::spawn(connection);
+        let lock = locker.transaction().await.unwrap();
+        lock.batch_execute("LOCK TABLE facts IN ACCESS EXCLUSIVE MODE")
+            .await
+            .unwrap();
+        storage
+            .client()
+            .batch_execute("SET statement_timeout = '100ms'")
+            .await
+            .unwrap();
+        let send = params(
+            json!({"to": recipient["agent_id"], "text": "clock proof", "request_id": "clock-proof"}),
+        );
+        let refused = board
+            .dispatch("send", send.clone(), &headers, "default")
+            .await;
+        lock.rollback().await.unwrap();
+        storage
+            .client()
+            .batch_execute("RESET statement_timeout")
+            .await
+            .unwrap();
+        let committed: i64 = storage
+            .client()
+            .query_one("SELECT count(*) FROM coordination_messages", &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(
+            committed, 0,
+            "incomplete clock seed committed mail below bank history"
+        );
+        assert!(refused.is_err());
+        assert!(!board.hlc.lock().unwrap().seeded);
+        board
+            .dispatch("send", send, &headers, "default")
+            .await
+            .unwrap();
+        assert!(board.hlc.lock().unwrap().seeded);
+        let stamp: String = storage
+            .client()
+            .query_one("SELECT hlc FROM coordination_messages", &[])
+            .await
+            .unwrap()
+            .get(0);
+        let (phys, logical) = stamp.split_once(':').unwrap();
+        assert!(
+            (
+                phys.parse::<i64>().unwrap(),
+                logical.parse::<i64>().unwrap()
+            ) > (future, 7)
+        );
+        drop(storage);
+        drop(board);
+        drop(locker);
+        driver.abort();
+        let storage = service.inner.lock().await.storage.take().unwrap();
+        service.update(|s| s.storage = None);
+        Arc::try_unwrap(storage)
+            .ok()
+            .expect("storage released")
+            .close()
+            .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a disposable board database through board.boundary"]
+    async fn board_json_capabilities_roundtrip() {
+        let dsn = std::env::var("PL_W2F_BOARD_DSN").expect("owned board fixture DSN");
+        let parsed = crate::storage::parse_dsn(&dsn).unwrap();
+        assert!(
+            parsed
+                .get_dbname()
+                .is_some_and(|n| n.starts_with("pl_cf_w2f_"))
+        );
+        assert_eq!(parsed.get_ports(), &[5434]);
+        assert!(
+            matches!(parsed.get_hosts(), [tokio_postgres::config::Host::Tcp(h)] if h == "127.0.0.1")
+        );
+        let service = Arc::new(Service::new(
+            Config::default(),
+            DaemonEnv::from_env(&|_| None).unwrap(),
+            PathBuf::new(),
+            dsn.clone(),
+            true,
+        ));
+        let board = crate::board::Board::new(
+            service.config.coordination.clone(),
+            dsn,
+            service.clone(),
+            Arc::new(crate::auth::PrincipalStore::new()),
+        );
+        let params = |v: Value| v.as_object().unwrap().clone();
+        let mut headers = std::collections::HashMap::new();
+        let capabilities = json!({"$serde_json::private::Number": true});
+        let registered = board
+            .dispatch(
+                "register",
+                params(json!({"label":"json fixture", "capabilities": capabilities})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_vec(&registered["capabilities"]).unwrap(),
+            serde_json::to_vec(&capabilities).unwrap()
+        );
+        headers.insert(
+            "x-pl-agent".into(),
+            registered["agent_id"].as_str().unwrap().into(),
+        );
+        headers.insert(
+            "x-pl-agent-key".into(),
+            registered["credential"].as_str().unwrap().into(),
+        );
+        let changed = capabilities.clone();
+        let updated = board
+            .dispatch(
+                "update",
+                params(json!({"status": "updated"})),
+                &headers,
+                "default",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_vec(&updated["capabilities"]).unwrap(),
+            serde_json::to_vec(&changed).unwrap()
+        );
+        // The roster excludes its caller, so read from a separate observer.
+        let observer = board
+            .dispatch(
+                "register",
+                params(json!({"label": "observer"})),
+                &std::collections::HashMap::new(),
+                "default",
+            )
+            .await
+            .unwrap();
+        let observer_headers = std::collections::HashMap::from([
+            (
+                "x-pl-agent".into(),
+                observer["agent_id"].as_str().unwrap().into(),
+            ),
+            (
+                "x-pl-agent-key".into(),
+                observer["credential"].as_str().unwrap().into(),
+            ),
+        ]);
+        let roster = board
+            .dispatch("agents", params(json!({})), &observer_headers, "default")
+            .await
+            .unwrap();
+        let console = board
+            .console("default", &std::collections::HashMap::new())
+            .await
+            .unwrap();
+        for result in [roster, console] {
+            let row = result["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["agent_id"] == registered["agent_id"])
+                .unwrap();
+            assert_eq!(
+                serde_json::to_vec(&row["capabilities"]).unwrap(),
+                serde_json::to_vec(&changed).unwrap()
+            );
+        }
+        drop(board);
+        let storage = service.inner.lock().await.storage.take().unwrap();
+        service.update(|s| s.storage = None);
+        Arc::try_unwrap(storage)
+            .ok()
+            .expect("storage released")
+            .close()
+            .await;
     }
 
     #[test]
@@ -535,7 +898,7 @@ mod tests {
             );
         }
         fn retained(ready: &Ready) -> Value {
-            json!({"startup": ready.startup.dump(), "entries": ready.bank.entries_dump()})
+            json!({"startup": ready.startup.dump(), "entries": ready.bank.read().expect("bank lock").entries_dump()})
         }
         let first = service.ensure_init().await;
         let first_ready = service.inner.lock().await.ready.clone();
@@ -595,7 +958,7 @@ mod tests {
                         })
                     });
                     json!({"ok": true, "startup": ready.startup.dump(),
-                           "entries": ready.bank.entries_dump(), "same_as_first": same})
+                           "entries": ready.bank.read().expect("bank lock").entries_dump(), "same_as_first": same})
                 }
                 Err(error) => json!({"ok": false, "error": error,
                     "retained": service.inner.lock().await.ready.as_deref().map(retained),

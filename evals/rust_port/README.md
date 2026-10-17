@@ -264,7 +264,7 @@ remain private. Startup stderr still has no allowlist. Concurrent call order is
 authorized only by the separately captured per-platform final-pair contract.
 
 New parity selects its Python source from immutable workflow event commits:
-`pull_request` uses `git merge-base(base.sha, head.sha)`, not the synthetic PR
+`pull_request` normally uses `git merge-base(base.sha, head.sha)`, not the synthetic PR
 merge checkout; `push` uses `after`; manual master capture uses `frozen_head`,
 which must equal the dispatched checkout, with `GITHUB_REF` required to be
 `refs/heads/master`. Both manual `ci` and `wait-mail` modes require `frozen_head`.
@@ -287,6 +287,28 @@ Python commit. A PR changing Python behavior and its Rust port together fails
 PR parity until its base includes the Python change. This is the intended
 ordering for changes to `pseudolife_memory/`.
 
+A version-only release is the narrow exception: the selector uses the immutable
+PR head when `pyproject.toml` changes only `project.version`, all Python behavior
+and original tests stay unchanged, and every other changed path is recognized
+documentation or an allowlisted version-bearing file. Native changes are limited
+to the shim's Cargo package/lock version, `lifecycle.rs` version literals and
+`auth_lifecycle_http.rs` version fixtures, with all other bytes unchanged.
+Dependency, workflow, instrument, script,
+hook or unknown-path changes keep the merge-base rule. The receipt records
+`release_cut` with the old and new versions, and loading it recomputes eligibility.
+No stderr, frame, instruction or version text is removed from comparisons.
+
+For the next release, bump `rust/shim/Cargo.toml`, the `pseudolife-stdio` lock
+entry, `lifecycle::PACKAGE_VERSION` and its version-specific test literals in
+the same PR as the Python release metadata. The release PR selects the new
+version for both the daemon and Python shim; the candidate must match it.
+After merge, push and scheduled checks select the same new version. A later
+native-only PR again uses its merge base. A stale native version still fails;
+there is no crate-bump grace period. The historical Phase 1 inventory and
+startup captures retain their pins: the candidate identity test uses the event
+oracle (the checkout version outside event CI), so a version cut alone needs
+no inventory re-pin. Land any Python behavior or test changes before the cut.
+
 The workflow binds `PSEUDOLIFE_PORT_ORACLE_SELECTION` before preparing metadata,
 running harness tests or creating the isolated oracle. For an explicit local
 proof, save the actual event payload and select it first (no moving-master
@@ -297,8 +319,9 @@ python -m evals.rust_port.oracle_selection --event-name pull_request --event-pat
 export PSEUDOLIFE_PORT_ORACLE_SELECTION="$(cat /private/selection.json)"
 ```
 
-The historical selected pin was master `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1`
-(the #637 squash commit, Python 0.17.0, schema 55).
+The fixed Phase 1 inventory pin is master `1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4`
+(the v0.18.0 release commit, Python 0.18.0, schema 55). The historical selected pin
+was master `686b3f95c4a4d4e6c2d81e1b76be9901945a8da1` (the #637 squash commit, Python 0.17.0, schema 55).
 
 Historical selected-pin evidence: Selected-pin validation and exact-head CI are recorded by [the re-pin CI run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37807737497) at `1f33ef7c12eaa5250ad2e62d46b5fb2bfc177195`: both Parity jobs passed, including the unchanged differential judges. [Independent publication review](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/642) approved the frozen tree `d1e2a8395ad955b39594ca4c7639aa31594ecdf0` with no findings; the actual re-pin merge is `cebbf63f6970636c5c3da48853f220d9ddbe14ab`.
 

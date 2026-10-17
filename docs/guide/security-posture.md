@@ -137,8 +137,10 @@ problem than the limitation it hides.
 - **Content screening.** There is none, deliberately — see the evaded-class
   note above. Do not read the literal-faithfulness gate, the novelty gate,
   or the contradiction detector as trust filters. In particular the
-  **surprise gate** is an *admission* filter that drops near-duplicates:
-  novel malicious content passes it preferentially.
+  **surprise gate** is an *admission* filter that can drop near-duplicates
+  when `memory.surprise_threshold` is above `0` (the shipped default,
+  `0.0`, is permissive and stores everything): novel malicious content
+  passes it preferentially.
 - **Cryptographic writer authentication.** Writer identity is
   self-reported over MCP. Per-principal bearer tokens improve on this
   (the token determines the writer id) but agent writers have no signing,

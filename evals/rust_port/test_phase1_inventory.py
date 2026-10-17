@@ -1,12 +1,15 @@
 """Additive Phase 1 audit; historical audit assertions are unchanged."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import tomllib
 
 import pytest
+
+from .oracle_selection import SELECTION_ENV, selected_oracle
 
 
 @pytest.fixture(scope="module")
@@ -19,11 +22,11 @@ def inventory():
 
 
 def test_phase1_inventory_has_all_pinned_files_and_pending_function_ownership(inventory):
-    assert inventory.PHASE1_ORACLE == "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1"
+    assert inventory.PHASE1_ORACLE == "1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4"
     result = inventory.validate_phase1()
-    assert result["test_files"] == 425
+    assert result["test_files"] == 426
     assert result["candidate_nodes"] == 18
-    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 355}
+    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 356}
 
 
 def test_legacy_inventory_retains_its_real_pin(inventory):
@@ -49,17 +52,23 @@ def test_candidate_summary_does_not_admit_candidate_register_status(inventory, m
 
 def test_candidate_runtime_identity_matches_the_selected_python_pin(inventory):
     root = inventory.ROOT
-    pinned = subprocess.check_output(["git", "show", inventory.PHASE1_ORACLE + ":pyproject.toml"], cwd=root)
-    version = tomllib.loads(pinned.decode())["project"]["version"]
-    crate = tomllib.loads((root / "rust/shim/Cargo.toml").read_text())
-    lock = tomllib.loads((root / "rust/Cargo.lock").read_text())
+    # The inventory's fixed pin owns historical coverage, not today's package
+    # identity. Event CI uses exactly the same oracle as the live byte judge.
+    if os.environ.get(SELECTION_ENV):
+        head = selected_oracle(root)["oracle_head"]
+        metadata = subprocess.check_output(["git", "show", head + ":pyproject.toml"], cwd=root)
+    else:
+        metadata = (root / "pyproject.toml").read_bytes()
+    version = tomllib.loads(metadata.decode("utf-8"))["project"]["version"]
+    crate = tomllib.loads((root / "rust/shim/Cargo.toml").read_text(encoding="utf-8"))
+    lock = tomllib.loads((root / "rust/Cargo.lock").read_text(encoding="utf-8"))
     member = next(item for item in lock["package"] if item["name"] == "pseudolife-stdio")
     runtime = re.search(r'pub const PACKAGE_VERSION: &str = "([^"]+)";',
-                        (root / "rust/shim/src/lifecycle.rs").read_text()).group(1)
+                        (root / "rust/shim/src/lifecycle.rs").read_text(encoding="utf-8")).group(1)
     assert crate["package"]["version"] == member["version"] == runtime == version
 
 
-@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 425)])
+@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 426)])
 def test_newer_checkout_test_cannot_shift_either_pin(inventory, monkeypatch, tmp_path, phase1, count):
     newer = tmp_path / "test_newer_master_surface.py"
     newer.write_text("def test_newer():\n    pass\n", encoding="utf-8")

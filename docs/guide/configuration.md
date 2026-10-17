@@ -708,6 +708,43 @@ in `also_broken`). `pseudolife-mcp lease designate`, the command's name in
 can also be given and taken from the Console, signed with your passkey: see
 [Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console).
 
+The delegate's session also gets a short brief after the startup check-in
+and one reminder line on every prompt, served by the daemon to the plugin's
+hooks (they pass the session's board address with the requests they already
+make). Both say to hand raw output to a subagent and to wake for decisions
+only; the check-in text itself is the same for every session. Only a grant
+by the operator or the maintainer counts, as for its urgent mail; the daemon
+rechecks it at most once a minute per session, so a grant or a revoke shows
+within a minute, and on the next session start for the brief.
+
+**The decision watcher: `pseudolife-mcp delegate-watch`.** The brief tells
+the delegate to start this once with `pseudolife-mcp delegate-watch
+--detach`. It waits without a model and sends its owner (by default the
+session whose `.agent` file sits beside its digest; `--owner` names another)
+one board message per batch of events: a pull request opened, merged or
+closed, turning green (with its merge state), failing on its head, finishing
+with checks cancelled (reported once, never as a failure), or newly
+conflicting; the newest master run of a workflow failing or passing again; a
+new file in `~/.pseudolife-mcp/suite-results`; and a `full-suite` or
+`full-suite@box` lease freeing up (`--lease` names others). A head counts as
+green or cancelled only once every workflow run on it has completed, so a run
+still queued keeps it pending. GitHub is read through the `gh` CLI
+(`--repo OWNER/NAME`, default the current checkout's; `--author` narrows it).
+The watcher registers its own board agent and prints its id; each message
+carries `clears="decision events"`, so park with
+`park_needs="decision events"` and `park_clear_by=<that id>` and the daemon
+rings you for it, then read with `memory_message(action="receive",
+ack=true)`. After 55 quiet minutes (`--quiet-after`) it sends one quiet line,
+unless you are parked `done`. It exits 0 when the owner leaves the board,
+when `--until-lease NAME` names a lease the owner no longer holds, after 14
+days (`--max-age`), or on `--stop`; it exits 2 when `gh` is missing or fails
+five polls in a row (after telling the owner), or when the board refuses it.
+`--detach` is safe to repeat: it answers that a live watcher is already
+running. The first run records what is already true and reports nothing for
+it; its state, log and a one-line-per-message ledger live beside the
+session's digest, else under `~/.pseudolife-mcp/watch/` (`--state` moves
+them).
+
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
 a grant made under the old name reopens nothing after the upgrade, so
@@ -1027,6 +1064,15 @@ on fork. Process environment variables, checkout names and titles do not select
 the mailbox. Missing or malformed metadata leaves ordinary memory available
 without attaching a mailbox.
 
+Once a task's mailbox is attached, each later coordination call first
+re-checks the bank's identity with a read-only request that never
+initializes anything. A timeout, an unreachable daemon or a 429, 500, 502,
+503 or 504 answer gets one automatic retry with the same adapter and saved
+mailbox (each check allows six seconds). A refused credential, a different
+bank or a credential that changed meanwhile fails closed at once, and the
+task's hint says whether validation, access or attachment failed. Message
+operations are never replayed by this retry.
+
 A native subagent (`collaboration.spawn_agent`) is a thread of its own, so it
 gets its own address too, and since schema v50 that address is linked to its
 parent's. Codex 0.158.0 (CLI and desktop, measured 2026-09-29) sends
@@ -1085,8 +1131,8 @@ A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map (principal `codex`, say) is
 off the board until an operator lists it: without `allowed_principals` only
 `default` is admitted. On the default setting the shim's startup question
 then leaves coordination off with no error, and memory keeps working. In
-explicit mode each task instead gets an "identity attachment unavailable"
-hint. In either mode the check reports
+explicit mode each task instead gets a hint that identity attachment "was
+refused by authentication or access policy". In either mode the check reports
 `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
 Add the principal the map gives that bearer, keeping `default` if the
 singular token should stay on the board, and restart the daemon:
@@ -1132,8 +1178,9 @@ and reuse the original request ID when retrying an addressed message.
 
 An active task should use `memory_agents` before shared-resource work and
 `memory_message(action="receive")` on resume and when the coordination digest
-(in the prompt hook or a tool result) shows pending mail. Receive does not
-acknowledge; use `action="ack"` after reading, with one `message_id` or
+(in the prompt hook or a tool result) shows pending mail. Receive without
+`ack` does not acknowledge; `ack=true` acknowledges what it returns in the
+same call, or use `action="ack"` after reading, with one `message_id` or
 several comma-separated (at most 50; a JSON array of strings, the form a
 host that stringifies list parameters sends, is read as that list): a batch
 returns the receipts in the order given and lists the ids that were not this
@@ -1803,8 +1850,9 @@ acknowledges mail. Optional adapter startup requests cancellation after three se
 for bounded in-flight request cleanup before falling back to ordinary memory
 service. This is not a three-second ceiling on total shim startup time.
 
-Messages have one recipient. Sending confirms durable enqueue; receiving does
-not acknowledge. The recipient explicitly acknowledges a message ID, and an
+Messages have one recipient. Sending confirms durable enqueue; receiving
+without `ack=true` does not acknowledge. The recipient explicitly acknowledges a
+message ID (or receives with `ack=true`), and an
 acknowledgment does not mean the requested work is complete. Retries reuse the
 same sender request key and content. Coordination traffic is not added to bands,
 cortex, graph, retrieval or dream input by the messaging APIs. Store a useful
@@ -1952,10 +2000,12 @@ a subagent only reads the board (`memory_agents(action="list")`,
 `memory_message(action="history")`, `memory_search`), and the
 orchestrating session owns the address. The served check-in says so, and
 since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
-(`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
-puts in a subagent's hook input, and never in the parent's, and denies that
+(`plugin/hooks/subagent-board-guard.sh`) sees the top-level `agent_id`
+Claude Code puts in a subagent's hook input, and never in the parent's (an
+`agent_id` inside the tool's arguments does not count), and denies that
 subagent's `memory_agents` update, claim and release and `memory_message`
-send and ack, whatever the server's name. Its list, receive and history
+send and ack (and receive with `ack=true`, which acknowledges what it
+returns), whatever the server's name. Its list, receive and history
 pass, and so does every call the parent makes. The subagent reads the refusal as
 `PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
 it to ask the parent instead (probed on Claude Code 2.1.283: the child's
@@ -2803,9 +2853,11 @@ every variant.
   Since schema v39, correction events for existing traces survive source
   deletion and are preserved even while tracing is off; new trace formation
   remains disabled. Re-enabling tracing can therefore surface those warnings.
-  `memory.traces.retention_boost` (default `0.0`) is the separate Phase-2
-  MTT-retention weight this same cross-index feeds; `0.0` is today's
-  eviction behavior unchanged.
+  `memory.traces.retention_boost` is the separate Phase-2 MTT-retention
+  weight this same cross-index feeds: the daemon runs `1.0` unless the key
+  is set (a reinforced entry resists eviction by
+  `retention_boost * log1p(reinforcements)`), while the library default is
+  `0.0`, eviction unchanged.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -2935,7 +2987,8 @@ every variant.
   (`evals/digest_sidecar_probe.py`).
 - **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
   false`) — when on, a scalar dream claim whose backing entry is
-  agent-tier (its `source` maps to origin `agent`) and outside
+  agent-tier (its `source` maps to origin `agent`, or it cites a
+  user-stated note that fails the citation check) and outside
   `memory.dream.trusted_sources` never takes `current` directly: it
   parks via the existing contender machinery (visible in
   `memory_fact_get` as contested), promotable only by an explicit
@@ -3673,7 +3726,7 @@ installer and the session notices print.
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon. On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release (the newest release when it does not answer), and `--daemon-only` is refused naming the daemon's host |
-| `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
+| `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
 | `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |

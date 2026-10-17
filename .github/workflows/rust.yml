@@ -27,8 +27,14 @@ on:
 permissions:
   contents: read
 
+# The nightly gets its own group. Sharing master's let it cancel the push run
+# a merge relies on: push run 38870639548 ended 2 s after nightly 38872655184
+# started (2026-10-16), and push 38704856443 / nightly 38705376001 match the
+# same pattern (2026-10-15); a later push then cancelled each nightly. Manual
+# CI on master would do the same, so it gets its own group too. A push run is
+# now cancelled only by a newer push.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || format('rust-{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('rust-{0}-{1}-{2}', github.event_name, github.workflow, github.ref) || format('rust-{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 env:
@@ -39,15 +45,66 @@ env:
   MKL_NUM_THREADS: '1'
 
 jobs:
-  rust:
+  scope:
+    # Decides whether this run needs the Rust, candidate, parity and image
+    # jobs. Only a pull request whose every changed file (merge commit vs its
+    # base parent) is documentation skips them: Markdown, llms.txt /
+    # llms-full.txt, and non-script files under docs/ (CLAUDE.md "Docs-only
+    # changes"), none of them under rust/, evals/, pseudolife_memory/,
+    # plugin/, ops/, tests/ or .github/. An empty or unreadable diff, and a
+    # failed scope job, run everything. On 2026-10-16 a CLAUDE.md-only PR
+    # (#782) queued the whole ~33-job matrix behind the account's 20-job cap.
+    # No hosted step here reads docs outside rust/: the producer census only
+    # reports docs drift, and the W2-D docs seed runs locally, not in CI.
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    name: Scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.scope.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Classify the change
+        id: scope
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          $docs = '^(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)))$'
+          $rust = 'true'
+          if ($env:EVENT_NAME -ceq 'pull_request') {
+            $files = @(git diff --no-renames --name-only HEAD^1 HEAD)
+            if ($LASTEXITCODE -eq 0 -and $files.Count -gt 0) {
+              $files | Write-Output
+              if (@($files | Where-Object { $_ -cnotmatch $docs }).Count -eq 0) { $rust = 'false' }
+            }
+          }
+          Write-Output "rust=$rust"
+          "rust=$rust" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          exit 0
+
+  rust:
+    # Fail-safe: run unless scope affirmatively says skip.
+    needs: scope
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' }}
     name: Rust / ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Hosted windows, cold rust-cache: 21.7-23.9 min on 2026-10-10/13. On
+    # 2026-10-15 three cold runs were cancelled at 25 min (jobs 116301727515,
+    # 116323387861, 116326383784), 20 min in before the override builds,
+    # after the daemon's warm release compile went from about 1 to 2 min.
+    # No cold run has finished since: an estimated 26-34 min. Warm runs
+    # peak at 17.5 min. A cold run must finish, or the cache is never saved
+    # and every later run is cold too: the cache key hashes the runner
+    # image's own Rust, so each image rollout starts cold (windows-latest
+    # 1.98.1 -> 1.99.0, 2026-10-15).
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: rust
@@ -65,7 +122,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install the Python SDK fixture dependency
-        run: python -m pip install "mcp==2.1.1"
+        run: python -m pip install "mcp==2.2.0"
       - name: Check generated daemon schema
         working-directory: .
         shell: pwsh
@@ -78,13 +135,19 @@ jobs:
         run: |
           python -m pip install pytest pyyaml "psycopg[binary]" psutil
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py -k 'not committed_census_matches_current_tree'
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py -k 'not committed_census_matches_current_tree'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
       - name: ported-row-and-mutant-ci-inventory
         working-directory: .
         run: python rust/ci/inventory.py
+      - name: Board harness lifecycle and normalization
+        working-directory: .
+        # Linux 2026-10-13: 21 tests in 0.21s. Allow a three-minute cold
+        # Windows startup/import floor pending its first hosted measurement.
+        timeout-minutes: 3
+        run: python -m pytest -q rust/daemon/harness/board/test_norm.py rust/daemon/harness/board/test_run.py
       - name: Bind the event-selected Python oracle
         shell: pwsh
         working-directory: .
@@ -130,6 +193,10 @@ jobs:
         run: cargo check --locked --all-targets -j 4
       - name: Clippy
         run: cargo clippy --locked --all-targets -j 4 -- -D warnings
+      - name: Check write-path harness targets
+        # 2026-10-13: cold Linux dev-profile check took 54 s; allow about 2x.
+        timeout-minutes: 2
+        run: cargo check --locked --all-targets -p pseudolife-daemon --features harness,mutants -j 4
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
       - name: Check all targets without default features
@@ -141,20 +208,29 @@ jobs:
 
       - name: Daemon override build configurations
         working-directory: ${{ github.workspace }}
+        # Hosted windows: about 7 min cold on 2026-10-10/13 (release build
+        # 5-6 min), 3.2 min warm since 2026-10-14. The cold release build
+        # was still running 6m20s in when job 116323387861 was cancelled.
+        timeout-minutes: 20
         shell: pwsh
         run: |
+          # Each build's output is printed only once it finishes; these lines
+          # show which one was running if the step times out.
           $env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND = '1'
           $daemonDefaultLog = Join-Path $env:RUNNER_TEMP 'daemon-default-override.log'
+          Write-Host "$(Get-Date -Format o) debug override test: start"
           cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonDefaultLog
           $result = $LASTEXITCODE
           Get-Content $daemonDefaultLog
           if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonDefaultLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
           $daemonReleaseLog = Join-Path $env:RUNNER_TEMP 'daemon-release-override.log'
+          Write-Host "$(Get-Date -Format o) release override test: start"
           cargo +1.94.0 test --manifest-path rust/Cargo.toml --locked --release --features mutants -p pseudolife-daemon -j 3 mutants::tests::loopback_bind_override_is_absent_from_production_build -- --exact *> $daemonReleaseLog
           $result = $LASTEXITCODE
           Remove-Item env:PSEUDOLIFE_DAEMON_TEST_LOOPBACK_BIND
           Get-Content $daemonReleaseLog
           if ($result -ne 0 -or -not (Select-String -LiteralPath $daemonReleaseLog -Pattern 'test result: ok\. 1 passed;')) { exit 1 }
+          Write-Host "$(Get-Date -Format o) mutants dev build: start"
           cargo +1.94.0 build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --features mutants -j 3
           exit $LASTEXITCODE
       - name: Retain debug bind fixture
@@ -167,7 +243,8 @@ jobs:
           if-no-files-found: error
 
   candidate:
-    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    needs: scope
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' }}
     name: Candidate / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -215,7 +292,9 @@ jobs:
           if-no-files-found: error
 
   parity-checks:
-    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    # Explicit: the implicit success() also checks scope, an ancestor, so a
+    # failed scope would skip these jobs even after rust and candidate ran.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
     needs: [candidate, rust]
     strategy:
@@ -305,7 +384,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "setuptools>=68" wheel
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
-          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          python -m pip install -e ".[dev,lite]" "mcp==2.2.0"
       - uses: actions/download-artifact@v4
         with:
           name: rust-shim-${{ runner.os }}
@@ -347,6 +426,15 @@ jobs:
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
           python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
           exit $LASTEXITCODE
+      # Linux 2026-10-13: offline W2-D checks measured below one second;
+      # one minute is the smallest whole-minute timeout above twice that.
+      - name: Offline W2-D search harness regressions
+        if: matrix.suite == 'eval'
+        timeout-minutes: 1
+        shell: pwsh
+        run: |
+          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py
+          exit $LASTEXITCODE
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
         if: matrix.suite == 'eval'
@@ -367,7 +455,9 @@ jobs:
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py
+          $env:PSEUDOLIFE_RUST_BINARY = $candidate
+          $env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py rust/cli_harness/test_backup.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row mail --row hook --row episode --skip-bank --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -525,7 +615,7 @@ jobs:
           if (-not $IsWindows) { chmod +x $bindFixture }
           $env:PL_SECURITY_DEFAULT_BIN = $candidate
           $env:PL_SECURITY_RELEASE_MUTANTS_BIN = $mutants
-          python -m pytest -q rust/daemon/harness/test_security_cases.py
+          python -m pytest -q rust/daemon/harness/test_security_cases.py rust/daemon/harness/test_principals_settle.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte security-refusals --out (Join-Path $env:RUNNER_TEMP 'daemon-security-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -535,6 +625,48 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')
           exit $LASTEXITCODE
+      # Linux 2026-10-13: coercion baseline + four controls + disabled control 204.2s,
+      # targeted tests 14.68s; Linux's seven minutes is about twice that gate.
+      # The tool argument binding sweep and its 14 mutants add 9.4s (Windows
+      # release build, 2026-10-16).
+      - name: Daemon MCP live parity and controls
+        if: matrix.suite == 'cli'
+        # Windows master 2026-10-15: 6m28s and 6m49s (runs 38689105018,
+        # 38794022446), so seven minutes had no headroom; fourteen is about
+        # twice that gate.
+        timeout-minutes: ${{ runner.os == 'Linux' && 7 || 14 }}
+        shell: pwsh
+        env:
+          PL_HARNESS_SLICE: w2g
+        run: |
+          $defaultName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
+          $mutantName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $defaultName)).Path
+          $mutants = (Resolve-Path (Join-Path 'rust/target/release' $mutantName)).Path
+          $env:PL_HARNESS_SCRATCH = Join-Path $env:RUNNER_TEMP 'daemon-mcp-homes'
+          # Scalar coercions are not fully described by the SDK JSON schemas.
+          python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py rust/daemon/harness/test_mcp_binding.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Tool argument binding: the table is current, then every generated
+          # case matches Python in process and every binder mutant is caught.
+          python rust/daemon/harness/mcp_binding_table.py --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $mcpOut = New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'daemon-mcp')
+          python rust/daemon/harness/mcp_binding_sweep.py --rust-bin $mutants --mutants --show 10 --out (Join-Path $mcpOut 'binding-sweep.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/daemon/harness/mcp_ci.py --default-bin $candidate --mutant-bin $mutants --out (Join-Path $env:RUNNER_TEMP 'daemon-mcp')
+          exit $LASTEXITCODE
+      - name: Retain daemon MCP parity outcomes
+        if: always() && matrix.suite == 'cli'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-mcp-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/daemon-mcp/**/*.json
+            ${{ runner.temp }}/daemon-mcp/*.log
+          if-no-files-found: error
       - name: Retain daemon security parity outcomes
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
@@ -844,8 +976,16 @@ jobs:
   source-mutants:
     # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs
     # queued behind the 20-job concurrency cap, with a largest matrix queue
-    # of 24m25s. Catch CLI source survivors after merge on master/nightly.
-    if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')
+    # of 24m25s, so they left PRs. Since 2026-10-17 they also leave master
+    # pushes and run nightly and on manual CI. On master they were 72 of 104
+    # jobs and about 550 of 920 runner-minutes (runs 38412458284,
+    # 38775578227, 38794022446; Windows shard median 11 min, Linux 5), and
+    # all 1,170 shard jobs in the 16 readable master/nightly runs from
+    # 2026-10-12 to 2026-10-16 passed. 18 of the 27 push runs in that window
+    # were cancelled by a newer push before finishing. A survivor now
+    # surfaces at the next nightly (its own concurrency group, so pushes no
+    # longer cancel it) instead of after the merge that caused it.
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && needs.candidate.result == 'success' }}
     name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
     # These shards compile their own source copies and consume no rust-job
     # artifact; the final Parity gate still requires both Rust jobs.
@@ -854,7 +994,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        shard: [audit-0, audit-1, audit-2, backup-0, backup-1, connect-0, connect-1, connect-2, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, mail-0, mail-1, maintainer-0, maintainer-1, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2]
+        shard: [audit-0, audit-1, audit-2, backup-0, backup-1, backup-2, connect-0, connect-1, connect-2, doctor-0, doctor-1, doctor-2, doctor-3, doctor-4, episode-0, hook-0, hook-1, invite-0, lease-0, mail-0, mail-1, maintainer-0, maintainer-1, move-0, move-1, pair-0, pair-1, test_login-0, test_login-1, test_login-2, transfer-0, transfer-1, transfer-2, tunnel-0, tunnel-1, tunnel-2]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -880,7 +1020,7 @@ jobs:
         run: |
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          python -m pip install -e ".[dev,lite]" "mcp==2.2.0"
           exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL for source controls
         # Linux 2026-10-11: fixture setup under 5s; network-bound floor.
@@ -931,7 +1071,8 @@ jobs:
 
   daemon-image:
     name: Rust daemon / disposable image
-    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    needs: scope
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -969,11 +1110,13 @@ jobs:
           docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
           python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
-    # Only a PR may skip the after-merge CLI source matrix. Master/nightly
+    # Only a PR or a master push may skip the CLI source matrix. The nightly
     # (and ordinary manual CI) require its success, never a skip or failure.
+    # A PR that scope classified as documentation-only skips the Rust,
+    # candidate and parity jobs; any other skip still fails.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
     name: Parity / ${{ matrix.os }}
-    needs: [rust, candidate, parity-checks, source-mutants]
+    needs: [scope, rust, candidate, parity-checks, source-mutants]
     strategy:
       fail-fast: false
       matrix:
@@ -988,15 +1131,16 @@ jobs:
           GATE_EVENT: ${{ github.event_name }}
         run: |
           $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
+          $docsOnly = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
           foreach ($job in @('rust', 'candidate', 'parity-checks')) {
-            if ($results[$job].result -cne 'success') {
+            if ($results[$job].result -cne 'success' -and -not ($docsOnly -and $results[$job].result -ceq 'skipped')) {
               Write-Error "$job did not succeed"
               exit 1
             }
           }
           $sourceResult = $results['source-mutants'].result
-          if ($sourceResult -cne 'success' -and -not ($env:GATE_EVENT -ceq 'pull_request' -and $sourceResult -ceq 'skipped')) {
-            Write-Error "source-mutants did not succeed outside the PR skip exception"
+          if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
+            Write-Error "source-mutants did not succeed outside the PR and push skip exception"
             exit 1
           }
 
@@ -1041,7 +1185,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install -e ".[dev,lite]" "mcp==2.1.1"
+          python -m pip install -e ".[dev,lite]" "mcp==2.2.0"
           exit $LASTEXITCODE
       - name: Bind the frozen-head Python oracle
         shell: pwsh

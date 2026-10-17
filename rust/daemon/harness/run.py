@@ -84,6 +84,7 @@ T_COLON = "tok:with:colons-0003"
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
          timeout: float = 120.0, compare_length: bool = False, body_bytes: bool = False,
          chunked: bool = False, headers_only: bool = False) -> dict:
+    started_at = time.time()
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     c.putrequest(method, path, skip_host=any(k.lower() == "host" for k, _ in headers),
                  skip_accept_encoding=True)
@@ -132,6 +133,9 @@ def call(port: int, method: str, path: str, headers=(), body: bytes | None = Non
     else:
         payload = {"bytes": raw.decode("latin-1")}
     c.close()
+    if path == "/api/agents?view=coordination" and isinstance(payload.get("json"), dict) \
+            and "snapshot_at" in payload["json"]:
+        payload["_clock_window"] = [started_at, time.time()]
     return {"status": r.status, "headers": hdrs, **payload}
 
 
@@ -247,8 +251,20 @@ def normalize_search(body: dict) -> dict:
     return body
 
 
+def snapshot_clock_valid(resp: dict) -> bool:
+    window = resp.get("_clock_window")
+    body = resp.get("json")
+    value = body.get("snapshot_at") if isinstance(body, dict) else None
+    return (isinstance(window, list) and len(window) == 2
+            and all(type(t) in (int, float) for t in window)
+            and type(value) in (int, float) and window[0] <= value <= window[1])
+
+
 def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bool = False) -> dict:
     resp = json.loads(json.dumps(resp))
+    if path == "/api/agents?view=coordination" and snapshot_clock_valid(resp):
+        resp["json"]["snapshot_at"] = "<request clock>"
+    resp.pop("_clock_window", None)
     if urllib.parse.unquote(path.split("?")[0]) == "/health" and "json" in resp:
         resp["json"] = normalize_health(resp["json"], declared, golden=golden)
     if urllib.parse.unquote(path.split("?")[0]) == "/api/search" and isinstance(resp.get("json"), dict):
@@ -383,6 +399,12 @@ class Scenario:
     seeds_principals = False
     seed_entries = False
     settle = True          # wait until both report db + embedder
+    snapshot_settle = True  # early HTTP witnesses still wait before measuring bank state
+    # Wait for the stored-principal view before the cases: required when a
+    # case's bearer matches no environment token on a reachable bank. The
+    # readiness settle does not imply it (its search uses an environment
+    # token), and a failed first read retries only after REFRESH_EVERY.
+    principals_settle = False
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
     loopback_bind_fixture = False
@@ -485,8 +507,7 @@ def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
         case("api POST coordination over 32K", "POST", "/api/coordination/receive", a + [js], b"{\"x\": \"" + b"a" * 40000 + b"\"}"),
         case("api maintainer unknown", "GET", "/api/maintainer/nope", a),
         case("api maintainer wrong verb", "GET", "/api/maintainer/send", a),
-        case("api agents coordination view", "GET", "/api/agents?view=coordination", a,
-             declared="W2-F: board snapshot" if auth else None),
+        case("api agents coordination view", "GET", "/api/agents?view=coordination", a),
         case("api agents coordination view POST", "POST", "/api/agents?view=coordination", a),
         case("api known GET (not ported)", "GET", "/api/stats", a, declared="W2-D: stats"),
         case("api config GET (not ported)", "GET", "/api/config", a, declared="W2-D: config read"),
@@ -517,6 +538,7 @@ class Tokens(Scenario):
     (one paired, one revoked) written by Python's principal store."""
     name = "tokens"
     seeds_principals = True
+    principals_settle = True  # several cases' bearers resolve through the stored view
 
     def __init__(self):
         self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT,
@@ -570,7 +592,7 @@ class Tokens(Scenario):
                  json.dumps({"code": "ABCD-EFGH-JKMN", "token_sha256": "b" * 64}).encode(),
                  declared="W2-F: pairing redemption"),
             case("maintainer known GET", "GET", "/api/maintainer", [auth], declared="W2-F: maintainer"),
-            case("mcp path, auth", "GET", "/mcp", [auth], declared="W2-G: MCP transport"),
+            case("mcp path, auth", "GET", "/mcp", [auth]),
             case("search blank q", "GET", q(q=""), [auth]),
             case("search unknown band", "GET", q(q="memory", band="nope"), [auth]),
             case("search unknown band, blank q", "GET", q(band="nope"), [auth]),
@@ -583,7 +605,7 @@ class Tokens(Scenario):
             case("board check-in: revoked stored principal", "GET", "/api/hook/coordination-start",
                  [bearer("stored-dave-token-w1a")]),
             case("coordination hub (authenticated)", "POST", "/api/coordination/receive",
-                 [auth, ("Content-Type", "application/json")], b"{}", declared="W2-F: board hub"),
+                 [auth, ("Content-Type", "application/json")], b"{}"),
         ]
         return c
 
@@ -812,6 +834,8 @@ class DimMismatch(Scenario):
     """entries.embedding is vector(384): init_refusal before any DDL."""
     name = "dim-mismatch"
     settle = False
+    snapshot_settle = False  # schema refusal never reaches healthy initialization
+    golden_replay = True  # the timeline only waits; its cases replay against the golden
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -824,11 +848,27 @@ class DimMismatch(Scenario):
         return [case("health, dim refusal", "GET", "/health"),
                 case("search during refusal", "GET", "/api/search?q=x")]
 
+    def timeline(self, procs, holders):
+        # Rust records init_refusal in its warmup task, after its listener
+        # answers; /health says ok until then. Golden mode has no Python arm
+        # to delay the first case (Linux run 38699015278 compared Rust's
+        # pre-warmup 200 with the recorded 503), so wait as StampedBank does.
+        waiting = dict(procs)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            waiting = {side: d for side, d in waiting.items()
+                       if not (call(d.port, "GET", "/health").get("json") or {}).get("init_refusal")}
+            if not waiting:
+                return self.cases()
+            time.sleep(0.1)
+        raise RuntimeError(f"dim-mismatch startup did not refuse: {', '.join(sorted(waiting))}")
+
 
 class StampedBank(Scenario):
     """Future schema: Python downgrades; Rust deliberately refuses unchanged."""
     name = "stamped"
     settle = False
+    snapshot_settle = False  # timeline settles Python and observes Rust's schema refusal
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -1069,6 +1109,7 @@ class NullEmbedding(Scenario):
     """A stored row with a NULL vector: hydration fails, not_ready, backoff."""
     name = "null-embedding"
     settle = False
+    snapshot_settle = False  # timeline observes failed hydration, not a healthy bank
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -1094,6 +1135,7 @@ class UnconstrainedDims(Scenario):
     guard passes, the hydrated-dimension guard refuses (init_refusal)."""
     name = "unconstrained-dims"
     settle = False
+    snapshot_settle = False  # timeline observes the hydrated-dimension refusal
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -1153,6 +1195,9 @@ class Encodings(Scenario):
     name = "encodings"
     config_yaml = "coordination:\n  allowed_principals: [alice]\n"
     settle = False
+    # "matching nothing" reaches the stored-principal view; before its first
+    # read both daemons answer principals_unavailable instead of unauthorized.
+    principals_settle = True
 
     def __init__(self):
         # The singular token is UTF-8 "caf\u00e9" read as latin-1; the map's is "caf\u00e9".
@@ -1271,8 +1316,11 @@ class StaticPaths(StaticBuild):
             import subprocess
             subprocess.run(["cmd", "/c", "mklink", "/J", str(root / "escape"), str(outside)],
                            check=True, capture_output=True)
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(root / "prefix-escape"), str(sibling)],
+                           check=True, capture_output=True)
         else:
             (root / "escape").symlink_to(outside, target_is_directory=True)
+            (root / "prefix-escape").symlink_to(sibling, target_is_directory=True)
             (root / "notice.js").symlink_to(root / "notice.txt")
             (root / "loop-a").symlink_to("loop-b")
             (root / "loop-b").symlink_to("loop-a")
@@ -1301,6 +1349,20 @@ class StaticPaths(StaticBuild):
                   "/ui/%5c%5c.%5cpipe%5cpl_http_missing_pipe"]
         paths += ["/ui/a*b", "/ui/a%7Cb", "/ui/%3C", "/ui/..%20/outside/secret.txt",
                   "/ui/..%20/static/index.html", "/ui/sub/..%20/notice.txt"]
+        paths += ["/ui/../static/index.html", "/ui/../outside/../static/index.html",
+                  "/ui/a/../../static/js/app.js", "/ui/js/../index.html",
+                  "/ui/a/./b/../c.css", "/ui/COM0.js", "/ui/lpt0.css",
+                  "/ui/prefix-escape/secret.txt"]
+        if os.name == "nt":
+            drive = daemons.scratch_root().drive.upper()
+            paths = [f"/ui/{drive}index.html" if p == "/ui/C:index.html" else p for p in paths]
+            other = "R" if drive == "Q:" else "Q"
+            paths += [f"/ui/{other}:x", f"/ui/{other}:%5capp%5cstatic%5cx",
+                      f"/ui/%5c%5c%3f%5c{other}:%5cx"]
+            paths += ["/ui/NUL", "/ui/nul.txt", "/ui/a/CON", "/ui/COM1.js",
+                      "/ui/lpt9.css", "/ui/COM%C2%B9", "/ui/AUX%20.txt", "/ui/CONOUT$",
+                      "/ui/index.html:private", "/ui/a:b/index.html",
+                      "/ui/..%5cstatic%5cindex.html", "/ui/C:..%5cstatic%5cindex.html"]
         odd_segments = (".. .", ".. ..", "... ", ".... ", ". .")
         paths += ["/ui/" + urllib.parse.quote(p) + "/notice.txt" for p in odd_segments]
         if os.name != "nt":
@@ -1311,8 +1373,6 @@ class StaticPaths(StaticBuild):
         out = [case("path " + p, "GET", p) for p in paths]
         if os.name == "nt":
             for c in out:
-                if c["path"] == "/ui/C:index.html":
-                    c["refusal_policy"] = "lexical-outside-root"
                 if "..%20/" in c["path"]:
                     c["refusal_policy"] = "parent-space-refusal"
                 if any("/" + urllib.parse.quote(p) + "/" in c["path"] for p in odd_segments):
@@ -1357,10 +1417,6 @@ class StaticRootLink(StaticPaths):
         out = [case("linked root " + p, "GET", p) for p in
                 ("/ui", "/ui/notice.txt", "/ui/missing", "/ui/escape/missing",
                  "/ui/../static/index.html", "/ui/%2e%2e/static/index.html")]
-        if os.name != "nt":
-            for c in out:
-                if "/../" in c["path"] or "%2e%2e" in c["path"]:
-                    c["refusal_policy"] = "lexical-outside-root"
         return out
 
 
@@ -1535,10 +1591,58 @@ def wait_settled(ports: list[int], timeout: float = 600.0, token: str | None = N
         raise RuntimeError(f"daemons on {sorted(pending)} did not settle within {timeout}s")
 
 
+PRINCIPAL_PROBE = b"Bearer pl-harness-principal-probe"
+
+
+def principals_ready(port: int) -> bool:
+    """The stored-principal view has loaded: a bearer no token matches is
+    refused 401, not 503 ``principals_unavailable``. Both daemons start the
+    refresher in the background (``PrincipalRefresher.start``, Rust
+    ``principals::spawn_refresher``), so requests can arrive before its first
+    read. The refusal comes before any handler, so the probe writes nothing;
+    any other answer (an open daemon would run the search) is a scenario
+    misconfiguration and raises."""
+    try:
+        r = call(port, "GET", "/api/search?q=", [("Authorization", PRINCIPAL_PROBE)], timeout=30)
+    except OSError:
+        return False
+    error = (r.get("json") or {}).get("error")
+    if r["status"] == 503 and error == "principals_unavailable":
+        return False
+    if r["status"] == 401 and error == "unauthorized":
+        return True
+    raise RuntimeError(f"principal probe on {port}: expected 401 or 503 principals_unavailable, "
+                       f"got {r['status']} {error!r}")
+
+
+def wait_principals(ports: list[int], timeout: float = 60.0) -> None:
+    deadline = time.monotonic() + timeout
+    pending = set(ports)
+    while pending and time.monotonic() < deadline:
+        pending = {p for p in pending if not principals_ready(p)}
+        if pending:
+            time.sleep(0.2)
+    if pending:
+        raise RuntimeError(f"stored principals on {sorted(pending)} did not load within {timeout}s")
+
+
+def settle_before_cases(scn: Scenario, ports: list[int]) -> None:
+    if scn.settle:
+        wait_settled(ports, token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"), check_db=not scn.settle_with_search)
+    if scn.principals_settle:
+        wait_principals(ports)
+
+
 def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) -> dict:
     declared: list[str] = []
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
+    if c["path"] == "/api/agents?view=coordination":
+        for side, response in (("python", py), ("rust", rs)):
+            if response and isinstance(response.get("json"), dict) and "snapshot_at" in response["json"]:
+                recorded = golden and side == "python" and response["json"]["snapshot_at"] == "<request clock>"
+                if not recorded and not snapshot_clock_valid(response):
+                    row["diffs"].append(f"{side}: snapshot_at is outside its captured request window")
     if c.get("session_end_invalid_json"):
         row["declared"] = "invalid SessionEnd: Python succeeds without closing; Rust refuses"
         headers = {"content-type": "application/json; charset=utf-8",
@@ -1669,9 +1773,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         scn.configure_daemons(procs)
         for d in procs.values():
             d.start(240)
-        if scn.settle:
-            wait_settled([d.port for d in procs.values()], token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"),
-                         check_db=not scn.settle_with_search)
+        settle_before_cases(scn, [d.port for d in procs.values()])
         rows = []
         golden_name = scn.name
         if scn.name in {"static-build", "static-paths", "static-root-link"}:
@@ -1701,6 +1803,16 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
             rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
+        if not scn.settle and scn.snapshot_settle and not scn.unreachable_database:
+            from pseudolife_memory.principals import env_auth
+            mapped, singular = env_auth(scn.env)
+            # Hosted Windows run 38226818257 matched 22/22 pair-budget
+            # responses but compared initialized/empty bank catalogs.
+            # Keep requests early; settle before shutdown and the bank-state
+            # measurement (including recording). Reuse the recovery wait bound.
+            wait_settled([d.port for d in procs.values()], timeout=240,
+                         token=singular or next(iter(mapped), None),
+                         check_db=not scn.settle_with_search)
     finally:
         release(holders)
         for d in procs.values():

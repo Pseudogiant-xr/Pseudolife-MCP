@@ -23,6 +23,8 @@ import functools
 import json
 import logging
 import mimetypes
+import ntpath
+import os
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -201,6 +203,46 @@ def _parse_query(scope) -> dict[str, str]:
     return out
 
 
+# Names Windows maps to devices in every directory, with or without an
+# extension (``NUL``, ``com1.txt``); opening one reaches the device, not a file.
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"{kind}{n}" for kind in ("COM", "LPT") for n in "123456789¹²³"})
+
+
+def _inside_static_root(root: str, rel: str, pathmod: Any = os.path) -> bool:
+    """Whether ``rel`` joined to ``root`` stays under it, decided from the
+    strings alone. An absolute, drive, UNC or device form replaces the root
+    in the join and so lands outside it. Under Windows path rules a device
+    name or an alternate data stream (``name:stream``) is refused too."""
+    base = pathmod.normcase(pathmod.normpath(root))
+    joined = pathmod.normcase(pathmod.normpath(pathmod.join(root, rel)))
+    try:
+        if pathmod.commonpath([base, joined]) != base:
+            return False
+    except ValueError:  # different drives, or absolute mixed with relative
+        return False
+    # A path that climbs above the root and comes back ("../x/../static/a")
+    # normalizes inside it, but resolving it would still visit the outside
+    # directory on the way. Refuse any ".." that rises above the root.
+    # A same-drive "C:name" joins under the root, so only its tail counts.
+    tail = ntpath.splitdrive(rel)[1] if pathmod is ntpath else rel
+    parts = tail.replace("\\", "/").split("/") if pathmod is ntpath else tail.split("/")
+    depth = 0
+    for part in parts:
+        if part in ("", "."):
+            continue
+        depth += -1 if part == ".." else 1
+        if depth < 0:
+            return False
+    if pathmod is ntpath:
+        for part in tail.replace("/", "\\").split("\\"):
+            stem = part.split(".", 1)[0].rstrip(" .").upper()
+            if ":" in part or stem in _WINDOWS_DEVICE_NAMES:
+                return False
+    return True
+
+
 def _serve_static(rel_path: str) -> tuple[int, bytes, str]:
     """Resolve ``/ui/<rel_path>`` under STATIC_DIR with traversal protection."""
     rel = rel_path.strip("/")
@@ -208,23 +250,27 @@ def _serve_static(rel_path: str) -> tuple[int, bytes, str]:
         rel = "index.html"
     elif rel.startswith("ui/"):
         rel = rel[3:]
+    # Refuse before touching the filesystem: resolving first would open
+    # whatever the join names, which on Windows may be a UNC or pipe path.
+    if not _inside_static_root(str(STATIC_DIR), rel):
+        return 403, b"forbidden", "text/plain"
+    root = STATIC_DIR.resolve()
+
+    def contained(resolved: Path) -> bool:
+        return resolved.is_relative_to(root)
+
     target = (STATIC_DIR / rel).resolve()
-    try:
-        target.relative_to(STATIC_DIR.resolve())
-    except ValueError:
+    if not contained(target):
         return 403, b"forbidden", "text/plain"
     if target.is_dir():
+        # The appended index may itself link outside the folder.
         target = (target / "index.html").resolve()
-        try:
-            target.relative_to(STATIC_DIR.resolve())
-        except ValueError:
+        if not contained(target):
             return 403, b"forbidden", "text/plain"
     if not target.is_file():
         # SPA fallback: unknown sub-route -> index.html (hash router handles it).
         index = (STATIC_DIR / "index.html").resolve()
-        try:
-            index.relative_to(STATIC_DIR.resolve())
-        except ValueError:
+        if not contained(index):
             return 403, b"forbidden", "text/plain"
         if index.is_file():
             return 200, index.read_bytes(), "text/html; charset=utf-8"
@@ -553,6 +599,17 @@ def build_console_app(
                 text = await asyncio.get_running_loop().run_in_executor(
                     None, hook_memory_changes, service, params.get("session_id"),
                     params.get("since"))
+                # The maintainer's delegate's one-line reminder (spec
+                # 2026-10-14), after the cursor and any note: only beside a
+                # cursor, since an empty answer must stay empty for the hook.
+                # The lookup waits at most DELEGATE_LOOKUP_BUDGET.
+                if text and params.get("agent"):
+                    from pseudolife_memory.coordination import delegate_reminder
+                    headers = {k.decode().lower(): v.decode("latin-1")
+                               for k, v in scope.get("headers", [])}
+                    text += await delegate_reminder(service, headers,
+                                                    agent=params.get("agent"),
+                                                    token_map=token_map, token=token)
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store")
             return
@@ -602,7 +659,8 @@ def build_console_app(
         # 4c) plugin coordination SessionStart hook: the board check-in as
         # plain text, or an empty body when this bearer cannot use the board
         # (disabled, no or unknown bearer, unlisted principal, file mode).
-        # 200 always, like session-start; the check touches no storage.
+        # 200 always, like session-start; the check touches no storage (only
+        # the delegate lookup below does, and only given ?agent=).
         if path == "/api/hook/coordination-start":
             denied = _browser_gate(scope)
             if denied:
@@ -616,6 +674,15 @@ def build_console_app(
                        for k, v in scope.get("headers", [])}
             reason = unavailable_reason(service, headers, token_map=token_map, token=token)
             text = "" if reason else CHECKIN_TEXT + "\n"
+            # ?agent=<id> (the session's board address, spec 2026-10-14):
+            # the maintainer's delegate gets its brief as a block after the
+            # unchanged check-in. The lookup is the one storage read here, and
+            # waits at most DELEGATE_LOOKUP_BUDGET.
+            agent = _parse_query(scope).get("agent") if not reason else None
+            if agent:
+                from pseudolife_memory.coordination import delegate_brief
+                text += await delegate_brief(service, headers, agent=agent,
+                                             token_map=token_map, token=token)
             # X-PL-Board names why the board is off, so the installer and
             # doctor report the daemon's reason instead of guessing one.
             # The codes reveal no more than /api's own 401 already does.

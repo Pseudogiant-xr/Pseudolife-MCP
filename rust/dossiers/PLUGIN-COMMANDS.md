@@ -69,7 +69,7 @@ Dossier-local census, pending `rust/producer-census.json`. These are exact tool 
 | Memory-status | GET `/health`; `memory_stats({})`; `memory_dream({"action":"status"})`; mention `/ui/` (`plugin/commands/memory-status.md:11`, `:15`, `:29`, `:46`). No mutation is requested by the ordinary status flow. |
 | PreToolUse | Stdin `{"session_id":"demo-session","agent_id":"demo-child","tool_name":"mcp__demo__memory_agents","tool_input":{"action":"update","status":"demo"}}`; denial stdout `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"<source-specific-reason>"}}` and exit 0 (`plugin/hooks/subagent-board-guard.sh:54`, `:108`). Missing agent_id represents the parent and passes; agent tool absent/default/list passes; message receive/history passes, while send/ack/default/unknown actions deny in guarded Claude child context (`:60`, `:95`). |
 
-Hook HTTP/argv producers are specified in HOOKS section 4; the event table above is their packaging identity. Release metadata is currently `{"version":"0.17.0"}` (`plugin/release.json:1`), not a new plugin-manifest version key.
+Hook HTTP/argv producers are specified in HOOKS section 4; the event table above is their packaging identity. Release metadata is currently `{"version":"0.18.0"}` (`plugin/release.json:1`), not a new plugin-manifest version key.
 
 ## 5. Python incidentals to defer
 

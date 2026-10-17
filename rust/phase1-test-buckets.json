@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "oracle_commit": "686b3f95c4a4d4e6c2d81e1b76be9901945a8da1",
+  "oracle_commit": "1d444aa1bc432431e5fcbc07a55e1fe661c0f8e4",
   "database_schema": 55,
   "policy": "Each file has one bucket. Candidate files route only listed concrete nodes; every other node remains oracle-only. Internal equivalents marked pending establish no Rust parity.",
   "counts": {
-    "internal": 355,
+    "internal": 356,
     "oracle": 68,
     "candidate": 2
   },
@@ -206,6 +206,12 @@
       "bucket": "internal",
       "equivalent": "pending",
       "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_changelog_fragments.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
     },
     {
       "path": "tests/test_channel.py",

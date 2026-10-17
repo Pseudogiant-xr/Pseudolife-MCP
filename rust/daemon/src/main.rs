@@ -7,15 +7,24 @@ mod auth;
 mod background;
 mod background_sessions;
 mod bank;
+mod board;
 mod config;
+mod contradiction;
 mod dream;
 mod embed;
 mod embedding_math;
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+mod episodes;
 mod graph_read;
+#[cfg(feature = "harness")]
+mod harness_route;
 mod health;
 mod heap_trim;
 mod http;
+mod labels;
 mod maintenance;
+mod mcp;
+mod meta_filter;
 mod mutants;
 mod onnx_artifacts;
 mod onnx_runtime;
@@ -23,13 +32,18 @@ mod onnx_runtime;
 mod principal_probe;
 mod principals;
 mod pyjson;
+mod read;
 mod release_check;
 mod routes;
 mod search;
 mod service;
+mod slots;
 mod startup;
 mod static_files;
 mod storage;
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+mod store;
+mod stores;
 mod txn;
 
 use std::path::PathBuf;
@@ -61,6 +75,18 @@ fn fail(code: i32, message: &str) -> ! {
     std::process::exit(code)
 }
 
+fn nodelay_listener(
+    listener: tokio::net::TcpListener,
+) -> impl axum::serve::Listener<Io = tokio::net::TcpStream, Addr = std::net::SocketAddr> {
+    use axum::serve::ListenerExt;
+
+    listener.tap_io(|stream| {
+        if let Err(error) = stream.set_nodelay(true) {
+            eprintln!("set TCP_NODELAY: {error}");
+        }
+    })
+}
+
 fn main() {
     #[cfg(feature = "principal-harness")]
     if std::env::var_os("PSEUDOLIFE_PRINCIPAL_HARNESS").is_some() {
@@ -74,6 +100,13 @@ fn main() {
         && std::env::var_os("PSEUDOLIFE_DAEMON_HARNESS_CAPABILITIES").is_some()
     {
         println!("{}", mutants::supports_loopback_bind_fixture());
+        return;
+    }
+    // The binding sweep (harness/mcp_binding_sweep.py) drives the MCP
+    // argument binder directly: one {"tool", "args"} JSON object per line.
+    #[cfg(any(feature = "harness", feature = "mutants"))]
+    if std::env::var_os("PSEUDOLIFE_MCP_BIND_PROBE").is_some() {
+        mcp::binding::probe();
         return;
     }
     // The embedding harness exercises the same loader and encoder without a bank.
@@ -211,6 +244,7 @@ fn main() {
             env_principals.clone(),
         ));
         principals::spawn_refresher(dsn.clone(), store.clone(), env_principals);
+        let service_dsn = dsn.clone();
         let service = Arc::new(service::Service::new(
             config,
             env,
@@ -229,7 +263,19 @@ fn main() {
         );
         background.start_release_check(service.release_check.clone(), &service.config.updates);
         background.start_heap_trim(trim_every);
-        let app = Arc::new(http::App::new(service.clone(), tokens, store, static_dir));
+        let board = Arc::new(board::Board::new(
+            service.config.coordination.clone(),
+            service_dsn,
+            service.clone(),
+            store.clone(),
+        ));
+        let app = Arc::new(http::App::new(
+            service.clone(),
+            tokens,
+            store,
+            static_dir,
+            board,
+        ));
         let router = axum::Router::new().fallback(http::handle).with_state(app);
         let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {
             Ok(l) => l,
@@ -240,7 +286,7 @@ fn main() {
             }
         };
         eprintln!("daemon: listening on {host}:{port} (auth={auth_configured})");
-        let code = match axum::serve(listener, router)
+        let code = match axum::serve(nodelay_listener(listener), router)
             .with_graceful_shutdown(shutdown_signal())
             .await
         {
@@ -250,6 +296,9 @@ fn main() {
                 1
             }
         };
+        // HTTP admission has stopped. Detached stores must finish before
+        // background shutdown performs the final persistence callback.
+        service.writes.drain().await;
         background.shutdown(service.as_ref()).await;
         code
     });
@@ -267,5 +316,22 @@ async fn shutdown_signal() {
     {
         let mut break_signal = tokio::signal::windows::ctrl_break().expect("CTRL_BREAK handler");
         tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = break_signal.recv() => {} }
+    }
+}
+
+#[cfg(test)]
+mod listener_tests {
+    use super::*;
+    use axum::serve::Listener;
+
+    #[tokio::test]
+    async fn accepted_tcp_socket_disables_nagle() {
+        let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = tcp.local_addr().unwrap();
+        let mut listener = nodelay_listener(tcp);
+        assert_eq!(listener.local_addr().unwrap(), address);
+        let _client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let (accepted, _) = listener.accept().await;
+        assert!(accepted.nodelay().unwrap());
     }
 }

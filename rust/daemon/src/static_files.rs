@@ -203,6 +203,77 @@ fn contained(path: &Path, root: &Path) -> bool {
     }
 }
 
+/// Keep the traversal history that normalization discards. Windows also
+/// interprets device names and streams independently of the containing folder.
+fn safe_relative_tail(rel: &str) -> bool {
+    #[cfg(windows)]
+    let rel = match Path::new(rel).components().next() {
+        Some(Component::Prefix(prefix)) => &rel[prefix.as_os_str().len()..],
+        _ => rel,
+    };
+    #[cfg(windows)]
+    let parts = rel.split(['/', '\\']);
+    #[cfg(not(windows))]
+    let parts = rel.split('/');
+    let mut depth = 0usize;
+    for part in parts {
+        match part {
+            "" | "." => continue,
+            ".." => {
+                let Some(parent) = depth.checked_sub(1) else {
+                    return false;
+                };
+                depth = parent;
+            }
+            _ => depth += 1,
+        }
+        #[cfg(windows)]
+        {
+            let stem = part
+                .split('.')
+                .next()
+                .unwrap_or("")
+                .trim_end_matches([' ', '.']);
+            let stem = stem.to_uppercase();
+            let numbered_device = ["COM", "LPT"].iter().any(|prefix| {
+                stem.strip_prefix(prefix).is_some_and(|number| {
+                    number.chars().count() == 1 && "123456789¹²³".contains(number)
+                })
+            });
+            if part.contains(':')
+                || matches!(
+                    stem.as_str(),
+                    "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+                )
+                || numbered_device
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// pathlib joins a same-drive relative path below the root, whereas
+/// PathBuf::join replaces the root whenever its argument has a prefix.
+fn relative_tail<'a>(root: &Path, rel: &'a str) -> &'a str {
+    #[cfg(windows)]
+    {
+        use std::path::Prefix;
+        if let (Some(Component::Prefix(base)), Some(Component::Prefix(request))) =
+            (root.components().next(), Path::new(rel).components().next())
+            && let (Prefix::Disk(base), Prefix::Disk(request)) = (base.kind(), request.kind())
+            && base.eq_ignore_ascii_case(&request)
+            && !Path::new(rel).has_root()
+        {
+            return &rel[2..];
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = root;
+    rel
+}
+
 fn forbidden() -> Served {
     Served {
         status: 403,
@@ -237,6 +308,14 @@ fn missing_metadata_error(error: &std::io::Error) -> bool {
 
 /// `_serve_static(path)`: `path` is the full request path (`/ui/...`).
 pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
+    serve_with_resolver(root, path, |path| resolve_path(path, &mut HashSet::new()))
+}
+
+fn serve_with_resolver(
+    root: &Path,
+    path: &str,
+    mut resolve: impl FnMut(&Path) -> std::io::Result<PathBuf>,
+) -> std::io::Result<Served> {
     let trimmed = path.trim_matches('/');
     let rel = if matches!(trimmed, "" | "ui" | "ui/") {
         "index.html"
@@ -245,42 +324,60 @@ pub fn serve(root: &Path, path: &str) -> std::io::Result<Served> {
     } else {
         trimmed
     };
+    let rel = relative_tail(root, rel);
+    #[cfg(windows)]
+    let ambiguous_segment = rel.split(['/', '\\']).any(|part| {
+        !part.is_empty()
+            && !matches!(part, "." | "..")
+            && part.bytes().all(|b| matches!(b, b'.' | b' '))
+    });
+    #[cfg(not(windows))]
+    let ambiguous_segment = false;
+    // Refuse out-of-root paths before filesystem access, including getcwd.
+    let lexical_root = lexical_path(root);
+    let joined = lexical_root.join(rel);
+    let request = Path::new(rel);
+    let changes_anchor = !root.has_root()
+        && (request.has_root()
+            || matches!(request.components().next(), Some(Component::Prefix(_))));
+    if !safe_relative_tail(rel)
+        || ambiguous_segment
+        || changes_anchor
+        || !contained(&lexical_path(&joined), &lexical_root)
+    {
+        if crate::mutants::active("static-traversal-open") {
+            // An observable open without asking the OS to open devices or
+            // remote paths during the Windows mutant control.
+            return Ok(Served {
+                status: 200,
+                body: b"unguarded static path".to_vec(),
+                content_type: "text/plain".into(),
+                cache: "no-store",
+            });
+        }
+        return Ok(forbidden());
+    }
     if rel.contains('\0') {
         // `Path.resolve()` raises on an embedded NUL: the 500 path.
         return Err(std::io::Error::other("embedded NUL in path"));
     }
-    #[cfg(windows)]
-    if rel.split(['/', '\\']).any(|part| {
-        !part.is_empty()
-            && !matches!(part, "." | "..")
-            && part.bytes().all(|b| matches!(b, b'.' | b' '))
-    }) && !crate::mutants::active("static-traversal-open")
-    {
-        return Ok(forbidden());
-    }
     let original_root = lexical_path(&std::env::current_dir()?.join(root));
     let joined = original_root.join(rel);
-    // Refuse out-of-root paths before filesystem access.
-    if !contained(&lexical_path(&joined), &original_root)
-        && !crate::mutants::active("static-traversal-open")
-    {
-        return Ok(forbidden());
-    }
-    let root = resolve_path(&original_root, &mut HashSet::new())?;
-    let mut target = resolve_path(&joined, &mut HashSet::new())?;
+    let root = resolve(&original_root)?;
+    let mut target = resolve(&joined)?;
     if !contained(&target, &root) && !crate::mutants::active("static-traversal-open") {
         return Ok(forbidden());
     }
     if metadata(&target)?.is_some_and(|m| m.is_dir()) {
         target = target.join("index.html");
-        let child = resolve_path(&target, &mut HashSet::new())?;
+        let child = resolve(&target)?;
         if !contained(&child, &root) && !crate::mutants::active("static-traversal-open") {
             return Ok(forbidden());
         }
         target = child;
     }
     if !metadata(&target)?.is_some_and(|m| m.is_file()) {
-        let index = resolve_path(&root.join("index.html"), &mut HashSet::new())?;
+        let index = resolve(&root.join("index.html"))?;
         if !contained(&index, &root) && !crate::mutants::active("static-traversal-open") {
             return Ok(forbidden());
         }
@@ -386,6 +483,123 @@ mod tests {
     fn lexical_escape_is_refused_before_an_invalid_root_is_resolved() {
         let root = std::env::temp_dir().join("pl-static-invalid\0root");
         assert_eq!(serve(&root, "/ui/../outside").unwrap().status, 403);
+    }
+
+    fn assert_lexical_refusal(root: &Path, paths: &[&str]) {
+        for path in paths {
+            let response = serve_with_resolver(root, path, |_| {
+                panic!("filesystem resolution reached for {path}")
+            })
+            .unwrap();
+            assert_eq!(response.status, 403, "{path}");
+            assert_eq!(response.body, b"forbidden", "{path}");
+        }
+    }
+
+    #[test]
+    fn climb_and_return_is_refused_before_filesystem_resolution() {
+        let root = std::env::temp_dir().join("static");
+        assert_lexical_refusal(
+            &root,
+            &[
+                "/ui/../static/index.html",
+                "/ui/../outside/../static/index.html",
+                "/ui/a/../../static/js/app.js",
+            ],
+        );
+    }
+
+    #[test]
+    fn relative_roots_refuse_rooted_requests_before_filesystem_resolution() {
+        for root in [".", "", "a/..", ".."] {
+            assert_lexical_refusal(Path::new(root), &["/ui//outside"]);
+            #[cfg(windows)]
+            assert_lexical_refusal(
+                Path::new(root),
+                &[r"/ui/\\host\share\x", r"/ui/\\.\pipe\x", "/ui/D:x"],
+            );
+        }
+    }
+
+    #[test]
+    fn relative_root_parents_are_preserved_when_resolving() {
+        let cwd = std::env::current_dir().unwrap();
+        let expected = cwd.parent().unwrap().join("static");
+        let mut reached = false;
+        let result = serve_with_resolver(Path::new("../static"), "/ui/index.html", |path| {
+            reached = true;
+            assert_eq!(path, expected);
+            Err(std::io::Error::other("stop before filesystem access"))
+        });
+        assert!(reached && result.is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_special_paths_are_refused_before_filesystem_resolution() {
+        assert_lexical_refusal(
+            Path::new(r"C:\app\static"),
+            &[
+                r"/ui/\\host\share\x",
+                r"/ui/\\.\pipe\x",
+                r"/ui/\\?\C:\x",
+                r"/ui/C:\x",
+                r"/ui/D:x",
+                r"/ui/D:\app\static\x",
+                r"/ui/..\x",
+                r"/ui/..\static\index.html",
+                r"/ui/C:..\static\index.html",
+                "/ui/NUL",
+                "/ui/nul.txt",
+                "/ui/a/CON",
+                "/ui/COM1.js",
+                "/ui/lpt9.css",
+                "/ui/COM¹",
+                "/ui/AUX .txt",
+                "/ui/CONOUT$",
+                "/ui/index.html:private",
+                "/ui/a:b/index.html",
+            ],
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn same_drive_relative_paths_join_under_the_static_root() {
+        let root = tree("drive-relative");
+        let drive = root
+            .components()
+            .next()
+            .unwrap()
+            .as_os_str()
+            .to_str()
+            .unwrap();
+        for path in [
+            format!("/ui/{drive}index.html"),
+            format!("/ui/{drive}js/../index.html"),
+        ] {
+            let s = serve(&root, &path).unwrap();
+            assert_eq!((s.status, s.body.as_slice()), (200, b"<html>".as_slice()));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn in_root_parent_components_and_ordinary_names_remain_allowed() {
+        let root = tree("lexical-allowed");
+        for path in [
+            "/ui/js/../index.html",
+            "/ui/a/./b/../c.css",
+            "/ui/console.js",
+            "/ui/icon.svg",
+            "/ui/nul-ish.css",
+            "/ui/com10.txt",
+            "/ui/COM0.js",
+            "/ui/lpt0.css",
+        ] {
+            assert_eq!(serve(&root, path).unwrap().status, 200, "{path}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn tree(name: &str) -> PathBuf {

@@ -1,6 +1,6 @@
 [package]
 name = "pseudolife-stdio"
-version = "0.17.0"
+version = "0.18.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -63,4 +63,4 @@ rustix = { workspace = true, features = ["event"] }
 
 [target.'cfg(windows)'.dependencies]
 libc.workspace = true
-windows-sys.workspace = true
+windows-sys = { workspace = true, features = ["Win32_System_SystemInformation"] }

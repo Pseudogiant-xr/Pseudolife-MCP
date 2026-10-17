@@ -123,8 +123,22 @@ def main():
                             unobserved_controls=UNOBSERVED_CONTROLS), indent=2),
             encoding='utf-8')
         if code and not args.keep_going:
-            return code
-    return int(any(receipt['exit'] for receipt in receipts))
+            return report_failures(selection, receipts) and code
+    return report_failures(selection, receipts)
+
+
+def report_failures(selection: str, receipts: list[dict]) -> int:
+    """Name each failed selection at exit: a --keep-going run otherwise ends
+    with a bare exit 1 many selections after the failure it carries."""
+    failed = [receipt for receipt in receipts if receipt['exit']]
+    for receipt in failed:
+        action = receipt['selection']
+        name = action.get('mutant') or action.get('scenario') or action['row']
+        print(f'{selection}: FAILED {name} {action["mode"]} (exit {receipt["exit"]})', flush=True)
+    if failed:
+        print(f'{selection}: {len(failed)} of {len(receipts)} selections failed; '
+              f'see {selection}-timings.json', flush=True)
+    return int(bool(failed))
 
 
 if __name__ == '__main__':

@@ -438,7 +438,7 @@ is agent context every session, so it stays lean.
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_agents(action, project?, task?, status?, lease?, worktree?, repository_id?, path?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?, name?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and each row by its session's `name` (the title Claude Code or Codex shows, else one the agent set with `name`, else its `memory_session_title`, else its label and short id; [board names](docs/guide/configuration.md#board-names-and-finding-a-session)), and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`, or an advisory claim on one exact repository file (`worktree` + relative `path` through the stdio shim; a hashed `repository_id` + `path` over direct HTTP; no globs, directories or edit enforcement — [exact repository file claims](docs/guide/configuration.md#exact-repository-file-claims)); unknown episode scope stays unknown, and activity is not a resource reservation |
-| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?)` | Experimental addressed mail: `send` (needs `to`, `text` and a new unique `request_id`; reuse the id only to retry the identical send after an uncertain result) to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs (or `urgent` mail), a peer parked `done` only for `urgent` mail from the maintainer, the maintainer's delegate for the project (`pseudolife-mcp lease delegate`) or the park's named clearer, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?, ack?)` | Experimental addressed mail: `send` (needs `to`, `text` and a new unique `request_id`; reuse the id only to retry the identical send after an uncertain result) to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive` (with `ack=true` it also acknowledges the mail it returns, in a compact result), explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs (or `urgent` mail), a peer parked `done` only for `urgent` mail from the maintainer, the maintainer's delegate for the project (`pseudolife-mcp lease delegate`) or the park's named clearer, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute, verbose?)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
@@ -1327,7 +1327,7 @@ mistaken for a real bank.
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook eager-open or lazy-open on first store + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB, downloaded on first use; the offline daemon image does not include it); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
 | Schema version | v55 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
@@ -1384,10 +1384,10 @@ pseudolife-mcp-daemon`).
   few seconds.
 - **Tools vanish after an upgrade / the client log says "Connection
   closed"**: the shim's registered command can live outside the repo venv,
-  and the MCP SDK v2 migration set an `mcp>=2.1` floor — an older SDK in
-  that environment crashes the shim on start. The shim detects this and
+  and the shim needs the MCP SDK v2 — an SDK older than v2 in that
+  environment crashes the shim on start. The shim detects this and
   prints the interpreter path and the exact fix on stderr: `pip install -U
-  "mcp>=2.1,<2.2"` in that interpreter, or re-run the installer (which
+  "mcp>=2.2,<2.3"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
@@ -1555,7 +1555,9 @@ slots](#set-valued-slots)), retrievable out of the context window.
   [Benchmarks](benchmarks.md)).
 - **Deliberate write / correction.** `memory_fact_set(entity, attribute,
   value, origin="user")` asserts a fact at higher confidence; setting a new
-  value at an existing slot supersedes the old (kept as audit history).
+  value at an existing slot supersedes the old (kept as audit history) when
+  the write's tier is equal to or stronger than the standing value's. A
+  weaker write parks as a contender instead (see "Provenance contenders").
 
 ### How current is this fact?
 
@@ -1950,8 +1952,86 @@ it came from a live `memory_set_add` call or a dream claim.
 
 Every cortex fact carries a provenance tier: **`user` > `action` >
 `agent` > `assistant`** (set via `origin=`, or defaulted from `source`). A
-write may only *supersede* a slot whose current value is backed by an
-equal-or-weaker tier. A **weaker-tier** write (e.g. an `agent` value
+dream-consolidated fact takes the tier of its backing note's `source` tag
+(`user` / `conversation` → `user`; an unmapped tag or no backing note →
+`agent`); the claim's own `origin` field is model output and is never read.
+The extractor chooses which note a claim cites, in a one-note batch as in a
+larger one, so a tier above `agent` also needs the cited note to pass a
+citation check: the claim's whole value appears in it as one phrase
+(case-insensitive, on Unicode word boundaries, every word kept, so
+"retired" does not back `not retired`, nor "UK" back `US`), at least once
+without a negator (`not`, `no`, `never`, `without`, `neither`, `nor`,
+`cannot` or an `n't` form) among the three words before it in the same
+clause, so "editor: never emacs" does not back `emacs`; and the note
+contains at least one word of the claim's entity or attribute name (split
+on `-`, `_`, `.` and spaces; stop words and single letters skipped; a
+plural or paraphrase does not match). A retraction (`op: "remove"`) skips
+the negation rule, since "no longer serves X" is what backs removing X.
+Otherwise the claim counts as unbacked: `agent` tier, and low-trust to the
+consolidation quarantine (which then parks it rather than writing it). A
+`source` index that is a boolean is not read as a note number.
+
+The check bounds the tier a claim may borrow; it is not a fact check, and
+its limits are deliberate trade-offs, not guarantees:
+
+- It proves a *mention*, not an *assertion*: "I tried vim but hated it; my
+  editor is emacs" mentions `vim` and names the editor slot, so a claim of
+  `vim` passes. The rule below keeps such a claim from replacing a value
+  the user set directly.
+- Hyphens and apostrophes are word edges: "editor-vim" backs `vim`, and
+  "O'Brien" backs `O`.
+- A value that contains its own slot word (`home city` at `user.home_city`)
+  passes the slot-word check by itself.
+- Negation is read only from the three words before a mention in its
+  clause: a negation further back, after the value, or in other words
+  ("hated", "gave up on") is not seen.
+- A retraction skips the negation rule, so a note that mentions a
+  dream-consolidated member and names the slot can back an extractor's
+  misread removal of it even when the note affirms it. A member added by a
+  direct write is not affected (see below).
+- Only a string value is checked: a `None`, number, boolean, list or dict
+  value stays at `agent` tier, and so does a number or other non-string
+  value the shipped extractor's parser turned into text. The shipped extractor's parser drops a claim
+  whose value is JSON `null` rather than storing the text `None`.
+- `memory_dream(rollback)` restores the previous value as a direct write,
+  so a restored value the dream had consolidated is protected from later
+  dream claims until it is changed directly.
+
+**A dream claim never replaces a value a direct write set.** When the
+current value's `user` or `action` tier comes from a direct write
+(`memory_fact_set`, a resolve, a store's auto-promote, anything but the
+dream), a dream claim for a different value parks as a contender, whatever
+its own tier and whether or not the quarantine is on. The same holds on the
+set paths: a dream add parks rather than convert such a scalar into a set
+(`member_add_blocked_direct`), and a dream retraction of a member a direct
+user- or action-tier write added is dropped (`member_remove_refused`); a
+retraction aimed at a scalar slot finds no member and changes nothing.
+Members added by `memory_set_add`, which passes no origin, carry no tier
+(empty support, empty origin) and are not guarded against a dream
+retraction; an assistant-origin retraction of one is still refused. A
+quarantine promotion checks again when it promotes,
+so a direct write that lands in between is not replaced. A value the dream
+itself consolidated from a user note still updates from a later backed
+user note, so changed preferences keep flowing. The record tells the two
+apart by a `dream:<tier>` provenance mark the dream adds when it is the
+write that first gives a fact that tier; a direct write at the tier clears
+it, so a direct confirmation (of a member too, by exact or near-duplicate
+value) protects the value from then on. A scalar converted into a set keeps
+every support tier and its marks. Only the dream writes a mark: a `dream:`
+token in a caller's provenance or `source` tag is dropped. Facts written
+before this release carry no mark and count as direct, with one exception:
+before this release a store with `source="dream:user"` and auto-promote on
+could leave a literal `dream:user` token in a fact's provenance, and such a
+stored token is indistinguishable from a mark, so it is honoured as one
+after a reload. A dream restatement
+that is a shorter form of the current value (a compression echo) confirms
+it without raising its tier; only an exact restatement can. With
+`protect_provenance` off, these rules are off as well.
+
+A write may only *supersede* a slot whose current value is backed by an
+equal-or-weaker tier, so a `memory_fact_set` with no `origin` (recorded as
+`agent`) parks against a fact the dream consolidated at `user` tier. A
+**weaker-tier** write (e.g. an `agent` value
 conflicting with a `user`-stated fact), or one below the confidence margin,
 is **not applied** — it's parked as a *contender*:
 
@@ -1986,6 +2066,12 @@ member another tier added (the retraction is dropped, `action:
 "member_remove_refused"`). It may fill an empty slot, extend a set it
 alone built, and retract its own members. Nothing supersedes *it*
 in return: an assistant-origin value is replaced by any later write.
+With `protect_provenance` on, every other tier gets the same two set-slot
+guards against a stronger tier: a weaker-tier add cannot convert a
+stronger tier's scalar into a set (it parks, `member_add_blocked_tier`),
+and a weaker-tier retraction of a stronger tier's member is dropped
+(`member_remove_refused`). Joining a set is not tier-guarded, and the MCP
+set tools, which pass no tier, are unguarded by design.
 Measured 2026-09-05 on the LongMemEval oracle slice: asking the extractor
 for assistant-stated facts lifts the fact-only arm on
 `single-session-assistant` from 0.054 to 0.536 while the knowledge-update
@@ -2505,7 +2591,10 @@ calls cost ~10 ms per reranked candidate on CPU (≈ 200 ms wall-clock
 added to a top-20 search). A `reranker.skip_margin` skips the pass when
 the top-2 bi-encoder gap is decisive. If the model fails to load, the
 reranker disables itself silently and retrieval falls back to bi-encoder
-ranking — search never breaks because of an optional component.
+ranking — search never breaks because of an optional component. The
+daemon image runs offline (`HF_HUB_OFFLINE=1`) and does not include the
+reranker's model, so in the container stack it takes that fallback; the
+download applies to pip and host-process installs.
 
 `memory_search(..., rerank=True, explain=True)` surfaces the per-candidate
 `original_score`, `ce_score`, and `fused_score` under `trace.reranker`
@@ -3663,9 +3752,9 @@ superseded-row compaction. Design doc:
 poisoning-amplifier path with a defense keyed on *who wrote*, never on
 what the text says (the MAFIA result in `SECURITY.md` closes the argument
 that content inspection can defend this path). When on, a **scalar** claim
-whose backing entry is agent-tier — its `source` maps to origin `agent` —
-and outside `memory.dream.trusted_sources` never takes `current`
-directly:
+whose backing entry is agent-tier — its `source` maps to origin `agent`,
+or it cites a user-stated note that fails the citation check — and outside
+`memory.dream.trusted_sources` never takes `current` directly:
 
 - it **parks** via the ordinary contender machinery (visible as
   `contested` in `memory_fact_get`, `quarantine:low_trust` in its
@@ -3677,9 +3766,15 @@ directly:
   **and only when the witness's tier is not below the standing current's
   origin**: the two-man rule is never weaker than the provenance guard
   it reinforces, so two agent witnesses cannot supersede a user-stated
-  fact. The same witness restating merely re-confirms the parked value;
-  an automated promotion is stamped agent-supported (a literal, never
-  the claim's own origin field), and never as a user act.
+  fact, and no promotion replaces a value a direct (non-dream) user or
+  action write set. The witness's tier here is the tier a direct write of
+  the same claim would get: its note's `source` tag, kept only when the
+  note passes the citation check ("Provenance contenders" in
+  [memory-model.md](memory-model.md)), and lowered to `assistant` for an
+  assistant-stated claim. The same witness restating merely re-confirms
+  the parked value; an automated promotion adds that same tier to the
+  value's support (never the claim's own origin field), so a value a
+  user-sourced note confirms is as protected as one it wrote directly.
 
 Run results carry `quarantine_parked` / `quarantine_held` /
 `quarantine_promoted`; parks and promotions are journaled (a promotion
@@ -5114,6 +5209,43 @@ in `also_broken`). `pseudolife-mcp lease designate`, the command's name in
 can also be given and taken from the Console, signed with your passkey: see
 [Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console).
 
+The delegate's session also gets a short brief after the startup check-in
+and one reminder line on every prompt, served by the daemon to the plugin's
+hooks (they pass the session's board address with the requests they already
+make). Both say to hand raw output to a subagent and to wake for decisions
+only; the check-in text itself is the same for every session. Only a grant
+by the operator or the maintainer counts, as for its urgent mail; the daemon
+rechecks it at most once a minute per session, so a grant or a revoke shows
+within a minute, and on the next session start for the brief.
+
+**The decision watcher: `pseudolife-mcp delegate-watch`.** The brief tells
+the delegate to start this once with `pseudolife-mcp delegate-watch
+--detach`. It waits without a model and sends its owner (by default the
+session whose `.agent` file sits beside its digest; `--owner` names another)
+one board message per batch of events: a pull request opened, merged or
+closed, turning green (with its merge state), failing on its head, finishing
+with checks cancelled (reported once, never as a failure), or newly
+conflicting; the newest master run of a workflow failing or passing again; a
+new file in `~/.pseudolife-mcp/suite-results`; and a `full-suite` or
+`full-suite@box` lease freeing up (`--lease` names others). A head counts as
+green or cancelled only once every workflow run on it has completed, so a run
+still queued keeps it pending. GitHub is read through the `gh` CLI
+(`--repo OWNER/NAME`, default the current checkout's; `--author` narrows it).
+The watcher registers its own board agent and prints its id; each message
+carries `clears="decision events"`, so park with
+`park_needs="decision events"` and `park_clear_by=<that id>` and the daemon
+rings you for it, then read with `memory_message(action="receive",
+ack=true)`. After 55 quiet minutes (`--quiet-after`) it sends one quiet line,
+unless you are parked `done`. It exits 0 when the owner leaves the board,
+when `--until-lease NAME` names a lease the owner no longer holds, after 14
+days (`--max-age`), or on `--stop`; it exits 2 when `gh` is missing or fails
+five polls in a row (after telling the owner), or when the board refuses it.
+`--detach` is safe to repeat: it answers that a live watcher is already
+running. The first run records what is already true and reports nothing for
+it; its state, log and a one-line-per-message ledger live beside the
+session's digest, else under `~/.pseudolife-mcp/watch/` (`--state` moves
+them).
+
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
 a grant made under the old name reopens nothing after the upgrade, so
@@ -5433,6 +5565,15 @@ on fork. Process environment variables, checkout names and titles do not select
 the mailbox. Missing or malformed metadata leaves ordinary memory available
 without attaching a mailbox.
 
+Once a task's mailbox is attached, each later coordination call first
+re-checks the bank's identity with a read-only request that never
+initializes anything. A timeout, an unreachable daemon or a 429, 500, 502,
+503 or 504 answer gets one automatic retry with the same adapter and saved
+mailbox (each check allows six seconds). A refused credential, a different
+bank or a credential that changed meanwhile fails closed at once, and the
+task's hint says whether validation, access or attachment failed. Message
+operations are never replayed by this retry.
+
 A native subagent (`collaboration.spawn_agent`) is a thread of its own, so it
 gets its own address too, and since schema v50 that address is linked to its
 parent's. Codex 0.158.0 (CLI and desktop, measured 2026-09-29) sends
@@ -5491,8 +5632,8 @@ A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map (principal `codex`, say) is
 off the board until an operator lists it: without `allowed_principals` only
 `default` is admitted. On the default setting the shim's startup question
 then leaves coordination off with no error, and memory keeps working. In
-explicit mode each task instead gets an "identity attachment unavailable"
-hint. In either mode the check reports
+explicit mode each task instead gets a hint that identity attachment "was
+refused by authentication or access policy". In either mode the check reports
 `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
 Add the principal the map gives that bearer, keeping `default` if the
 singular token should stay on the board, and restart the daemon:
@@ -5538,8 +5679,9 @@ and reuse the original request ID when retrying an addressed message.
 
 An active task should use `memory_agents` before shared-resource work and
 `memory_message(action="receive")` on resume and when the coordination digest
-(in the prompt hook or a tool result) shows pending mail. Receive does not
-acknowledge; use `action="ack"` after reading, with one `message_id` or
+(in the prompt hook or a tool result) shows pending mail. Receive without
+`ack` does not acknowledge; `ack=true` acknowledges what it returns in the
+same call, or use `action="ack"` after reading, with one `message_id` or
 several comma-separated (at most 50; a JSON array of strings, the form a
 host that stringifies list parameters sends, is read as that list): a batch
 returns the receipts in the order given and lists the ids that were not this
@@ -6209,8 +6351,9 @@ acknowledges mail. Optional adapter startup requests cancellation after three se
 for bounded in-flight request cleanup before falling back to ordinary memory
 service. This is not a three-second ceiling on total shim startup time.
 
-Messages have one recipient. Sending confirms durable enqueue; receiving does
-not acknowledge. The recipient explicitly acknowledges a message ID, and an
+Messages have one recipient. Sending confirms durable enqueue; receiving
+without `ack=true` does not acknowledge. The recipient explicitly acknowledges a
+message ID (or receives with `ack=true`), and an
 acknowledgment does not mean the requested work is complete. Retries reuse the
 same sender request key and content. Coordination traffic is not added to bands,
 cortex, graph, retrieval or dream input by the messaging APIs. Store a useful
@@ -6358,10 +6501,12 @@ a subagent only reads the board (`memory_agents(action="list")`,
 `memory_message(action="history")`, `memory_search`), and the
 orchestrating session owns the address. The served check-in says so, and
 since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
-(`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
-puts in a subagent's hook input, and never in the parent's, and denies that
+(`plugin/hooks/subagent-board-guard.sh`) sees the top-level `agent_id`
+Claude Code puts in a subagent's hook input, and never in the parent's (an
+`agent_id` inside the tool's arguments does not count), and denies that
 subagent's `memory_agents` update, claim and release and `memory_message`
-send and ack, whatever the server's name. Its list, receive and history
+send and ack (and receive with `ack=true`, which acknowledges what it
+returns), whatever the server's name. Its list, receive and history
 pass, and so does every call the parent makes. The subagent reads the refusal as
 `PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
 it to ask the parent instead (probed on Claude Code 2.1.283: the child's
@@ -7209,9 +7354,11 @@ every variant.
   Since schema v39, correction events for existing traces survive source
   deletion and are preserved even while tracing is off; new trace formation
   remains disabled. Re-enabling tracing can therefore surface those warnings.
-  `memory.traces.retention_boost` (default `0.0`) is the separate Phase-2
-  MTT-retention weight this same cross-index feeds; `0.0` is today's
-  eviction behavior unchanged.
+  `memory.traces.retention_boost` is the separate Phase-2 MTT-retention
+  weight this same cross-index feeds: the daemon runs `1.0` unless the key
+  is set (a reinforced entry resists eviction by
+  `retention_boost * log1p(reinforcements)`), while the library default is
+  `0.0`, eviction unchanged.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -7341,7 +7488,8 @@ every variant.
   (`evals/digest_sidecar_probe.py`).
 - **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
   false`) — when on, a scalar dream claim whose backing entry is
-  agent-tier (its `source` maps to origin `agent`) and outside
+  agent-tier (its `source` maps to origin `agent`, or it cites a
+  user-stated note that fails the citation check) and outside
   `memory.dream.trusted_sources` never takes `current` directly: it
   parks via the existing contender machinery (visible in
   `memory_fact_get` as contested), promotable only by an explicit
@@ -8079,7 +8227,7 @@ installer and the session notices print.
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon. On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release (the newest release when it does not answer), and `--daemon-only` is refused naming the daemon's host |
-| `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
+| `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
 | `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
@@ -8773,7 +8921,8 @@ startup briefing is not a relevance-ranked answer to a prompt it has not seen.
 
 The provider that *talks* to the bank and the model that *consolidates* it
 are separate choices, and the installer wires both. `--extractor` /
-`-Extractor` takes `sidecar` (the bundled CPU model, the default),
+`-Extractor` (required: the installer has no default and asks when run
+interactively) takes `sidecar` (the bundled CPU model),
 `claude-fallback` / `claude-only` (a Claude Max plan via the CLI shim),
 `openai-fallback` / `openai-only` (a ChatGPT plan via the Codex CLI shim),
 or `endpoint` / `endpoint-fallback` (any OpenAI-compatible server, no shim:
@@ -10399,8 +10548,10 @@ problem than the limitation it hides.
 - **Content screening.** There is none, deliberately — see the evaded-class
   note above. Do not read the literal-faithfulness gate, the novelty gate,
   or the contradiction detector as trust filters. In particular the
-  **surprise gate** is an *admission* filter that drops near-duplicates:
-  novel malicious content passes it preferentially.
+  **surprise gate** is an *admission* filter that can drop near-duplicates
+  when `memory.surprise_threshold` is above `0` (the shipped default,
+  `0.0`, is permissive and stores everything): novel malicious content
+  passes it preferentially.
 - **Cryptographic writer authentication.** Writer identity is
   self-reported over MCP. Per-principal bearer tokens improve on this
   (the token determines the writer id) but agent writers have no signing,
@@ -11219,17 +11370,19 @@ finish (finish it with the commands the report and the move record list).
 ## Troubleshooting
 
 **"unhandled errors in a TaskGroup" on every `tools/list`, while `curl` with
-the same token succeeds.** This is not an auth failure. The shim's MCP client
-library must be on the same major-minor line as the daemon's: a client on
-`mcp` 2.2 against a daemon on 2.1 fails exactly this way. The project pins
-the range (`mcp>=2.1,<2.2`); a shim pipx-installed from an older release may
-need:
+the same token succeeds.** This is not an auth failure. Keep the shim's MCP
+client library on the same major-minor line as the daemon's: a remote client
+on `mcp` 2.2 against a daemon on 2.1 failed exactly this way over a tailnet
+(2026-09-28), although the same mix works on loopback. Each release pins one
+line for both (`mcp>=2.2,<2.3` since 0.18.2, `mcp>=2.1,<2.2` before), so the
+fix is a shim from the daemon's release:
 
 ```bash
-pipx runpip pseudolife-mcp install "mcp<2.2"
+pipx install --force "pseudolife-mcp==<the daemon's version>"
 ```
 
-or a reinstall of `pseudolife-mcp`.
+or, for a daemon on the 2.1 line, `pipx runpip pseudolife-mcp install
+"mcp<2.2"`.
 
 **The shim exits at startup naming the credential file.** The file is
 missing, not owner-only, or holds more than the token. Fix the file; the

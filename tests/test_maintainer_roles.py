@@ -628,3 +628,125 @@ def test_an_assign_whose_assignee_was_made_delegate_since_the_preview_is_refused
     refused("role_changed", call, svc, "role", body)
     assert holder(svc, "delegate:p") == agent["agent_id"]
     assert holder(svc, "coordinator:p") is None
+
+
+# ── the delegate's brief and per-turn reminder (spec 2026-10-14, section 2) ─
+
+_TOKENS = {"t-user": PRINCIPAL, "t-other": "other-user"}
+
+
+def _asks(svc, agent, bearer="t-user"):
+    """What the hook endpoints ask: the projects ``agent`` is the
+    operator-granted delegate for, as the bearer ``bearer`` sees it."""
+    svc._delegate_cache = {}
+    return coordination.delegate_projects(svc, {"authorization": f"Bearer {bearer}"},
+                                          agent=agent["agent_id"], token_map=_TOKENS)
+
+
+def test_delegate_projects_follow_the_same_proof_as_authority(svc):
+    """The brief goes to the session ``_authority`` treats as the delegate,
+    and to no other: an operator or maintainer grant counts, a plain hold
+    or a record by any other actor does not."""
+    auth = bootstrap(svc)
+    delegate, other = peer(svc), peer(svc, label="other")
+    assert _asks(svc, delegate) == [] and _asks(svc, other) == []
+    role(svc, auth, "grant-delegate", project="p", agent_id=delegate["agent_id"], hold=HOUR)
+    assert _asks(svc, delegate) == ["p"] and _asks(svc, other) == []
+    board(svc).grant_delegate("q", delegate["agent_id"], hold=HOUR)    # the operator
+    assert _asks(svc, delegate) == ["p", "q"] and _asks(svc, other) == []
+    with svc._coordination_lock:
+        store = coordination._store(svc)
+        assert store.delegate_projects(delegate["agent_id"], store.clock()) == ["p", "q"]
+        assert store.delegate_projects(delegate["agent_id"], store.clock(), project="q") == ["q"]
+        assert store.delegate_projects(delegate["agent_id"], store.clock(), project="r") == []
+
+
+def test_no_brief_for_a_plain_hold_or_a_record_by_any_other_actor(svc):
+    delegate = peer(svc)
+    sql(svc, "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,fence,"
+             "acquired_at,expires_at) VALUES ('delegate:p',%s,%s,4242,0,9e12)",
+        (delegate["agent_id"], PRINCIPAL))
+    assert _asks(svc, delegate) == []
+    with svc._coordination_lock:
+        store = coordination._store(svc)
+        with store.storage._txn():
+            store._append([store._event("lease_delegate", {"name": "delegate:p", "fence": 4242,
+                                                           "hold": HOUR, "replaced": None},
+                                        actor="agent", agent_id=delegate["agent_id"])],
+                          store.clock())
+    assert _asks(svc, delegate) == []
+
+
+def test_no_brief_after_the_grant_expires_or_is_revoked(svc):
+    delegate = peer(svc)
+    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
+    assert _asks(svc, delegate) == ["p"]
+    sql(svc, "UPDATE coordination_leases SET expires_at=1 WHERE name='delegate:p'")
+    assert _asks(svc, delegate) == []
+    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
+    assert _asks(svc, delegate) == ["p"]
+    board(svc).break_lease("delegate:p")
+    assert _asks(svc, delegate) == []
+
+
+def test_the_lookup_reports_how_long_the_delegate_lease_has_left(svc):
+    delegate = peer(svc)
+    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
+    board(svc).grant_delegate("q", delegate["agent_id"], hold=HOUR)
+    store = board(svc)
+    sql(svc, "UPDATE coordination_leases SET expires_at=%s WHERE name='delegate:q'",
+        (store.clock() + 10,))
+    with svc._coordination_lock:
+        out = store.delegate_of(delegate["agent_id"], PRINCIPAL)
+    assert out["projects"] == ["p", "q"] and 0 < out["remaining"] <= 10
+    with svc._coordination_lock:
+        assert coordination._store(svc).delegate_of(delegate["agent_id"], "other-user") == {
+            "projects": [], "remaining": None}
+
+
+def test_no_brief_for_another_principals_agent_or_a_malformed_id(svc):
+    svc.config.coordination.allowed_principals = [PRINCIPAL, "other-user"]
+    delegate = peer(svc)
+    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
+    assert _asks(svc, delegate, bearer="t-other") == []
+    assert _asks(svc, delegate, bearer="t-wrong") == []
+    for bad in (None, "", delegate["agent_id"].upper(), delegate["agent_id"][:31],
+                delegate["agent_id"] + "0", "g" * 32):
+        svc._delegate_cache = {}
+        assert coordination.delegate_projects(svc, {"authorization": "Bearer t-user"},
+                                              agent=bad, token_map=_TOKENS) == []
+
+
+def test_the_hook_endpoints_serve_the_brief_and_the_reminder_to_the_delegate_only(
+        svc, monkeypatch):
+    from pseudolife_memory.coordination import CHECKIN_TEXT, DELEGATE_REMINDER
+    # A loaded host's first lookup may pass the hooks' budget; this test is
+    # about who gets the text, not how fast (the budget has its own test).
+    monkeypatch.setattr(coordination, "DELEGATE_LOOKUP_BUDGET", 30)
+    from pseudolife_memory.web.api import build_console_app
+    from tests.asgi_helpers import call as asgi_call, stub_mcp
+    delegate, other = peer(svc), peer(svc, label="other")
+    board(svc).grant_delegate("p", delegate["agent_id"], hold=HOUR)
+    svc._delegate_cache = {}
+    app = build_console_app(stub_mcp, None, lambda: {}, svc, token_map=_TOKENS)
+    bearer = [(b"authorization", b"Bearer t-user")]
+
+    def start(agent=None):
+        status, body = asgi_call(app, "GET", "/api/hook/coordination-start", headers=bearer,
+                                 query=f"agent={agent['agent_id']}" if agent else "")
+        assert status == 200
+        return body.decode("utf-8")
+
+    def prompt(agent=None):
+        query = "session_id=s1" + (f"&agent={agent['agent_id']}" if agent else "")
+        status, body = asgi_call(app, "GET", "/api/hook/memory-changes", headers=bearer,
+                                 query=query)
+        assert status == 200
+        return body.decode("utf-8").split("\n", 1)
+
+    assert start() == start(other) == CHECKIN_TEXT + "\n"
+    assert start(delegate) == (CHECKIN_TEXT + "\n\n"
+                               + coordination.render_delegate_brief(["p"]) + "\n")
+    assert prompt()[1] == prompt(other)[1] == ""
+    cursor, rest = prompt(delegate)
+    assert float(cursor) > 0 and rest == DELEGATE_REMINDER + "\n"

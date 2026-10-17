@@ -436,6 +436,96 @@ def test_a_sessions_first_note_clears_marks_idle_for_a_month(tmp_path, hook):
     assert _mark(digest_dir, "sess-new").read_text().strip() == "200.000000"
 
 
+# ── the delegate's per-turn reminder (spec 2026-10-14) ────────────────────
+
+AGENT_ID = "0123456789abcdef0123456789abcdef"
+REMINDER = "Delegate: raw output goes to a subagent; a quiet wake gets one line."
+
+
+def _agent_file(digest_dir, session_id, content):
+    digest_dir.mkdir(parents=True, exist_ok=True)
+    path = digest_dir / (hashlib.sha256(session_id.encode()).hexdigest() + ".agent")
+    path.write_bytes(content.encode("utf-8"))
+    return path
+
+
+@pytest.mark.parametrize("hook", ["bash", "native"])
+@pytest.mark.parametrize("content,sent", [
+    (AGENT_ID + "\n", True),
+    (AGENT_ID + "\r\n", True),
+    (AGENT_ID.upper() + "\n", False),
+    (AGENT_ID + "0\n", False),
+    ("x&agent=" + AGENT_ID + "\n", False),
+    (None, False),
+], ids=["valid", "crlf", "upper", "long", "injection", "absent"])
+def test_prompt_hook_names_the_board_address_only_from_a_valid_agent_file(
+        tmp_path, hook, content, sent):
+    """The daemon appends the delegate's one-line reminder to the same
+    per-turn answer (no new request), keyed by ``agent=``; the hook passes
+    the address the shim wrote beside the session's digest."""
+    digest_dir = tmp_path / "digests"
+    if content is not None:
+        _agent_file(digest_dir, "sess-1", content)
+    daemon = _Daemon([("100.000000\n" + REMINDER + "\n").encode()])
+    try:
+        out = _run_prompt_hook(hook, daemon.url, digest_dir,
+                               json.dumps({"session_id": "sess-1"}), tmp_path)
+    finally:
+        daemon.close()
+    assert out == REMINDER + "\n"
+    [(path, query)] = daemon.queries
+    assert path == "/api/hook/memory-changes"
+    assert query.get("agent") == ([AGENT_ID] if sent else None)
+    assert query.get("session_id") == ["sess-1"]
+    assert _mark(digest_dir, "sess-1").read_text().strip() == "100.000000"
+
+
+@pytest.mark.parametrize("hook", ["bash", "native"])
+def test_prompt_hook_ignores_a_symlinked_agent_file(tmp_path, hook):
+    import os
+    digest_dir = tmp_path / "digests"
+    digest_dir.mkdir()
+    target = tmp_path / "target.agent"
+    target.write_bytes((AGENT_ID + "\n").encode())
+    try:
+        os.symlink(target, digest_dir / (hashlib.sha256(b"sess-1").hexdigest() + ".agent"))
+    except OSError:
+        pytest.skip("this host cannot create symlinks")
+    daemon = _Daemon([b"100.000000\n"])
+    try:
+        _run_prompt_hook(hook, daemon.url, digest_dir, json.dumps({"session_id": "sess-1"}),
+                         tmp_path)
+    finally:
+        daemon.close()
+    assert "agent" not in daemon.queries[0][1]
+
+
+def test_bash_prompt_hook_reads_the_agent_file_under_the_shims_key(tmp_path):
+    """Claude Code's shim keeps its launch key across /clear; the prompt hook
+    follows the process record (line 2 confirming this session) to the
+    shim's .agent, as coordination-prompt.sh follows it to the digest. The
+    cursor stays keyed by this session's own id."""
+    import os
+    digest_dir = tmp_path / "digests"
+    launch = hashlib.sha256(b"launch-session").hexdigest()
+    cleared = hashlib.sha256(b"cleared-session").hexdigest()
+    _agent_file(digest_dir, "launch-session", AGENT_ID + "\n")
+    (digest_dir / f"claude-{os.getpid()}.host").write_bytes(
+        f"{launch}\n{cleared}\n".encode())
+    daemon = _Daemon([b"100.000000\n", b"100.000000\n"])
+    try:
+        payload = json.dumps({"session_id": "cleared-session"})
+        _run_prompt_hook("bash", daemon.url, digest_dir, payload, tmp_path,
+                         CLAUDE_PID=str(os.getpid()), CLAUDE_CODE_SESSION_ID="cleared-session")
+        # A host run from a Bash command inherits another session's id: no record.
+        _run_prompt_hook("bash", daemon.url, digest_dir, payload, tmp_path,
+                         CLAUDE_PID=str(os.getpid()), CLAUDE_CODE_SESSION_ID="outer-session")
+    finally:
+        daemon.close()
+    assert [q.get("agent") for _, q in daemon.queries] == [[AGENT_ID], None]
+    assert _mark(digest_dir, "cleared-session").read_text().strip() == "100.000000"
+
+
 # ── pseudolife-mcp prompt-hook (installs without the plugin) ──────────────
 
 def test_cli_prompt_hook_refuses_a_redirect_and_keeps_its_cursor(tmp_path):

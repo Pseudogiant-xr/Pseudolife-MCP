@@ -11,18 +11,19 @@ from test_workflow import commands
 
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
-SOURCE_EVENTS = "github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
+SOURCE_EVENTS = "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
 PARITY_EVENT_GATE = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
+$docsOnly = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
 foreach ($job in @('rust', 'candidate', 'parity-checks')) {
-  if ($results[$job].result -cne 'success') {
+  if ($results[$job].result -cne 'success' -and -not ($docsOnly -and $results[$job].result -ceq 'skipped')) {
     Write-Error "$job did not succeed"
     exit 1
   }
 }
 $sourceResult = $results['source-mutants'].result
-if ($sourceResult -cne 'success' -and -not ($env:GATE_EVENT -ceq 'pull_request' -and $sourceResult -ceq 'skipped')) {
-  Write-Error "source-mutants did not succeed outside the PR skip exception"
+if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
+  Write-Error "source-mutants did not succeed outside the PR and push skip exception"
   exit 1
 }
 """
@@ -68,6 +69,35 @@ def exit_propagation(step, invocation):
     assert lines[0] == invocation, 'H5 driver command or failure propagation changed'
 
 
+def backup_zero_retention_scope(exceptions):
+    scoped = exceptions['cli_case_selections']
+    assert set(scoped) == {'windows-backup-zero-retention-clock-race'}, 'backup zero exception scope changed'
+    entry = scoped['windows-backup-zero-retention-clock-race']
+    assert set(entry) == {'platform', 'mode', 'row', 'case', 'reason'} \
+        and (entry['platform'], entry['mode'], entry['row'], entry['case']) \
+        == ('windows', 'both', 'backup', 'file-mode-keep-zero'), 'backup zero exception scope changed'
+    assert all(proof in entry['reason'] for proof in ('GetSystemTimeAsFileTime', '0.015625',
+                                                     '254/deleted 46', '229/deleted 71')), \
+        'backup zero reference measurement missing'
+    tree = ast.parse((ROOT / 'rust/cli_harness/rows/backup.py').read_text(encoding='utf-8'))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Name) and node.func.id == 'Case'
+             and node.args and isinstance(node.args[0], ast.Constant)
+             and node.args[0].value == 'file-mode-keep-zero']
+    assert len(calls) == 1, 'backup zero exception lost or duplicated case'
+    options = {keyword.arg: keyword.value for keyword in calls[0].keywords}
+    assert ast.literal_eval(options['platforms']) == ('linux',) \
+        and ('golden' not in options or ast.literal_eval(options['golden']) is True) \
+        and 'skip_if' not in options, 'backup zero Linux live/record/golden selection changed'
+    assert isinstance(calls[0].args[1], ast.List) \
+        and isinstance(calls[0].args[1].elts[-1], ast.Constant) \
+        and calls[0].args[1].elts[-1].value == '--keep-days=0', 'backup zero argument changed'
+    native = (ROOT / 'rust/shim/src/cli/backup/mod.rs').read_text(encoding='utf-8')
+    for name in ('rotation_keeps_files_equal_to_the_python_clock_cutoff',
+                 'windows_clock_matches_python_within_the_same_clock_tick'):
+        assert re.search(r'#\[test\]\s+fn ' + name + r'\(', native), 'backup zero native proof dropped'
+
+
 def check(workflow):
     from coverage_plan import (SUITES, DAEMON_CONTROLS, GRAPH_CONTROLS, W1A, EXCEPTIONS,
                                SOURCE_SHARDS, PLATFORM_EXCLUSIONS, UNOBSERVED_CONTROLS, BACKGROUND)
@@ -78,6 +108,7 @@ def check(workflow):
     selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
     assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"
     exception_reasons(EXCEPTIONS)
+    backup_zero_retention_scope(EXCEPTIONS)
     exception_reasons(PLATFORM_EXCLUSIONS)
     exception_reasons(UNOBSERVED_CONTROLS)
     all_controls = set().union(*declared.values())
@@ -101,7 +132,8 @@ def check(workflow):
     jobs = workflow["jobs"]
     parity = jobs["parity-checks"]
     ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'"
-    assert parity['if'] == ordinary_ci, 'H5 PR event selection changed'
+    assert parity['if'] == (f"${{{{ !cancelled() && ({ordinary_ci}) && needs.candidate.result == 'success' "
+                            "&& needs.rust.result == 'success' }}"), 'H5 PR event selection changed'
     matrix = parity["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS and "exclude" not in matrix
     assert set(SUITES) <= set(matrix["suite"]), "missing H5 suite"
@@ -139,9 +171,10 @@ def check(workflow):
     assert events.get('push') == {'branches': ['master']} \
         and events.get('schedule') == [{'cron': '23 3 * * *'}], 'source events dropped or changed'
     assert 'pull_request' in events and 'workflow_dispatch' in events, 'source events dropped or changed'
-    assert source['if'] == SOURCE_EVENTS, 'source event selection changed'
+    assert source['if'] == (f"${{{{ !cancelled() && ({SOURCE_EVENTS}) "
+                            "&& needs.candidate.result == 'success' }}"), 'source event selection changed'
     gate = jobs['parity']
-    assert gate['needs'] == ['rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
+    assert gate['needs'] == ['scope', 'rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
     assert gate['if'] == f'always() && ({ordinary_ci})' and not gate.get('continue-on-error'), 'Parity event gate can skip failures'
     assert len(gate['steps']) == 1, 'Parity event gate steps changed'
     required = gate['steps'][0]
@@ -185,25 +218,18 @@ def check(workflow):
                     for name in W1A if name in supported for mode in ('live', 'golden')]
     assert SUITES['h5-w1a'] == expected_w1a, 'W1-A recording/replay selection dropped or changed'
     scoped = EXCEPTIONS['w1a_selections']
-    exception_id = 'windows-map-order-unsettled-bank-init'
-    assert set(scoped) == {exception_id}, 'map-order exception scope changed'
-    entry = scoped[exception_id]
-    assert set(entry) == {'platform', 'mode', 'scenario', 'reason'} \
-        and (entry['platform'], entry['mode'], entry['scenario']) == ('windows', 'both', 'map-order'), \
-        'map-order exception scope changed'
+    assert not scoped, 'retired unsettled-bank exception restored'
     from run_coverage import suite_actions
     for platform in ('linux', 'windows'):
         actions, omitted_scenarios, omitted_selections = suite_actions('h5-w1a', platform)
-        protected = [('live', 'map-order-reversed'), ('golden', 'map-order-reversed')]
-        if platform == 'linux':
-            protected.extend([('live', 'map-order'), ('golden', 'map-order')])
+        protected_names = ('encodings', 'map-order', 'map-order-reversed')
+        protected = [(mode, name) for name in protected_names for mode in ('live', 'golden')]
         actual_protected = Counter((a['mode'], a['scenario']) for a in actions
-                                   if a['scenario'] in ('map-order', 'map-order-reversed'))
-        assert actual_protected == Counter(protected), 'protected map-order selections dropped or changed'
-        expected = [a for a in expected_w1a if a['scenario'] not in EXCEPTIONS['w1a_platform'][platform]
-                    and not (platform == 'windows' and a['scenario'] == 'map-order')]
-        assert actions == expected, 'map-order exception scope changed in executable selection'
-        assert omitted_selections == (scoped if platform == 'windows' else {}), 'map-order exception scope changed in receipt'
+                                   if a['scenario'] in protected_names)
+        assert actual_protected == Counter(protected), 'protected settled-auth selections dropped or changed'
+        expected = [a for a in expected_w1a if a['scenario'] not in EXCEPTIONS['w1a_platform'][platform]]
+        assert actions == expected, 'W1-A executable selection changed'
+        assert not omitted_selections, 'retired unsettled-bank exception in receipt'
         assert omitted_scenarios == EXCEPTIONS['w1a_platform'][platform]
     assert SUITES['h5-background'] == [dict(kind='daemon', scenario=name, mode='live')
                                      for name in BACKGROUND], 'accepted daemon scenario lost live background execution'

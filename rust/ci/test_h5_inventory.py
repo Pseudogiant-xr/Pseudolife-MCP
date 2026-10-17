@@ -43,6 +43,34 @@ def test_ported_row_and_mutant_ci_inventory():
     check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
 
 
+def test_backup_zero_retention_selection_is_platform_scoped(monkeypatch):
+    from rust.cli_harness import core, runner
+    from rust.cli_harness.rows import backup
+    monkeypatch.setattr(backup, '_have_pg0', lambda: False)
+    loaded = backup.cases()
+    grammar = next(case for case in loaded if case.id == 'argparse-keep-zero')
+    assert grammar.argv == ['backup', '--keep-days=0', '--help']
+    assert grammar.platforms == ('windows', 'linux')
+    for platform in ('windows', 'linux'):
+        monkeypatch.setattr(core, 'PLATFORM', platform)
+        for mode in ('live', 'record', 'golden'):
+            selected = {case.id for case in runner._select(loaded, [], replay=mode != 'live')}
+            assert ('file-mode-keep-zero' in selected) == (platform == 'linux')
+            assert 'argparse-keep-zero' in selected
+
+
+@pytest.mark.parametrize('field,value', [('platform', 'linux'), ('mode', 'golden'),
+                                        ('row', 'audit'), ('case', 'file-mode')])
+def test_backup_zero_exception_rejects_broader_or_partial_scope(monkeypatch, field, value):
+    from coverage_plan import EXCEPTIONS
+    from inventory import backup_zero_retention_scope
+    scoped = copy.deepcopy(EXCEPTIONS['cli_case_selections'])
+    scoped['windows-backup-zero-retention-clock-race'][field] = value
+    monkeypatch.setitem(EXCEPTIONS, 'cli_case_selections', scoped)
+    with pytest.raises(AssertionError, match='backup zero exception scope'):
+        backup_zero_retention_scope(EXCEPTIONS)
+
+
 @pytest.mark.parametrize('event', ['push', 'schedule'])
 def test_inventory_rejects_missing_source_event(event):
     from inventory import check
@@ -52,7 +80,7 @@ def test_inventory_rejects_missing_source_event(event):
         check(workflow)
 
 
-def test_inventory_rejects_aggregate_accepting_skipped_source_on_push():
+def test_inventory_rejects_aggregate_accepting_any_skipped_job():
     import os
     import subprocess
     from inventory import check
@@ -67,7 +95,7 @@ foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
 }
 """
     needs = {job: {'result': 'success'} for job in workflow['jobs']['parity']['needs']}
-    needs['source-mutants']['result'] = 'skipped'
+    needs['rust']['result'] = 'skipped'
     executed = subprocess.run(['pwsh', '-NoProfile', '-Command', gate['run']],
                               env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT='push'),
                               capture_output=True, text=True)
@@ -76,12 +104,15 @@ foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
         check(workflow)
 
 
-@pytest.mark.parametrize('event', ['push', 'schedule'])
+@pytest.mark.parametrize('event', ['schedule', 'workflow_dispatch'])
 def test_inventory_rejects_source_filter_dropping_event(event):
     from inventory import check
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    workflow['jobs']['source-mutants']['if'] = workflow['jobs']['source-mutants']['if'].replace(
-        f"github.event_name == '{event}' || ", '')
+    source = workflow['jobs']['source-mutants']
+    dropped = (f"github.event_name == '{event}' || " if event == 'schedule'
+               else " || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')")
+    assert dropped in source['if']
+    source['if'] = source['if'].replace(dropped, '')
     with pytest.raises(AssertionError, match='source event selection'):
         check(workflow)
 
@@ -433,7 +464,7 @@ def test_episode_daemon_uses_fixture_with_empty_model_cache(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize('platform', ['linux', 'windows'])
-def test_encodings_bank_gap_keeps_auth_control_on_both_platforms(monkeypatch, tmp_path, platform):
+def test_settled_encodings_records_and_replays_on_both_platforms(monkeypatch, tmp_path, platform):
     import run_coverage
     from coverage_plan import DAEMON_CONTROLS
     invoked = []
@@ -444,7 +475,8 @@ def test_encodings_bank_gap_keeps_auth_control_on_both_platforms(monkeypatch, tm
     monkeypatch.setattr(run_coverage.subprocess, 'run', lambda argv, **kw: invoked.append(argv) or SimpleNamespace(returncode=0))
     assert run_coverage.main() == 0
     encodings = [a for a in invoked if a[a.index('--only') + 1] == 'encodings']
-    assert not encodings
+    assert [a[2] for a in encodings] == ['live', 'golden']
+    assert '--record' in encodings[0]
     assert DAEMON_CONTROLS['auth-candidate-order'] == ['encodings']
     invoked.clear()
     monkeypatch.setattr(sys, 'argv', ['run_coverage.py', '--suite', 'h5-daemon-mutants',
@@ -463,12 +495,12 @@ def test_inventory_rejects_broadened_map_order_exception(monkeypatch, field, val
     entry[field] = value
     monkeypatch.setitem(EXCEPTIONS, 'w1a_selections', {'windows-map-order-unsettled-bank-init': entry})
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    with pytest.raises(AssertionError, match='map-order exception scope'):
+    with pytest.raises(AssertionError, match='retired unsettled-bank exception'):
         check(workflow)
 
 
 @pytest.mark.parametrize('platform', ['linux', 'windows'])
-def test_map_order_exception_only_omits_windows(monkeypatch, tmp_path, platform):
+def test_settled_map_order_records_and_replays_on_both_platforms(monkeypatch, tmp_path, platform):
     import run_coverage
     invoked = []
     monkeypatch.setattr(run_coverage, 'os', SimpleNamespace(name='nt' if platform == 'windows' else 'posix',
@@ -477,13 +509,14 @@ def test_map_order_exception_only_omits_windows(monkeypatch, tmp_path, platform)
     monkeypatch.setattr(run_coverage.subprocess, 'run', lambda argv, **kw: invoked.append(argv) or SimpleNamespace(returncode=0))
     assert run_coverage.main() == 0
     selected = [(argv[2], argv[argv.index('--only') + 1]) for argv in invoked]
-    assert (('live', 'map-order') in selected) == (platform == 'linux')
-    assert (('golden', 'map-order') in selected) == (platform == 'linux')
+    assert ('live', 'map-order') in selected
+    assert ('golden', 'map-order') in selected
     assert ('live', 'map-order-reversed') in selected and ('golden', 'map-order-reversed') in selected
 
 
-@pytest.mark.parametrize('platform, scenario', [(None, 'map-order'), ('linux', 'map-order'), ('windows', 'map-order-reversed'), ('linux', 'map-order-reversed')])
-def test_inventory_rejects_alternate_map_order_omissions(monkeypatch, platform, scenario):
+@pytest.mark.parametrize('platform', [None, 'linux', 'windows'])
+@pytest.mark.parametrize('scenario', ['encodings', 'map-order', 'map-order-reversed'])
+def test_inventory_rejects_settled_auth_omissions(monkeypatch, platform, scenario):
     from coverage_plan import EXCEPTIONS, SUITES
     from inventory import check
     if platform is None:
@@ -492,7 +525,7 @@ def test_inventory_rejects_alternate_map_order_omissions(monkeypatch, platform, 
     else:
         monkeypatch.setitem(EXCEPTIONS['w1a_platform'][platform], scenario, 'broad platform initialization exception')
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    with pytest.raises(AssertionError, match='protected map-order selections'):
+    with pytest.raises(AssertionError, match='protected settled-auth selections'):
         check(workflow)
 
 
@@ -508,3 +541,23 @@ def test_inventory_rejects_failure_mask_on_invocation_line(job, name, suffix):
     step['run'] = '\n'.join(lines)
     with pytest.raises(AssertionError, match='driver command'):
         check(workflow)
+
+
+@pytest.mark.parametrize('keep_going', [True, False])
+def test_a_failed_selection_is_named_at_exit(monkeypatch, tmp_path, capsys, keep_going):
+    """Run 38699015278 ended h5-w1a with exit 1 and no reason: one diff
+    four minutes up the log, then twelve clean selections under
+    --keep-going. The runner names every failed selection as it exits."""
+    import run_coverage
+    monkeypatch.setattr(sys, 'argv', ['run_coverage.py', '--suite', 'h5-w1a', '--out-dir', str(tmp_path)]
+                        + (['--keep-going'] if keep_going else []))
+
+    def run(argv, **kw):
+        failed = argv[argv.index('--only') + 1] == 'dim-mismatch' and argv[2] == 'golden'
+        return SimpleNamespace(returncode=1 if failed else 0)
+
+    monkeypatch.setattr(run_coverage.subprocess, 'run', run)
+    assert run_coverage.main() == 1
+    out = capsys.readouterr().out.splitlines()
+    assert 'h5-w1a: FAILED dim-mismatch golden (exit 1)' in out
+    assert out[-1].startswith('h5-w1a: 1 of ') and out[-1].endswith(' selections failed; see h5-w1a-timings.json')
