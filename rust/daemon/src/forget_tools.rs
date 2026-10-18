@@ -127,7 +127,9 @@ async fn delete(
         .get("confirm_bulk")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let max_removed = (!confirm && threshold > 0).then_some(threshold);
+    let max_removed =
+        (!confirm && threshold > 0 && !crate::mutants::active("mcp-forget-no-bulk-guard"))
+            .then_some(threshold);
     let (text, substring, source, episode) = (
         opt_str(a, "text"),
         opt_str(a, "substring"),
@@ -406,7 +408,7 @@ async fn forget_entries(
             e.superseded_by_text = Some(by_text.clone());
         }
     }
-    if changed.lessons_retired {
+    if changed.lessons_retired && !crate::mutants::active("mcp-forget-lessons-stale") {
         refresh_source_retired_lessons(ready).await?;
     }
     Ok(retained)
