@@ -24,6 +24,49 @@ SEED = 61003
 TOPICS = ("apricot", "birch", "cobalt", "dahlia", "elm", "fern", "granite", "hazel")
 
 
+# A token-mode daemon checks a bearer the environment does not match against
+# its stored-principal view, which a background thread loads after /health
+# already answers (pseudolife_memory/daemon.py start_stored_principals; Rust
+# principals::spawn_refresher). Until a read lands, such a bearer gets 503
+# principals_unavailable instead of 401, and a failed first read is retried
+# 10 s later (principal_store.REFRESH_INTERVAL_S). Hosted Windows run
+# 39116824665 (PR #826) failed full_bank's search-wrong-bearer contract on a
+# fresh daemon; rust/daemon/harness/run.py waits the same way.
+PRINCIPAL_PROBE = "Bearer pl-harness-principal-probe"
+
+
+def wait_for_principals(url, deadline, *, alive=lambda: True) -> int:
+    """Wait until a bearer no token matches is no longer answered 503
+    ``principals_unavailable``; return how many such answers came first.
+
+    Only that exact refusal means "not loaded yet": any other answer (401, an
+    open daemon's search, a stand-in's 200) is the daemon's own and is left
+    for the caller's contract to judge. The refusal precedes every handler, so
+    the probe writes nothing."""
+    import httpx
+    unavailable = 0
+    while True:
+        if not alive():
+            raise RuntimeError("disposable daemon exited while its stored principals loaded")
+        try:
+            response = httpx.get(url + "/api/search?q=", headers={"Authorization": PRINCIPAL_PROBE},
+                                 timeout=max(0.001, min(5, deadline - time.monotonic())),
+                                 trust_env=False, follow_redirects=False)
+            try:
+                error = response.json().get("error") if response.status_code == 503 else None
+            except (ValueError, AttributeError):
+                error = None
+            if not (response.status_code == 503 and error == "principals_unavailable"):
+                return unavailable
+            unavailable += 1
+        except httpx.HTTPError:
+            pass
+        if time.monotonic() >= deadline:
+            raise RuntimeError("disposable daemon's stored-principal view did not load before the "
+                               f"startup deadline ({unavailable} principals_unavailable answers)")
+        time.sleep(0.1)
+
+
 def corpus(count, seed=SEED):
     rng = random.Random(seed)
     return [{"text": f"Project {TOPICS[i % len(TOPICS)]} record {i:05d} has calibration value {rng.randrange(1000000):06d}.",
@@ -201,6 +244,8 @@ def launched_daemon(dsn, private, *, env_extra=None, source_root=None, startup_t
                     time.sleep(0.1)
                 else:
                     raise RuntimeError("disposable daemon startup deadline exceeded")
+                cleanup["principals_unavailable_before_ready"] = wait_for_principals(
+                    url, deadline, alive=lambda: process.poll() is None)
                 print(json.dumps({"daemon_health_observed": True, "readiness_identity_verified": True}), flush=True)
                 yield process, url, cleanup
         finally:
