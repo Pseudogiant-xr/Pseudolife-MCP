@@ -44,10 +44,8 @@ tool's answers by value.
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
 | `memory_world_set` | W2-E | No world-fact mutation service. |
-| `memory_outcome` | W2-E | No outcome/lesson mutation service. |
 | `memory_supersede` | W2-E | No supersession service, audit lineage or resident publication. |
 | `memory_reinstate` | W2-E | No reinstatement decision service. |
-| `memory_reinforce` | W2-E | No reinforcement service. |
 | `memory_forget` | W2-E | No forget/cascade service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
@@ -64,7 +62,7 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_fact_set`, `memory_set_add`, `memory_set_remove`,
 `memory_fact_resolve`, `memory_stats`, `memory_episode_start`,
 `memory_episode_end`, `memory_session_title`, `memory_episode_summary`,
-`memory_agents` and `memory_message`. The two board tools
+`memory_outcome`, `memory_reinforce`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -209,6 +207,8 @@ binding"). What it cannot or does not reproduce:
 | `memory_stats` `GET /api/stats` | the same `service.stats()` | not served | a later PR (the REST route over this body) |
 | `memory_stats` band sizes under a custom preset that repeats a band name | positional: a store lands in `bands[0]` even when a later band shares its name | an entry carries its band name, so every entry of that name counts in the last band bearing it (exact at startup, where seating picks that band) | no preset repeats a name; a custom config would have to |
 | `memory_episode_summary` distributions over non-string tags | dict keys (`True == 1`) in `(-count, tag)` order, raising a TypeError when equal counts compare tags of different types | each distinct JSON value its own key; equal counts order by its JSON text (a list or object tag fails with Python's `unhashable type` text) | no tool writes a non-string tag (`normalize_tags`); a hand-written row would have to |
+| `memory_outcome` `used_ids` tokens in non-ASCII digits | `int()` takes any Unicode decimal digit (`"١٢"` is 12) | ASCII digits only (with sign, leading zeros, single underscores and the 4,300-digit limit, as `int()`); other digits count as ignored | the same ASCII-only rule as `memory_stats`' drop count; agents type ASCII ids |
+| `used_ids` and dereference credits naming the entry the startup warmup search served | the warmup search logs a NULL-session event: a session-less credit may name it as the most recent serving event, and a session's `used_ids` counts it as served elsewhere | Rust's warmup logs no event (the declared warmup row in `harness/run.py`), so such a credit names the previous NULL-session event or none, and the id may read as unmatched | W2-D warmup telemetry; the harness's ops never name the entry the warmup serves |
 | `memory_stats` `true_drops` under a multi-band preset | counts evictions out of the last band only (earlier bands relocate) | counts every eviction, as every Rust eviction is a true drop (the multi-band store row below) | the opt-in presets; flat is the default |
 | Legacy transport session (`PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`, header `mcp-session-id`) | the event's session falls back to that header | not read | a one-release rollback switch no shipped client sets |
 | Reranker or BM25 settings Python refuses (`reranker.fusion_weight` outside [0, 1], `reranker.top_n < 1`, `bm25.k1 < 0`, `bm25.b` outside [0, 1]) | init fails (500 on every route) or every BM25 search answers 400 | accepted as given | canonical configs use the shipped defaults; W1-A's early-refusal policy can absorb them |
@@ -281,7 +281,7 @@ The remaining write work is deliberately split into subsequent increments:
 | Item | Remaining behavior | Owner / reason |
 |---|---|---|
 | Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save), `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) and `memory_fact_resolve` (spec FR1-FR8: contender promotion and retirement) are served; world facts remain unimplemented; slot extraction here is a pure text operation, not a canonical write | W2-E world-fact increment (`memory_world_set`) |
-| Outcomes and lessons | Outcome attribution, lesson updates and their persistence remain unimplemented | W2-E outcomes increment |
+| Lessons | `memory_outcome` (signals, attribution and the `used_ids` label; spec OC1-OC12) and `memory_reinforce` are served; the lesson store, lesson search and the dream's lesson synthesis remain unimplemented | W2-E lessons increment (`memory_lesson_search`), W3-H (dream) |
 | Episode titles on idle close | `memory_episode_start`, `memory_episode_end`, `memory_session_title` and `memory_episode_summary` are served (spec EP1-EP12) on the state store-driven open/resume and empty-root reaping share; automatic content titles on idle close remain unimplemented | W2-E reaper follow-up; content titles also rewrite entry stamps |
 | Autosave and clean-exit flush | Background scheduling exists, but changed-state saving and exit flush remain no-ops; store rows write through, while counters, surprise history and band weights do not survive restart via `weights.pt` | W2-E persistence increment; the Python tensor format and recovery contract need a separate proof |
 | Resident cortex refresh | `memory_fact_set`, `memory_set_add`, `memory_set_remove` and `memory_fact_resolve` update the resident cortex in place (readers take snapshots); the world and lesson stores have no write path, and auto-promotion stays disabled | W2-E world, lesson and auto-promotion increments |

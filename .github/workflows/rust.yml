@@ -526,6 +526,7 @@ jobs:
           python -m pytest -q rust/daemon/harness/test_dream_cursor_cancel.py -k admitted_commit_survives_cancel_and_next_pull > $cancelLog 2>&1
           $cancelExit = $LASTEXITCODE
           Remove-Item Env:PSEUDOLIFE_DAEMON_MUTANT
+          Write-Output 'Mutant control dream-cancel-drop-task: the test below MUST fail (expected); this step fails only if the control passes.'
           Get-Content -Tail 20 $cancelLog
           if ($cancelExit -ne 1 -or -not (Select-String -LiteralPath $cancelLog -Pattern 'AssertionError|_queue.Empty' -Quiet)) {
             throw 'Cancelled-waiter ownership control was not rejected by the next-operation check'

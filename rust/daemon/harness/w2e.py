@@ -10,8 +10,9 @@ usage:
 
 Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_set_add``, ``memory_set_remove``, ``memory_fact_resolve``,
-``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``
-and ``memory_episode_summary`` on ``/mcp`` (``--features mutants`` adds the
+``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
+``memory_episode_summary``, ``memory_outcome`` and ``memory_reinforce`` on
+``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -39,7 +40,8 @@ Normalizers (declared, spec "Free for W1 and W2"):
 * the canonical-fact clocks: ``facts`` ``asserted_at``, ``last_confirmed``,
   ``superseded_at``, ``tx_time``, ``valid_time`` and ``hlc_phys`` (the HLC's
   wall-clock milliseconds; ``hlc_logical`` stays exact),
-  ``outcome_signals.created_at``, ``entities.created_at`` and each
+  ``outcome_signals.created_at``, ``retrieval_uses.created_at``,
+  ``entities.created_at`` and each
   ``cortex_supersession_log`` row's ``timestamp`` keep only null-or-not;
 * the board columns a session title writes: ``coordination_agents.name_set_at``
   and ``coordination_events.created_at`` keep only null-or-not, and so do the
@@ -97,7 +99,8 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("facts", "tx_time"), ("facts", "valid_time"), ("facts", "hlc_phys"),
          ("outcome_signals", "created_at"), ("entities", "created_at"),
          ("coordination_agents", "name_set_at"), ("coordination_events", "created_at"),
-         ("coordination_events", "hash"), ("coordination_events", "prev_hash")}
+         ("coordination_events", "hash"), ("coordination_events", "prev_hash"),
+         ("retrieval_uses", "created_at")}
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
                   "started_at", "ended_at"}
@@ -123,7 +126,12 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # session-title scenarios.
            "mcp-episode-start-no-anchor", "mcp-episode-end-pops-root",
            "mcp-session-title-no-entry-stamp", "mcp-session-title-no-board",
-           "mcp-episode-summary-count-order"]
+           "mcp-episode-summary-count-order",
+           # memory_outcome and memory_reinforce (spec OC1-OC12): caught by
+           # the outcome-labels scenario.
+           "mcp-outcome-no-used-ids-record", "mcp-outcome-credit-latest-only",
+           "mcp-outcome-ignore-handle", "mcp-reinforce-no-explicit",
+           "mcp-reinforce-no-use-credit"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -249,6 +257,19 @@ def session_title(title, headers=(), **kw) -> dict:
 
 def ep_summary(eid) -> dict:
     return tool("memory_episode_summary", id=eid)
+
+
+def outcome(task, result, headers=(), **kw) -> dict:
+    return tool("memory_outcome", headers, task=task, outcome=result, **kw)
+
+
+def reinforce(entry_id, headers=()) -> dict:
+    return tool("memory_reinforce", headers, entry_id=entry_id)
+
+
+def search(query, headers=(), top_k=1) -> dict:
+    """Seed-only here: a logged search whose served ids an outcome credits."""
+    return tool("memory_search", headers, query=query, top_k=top_k)
 
 
 def register(episode: str, **fields) -> dict:
@@ -712,6 +733,80 @@ SCENARIOS.update({
             resolve("Bike Rack", "bikes", False),
             # the parked member replaces the protected total
             resolve("Aquarium", "Fish Count", True),
+        ],
+    },
+})
+
+
+# memory_outcome and memory_reinforce (spec OC1-OC12). Entry ids follow the
+# seed order (1-5). Seeded searches (top_k 1) give the window its events: id 2
+# served twice in sess-a, id 4 once in sess-b, id 5 twice with no session.
+# Entry 1 draws the Python daemon's own startup warmup search (a no-session
+# event Rust does not write, declared), so no op names it: a session-less
+# credit could name that event, and a session's credit would count it as
+# served elsewhere.
+OUTCOME_SEED = [
+    store("The warmup probe runs once when the daemon starts."),
+    store("The payments database listens on port 5432 on db-1.", [sess("sess-a")]),
+    store("Deploys go out through the blue-green pipeline on Fridays.", [sess("sess-a")]),
+    store("The bench box runs Debian 12 with a 4 TB scratch disk.", [sess("sess-b")]),
+    store("Nightly backups land in the cold-storage bucket."),
+    search("payments database port", [sess("sess-a")]),
+    search("which port does the payments database use", [sess("sess-a")]),
+    search("bench box scratch disk", [sess("sess-b")]),
+    search("nightly backups bucket"),
+    search("where do the nightly backups go"),
+]
+
+SCENARIOS.update({
+    "outcome-labels": {
+        "config": None,
+        "seed": OUTCOME_SEED,
+        "ops": [
+            # credited by both sess-a events, unmatched, served elsewhere,
+            # unknown; attributed to sess-a's open leaf
+            outcome("deploy engine to host", "success", [sess("sess-a")],
+                    used_ids=[2, 3, 4, 999]),
+            # text with junk tokens and a repeat; a repeat credit writes no
+            # row (a JSON list in a string with a non-integer item is
+            # refused by the binder, before the body: not this case)
+            outcome("deploy engine to host", "failure", [sess("sess-a")],
+                    used_ids="2 2 x, true"),
+            # handle attribution without a header, every optional field
+            outcome("bench maintenance", "correction", episode="@root:sess-b:12",
+                    about="debian", detail="the upgrade path", polarity="-"),
+            # an unknown handle warns and falls back to the header's leaf
+            outcome("unknown handle", "success", [sess("sess-a")], episode="ffffffffffff"),
+            # no session: only the most recent NULL-session event per id
+            outcome("backups", "success", used_ids="5, 5"),
+            # an empty list and junk: the signal lands, the label does not
+            outcome("empty label", "success", [sess("sess-a")], used_ids=[]),
+            outcome("junk label", "success", [sess("sess-a")], used_ids="abc def"),
+            # an id past BIGINT fails the label statement: counted, kept unchecked
+            outcome("big id", "success", [sess("sess-a")], used_ids="99999999999999999999 2"),
+            # over the cap of fifty (from 2: entry 1 is the warmup's)
+            outcome("many ids", "success", [sess("sess-a")], used_ids=list(range(2, 55))),
+            # both counters, the resident copy, the dereference credit
+            reinforce(2, [sess("sess-a")]),
+            reinforce(999999),
+            # no session and no NULL-session event serving it: no credit
+            reinforce(4),
+        ],
+    },
+    "outcome-lessons-off": {
+        "config": "memory:\n  lessons:\n    enabled: false\n",
+        "seed": [store("A note so the bank is not empty.")],
+        "ops": [
+            outcome("lessons are off", "success", used_ids="abc"),
+            outcome("lessons are off", "failure", used_ids=[1]),
+        ],
+    },
+    "outcome-log-off": {
+        "config": "memory:\n  retrieval_log:\n    enabled: false\n",
+        "seed": [store("A note so the bank is not empty.", [sess("sess-a")])],
+        "ops": [
+            outcome("log is off", "success", [sess("sess-a")], used_ids=[1]),
+            reinforce(1, [sess("sess-a")]),
         ],
     },
 })

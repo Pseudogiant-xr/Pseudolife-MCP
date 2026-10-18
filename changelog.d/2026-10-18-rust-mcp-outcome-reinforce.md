@@ -1,0 +1,3 @@
+### Added (2026-10-18 — the Rust daemon serves memory_outcome and memory_reinforce)
+
+- The Rust daemon's MCP endpoint now answers `memory_outcome` and `memory_reinforce` as the Python daemon does, with the same database changes. An outcome records its signal under the handle's session or the caller's open episode. Its `used_ids` label credits every search in the caller's session from the last hour that served each id, reports which ids were credited, served elsewhere or unmatched, and keeps that split on the signal row. A reinforce raises a memory's reinforcement counters and credits the search that served it.
