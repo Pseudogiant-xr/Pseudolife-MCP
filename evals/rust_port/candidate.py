@@ -68,6 +68,9 @@ def launched_candidate(command, dsn, private, *, source_root, cache_overrides, s
                 time.sleep(.1)
             else:
                 raise RuntimeError("owned candidate readiness timed out")
+            from evals.rust_baseline.daemon import wait_for_principals
+            cleanup["principals_unavailable_before_ready"] = wait_for_principals(
+                url, deadline, alive=lambda: process.poll() is None)
             try:
                 yield url, cleanup
             finally:

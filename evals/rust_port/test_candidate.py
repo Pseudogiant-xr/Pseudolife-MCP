@@ -230,3 +230,17 @@ def test_full_bank_routes_candidate_arm_to_selected_target(tmp_path, monkeypatch
     assert launches == ["new-bank", "oracle", "new-bank", mode]
     assert observations == [("http://127.0.0.1:1", False), ("http://127.0.0.1:2", True)]
     assert receipt["status"] == "passed"
+
+
+def test_owned_candidate_waits_for_its_stored_principal_view(tmp_path):
+    # The Rust candidate refreshes stored principals in the background too
+    # (principals::spawn_refresher); a bearer no token matches must get 401,
+    # not 503 principals_unavailable, before the corpus starts.
+    import httpx
+    from evals.rust_baseline.test_principals_readiness import stand_in
+    with candidate.launched_candidate(stand_in(3), "synthetic-minted-bank", tmp_path,
+            source_root=tmp_path, cache_overrides={}, startup_timeout=30) as (url, cleanup):
+        response = httpx.get(url + "/api/search?q=apricot", headers={"Authorization": "Bearer synthetic-invalid"},
+                             trust_env=False, timeout=5)
+        assert (response.status_code, response.json()["error"]) == (401, "unauthorized")
+        assert cleanup["principals_unavailable_before_ready"] == 3
