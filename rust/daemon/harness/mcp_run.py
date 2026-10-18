@@ -67,14 +67,14 @@ def wait_for_principals(banks, timeout_s=PRINCIPALS_WAIT_S, poll_s=0.25):
     pending = dict(banks)
     while True:
         for side, dsn in list(pending.items()):
-            with psycopg.connect(dsn, autocommit=True) as conn:
+            with psycopg.connect(dsn, autocommit=True, connect_timeout=10) as conn:
                 if conn.execute("SELECT to_regclass('public.principals')").fetchone()[0] is not None:
                     del pending[side]
         if not pending:
             return
         if time.monotonic() >= deadline:
-            raise RuntimeError(f"{' and '.join(pending)} daemon never created public.principals "
-                               f"within {timeout_s:g} s of answering /health")
+            raise RuntimeError(f"public.principals never appeared in the {' and '.join(pending)} "
+                               f"bank {timeout_s:g} s after both daemons answered /health")
         time.sleep(poll_s)
 
 

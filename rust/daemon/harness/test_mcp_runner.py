@@ -220,7 +220,7 @@ def test_principals_timeout_is_an_infrastructure_failure(runner, monkeypatch, ca
     assert mcp_run.main() == 2
     err = capsys.readouterr().err
     assert 'infrastructure failed' in err
-    assert 'rust daemon never created public.principals' in err
+    assert 'public.principals never appeared in the rust bank' in err
     assert not seeded
     assert set(runner.stopped) == {'py', 'rs'} and len(runner.dropped) == 2
 
