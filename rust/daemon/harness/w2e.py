@@ -1321,14 +1321,16 @@ SCENARIOS.update({
     # close to what is held is stored where a plain store would be refused.
     "supersede-gate": {
         "config": "memory:\n  surprise_threshold: 0.35\n",
-        "seed": [store("The cafeteria opens early on weekdays."),
-                 store("Lunch is served from noon in the atrium.")],
+        # store-gate's near-duplicates: no contradiction cue (capitals,
+        # numbers, negation, possession), so only the gate decides.
+        "seed": [store("the tea kettle whistles loudly when the water boils"),
+                 store("the garden hose is coiled behind the shed")],
         "ops": [
             # a near-duplicate of another entry: a plain store is refused
-            store("On weekdays the cafeteria opens early."),
+            store("the kettle whistles loudly when water boils"),
             # as a correction of an unrelated entry it is stored
-            supersede("On weekdays the cafeteria opens early.",
-                      old_text="Lunch is served from noon in the atrium."),
+            supersede("the kettle whistles loudly when water boils",
+                      old_text="the garden hose is coiled behind the shed"),
         ],
     },
     # The meta filter refuses a replacement: the whole correction rolls back,
