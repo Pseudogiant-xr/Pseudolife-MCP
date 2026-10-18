@@ -7,9 +7,24 @@ status, headers and body bytes so the harness can diff them exactly.
 """
 import http.client
 import json
+import math
+import os
+import socket
+import struct
+import threading
 
 PROTOCOL = "2025-11-25"
 ACCEPT = "application/json, text/event-stream"
+
+# Windows discards data it has received but not yet handed to a receive once
+# the peer's reset arrives. A blocking receive is posted in the kernel and
+# takes the data on arrival; a CPython socket timeout waits in select() and
+# only then calls a non-blocking recv, so a reset landing in between still
+# loses the response: 22 of 3000 refused 4 MiB bodies with a timeout against
+# 0 of 3000 blocking on a Windows 11 host (2026-10-18). There the exchange
+# runs blocking, with the same timeout enforced by the kernel. Other hosts
+# keep received data readable after a reset.
+KERNEL_TIMEOUTS = os.name == "nt"
 
 
 def request(port, method, body, headers, timeout=120, *, connection=None):
@@ -24,14 +39,77 @@ def request(port, method, body, headers, timeout=120, *, connection=None):
             c.putheader(k, v)
         if data is not None:
             c.putheader("Content-Length", str(len(data)))
-        c.endheaders(data)
-        r = c.getresponse()
-        raw = r.read()
+        if data:
+            r, raw, send_error = _send_while_reading(c, method, data)
+        else:
+            c.endheaders(data)
+            r = c.getresponse()
+            raw = r.read()
+            send_error = None
         hdrs = [(k.lower(), v) for k, v in r.getheaders()]
     finally:
         c.close()
     req_sid = next((v for k, v in pairs if k.lower() == "mcp-session-id"), None)
-    return {"status": r.status, "headers": hdrs, "body": raw, "req_sid": req_sid}
+    out = {"status": r.status, "headers": hdrs, "body": raw, "req_sid": req_sid}
+    if send_error is not None:
+        out["send_error"] = send_error
+    return out
+
+
+def _send_while_reading(c, method, data):
+    """Read the response on a helper thread that is waiting before the request is sent.
+
+    The Rust daemon refuses an MCP body over its 4 MiB budget after reading
+    the budget, then closes with the overshoot unread, so its stack resets
+    the connection (divergences.md, MCP-REFUSAL-CLEANUP). Read only after the
+    send, body_limit's 413 was lost to WinError 10054 in about 1 of 100 calls
+    on an idle Windows 11 host (2026-10-18). The send starts once the reader
+    signals that it is about to read, and the daemon reads 4 MiB before it
+    answers, so the receive is waiting by then. A response split across
+    segments with the reset right behind can still lose its tail, which
+    raises, never passes. A complete response is returned even if the send
+    was cut off, which the result records as ``send_error``; without one the
+    read's error is raised, so a daemon that closes without a complete
+    answer still fails.
+    """
+    if c.sock is None:
+        c.connect()
+    if KERNEL_TIMEOUTS:
+        _kernel_timeouts(c.sock)
+    r = c.response_class(c.sock, method=method)
+    reading = threading.Event()
+    got, failed = [], []
+
+    def read():
+        reading.set()
+        try:
+            r.begin()
+            got.append(r.read())
+        except BaseException as exc:
+            failed.append(exc)
+
+    reader = threading.Thread(target=read, name="mcp_wire-read", daemon=True)
+    reader.start()
+    reading.wait()
+    try:
+        c.endheaders(data)
+        send_error = None
+    except Exception as exc:
+        send_error = f"{type(exc).__name__}: {exc}"
+    reader.join()
+    if failed:
+        r.close()
+        raise failed[0]
+    return r, got[0], send_error
+
+
+def _kernel_timeouts(sock):
+    """Make ``sock`` blocking, with its timeout kept as Winsock's DWORD milliseconds (0: none)."""
+    timeout = sock.gettimeout()
+    ms = 0 if timeout is None else max(1, math.ceil(timeout * 1000))
+    sock.settimeout(None)
+    for option in (socket.SO_RCVTIMEO, socket.SO_SNDTIMEO):
+        sock.setsockopt(socket.SOL_SOCKET, option, struct.pack("I", ms))
 
 
 def header(resp, name):
