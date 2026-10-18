@@ -129,7 +129,11 @@ fn mcp_memory_fact_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Too
 /// `_alias_retry_names` (`service.py:4157`): after `entity`, the node's
 /// canonical then its aliases (in `find_entity`'s order), minus any alias
 /// that is another entity's canonical, deduplicated on the cortex key.
-async fn alias_retry_names(db: &Client, entity: &str, node: &Value) -> anyhow::Result<Vec<String>> {
+pub(crate) async fn alias_retry_names(
+    db: &Client,
+    entity: &str,
+    node: &Value,
+) -> anyhow::Result<Vec<String>> {
     let aliases: Vec<String> = node["aliases"]
         .as_array()
         .map(|a| {

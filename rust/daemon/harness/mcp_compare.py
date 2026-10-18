@@ -39,14 +39,10 @@ FREE_PREFIXES = ("Parse error: ", "Validation error: ")
 # Bodies not yet served by the Rust daemon: tool -> owning slice. Mirrors
 # rust/daemon/divergences.md; delete a row when its body is wired.
 UNSERVED = {
-    "memory_recall": "W2-D", "memory_world_search": "W2-D",
-    "memory_lesson_search": "W2-D",
-    # memory_history: the probe sends only entity (chain mode), which stays
-    # the stub; slot mode is served and compared by harness/w2e.py.
-    "memory_history": "W2-D", "memory_graph": "W2-D",
+    "memory_recall": "W2-D",
+    "memory_graph": "W2-D",
     "document_search": "W2-D",
     "memory_consolidation_candidates": "W2-D",
-    "memory_world_set": "W2-E",
     "memory_supersede": "W2-E", "memory_reinstate": "W2-E",
     "memory_forget": "W2-E", "document_ingest": "W2-E",
     "memory_dream": "W3-H", "memory_graph_review": "W3-H", "memory_consolidate": "W3-H",
@@ -765,7 +761,7 @@ def recording_errors(data, cases=None):
                  for response in stubs.values()):
             errors.append('stub_tools: oracle call failed')
     total = sum(len(value) for value in data.values() if isinstance(value, (list, dict)))
-    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 333
+    expected_total = 10 if names == {'config_lists'} else 30 if side_config else 329
     if total != expected_total:
         errors.append(f'corpus: {total} responses, expected {expected_total}')
     if not errors:

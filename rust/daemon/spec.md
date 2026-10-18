@@ -201,7 +201,9 @@ Free for W1 and W2: log lines; the exact float bits of `entries.embedding`
 and `entries.surprise` within the measured tolerance (but never a different
 admission decision or reason); wall-clock values (`ts`, `started_at`,
 `capacity_true_drops.last_at`) and episode ids, which the harness normalizes
-by rule.
+by rule; and a search `score` in an answer within 1.5e-4 (the two
+embedders agree to the measured tolerance, and scores are rounded to four
+places).
 
 ## W3. Shared episode ownership
 
@@ -743,7 +745,7 @@ snapshot and `read/cortex_search.rs`'s `record_to_dict_age`, with the
 | HI3 | A set slot (`slot_kind` is `set`: no current scalar, and current members or any member row): every member row in record order adds `{"value", "event": "added", "at": asserted_at}` and, when its status is `removed` with a `superseded_at`, `{"value", "event": "removed", "at": superseded_at}`; with a cutoff only events at or before it remain; they sort by `at`, then adds before removes, then member row order. The answer is `{"kind": "set", "entity", "attribute", "count", "versions"}` with the raw arguments. | `service.py:5779-5812`; `cortex.py:1182-1216` |
 | HI4 | Otherwise every record at the slot key (`_norm_key` of both parts), in record order, filtered to `tx_time` (or `asserted_at` when it is unset or zero) at or before a cutoff, stably sorted by that time. The answer is `{"entity", "attribute", "count", "versions"}`, each version `_cortex_record_to_dict` with `config.time.relative_age` and the default `annotate` stale policy (never policy-rendered: the audit surface shows what was stored). | `service.py:5813-5831`; `cortex.py:1526-1528` |
 | HI5 | With a cutoff, `as_of` is appended (the epoch seconds; a NaN or infinite cutoff is null in structured content, as Python's is; Python's text block spells it `NaN`/`Infinity`, declared). | `service.py:5810-5811, 5829-5830` |
-| HI6 | Chain mode (`service.chain`) is not served: it answers the declared stub (`divergences.md`, the `memory_history` row) until the lesson store lands. | `service.py:5833-5927` |
+| HI6 | Chain mode (`attribute` omitted) is CH1-CH6 below. | `mcp_server.py:1826-1827` |
 | HI7 | Not reproduced: the text block's `NaN`/`Infinity` for a non-finite echo (declared). A naive `as_of` reads in each daemon's own local zone, so the harness compares two daemons in one zone. | `divergences.md` |
 
 `harness/w2e.py live --only history-slot` compares every answer and the full
@@ -758,6 +760,107 @@ relative word refused at binding. The `mcp-history-ignore-as-of`,
 `mcp-history-set-unsorted`, `mcp-history-set-no-removed` and
 `mcp-history-asserted-order` mutants must be caught. The epoch is checked natively against `_parse_as_of` answers
 recorded from CPython 3.11.
+
+### Lessons and the memory_history chain over MCP (2026-10-18)
+
+`stores/lessons.rs` (the resident lesson store's read side, hydrated at init
+as `Ready.lessons`), `lesson_tools.rs` (`memory_lesson_search`) and
+`read/history.rs` (`chain`); registered in `mcp::dispatch::registry`.
+Python: `memory/lessons.py` (`LessonRecord`, `current_records`, `search`
+220-238); `storage/sync.py` `hydrate_lessons` (474-505);
+`storage/postgres.py` `load_lessons` (1998-2008), `add_lesson_search_event`
+(2411-2428), `entries_for_entity` (4156-4171), `load_graph` (4370-4393),
+`find_entity` (2840-2867); `service.py` `_lesson_record_to_dict` (411-430),
+`_alias_retry_names` (4157-4183), `lesson_search` (5346-5361),
+`_cortex_change_index` (5399-5412), `_annotate_lesson_staleness`
+(5414-5443), `chain` (5833-5927), `_log_lesson_search` (5979-6003);
+`mcp_server.py` `memory_lesson_search` (2062-2093).
+
+| # | Exact item | Source |
+|---|---|---|
+| LS1 | Hydration at init: every `lessons` row in id order (`confidence` as its REAL text, `support`/`provenance` as their string items). No Rust path writes lessons, so the store is fixed after init. | `sync.py:474-505`; `postgres.py:1998-2008` |
+| LS2 | `memory_lesson_search(query, top_k=5, verbose=False)`; read-only (no `mutation` on an internal failure). Under the service lock (Rust: `Ready.write`, which the log's session resolution needs). | `mcp_server.py:2062-2093` |
+| LS3 | The width is `top_k` (the binder always passes one, so the config's `memory.lessons.top_k` is never read over MCP); the floor is `max(0.0, memory.lessons.min_confidence)`. | `service.py:5353-5354` |
+| LS4 | The query embedding; current lessons with an embedding scored by f32 cosine against the normalised query, at or above the floor, stably sorted by descending score, cut to the width; a stored vector of another length fails (torch raises). | `lessons.py:220-238`; `service.py:5355-5356` |
+| LS5 | Each hit as `_lesson_record_to_dict` (`task, aspect, lesson, about, polarity, outcome, status, confidence` (4 places), `origin`, sorted `provenance`, `asserted_at, last_confirmed, supersedes_value, superseded_by_value, superseded_at`) plus `score` (4 places). | `service.py:411-430, 5357-5358` |
+| LS6 | `re_verify`: with any personal-cortex record (the change index: per normalised entity, the latest `max(asserted_at, superseded_at or 0)` over every record), each row's name (`about`, else `task`, stripped) keys the index directly, else through its graph entity (`find_entity(norm_name(name))`, keyed by its canonical); a change after `max(asserted_at, last_confirmed)` adds `re_verify: true` and `re_verify_reason: "facts about <name> changed since this lesson"`. No index, no graph lookup. | `service.py:5399-5443` |
+| LS7 | With the retrieval log enabled, one `lesson_search_events` row (`query_text`, the session from `_resolve_writer`, its open leaf as `episode_id`, `served` = `[{entity_norm, attribute_norm, rank, score}]` in hit order, `created_at` now), its own transaction; any failure counts a retrieval-log error and never fails the search. A search with no hits logs an empty list. | `service.py:5979-6003`; `postgres.py:2411-2428` |
+| LS8 | The answer `{"count", "entries"}`; without `verbose` each entry keeps only `task, aspect, lesson, about, polarity, outcome, confidence, score, re_verify, re_verify_reason` (those present). | `mcp_server.py:2083-2093` |
+| LS9 | Not served: lesson writes (the dream's synthesis, `lesson_forget`, `lesson_restore`) and `lessons_dump` (no MCP tool reaches them yet). | `service.py:5446-5480, 5363-5371` |
+| LS10 | Not reproduced: non-string `provenance` items (declared). | `divergences.md` |
+| CH1 | `chain(entity, limit=20)`: a name blank after `strip()` answers `{"found": false, "entity", "count": 0, "events": []}` with the raw argument. | `service.py:5845-5849` |
+| CH2 | The keys are the name's `_norm_key`, plus, when `find_entity(norm_name(name))` resolves a node, the `_norm_key` of each `_alias_retry_names` name (its canonical, then its aliases not shadowed by another entity's canonical); the node's `display` replaces the name in the answer. | `service.py:5850-5866, 4157-4183` |
+| CH3 | Facts: every personal-cortex record (all statuses, record order) whose entity's key is in the keys adds `{"t": asserted_at, "kind": "fact_set", "summary": "<attribute> = <value>", "refs": {"attribute"}}` and, when `superseded_at` is set, `{"t": superseded_at, "kind": "superseded", "summary": "<attribute>: <value> superseded[ by <superseded_by_value>]", ...}`. | `service.py:5868-5883` |
+| CH4 | With a node: its source entries (`entries_for_entity`: distinct entries traced to its current facts, newest first, at most `limit`) add `{"t": ts, "kind": "entry", "summary": text[:160], "refs": {"entry_id"[, "episode_title"]}}`; each live edge touching it with a truthy `asserted_at` adds `{"t", "kind": "edge", "summary": "<src display> —<relation>→ <dst display>", "refs": {"relation"}}`. | `service.py:5884-5906`; `postgres.py:4156-4171, 4370-4393` |
+| CH5 | Lessons: every current lesson whose task's key, or whose `about`'s, is in the keys adds `{"t": asserted_at, "kind": "lesson", "summary": the lesson, "refs": {"task", "aspect"}}`. | `service.py:5907-5917` |
+| CH6 | No events answers CH1's not-found shape; else the events stably sorted by `t`, the last `max(1, limit)` kept: `{"found": true, "entity": the display name, "count", "events"}`. Read-only. | `service.py:5918-5927` |
+
+`harness/w2e.py live --only lessons` compares every answer and the full bank
+after each call, on a template whose facts, graph alias (`bearer tokens` ->
+`auth tokens`) and edge the Python daemon's own tools wrote, and whose four
+lessons (one superseded) are SQL seeds with embeddings copied from entries
+the Python daemon stored: compact, verbose and `top_k=1` searches, with
+`re_verify` direct and through the alias; a session's search (its
+`lesson_search_events` row, whose scores compare within one rounding unit);
+chains for an entity with facts (one superseded), an edge and an
+about-named lesson, for one whose alias names widen the keys, for a lesson
+matched by its task, for an unknown entity and for a blank one; and, in
+`lessons-config`, the `min_confidence` floor with the retrieval log off (no
+event row). Not exercised: chain entry events (the seeded facts trace no
+entries) and shadowed aliases. The `mcp-lesson-search-no-graph-resolve`,
+`mcp-lesson-search-no-log` and `mcp-history-chain-no-lessons` mutants must be
+caught.
+
+### World cortex tools over MCP (2026-10-18)
+
+`stores/world.rs` (the resident world store: hydration, `write_fact`,
+`search`, the per-slot save) and `world_tools.rs` (both tools); `Ready.world`
+is hydrated at init beside the personal cortex; registered in
+`mcp::dispatch::registry`. Python: `memory/world_cortex.py` (`WorldRecord`,
+`write_fact` 98-191, `_insert` 193-213, `lookup` 216-222, `search`
+226-239); `storage/sync.py` `_world_record_to_row` (320-348),
+`sync_world_slots` (351-359), `hydrate_world_cortex` (372-404);
+`storage/postgres.py` `load_world_facts` (1977-1987), `_replace_slot_rows`
+and `_insert_canonical_rows` (1818-1866); `service.py` stale policy
+(268-294), `_is_safe_source_url` (362-382), `_world_record_to_dict`
+(385-408), `_save_world` (3763-3772), `world_write` (4816-4842),
+`world_search` (4851-4864); `mcp_server.py` `_WORLD_NOTES` (747-750),
+`_world_correct_with` (1038-1049), `memory_world_set` (1834-1868),
+`memory_world_search` (1871-1903), `_compact_world` (1907-1921).
+
+| # | Exact item | Source |
+|---|---|---|
+| WD1 | Hydration at init: every `world_facts` row in id order (`confidence` as its REAL text, `source_url`/`source_quote` or empty, `freshness_class` or `volatile`, `retrieved_at` or 0.0, `version` or 1), then the current index (`{key: i}` over current records, the last winning). No dimension check, as Python checks none for world rows. | `sync.py:372-404`; `postgres.py:1977-1987` |
+| WD2 | `memory_world_set(entity, attribute, value, source_url="", source_quote="", freshness_class="volatile", confidence=0.85, retrieved_at=None, content_hash=None)`: the class is a binder Literal, `confidence` in [0, 1]. Not read-only (an internal failure carries `mutation: "unknown"`); the write runs detached, as `memory_fact_set` does. | `mcp_server.py:1834-1868` |
+| WD3 | An unsafe citation is refused before initialization: with every U+0000..U+0020 removed and the rest lowercased, a non-empty URL that is not `http://`/`https://` and starts with a scheme (`[a-z][a-z0-9+.\-]*:`) answers `{"action": "rejected", "reason": "unsafe_source_url", "source_url", "note"}` (the `_WORLD_NOTES` note); nothing runs. | `service.py:362-382, 4823-4828` |
+| WD4 | Under the write lock: the embedding of `f"{entity} {attribute} {value}".strip()` (a document embedding), the writer (`X-PL-Writer` identity) and session (`_resolve_writer`; an invalid TTL is the `invalid_argument` prose), one HLC tick, then `write_fact` at `now`, then `_save_world`. | `service.py:4829-4842` |
+| WD5 | `write_fact`: the slot is marked dirty first. An empty slot inserts a current record (`polarity "+"`, the confidence, citation, normalised class, `retrieved_at` or now, the hash, `asserted_at` = `last_confirmed` = `tx_time` = `valid_time` = now, the HLC stamp, writer and session, version 1). | `world_cortex.py:98-139, 193-213` |
+| WD6 | A value equal under `_norm_value` confirms: `last_confirmed` = `tx_time` = now, `retrieved_at` (or now), the class, `confidence = min(1, max(old, new))`, the URL, quote and hash only when non-empty, the HLC stamp, writer and session only when non-empty; `asserted_at` and `valid_time` stay. Action `confirmed`. | `world_cortex.py:141-166` |
+| WD7 | A different value: a candidate HLC older than the current record's (or equal with an earlier `now`) answers `stale` with the current record, unchanged; otherwise the current record becomes `superseded` (`superseded_at` = now, `superseded_by_value`) and a new current record is inserted with `supersedes_value` = the old value. Action `superseded`. | `world_cortex.py:168-191` |
+| WD8 | `_save_world` (`sync_world_slots`): the dirty slots' records, in record order, rewritten in one transaction: DELETE the slots, then one INSERT per row (`origin 'source'`, `support ["source"]`, `provenance []`, every citation and stamp column); the slots are cleared after. A failure counts a persistence error and raises (`internal_error`). | `sync.py:320-359`; `postgres.py:1818-1866`; `service.py:3763-3772` |
+| WD9 | The answer: `{"action", <record>}` with `_world_record_to_dict`: `entity, attribute, value, polarity, status, confidence` (4 places), `effective_confidence` (4 places: confidence times the class decay since `retrieved_at`), `stale` (past twice the TTL since `retrieved_at`), `origin "source"`, `freshness_class, source_url, source_quote, retrieved_at, asserted_at, last_confirmed, supersedes_value, superseded_by_value, superseded_at`, then the stale policy (`demote` adds `warning`; `quarantine` moves `value` to `last_known_value`). | `service.py:268-286, 385-408` |
+| WD10 | `memory_world_search(query, top_k=5, verbose=False)`: the query embedding; current records with an embedding scored by f32 cosine against the normalised query, at or above 0.0, stably sorted by descending score, cut to `top_k`; a stored vector of another length fails (torch raises). Entries are WD9 records plus `score` (4 places); under `demote` stale entries sort last, stably. Read-only. | `world_cortex.py:226-239`; `service.py:4851-4864` |
+| WD11 | The MCP layer: an entry stale, or past a third of its class TTL since `last_confirmed or retrieved_at or asserted_at`, gains `correct_with` (the `memory_world_set(entity=..., attribute=..., value=<the verified current value>, source_url=<citation>)` call with Python `repr` arguments); any such entry adds `correction_note`. Without `verbose` each entry is compacted (`entity, attribute, value, effective_confidence, stale, score, correct_with, warning` when present, then `last_known_value`, then `source_url` and `source_quote` when non-empty). | `mcp_server.py:1891-1921, 1038-1049` |
+| WD12 | Not served: `world_lookup`, `world_dump`, `retire`, `restore` and `forget` (no MCP tool reaches them yet); `source_doc_id` is never set over MCP. | `world_cortex.py:241-326`; `service.py:4844-4900` |
+
+`harness/w2e.py live --only world-facts world-facts-demote world-facts-quarantine`
+compares every answer and the full bank after each call, on templates whose
+three world facts (a slow one, a stale one with `retrieved_at` 1.0, an
+evergreen one) the Python daemon's own tool wrote: compact, verbose and
+`top_k=1` searches (the stale entry's `correct_with` and note); a
+restatement that confirms with a lifted confidence and a new hash; a
+supersession with a session header and an explicit `retrieved_at`; two
+unsafe schemes (one behind a tab and mixed case); a scheme-less citation;
+a wide search; and the personal slot history of the world slot (empty: the
+stores are apart). Under `demote` the stale entry sorts last with its
+warning; under `quarantine` its value moves to `last_known_value` in both
+projections. World embeddings compare within the measured tolerance and a
+response `score` within one rounding unit; the world clocks keep only
+null-or-not, except that `retrieved_at` does so only within a day of now (a
+write without one takes the clock) and an explicit past value compares
+exactly. The `mcp-world-set-no-confirm`,
+`mcp-world-set-unsafe-allowed`, `mcp-world-set-no-save` and
+`mcp-world-search-no-correct-with` mutants must be caught.
 
 ### Board tools over MCP (2026-10-16)
 
