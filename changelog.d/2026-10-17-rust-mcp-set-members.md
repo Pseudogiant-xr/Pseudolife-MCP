@@ -1,3 +1,0 @@
-### Added (2026-10-17 — the Rust daemon serves memory_set_add and memory_set_remove)
-
-- The Rust daemon's MCP endpoint now answers `memory_set_add` and `memory_set_remove` as the Python daemon does, with the same database changes: a member is added, or confirmed when it repeats one (same text or a near-identical embedding); a scalar at the slot converts to a set once, recording the labels and freshness class the conversion drops, unless it is a number-led total, which is kept and the add parked as a contender (or the total confirmed); a slot holding 100 members refuses further adds; a removal retracts a member and keeps its row for audit. Refusals carry the same notes, and the subject gets its graph node unless the name looks like an extraction artifact.
