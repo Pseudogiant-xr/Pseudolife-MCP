@@ -13,7 +13,7 @@ mod difflib;
 pub mod dispatch;
 mod envelope;
 pub mod identity;
-mod py_loads;
+pub(crate) mod py_loads;
 pub mod tiers;
 mod toolset;
 mod validation;
