@@ -201,13 +201,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-forget-no-bulk-guard", "mcp-forget-delete-digests", "mcp-forget-cortex-stale",
            "mcp-forget-no-lesson-cascade", "mcp-forget-lessons-stale", "mcp-forget-facts-kept",
            "mcp-forget-edges-kept", "mcp-forget-slot-reads-kept", "mcp-forget-no-world-audit",
-<<<<<<< HEAD
+           "mcp-forget-no-lesson-audit",
            # memory_consolidation_candidates (spec CC1-CC9): caught by
            # consolidation-candidates.
            "mcp-consolidation-unsorted", "mcp-consolidation-unverified"]
-=======
-           "mcp-forget-no-lesson-audit"]
->>>>>>> rust-cf/w2e-forget
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
