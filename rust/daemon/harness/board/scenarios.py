@@ -223,6 +223,8 @@ class Identity(Scenario):
             act("park expires bad", "update", agent="A", body={"park_reason": "blocked", "park_expires": True}),
             act("park with expiry", "update", agent="A",
                 body=lambda c: {"park_reason": "blocked", "park_expires": c.now + 3600}),
+            act("status with its park keeps it", "update", agent="A",
+                body={"status": "waiting on CI", "park_reason": "blocked"}),
             act("status clears park", "update", agent="A", body={"status": "back to work"}),
             act("park done", "update", agent="A", body={"park_reason": "done"}),
             act("clear park", "update", agent="A", body={"park_reason": ""}),
