@@ -1,4 +1,4 @@
-//! `memory_supersede` and `memory_reinstate` (spec CO1-CO10, RI1-RI10):
+//! `memory_supersede` and `memory_reinstate` (spec CO1-CO10, RI1-RI9):
 //! `mcp_server.memory_supersede` → `service.supersede` →
 //! `_apply_correction_locked`, and `mcp_server.memory_reinstate` →
 //! `service.reinstate` → `PostgresStorage.reinstate_entry`.
@@ -229,6 +229,17 @@ async fn resolve_target(
             return Err(noop(&reason, RESOLVE_NOTE, vec![Value::Object(error)]));
         }
     };
+    let holders = {
+        let bank = ready.bank.read().expect("bank lock");
+        bank.entries.iter().filter(|e| e.id == target.id).count()
+    };
+    if holders != 1 {
+        return Err(noop(
+            "ambiguous_target",
+            "A selected row ID has multiple resident entries; retry after recovery.",
+            vec![],
+        ));
+    }
 
     // A failed insert can leave a phantom row id resident; never correct it.
     let ids = vec![target.id];
@@ -382,6 +393,8 @@ async fn supersede(
         authority,
         distortion,
     };
+    // `stamp = time.time()` precedes the replacement's store (`ts`).
+    let stamp = episodes::now();
     let bypass = !crate::mutants::active("mcp-supersede-surprise-gate");
     let admission = match store::admit(ready, cfg, &ws, new, bypass, &ids)
         .await
@@ -402,7 +415,6 @@ async fn supersede(
         })
     });
 
-    let stamp = episodes::now();
     let traces_on = cfg.traces_enabled;
     let client = ready.storage.client();
     let committed = {
@@ -522,15 +534,16 @@ async fn supersede(
     let derived = derived_rows(ready, &traces);
     let total = derived.len();
     let capped: Vec<Value> = derived.into_iter().take(DERIVED_FLAGGED_CAP).collect();
+    let truncated = capped.len() < total;
     Ok(json!({
         "superseded_count": 1,
         "superseded_texts": [target.text],
         "superseded_ids": ids,
         "new_memory_stored": true,
         "new_memory_surprise": round4(adm.overall),
-        "derived_flagged_truncated": capped.len() < total,
         "derived_flagged": capped,
         "derived_flagged_total": total,
+        "derived_flagged_truncated": truncated,
     }))
 }
 
@@ -766,10 +779,11 @@ fn mcp_memory_reinstate<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> To
         }
         let ready = app.service.ensure_init().await.map_err(internal)?;
         let args = call.args.clone();
+        let cfg = app.service.config.memory.clone();
         let r2 = ready.clone();
         ready
             .writes
-            .spawn(async move { reinstate(&r2, &args, &principal).await })
+            .spawn(async move { reinstate(&r2, &cfg, &args, &principal).await })
             .await
             .map_err(internal)?
     })
@@ -778,12 +792,18 @@ fn mcp_memory_reinstate<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> To
 /// `service.reinstate` (`service.py:2681-2807`).
 async fn reinstate(
     ready: &Arc<Ready>,
+    cfg: &MemoryConfig,
     args: &Map<String, Value>,
     decided_by: &str,
 ) -> Result<Value, ToolError> {
     let _ws = ready.write.lock().await;
     let req = reinstatement_request(args, decided_by)?;
     let client = ready.storage.client();
+    // PostgreSQL is authoritative for admission and replay: the target's row
+    // is mirrored into the resident bank first (`service.py:2728-2734`).
+    if !crate::mutants::active("mcp-reinstate-no-mirror") {
+        mirror_target(ready, cfg, req.entry_id).await?;
+    }
     let durable: Option<String> = client
         .query_opt(
             "SELECT request_sha256 FROM entry_reinstatement_decisions \
@@ -849,6 +869,101 @@ async fn reinstate(
         }
     }
     Ok(extras(result))
+}
+
+/// `_reinstatement_target_mirrored` (`service.py:2604-2640`), published: the
+/// one target row's durable state in the resident bank. No row drops every
+/// resident holder; a row without a holder is loaded (`row_to_entry`, seated
+/// in its band or the first); otherwise the holders take the row's
+/// retirement. An id past BIGINT has no row and no holder.
+async fn mirror_target(
+    ready: &Ready,
+    cfg: &MemoryConfig,
+    id: Option<i64>,
+) -> Result<(), ToolError> {
+    let Some(id) = id else { return Ok(()) };
+    let row = ready
+        .storage
+        .client()
+        .query_opt(
+            "SELECT id, band, text, embedding::real[], surprise::text, ts, access_count,              source, superseded_at, superseded_by_text, episode_id, episode_title, tags,              slots, authority, distortion_tolerance, reinforcements, last_logical_turn,              dream_state FROM entries WHERE id = $1",
+            &[&id],
+        )
+        .await
+        .map_err(|e| internal(format!("reinstatement commit reconciliation required: {e}")))?;
+    let mut bank = ready.bank.write().expect("bank lock");
+    let holders: Vec<usize> = (0..bank.entries.len())
+        .filter(|&i| bank.entries[i].id == id)
+        .collect();
+    match row {
+        None => {
+            for &i in holders.iter().rev() {
+                bank.remove(i);
+            }
+        }
+        Some(r) if holders.is_empty() => {
+            let embedding: Vec<f32> = r.get::<_, Option<Vec<f32>>>(3).unwrap_or_default();
+            let mut unit = embedding.clone();
+            if unit.len() == bank.dim {
+                crate::bank::normalize_query(&mut unit);
+            } else {
+                unit = vec![0.0; bank.dim];
+            }
+            let stored_band: String = r.get(1);
+            let band = if cfg.bands.contains(&stored_band) {
+                stored_band.clone()
+            } else {
+                cfg.bands[0].clone()
+            };
+            let surprise_value = r
+                .get::<_, Option<String>>(4)
+                .unwrap_or_else(|| "0".into())
+                .parse::<f64>()
+                .unwrap_or(0.0);
+            let ts = r.get::<_, Option<f64>>(5).unwrap_or(0.0);
+            let array = |v: Option<Value>| match v {
+                Some(Value::Array(a)) => a,
+                _ => Vec::new(),
+            };
+            let entry = crate::bank::Entry {
+                id,
+                seq: episodes::next_seq(),
+                embedding,
+                band,
+                stored_band,
+                text: r.get(2),
+                surprise: surprise_value as f32,
+                surprise_value,
+                // `MemoryEntry.__post_init__` replaces a zero timestamp.
+                ts: if ts == 0.0 { episodes::now() } else { ts },
+                access_count: std::sync::atomic::AtomicI64::new(
+                    r.get::<_, Option<i32>>(6).unwrap_or(0) as i64,
+                ),
+                reinforcements: r.get::<_, Option<i32>>(16).unwrap_or(0),
+                last_logical_turn: r.get(17),
+                dream_state: r.get(18),
+                source: r.get::<_, Option<String>>(7).unwrap_or_default(),
+                superseded_at: r.get(8),
+                superseded_by_text: r.get(9),
+                episode_id: r.get(10),
+                episode_title: r.get(11),
+                tags: array(r.get(12)),
+                slots: array(r.get(13)),
+                authority: r.get(14),
+                distortion_tolerance: r.get(15),
+                ..Default::default()
+            };
+            bank.push(entry, &unit);
+        }
+        Some(r) => {
+            let (at, by): (Option<f64>, Option<String>) = (r.get(8), r.get(9));
+            for i in holders {
+                bank.entries[i].superseded_at = at;
+                bank.entries[i].superseded_by_text = by.clone();
+            }
+        }
+    }
+    Ok(())
 }
 
 /// `PostgresStorage.reinstate_entry` (`storage/postgres.py:1107-1209`):
