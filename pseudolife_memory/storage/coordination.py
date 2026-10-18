@@ -208,7 +208,7 @@ _PARK_CLEARED = {"park_reason": None, "park_needs": "", "park_clear_by": "", "pa
 PARK_CLEARED_WARNING = (
     "This status cleared your park ({reason}): a status without park fields means "
     "you are working again. To stay parked, send park_reason (and park_needs, "
-    "park_clear_by, park_resume) with the status.")
+    "park_clear_by, park_resume) with the status; cleared_park holds what it had.")
 # A status that says the session's work is over reads as parked done to the
 # Stop-hook park gate, so a session that ended with one is not asked to park.
 # A done park says "I expect no follow-up", not "unreachable" (maintainer,
@@ -1662,7 +1662,7 @@ class CoordinationStore:
                                    or not 1 <= expect <= LEASE_EXPECT_MAX):
             raise CoordinationError("invalid_expect")
         park_update = any(key in fields for key in PARK_FIELDS)
-        warning = None
+        warning = cleared = None
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             now = self.clock()
@@ -1707,6 +1707,9 @@ class CoordinationStore:
             elif "status" in fields and recorded:
                 fields.update(_PARK_CLEARED)
                 if parked:
+                    # The park is gone once this commits: return it, so
+                    # re-parking is one call that resends these fields.
+                    cleared = {key: row[key] for key in PARK_FIELDS}
                     warning = PARK_CLEARED_WARNING.format(reason=row["park_reason"])
             # Only a real change reaches the row and the log, so a status
             # update that never used an expectation logs what it always did.
@@ -1736,6 +1739,7 @@ class CoordinationStore:
             out = self.authenticate(principal, agent_id, credential)
             if warning is not None:
                 out["warning"] = warning
+                out["cleared_park"] = cleared
             return out
 
     @staticmethod

@@ -865,8 +865,13 @@ def test_a_status_that_clears_a_standing_park_says_so(store):
     assert out["park_reason"] is None
     assert out["warning"] == PARK_CLEARED_WARNING.format(reason="waiting_peer")
     assert "waiting_peer" in out["warning"] and "park_reason" in out["warning"]
-    # The warning rides on the result only; the stored row carries none.
-    assert "warning" not in store.authenticate(*creds(a))
+    # What was cleared comes back with it, so re-parking is one call that
+    # resends these fields (review of this change: the park is gone by then).
+    assert out["cleared_park"] == {"park_reason": "waiting_peer", "park_needs": "CI on #830",
+                                   "park_clear_by": b["agent_id"], "park_resume": "merge it",
+                                   "park_expires": 1000.0 + 12 * 3600}
+    # Both ride on the result only; the stored row carries neither.
+    assert not {"warning", "cleared_park"} & set(store.authenticate(*creds(a)))
 
 
 def test_the_rust_daemon_words_the_park_warning_the_same():
@@ -896,9 +901,9 @@ def test_a_status_sent_with_its_park_keeps_it_without_a_warning(store):
                           "park_clear_by": b["agent_id"], "park_resume": "merge it",
                           "park_expires": 1000.0 + 12 * 3600, "park_set_at": 1010.0}
     assert out["status"] == "waiting on CI for #830"
-    assert "warning" not in out
+    assert not {"warning", "cleared_park"} & set(out)
     out = store.update(*creds(a), status="back to work", park_reason="")
-    assert out["park_reason"] is None and "warning" not in out
+    assert out["park_reason"] is None and not {"warning", "cleared_park"} & set(out)
 
 
 @pytest.mark.parametrize("before", ["unparked", "lapsed"])
@@ -910,7 +915,7 @@ def test_a_status_with_no_standing_park_carries_no_warning(store, before):
         store.update(*creds(a), park_reason="blocked", park_expires=1500.0)
         store.test_time[0] = 2000.0
     out = store.update(*creds(a), status="working")
-    assert out["park_reason"] is None and "warning" not in out
+    assert out["park_reason"] is None and not {"warning", "cleared_park"} & set(out)
 
 
 def test_park_fields_without_a_reason_need_a_park_to_refine(store):

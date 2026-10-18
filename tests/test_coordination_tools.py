@@ -257,6 +257,34 @@ def test_the_tool_describes_the_status_clear_and_its_warning():
     assert "park fields" in tool.parameters["properties"]["status"]["description"]
 
 
+def test_a_storage_park_refusal_reaches_the_model_with_the_accepted_ones(monkeypatch):
+    """A park field alone with no standing park passes the binding and is
+    refused by storage; its detail, param and accepted list survive the
+    dispatch boundary into the MCP tool error."""
+    from pseudolife_memory import coordination
+    from pseudolife_memory.storage.coordination import (
+        PARK_REASONS, CoordinationError, CoordinationStore)
+    real = coordination.dispatch
+
+    class Store:
+        def update(self, principal, agent_id, credential, **fields):
+            CoordinationStore._fields(**fields)
+            raise CoordinationError(
+                "invalid_park", "park_reason is required: no park stands to refine "
+                "(a lapsed park counts as none); nothing was updated",
+                param="park_reason", accepted=list(PARK_REASONS))
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    monkeypatch.setattr(coordination, "_store", lambda svc: Store())
+    monkeypatch.setattr(coordination, "dispatch", lambda svc, action, params: real(
+        _board_service(), action, params, headers=_HEADERS))
+    out = _refusal("memory_agents", {"action": "update", "park_needs": "CI green"})
+    assert out["error"] == "invalid_park" and out["param"] == "park_reason"
+    assert out["accepted"] == list(PARK_REASONS)
+    assert "park_reason is required" in out["message"]
+
+
 def test_a_rest_park_reason_outside_the_list_still_names_the_accepted_ones(monkeypatch):
     """The storage refusal (what REST callers meet) keeps its detail, param
     and accepted list across the dispatch boundary."""

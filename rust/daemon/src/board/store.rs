@@ -34,7 +34,7 @@ pub fn park_cleared_warning(reason: &str) -> String {
     format!(
         "This status cleared your park ({reason}): a status without park fields means \
          you are working again. To stay parked, send park_reason (and park_needs, \
-         park_clear_by, park_resume) with the status."
+         park_clear_by, park_resume) with the status; cleared_park holds what it had."
     )
 }
 pub const MAX_PARK_NEEDS: usize = 120;
@@ -1194,8 +1194,18 @@ impl Store {
         } else if has(&fields, "status") && recorded {
             cleared(&mut fields);
             if parked {
-                warning = Some(park_cleared_warning(
-                    row.park_reason.as_deref().unwrap_or_default(),
+                // The park is gone once this commits: return it, so
+                // re-parking is one call that resends these fields.
+                let park = json!({
+                    "park_reason": opt_str(row.park_reason.as_deref()),
+                    "park_needs": row.park_needs,
+                    "park_clear_by": row.park_clear_by,
+                    "park_resume": row.park_resume,
+                    "park_expires": opt_f64(row.park_expires),
+                });
+                warning = Some((
+                    park_cleared_warning(row.park_reason.as_deref().unwrap_or_default()),
+                    park,
                 ));
             }
         }
@@ -1280,8 +1290,9 @@ impl Store {
             .authenticate(&tx, principal, agent_id, credential)
             .await?;
         super::db::commit(tx).await?;
-        if let (Some(warning), Some(map)) = (warning, out.as_object_mut()) {
+        if let (Some((warning, park)), Some(map)) = (warning, out.as_object_mut()) {
             map.insert("warning".into(), json!(warning));
+            map.insert("cleared_park".into(), park);
         }
         Ok(out)
     }

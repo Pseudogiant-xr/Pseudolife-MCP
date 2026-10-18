@@ -6720,7 +6720,8 @@ over. A plain status
 update while parked clears the record,
 since a session that is working is not parked, and when that park was
 standing its result carries a `warning` naming the cleared reason and
-saying to send the park fields with the status to stay parked; a task or
+saying to send the park fields with the status to stay parked, and a
+`cleared_park` object holding the five `park_*` values it had; a task or
 `children` update leaves it. A park field on its own refines a standing park
 and is refused (`invalid_park`) on an unparked row or a lapsed park, as are an
 unknown reason and a bad expiry (the MCP tool's schema lists the six reasons
