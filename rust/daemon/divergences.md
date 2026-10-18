@@ -39,7 +39,6 @@ tool's answers by value.
 | `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred by decision (PARITY.md, "Graph traversal deferred by decision"). |
 | `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
-| `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
 | `memory_graph_review` | W3-H | No graph review/proposal service. |
@@ -57,7 +56,8 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_episode_end`, `memory_session_title`, `memory_episode_summary`,
 `memory_outcome`, `memory_reinforce`, `memory_history`, `memory_world_set`,
 `memory_world_search`, `memory_lesson_search`, `memory_supersede`,
-`memory_reinstate`, `memory_forget`, `memory_agents` and `memory_message`. The two board tools
+`memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
+`memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -335,6 +335,13 @@ this increment does not claim the complete write boundary or cutover readiness.
 | A malformed `meta.session_digest_cursor` (a `ts` that is not a number or numeric string, a `retry` that is not an object, a non-iterable or non-string `regenerate`) | `float()` / `dict()` / `sorted()` raise their own `TypeError` / `ValueError` text | the same refusal kind (`invalid_argument`) with Rust's own wording | corrupt persisted data only; the dream writes the cursor |
 | `memory.delete_confirm_threshold` of the wrong type | `int(value or 0)` per call (a float truncates) | refused at config load, like every other typed key | the existing config-type substitution |
 | The restore path (`memory_graph_review(action="restore_slot")`) and file mode | served | not reachable: the review tool is W3-H, the daemon PostgreSQL-only | W3-H |
+
+### memory_consolidation_candidates (2026-10-19)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| The cosine `_cosine` (`consolidation.py:81-92`) | torch float32: `torch.dot` (BLAS order) over float32 norms | each sum accumulated in f64 and rounded to f32, then the same float32 division | measured-tolerance numeric substitution: results agree to about 1e-7 before the 4-place rounding; a cosine within that of `min_cohesion` could join one cluster and not the other |
+| The reference pool (ChromaDB documents) in a query anchor's retrieval | appended, then dropped as unaddressable | absent (no document store in schema 56) | the document slice; no answer differs |
 
 ## Coordination board completion (W2-F)
 
