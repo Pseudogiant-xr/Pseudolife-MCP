@@ -1,0 +1,3 @@
+### Added (2026-10-19 — the Rust daemon serves memory_forget)
+
+- The Rust daemon's MCP endpoint now answers `memory_forget` as the Python daemon does, with the same database changes, for all four stores. Forgetting memories deletes the matching entries and, in the same transaction, retires what rested only on them: the canonical facts they formed, the dream's graph edges, their session's digest, and lessons whose last source they were (each with an audit row). Forgetting a fact deletes the slot; forgetting a world fact or a lesson retires it with an audit row. A match larger than `memory.delete_confirm_threshold` (20) still needs `confirm_bulk`.
