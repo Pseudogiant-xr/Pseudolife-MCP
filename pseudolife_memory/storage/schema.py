@@ -1635,7 +1635,8 @@ def ensure_schema(conn) -> dict:
         # the only place a shadow judge's accepts can later be scored
         # against the decisions a human or agent took (the judge-agreement
         # report). NULL = decided before this column existed, or on a row
-        # no judge had seen. Nothing writes it in this build.
+        # no judge had seen. Written by record_merge_decision on every
+        # merge and junk decision path since 2026-10-18.
         cur.execute(
             "ALTER TABLE merge_decisions ADD COLUMN IF NOT EXISTS votes JSONB")
         cur.execute(

@@ -1,0 +1,575 @@
+"""The judge-agreement report: how often each recorded judge vote agreed
+with the decision a human or agent later took on the same row.
+
+A judge mode left in ``shadow`` records votes and applies nothing, and
+nothing scored those votes against the decisions that followed, so the
+promotion to ``auto`` had no number to rest on (2026-10-17: both v56
+modes shipped in shadow with no path to leave it). An accepted merge
+CASCADE-deletes its proposal row with the votes on it, so the votes are
+snapshotted into ``merge_decisions.votes`` (schema v56) at decision time;
+link rows survive their decision and are scored in place.
+"""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
+
+from pseudolife_memory.memory.graph_review import relate_note
+from pseudolife_memory.memory.judge_agreement import (
+    compute_judge_agreement, proposal_votes)
+
+
+@pytest.fixture()
+def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
+    from pseudolife_memory.service import MemoryService
+
+    s = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    with s._lock:
+        s._ensure_init()
+    yield s
+    s.flush()
+
+
+# ── pure: the vote snapshot ───────────────────────────────────────────────
+
+def test_proposal_votes_reads_each_recorded_opinion_and_its_relation():
+    row = {
+        "judge_verdict": "relate", "judge_confidence": 0.8, "judge_model": "m1",
+        "judge_note": relate_note("part-of", "thin") + " | 2nd (m2): relate:uses 0.70 [split]"
+                      " | 3rd (m3): accept 0.90 [no majority]",
+        "judge2_verdict": "relate", "judge2_confidence": 0.7, "judge2_model": "m2",
+        "judge2_served_model": "m2-served",
+        "judge3_verdict": "accept", "judge3_confidence": 0.9, "judge3_model": "m3",
+        "judge3_served_model": None,
+    }
+    votes = proposal_votes(row)
+    assert votes == {
+        "judge": {"verdict": "relate", "confidence": 0.8, "model": "m1",
+                  "relation": "part-of"},
+        "judge2": {"verdict": "relate", "confidence": 0.7, "model": "m2",
+                   "served_model": "m2-served", "relation": "uses"},
+        "judge3": {"verdict": "accept", "confidence": 0.9, "model": "m3",
+                   "relation": None},
+    }
+
+
+def test_proposal_votes_is_none_when_no_opinion_was_recorded():
+    assert proposal_votes({"judge_verdict": None, "judge2_verdict": None,
+                           "judge3_verdict": None}) is None
+    # A first opinion alone is a snapshot of one.
+    one = proposal_votes({"judge_verdict": "accept", "judge_confidence": 0.9,
+                          "judge_model": "m1", "judge_note": "same file"})
+    assert list(one) == ["judge"]
+
+
+# ── pure: the report ──────────────────────────────────────────────────────
+
+def _merge(status, decided_by, votes, into="B", entity="A",
+           reason="write-dedup"):
+    return {"status": status, "decided_by": decided_by,
+            "entity_display": entity, "into_display": into,
+            "reason": reason, "votes": votes}
+
+
+def _v(verdict, conf, model, relation=None, served=None):
+    out = {"verdict": verdict, "confidence": conf, "model": model,
+           "relation": relation}
+    if served:
+        out["served_model"] = served
+    return out
+
+
+def test_report_scores_each_merge_opinion_against_the_decision():
+    rows = [
+        # Both opinions said accept, a human accepted: both right.
+        _merge("accepted", "human", {"judge": _v("accept", 0.9, "m1"),
+                                     "judge2": _v("accept", 0.8, "m2")}),
+        # First said relate (reject-class), an agent rejected: right;
+        # second abstained.
+        _merge("rejected", "agent", {"judge": _v("relate", 0.8, "m1", "uses"),
+                                     "judge2": _v("leave", 0.3, "m2")}),
+        # First said accept, a human rejected: wrong.
+        _merge("rejected", "human", {"judge": _v("accept", 0.7, "m1")}),
+        # The judge's own application is not a label.
+        _merge("rejected", "dream-judge", {"judge": _v("reject", 0.95, "m1")}),
+        _merge("accepted", "dream-auto", {"judge": _v("accept", 0.95, "m1")}),
+    ]
+    out = compute_judge_agreement(rows, [], accept_gate=0.6, reject_gate=0.7,
+                                  link_gate=0.7, window_days=90)
+    assert out["window_days"] == 90
+    assert out["scored"] == {"merge": 3, "junk": 0, "link": 0}
+    assert out["labels"] == {"human": 2, "agent": 1}
+    j1 = out["merge"]["judge"]
+    assert j1["voted"] == 3 and j1["agree"] == 2 and j1["abstain"] == 0
+    assert j1["precision"] == pytest.approx(2 / 3, abs=0.001)
+    assert j1["by_verdict"] == {"accept": {"n": 2, "agree": 1},
+                                "reject": {"n": 1, "agree": 1}}
+    j2 = out["merge"]["judge2"]
+    assert j2["voted"] == 1 and j2["agree"] == 1 and j2["abstain"] == 1
+    j3 = out["merge"]["judge3"]
+    assert j3["voted"] == 0 and j3["precision"] is None
+
+
+def _s(verdict, conf, model, relation=None):
+    """A vote whose endpoint reported serving ``<model>-served``."""
+    return _v(verdict, conf, model, relation, served=f"{model}-served")
+
+
+def test_report_scores_two_agreeing_votes_and_a_three_vote_majority():
+    rows = [
+        # Agreeing accepts from distinct served models at mean 0.85 >= 0.6:
+        # scored, and the human agreed.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("accept", 0.8, "m2")}),
+        # Agreeing accepts below the gate: not an agreed pair.
+        _merge("accepted", "human", {"judge": _s("accept", 0.5, "m1"),
+                                     "judge2": _s("accept", 0.6, "m2")}),
+        # Agreeing rejects from the SAME served model: one opinion twice,
+        # never an agreed pair.
+        _merge("rejected", "human", {"judge": _s("reject", 0.9, "m1"),
+                                     "judge2": _v("reject", 0.9, "m2", served="m1-served")}),
+        # Agreeing reject-class (reject + relate) from distinct models at
+        # mean 0.8: scored; the human accepted, so the pair was wrong.
+        _merge("accepted", "human", {"judge": _s("reject", 0.8, "m1"),
+                                     "judge2": _s("relate", 0.8, "m2", "uses")}),
+        # Three votes, 2-1 reject at mean 0.75 >= 0.7: scored, and right.
+        _merge("rejected", "agent", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("reject", 0.7, "m2"),
+                                     "judge3": _s("relate", 0.8, "m3", "part-of")}),
+        # Three votes, 2-1 accept at mean 0.65 >= 0.6: scored, and wrong.
+        _merge("rejected", "human", {"judge": _s("accept", 0.6, "m1"),
+                                     "judge2": _s("reject", 0.9, "m2"),
+                                     "judge3": _s("accept", 0.7, "m3")}),
+        # Three votes, 2-1 reject below the gate: no majority scored.
+        _merge("rejected", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("reject", 0.5, "m2"),
+                                     "judge3": _s("reject", 0.6, "m3")}),
+    ]
+    out = compute_judge_agreement(rows, [], accept_gate=0.6, reject_gate=0.7,
+                                  link_gate=0.7, window_days=30)
+    two = out["merge"]["agreed_two"]
+    assert two["accept"] == {"n": 1, "agree": 1, "precision": 1.0}
+    assert two["reject"] == {"n": 1, "agree": 0, "precision": 0.0}
+    three = out["merge"]["majority_three"]
+    assert three["reject"] == {"n": 1, "agree": 1, "precision": 1.0}
+    assert three["accept"] == {"n": 1, "agree": 0, "precision": 0.0}
+
+
+def test_a_vote_with_no_served_model_is_never_part_of_a_pair():
+    """The live gates refuse a second vote whose endpoint named no model
+    (``_stored_second_distinct``) and a third from a model already heard
+    (``_tiebreak_refusal``); the report counts exactly what they would."""
+    rows = [
+        # The second endpoint named no model: a different configured name
+        # is not evidence of a different model.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _v("accept", 0.9, "m2")}),
+        # The first opinion's served name was never recorded.
+        _merge("accepted", "human", {"judge": _v("accept", 0.9, "m1"),
+                                     "judge2": _s("accept", 0.9, "m2")}),
+        # A-B-A: the third vote repeats the first model, so there is no
+        # tiebreak to score, even though the accepts would be a majority.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("reject", 0.9, "m2"),
+                                     "judge3": _s("accept", 0.9, "m1")}),
+        # The third vote's served name is unknown: refused.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("reject", 0.9, "m2"),
+                                     "judge3": _v("accept", 0.9, "m3")}),
+    ]
+    out = compute_judge_agreement(rows, [], accept_gate=0.6, reject_gate=0.7,
+                                  link_gate=0.7, window_days=30)
+    assert out["merge"]["judge"]["voted"] == 4          # every opinion is scored
+    assert out["merge"]["agreed_two"]["accept"]["n"] == 0
+    assert out["merge"]["majority_three"]["accept"]["n"] == 0
+
+
+def test_an_unattributed_link_decision_is_counted_but_not_a_label():
+    links = [
+        {"status": "accepted", "decided_by": None,
+         "judge_verdict": "accept", "judge_confidence": 0.9, "judge_model": "m1",
+         "judge2_verdict": None},
+        {"status": "rejected", "decided_by": "dream-auto",
+         "judge_verdict": "reject", "judge_confidence": 0.9, "judge_model": "m1",
+         "judge2_verdict": None},
+    ]
+    out = compute_judge_agreement([], links, accept_gate=0.6, reject_gate=0.7,
+                                  link_gate=0.7, window_days=30)
+    assert out["scored"]["link"] == 0 and out["labels"] == {}
+    assert out["unattributed_links"] == 1
+
+
+def test_a_majority_needs_both_earlier_served_names_and_a_fresh_third():
+    """The live tiebreak (``_tiebreak_refusal``) refuses a split row until
+    the second vote's served model is known, and never requires the first
+    two votes to come from different models: a same-model second vote is
+    recorded and the row still gets its third."""
+    rows = [
+        # The second vote's served name is unknown: no tiebreak to score.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _v("reject", 0.9, "m2"),
+                                     "judge3": _s("accept", 0.9, "m3")}),
+        # First and second from the same served model, third fresh: scored.
+        _merge("accepted", "human", {"judge": _s("accept", 0.9, "m1"),
+                                     "judge2": _s("reject", 0.9, "m1"),
+                                     "judge3": _s("accept", 0.9, "m3")}),
+    ]
+    out = compute_judge_agreement(rows, [], accept_gate=0.6, reject_gate=0.7,
+                                  link_gate=0.7, window_days=30)
+    assert out["merge"]["majority_three"]["accept"] == {"n": 1, "agree": 1,
+                                                        "precision": 1.0}
+    assert out["merge"]["agreed_two"]["accept"]["n"] == 0
+
+
+def test_accept_pairs_replay_the_live_gates_row_refusals():
+    """``_merge_accept_refusal`` leaves an analyzer-filed row, a name veto
+    and a variant conflict for a human however the votes agree, so the
+    accept side of ``agreed_two`` / ``majority_three`` must not count them
+    as what ``auto`` would have applied. The audit row carries the reason
+    and both names, so the report replays those three; the opinions are
+    still scored, and the reject side is untouched."""
+    from pseudolife_memory.memory.graph_consolidation import variant_conflict
+    from pseudolife_memory.memory.graph_review import merge_veto
+    # Each guard on its own: the veto pair carries no variant tokens and
+    # the variant pair is not vetoed, so dropping either guard shows.
+    assert merge_veto("Tri-Serpent", "tri-serpent-overnight-build-20260807")
+    assert not variant_conflict("Tri-Serpent",
+                                "tri-serpent-overnight-build-20260807")
+    assert merge_veto("model-Q4_K_M", "model-Q4_K_XL") is None
+    assert variant_conflict("model-Q4_K_M", "model-Q4_K_XL")
+    two = {"judge": _v("accept", 0.9, "m1", served="s1"),
+           "judge2": _v("accept", 0.9, "m2", served="s2")}
+    three = {**two, "judge3": _v("accept", 0.9, "m3", served="s3")}
+    rows = [
+        _merge("accepted", "human", two),                       # counted
+        _merge("accepted", "human", two, reason="analyzer-duplicate:name"),
+        _merge("accepted", "human", three, entity="Tri-Serpent",
+               into="tri-serpent-overnight-build-20260807"),    # event-slug veto
+        _merge("accepted", "human", three, entity="model-Q4_K_M",
+               into="model-Q4_K_XL"),                           # variant conflict
+        # Reject pairs are not gated by the row's shape.
+        _merge("rejected", "human", {"judge": _v("reject", 0.9, "m1", served="s1"),
+                                     "judge2": _v("reject", 0.9, "m2", served="s2")},
+               reason="analyzer-duplicate:name"),
+    ]
+    out = compute_judge_agreement(rows, [], accept_gate=0.6, reject_gate=0.7,
+                                  link_gate=0.7, window_days=90)
+    assert out["scored"]["merge"] == 5
+    assert out["merge"]["judge"]["voted"] == 5
+    assert out["merge"]["agreed_two"]["accept"] == {"n": 1, "agree": 1,
+                                                    "precision": 1.0}
+    assert out["merge"]["agreed_two"]["reject"]["n"] == 1
+    assert out["merge"]["majority_three"]["accept"]["n"] == 0
+
+
+def test_report_scores_junk_and_link_decisions():
+    junk = [
+        _merge("accepted", "human", {"judge": _v("delete", 0.9, "m1")}, into=None),
+        _merge("rejected", "human", {"judge": _v("keep", 0.9, "m1")}, into=None),
+        _merge("rejected", "agent", {"judge": _v("delete", 0.9, "m1")}, into=None),
+    ]
+    links = [
+        {"status": "accepted", "decided_by": "human",
+         "judge_verdict": "accept", "judge_confidence": 0.7, "judge_model": "m1",
+         "judge_served_model": "m1-served",
+         "judge2_verdict": "accept", "judge2_confidence": 0.8, "judge2_model": "m2",
+         "judge2_served_model": "m2"},
+        {"status": "retyped", "decided_by": "human",
+         "judge_verdict": "retype", "judge_confidence": 0.9, "judge_model": "m1",
+         "judge2_verdict": None},
+        {"status": "rejected", "decided_by": "agent",
+         "judge_verdict": "accept", "judge_confidence": 0.9, "judge_model": "m1",
+         "judge2_verdict": "reject", "judge2_confidence": 0.9, "judge2_model": "m2",
+         "judge2_served_model": "m2"},
+        {"status": "accepted", "decided_by": "dream-judge",
+         "judge_verdict": "accept", "judge_confidence": 0.9, "judge_model": "m1",
+         "judge2_verdict": None},
+    ]
+    out = compute_judge_agreement(junk, links, accept_gate=0.6, reject_gate=0.7,
+                                  link_gate=0.7, window_days=90)
+    assert out["scored"] == {"merge": 0, "junk": 3, "link": 3}
+    jj = out["junk"]["judge"]
+    assert jj["voted"] == 3 and jj["agree"] == 2
+    assert jj["by_verdict"] == {"delete": {"n": 2, "agree": 1},
+                                "keep": {"n": 1, "agree": 1}}
+    lj = out["link"]["judge"]
+    assert lj["voted"] == 3 and lj["agree"] == 2
+    assert lj["by_verdict"] == {"accept": {"n": 2, "agree": 1},
+                                "retype": {"n": 1, "agree": 1}}
+    lj2 = out["link"]["judge2"]
+    assert lj2["voted"] == 2 and lj2["agree"] == 2
+    # One agreed accept pair at mean 0.75 >= 0.7, and the human agreed; the
+    # split row is no pair.
+    assert out["link"]["agreed_two"] == {
+        "accept": {"n": 1, "agree": 1, "precision": 1.0},
+        "reject": {"n": 0, "agree": 0, "precision": None}}
+
+
+# ── PG: the snapshot at decision time, and the status block ──────────────
+
+def _two(svc, a, b):
+    svc.graph_relate(a, "related-to", f"{a}-anchor", origin="agent")
+    svc.graph_relate(b, "related-to", f"{b}-anchor", origin="agent")
+    ids = {e["canonical"]: e["id"] for e in svc._storage.load_graph()["entities"]}
+    return ids[a], ids[b]
+
+
+def _votes_for(svc, proposal_id):
+    row = svc._storage.conn.execute(
+        "SELECT votes FROM merge_decisions WHERE proposal_id = %s",
+        (proposal_id,)).fetchone()
+    return row[0] if row else "no audit row"
+
+
+def test_accepting_a_merge_snapshots_its_votes_into_the_audit(svc):
+    st = svc._storage
+    frm, into = _two(svc, "snap-a", "snap-b")
+    now = time.time()
+    pid = st.insert_entity_proposal("merge", frm, into, 0.9, "write-dedup", now)
+    assert st.set_entity_proposal_judgment(
+        pid, verdict="accept", confidence=0.85, note="same file", model="m1", at=now)
+    assert st.set_entity_proposal_second_judgment(
+        pid, verdict="accept", confidence=0.75, model="m2", at=now,
+        served_model="m2-served")
+    out = svc.graph_accept_entity_merge(pid, decided_by="human")
+    assert out["accepted"] is True
+    # The proposal row is gone with the folded entity; the audit kept the votes.
+    assert st.get_entity_proposal(pid) is None
+    assert _votes_for(svc, pid) == {
+        "judge": {"verdict": "accept", "confidence": 0.85, "model": "m1",
+                  "relation": None},
+        "judge2": {"verdict": "accept", "confidence": 0.75, "model": "m2",
+                   "served_model": "m2-served", "relation": None}}
+
+
+def test_rejecting_a_merge_and_keeping_a_junk_entity_snapshot_their_votes(svc):
+    st = svc._storage
+    a, b = _two(svc, "rej-a", "rej-b")
+    now = time.time()
+    merge = st.insert_entity_proposal("merge", a, b, 0.9, "write-dedup", now)
+    assert st.set_entity_proposal_judgment(
+        merge, verdict="relate", confidence=0.8,
+        note=relate_note("uses", "distinct tools"), model="m1", at=now)
+    assert svc.graph_reject_entity_proposal(merge, decided_by="agent")["rejected"]
+    assert _votes_for(svc, merge) == {
+        "judge": {"verdict": "relate", "confidence": 0.8, "model": "m1",
+                  "relation": "uses"}}
+    junk = st.insert_entity_proposal("junk", a, None, None, "status-word", now)
+    assert st.set_entity_proposal_judgment(
+        junk, verdict="keep", confidence=0.9, note="a real tool", model="m1", at=now)
+    assert svc.graph_reject_entity_proposal(junk, decided_by="human")["rejected"]
+    assert _votes_for(svc, junk) == {
+        "judge": {"verdict": "keep", "confidence": 0.9, "model": "m1",
+                  "relation": None}}
+
+
+def test_the_snapshot_carries_the_first_opinions_served_model_from_the_row(svc):
+    """The first opinion's stamp (``judge_served_model``, v56) is the model
+    its endpoint reported serving; the pair rule needs it, and the
+    snapshot reads it from the row, not from the judging memo (which every
+    refresh prunes to pending rows)."""
+    st = svc._storage
+    frm, into = _two(svc, "stamp-a", "stamp-b")
+    now = time.time()
+    pid = st.insert_entity_proposal("merge", frm, into, 0.9, "write-dedup", now)
+    st.set_entity_proposal_judgment(pid, verdict="accept", confidence=0.9,
+                                    note="same", model="m1", at=now,
+                                    served_model="m1-served")
+    assert st.get_meta("review_judgments_v1_merge") in (None, {})
+    assert svc.graph_accept_entity_merge(pid, decided_by="human")["accepted"]
+    assert _votes_for(svc, pid)["judge"]["served_model"] == "m1-served"
+
+
+def test_a_decided_link_is_scored_with_the_first_opinions_stamp(svc):
+    """A link row keeps its votes; the report reads the first opinion's
+    served model from the row's stamp, so a two-vote pair from distinct
+    served models counts as what the gate would have applied."""
+    st = svc._storage
+    now = time.time()
+    a, b = _two(svc, "lstamp-a", "lstamp-b")
+    pid = st.insert_proposal(a, "uses", b, 0.6, None, None, "deep-dream", now)
+    st.set_proposal_judgment(pid, verdict="accept", confidence=0.7, note=None,
+                             model="m1", relation=None, at=now,
+                             served_model="m1-served")
+    st.set_proposal_second_judgment(pid, verdict="accept", confidence=0.8,
+                                    note=None, model="m2", relation=None,
+                                    at=now, served_model="m2-served",
+                                    policy="p")
+    assert svc.graph_accept_proposal(pid, decided_by="human")["accepted"]
+    row = {r["id"]: r for r in st.judge_vote_decisions(now - 60)["link"]}[pid]
+    assert row["judge_served_model"] == "m1-served"
+    rep = svc.judge_agreement()
+    assert rep["scored"]["link"] == 1
+    assert rep["link"]["agreed_two"]["accept"]["n"] == 1
+    assert rep["link"]["agreed_two"]["accept"]["agree"] == 1
+
+
+def test_accepting_a_junk_proposal_snapshots_its_vote(svc):
+    st = svc._storage
+    a, _b = _two(svc, "junk-a", "junk-b")
+    now = time.time()
+    pid = st.insert_entity_proposal("junk", a, None, None, "status-word", now)
+    st.set_entity_proposal_judgment(pid, verdict="delete", confidence=0.9,
+                                    note="a status word", model="m1", at=now)
+    assert svc.graph_accept_entity_junk(pid, decided_by="human")["accepted"]
+    assert _votes_for(svc, pid) == {
+        "judge": {"verdict": "delete", "confidence": 0.9, "model": "m1",
+                  "relation": None}}
+    rep = svc.judge_agreement()
+    assert rep["scored"]["junk"] == 1 and rep["junk"]["judge"]["agree"] == 1
+
+
+def test_an_audit_row_without_votes_is_not_scored(svc):
+    """Decisions from before the snapshot (NULL votes) are skipped."""
+    st = svc._storage
+    st.record_merge_decision(None, "old-a", "old-b", "accepted", 0.9,
+                             "write-dedup", "human", time.time())
+    rep = svc.judge_agreement()
+    assert rep["scored"]["merge"] == 0 and rep["labels"] == {}
+
+
+def test_console_and_agent_link_decisions_are_attributed(svc):
+    """The Console routes settled links with no ``decided_by`` until
+    2026-10-18 (``memory_graph_review``'s handlers likewise; they pass
+    ``agent`` now, not exercised here), so the report could score none of
+    them; a route call now records ``human`` (the Console's default) or
+    the ``decided_by`` it was sent, and a row decided through the old
+    unattributed path is counted, not read as a human's."""
+    from pseudolife_memory.web.routes import ConsoleRoutes
+    st = svc._storage
+    now = time.time()
+    a, b = _two(svc, "route-a", "route-b")
+    c, d = _two(svc, "route-c", "route-d")
+    e, f = _two(svc, "route-e", "route-f")
+    for pair in ((a, b), (c, d), (e, f)):
+        pid = st.insert_proposal(pair[0], "uses", pair[1], 0.6, None, None,
+                                 "deep-dream", now)
+        st.set_proposal_judgment(pid, verdict="accept", confidence=0.7, note=None,
+                                 model="m1", relation=None, at=now)
+    routes = ConsoleRoutes(svc)
+    ids = sorted(r["id"] for r in st.pending_proposals())
+    routes.dispatch("POST", "/api/graph/accept-proposal", {}, {"id": ids[0]})
+    routes.dispatch("POST", "/api/graph/reject-proposal", {},
+                    {"id": ids[1], "decided_by": "agent"})
+    svc.graph_reject_proposal(ids[2])                   # the pre-fix Console path
+    rows = {r["id"]: r for r in st.judge_vote_decisions(now - 60)["link"]}
+    assert rows[ids[0]]["decided_by"] == "human"
+    assert rows[ids[1]]["decided_by"] == "agent"
+    assert rows[ids[2]]["decided_by"] is None
+    rep = svc.judge_agreement()
+    assert rep["scored"]["link"] == 2 and rep["unattributed_links"] == 1
+    assert rep["labels"] == {"human": 1, "agent": 1}
+
+
+def test_an_analyzer_filed_accept_is_not_counted_as_an_auto_accept(svc):
+    """The audit row keeps the proposal's reason and both names, which the
+    accept-side replay needs."""
+    st = svc._storage
+    now = time.time()
+    frm, into = _two(svc, "ana-a", "ana-b")
+    pid = st.insert_entity_proposal("merge", frm, into, 0.9,
+                                    "analyzer-duplicate:name", now)
+    st.set_entity_proposal_judgment(pid, verdict="accept", confidence=0.9,
+                                    note="same", model="m1", at=now,
+                                    served_model="s1")
+    st.set_entity_proposal_second_judgment(pid, verdict="accept", confidence=0.9,
+                                           model="m2", at=now, served_model="s2",
+                                           policy="p")
+    assert svc.graph_accept_entity_merge(pid, decided_by="human")["accepted"]
+    row = st.judge_vote_decisions(now - 60)["merge"][0]
+    assert row["reason"] == "analyzer-duplicate:name"
+    assert row["entity_display"] and row["into_display"]
+    rep = svc.judge_agreement()
+    assert rep["merge"]["judge"]["agree"] == 1
+    assert rep["merge"]["agreed_two"]["accept"]["n"] == 0
+
+
+def test_a_decision_with_no_recorded_vote_leaves_the_audit_votes_null(svc):
+    st = svc._storage
+    frm, into = _two(svc, "novote-a", "novote-b")
+    pid = st.insert_entity_proposal("merge", frm, into, 0.9, "write-dedup", time.time())
+    assert svc.graph_accept_entity_merge(pid, decided_by="human")["accepted"]
+    assert _votes_for(svc, pid) is None
+
+
+def test_dream_status_carries_the_agreement_report(svc):
+    st = svc._storage
+    now = time.time()
+    frm, into = _two(svc, "st-a", "st-b")
+    pid = st.insert_entity_proposal("merge", frm, into, 0.9, "write-dedup", now)
+    st.set_entity_proposal_judgment(pid, verdict="accept", confidence=0.9,
+                                    note="same", model="m1", at=now)
+    svc.graph_accept_entity_merge(pid, decided_by="human")
+    c, d = _two(svc, "st-c", "st-d")
+    pid2 = st.insert_entity_proposal("merge", c, d, 0.9, "write-dedup", now)
+    st.set_entity_proposal_judgment(pid2, verdict="accept", confidence=0.9,
+                                    note="same", model="m1", at=now)
+    svc.graph_reject_entity_proposal(pid2, decided_by="agent")
+    # The judge's own application is recorded but is not a label.
+    e, f = _two(svc, "st-e", "st-f")
+    pid3 = st.insert_entity_proposal("merge", e, f, 0.9, "write-dedup", now)
+    st.set_entity_proposal_judgment(pid3, verdict="reject", confidence=0.95,
+                                    note="siblings", model="m1", at=now)
+    svc.graph_reject_entity_proposal(pid3, decided_by="dream-judge")
+    # A link decided in place is scored from its row.
+    g, h = _two(svc, "st-g", "st-h")
+    lid = st.insert_proposal(g, "uses", h, 0.6, None, None, "deep-dream", now)
+    st.set_proposal_judgment(lid, verdict="accept", confidence=0.7, note=None,
+                             model="m1", relation=None, at=now)
+    st.set_proposal_status(lid, "accepted", decided_by="human", decided_at=now)
+
+    rq = svc.dream_status()["review_queue"]
+    rep = rq["judge_agreement"]
+    assert rep["scored"] == {"merge": 2, "junk": 0, "link": 1}
+    assert rep["labels"] == {"human": 2, "agent": 1}
+    assert rep["merge"]["judge"]["voted"] == 2
+    assert rep["merge"]["judge"]["agree"] == 1
+    assert rep["link"]["judge"] == {
+        "voted": 1, "agree": 1, "abstain": 0, "precision": 1.0,
+        "by_verdict": {"accept": {"n": 1, "agree": 1}}}
+    # Pre-v56 audit rows (no votes) and out-of-window rows are not scored.
+    st.conn.execute("UPDATE merge_decisions SET decided_at = decided_at - %s",
+                    (400 * 86400.0,))
+    st.conn.commit()
+    assert svc.judge_agreement()["scored"]["merge"] == 0
+    assert svc.judge_agreement(days=500)["scored"]["merge"] == 2
+
+
+def test_the_report_never_fails_the_status_call(svc, monkeypatch):
+    def boom(*_a, **_k):
+        raise RuntimeError("audit table unreadable")
+    monkeypatch.setattr(svc._storage, "judge_vote_decisions", boom)
+    rq = svc.review_queue_health(include_agreement=True)
+    assert rq["pending"]["merge"] == 0
+    assert rq["judge_agreement"]["error"].startswith("RuntimeError")
+    # The session-start briefing's health line does not pay for the scan.
+    assert "judge_agreement" not in svc.review_queue_health()
+
+
+def test_the_dreams_unattended_junk_delete_snapshots_the_vote(svc):
+    """The deep dream deletes guard-passing junk itself; the proposal row
+    CASCADEs away with the entity, so the audit row is the only place the
+    junk judge's vote can later be scored from."""
+    st = svc._storage
+    now = time.time()
+    with svc._lock:
+        svc._ensure_init()
+        eid = st.ensure_entity("42", display="42")             # structureless
+        pid = st.insert_entity_proposal("junk", eid, None, None,
+                                        "bare-number", now)
+        st.set_entity_proposal_judgment(pid, verdict="delete", confidence=0.9,
+                                        note="a bare number", model="m1",
+                                        at=now, served_model="m1-served")
+    out = svc.deep_dream(apply=True)
+    assert out["junk_deleted"] >= 1
+    assert _votes_for(svc, pid)["judge"] == {
+        "verdict": "delete", "confidence": 0.9, "model": "m1",
+        "served_model": "m1-served", "relation": None}
+    row = st.conn.execute(
+        "SELECT decided_by FROM merge_decisions WHERE proposal_id = %s",
+        (pid,)).fetchone()
+    assert row[0] == "dream-auto"

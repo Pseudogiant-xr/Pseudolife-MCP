@@ -18,6 +18,17 @@ queue per tick (`memory.deep_dream.judge_batch`), each mode-gated:
 | lesson / world duplicates | `curation_judge_mode` | `auto-distinct`: the reversible dismissal; `auto`: also retire the losing slot (reversible — `restore_slot` / `POST /api/lessons/restore`) after folding the carry-over into the surviving lesson |
 | link candidates (Step C) | `candidate_judge_mode` (`off` / `shadow` / `auto`) | one slice per tick after each deep apply: `propose` files an edge proposal (source `deep-dream-judge`), `dismiss` marks the pair distinct (for the merge analyzer too); every judged pair is memoised for `candidate_rejudge_days` |
 
+**Promoting a mode from `shadow`:** read `review_queue.judge_agreement`
+in `memory_dream(action="status")` / `GET /api/dream/status` first (schema
+v56). It scores every vote the judges recorded against the decision a
+human or agent later took on the same row, over the last 90 days: per
+opinion `voted` / `agree` / `precision`, and `agreed_two` /
+`majority_three` for the rows the two-vote and tiebreak gates would have
+applied. A mode is promoted on that number and its `n`, not on a ladder
+panel from another month; the judges' own applied decisions are excluded,
+and decisions from before v56 carry no votes and are not scored (see
+[Dreaming](../guide/dreaming.md#deep-dream--full-corpus-graph-consolidation)).
+
 **Turning it all off:** `memory.deep_dream.judges_enabled: false` stops
 every judge stage in one move (the mechanical tick keeps running;
 `analyzer_file_duplicates` and `orphan_sweep` have their own switches, and
