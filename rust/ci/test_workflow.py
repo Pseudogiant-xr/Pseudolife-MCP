@@ -284,7 +284,8 @@ def check_executable_coverage(jobs):
                     ("pydantic==2.14.0", "pydantic-core==2.50.0"))
     require_command(mcp, ("python", "-m", "pytest"),
                     ("tests/test_rust_mcp_catalogue.py", "rust/daemon/harness/test_mcp_mount.py",
-                     "rust/daemon/harness/test_mcp_mutant_verdict.py", "rust/daemon/harness/test_mcp_ci.py", "rust/daemon/harness/test_mcp_runner.py", "rust/daemon/harness/test_mcp_validation.py"), PYTEST_FILTERS)
+                     "rust/daemon/harness/test_mcp_mutant_verdict.py", "rust/daemon/harness/test_mcp_ci.py", "rust/daemon/harness/test_mcp_runner.py", "rust/daemon/harness/test_mcp_validation.py",
+                     "rust/daemon/harness/test_mcp_wire.py"), PYTEST_FILTERS)
     require_command(mcp, ("python", "rust/daemon/harness/mcp_ci.py"),
                     ("--default-bin", "$candidate", "--mutant-bin", "$mutants", "--out"))
     assert not any(words[0] == "cargo" for words in mcp)
