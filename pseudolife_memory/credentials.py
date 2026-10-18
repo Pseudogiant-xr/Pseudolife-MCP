@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 import hashlib
 import os
 from pathlib import Path
+import shlex
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -15,7 +17,77 @@ MAX_TOKEN_BYTES = 4096
 
 
 class CredentialError(RuntimeError):
-    """A sanitized credential failure safe to surface to a caller."""
+    """A sanitized credential failure safe to surface to a caller.
+
+    The message is the reason and never holds token bytes. ``path`` is the
+    credential file it concerns, set by :class:`CredentialProvider` when it
+    read one; :meth:`recovery` names the one fix for the reason, or ``None``
+    when the reason has no specific fix."""
+
+    path: Path | None = None
+
+    def recovery(self) -> str | None:
+        return credential_recovery(str(self), self.path)
+
+
+def _repair_command(target: str, path: Path | None, windows: bool) -> str:
+    """The command that rewrites the file through this module's own writer:
+    secured before a byte is written, then renamed over the old file, so the
+    token is never in a file other accounts can read. Shell recipes for the
+    same repair (icacls, a copy and a move) each left a window: a reset ACL,
+    an inherited copy, a reusable copy name (review findings, 2026-10-18)."""
+    module = "-m pseudolife_memory.credentials repair"
+    if windows:
+        file = f'"{target}"' if path is not None else "<token file>"
+        return (f'"{sys.executable}" {module} {file} (in PowerShell, start the line '
+                f'with "& ")')
+    file = shlex.quote(target) if path is not None else "<token file>"
+    return f"{shlex.quote(sys.executable)} {module} {file}"
+
+
+def credential_recovery(reason: str, path: Path | None, *,
+                        windows: bool | None = None) -> str | None:
+    """The one fix for a credential file refusal, naming the file. ``None``
+    when the reason has no specific fix (a writer's own failures)."""
+    if windows is None:
+        windows = os.name == "nt"
+    target = str(path) if path is not None else "the configured credential file"
+    if reason == "credential file must be owner-only":
+        if windows:
+            return (f"Other accounts can read it; rewrite it owner-only with the same token, "
+                    f"as the account that runs the shim: {_repair_command(target, path, True)}.")
+        quoted = shlex.quote(target) if path is not None else target
+        return f"Other users can read it; restrict it to its owner: chmod 600 {quoted}"
+    if reason == "credential file is owned by another account":
+        elevated = (" (a file written from an elevated prompt is owned by Administrators)"
+                    if windows else "")
+        return (f"Another account owns {target}{elevated}. If the token in it is yours, "
+                f"replace it, as the account that runs the shim, with an owner-only file of "
+                f"your own holding the same token: {_repair_command(target, path, windows)}.")
+    fixes = {
+        "configured credential file is missing":
+            f"Restore the token file at {target}, or set PSEUDOLIFE_MCP_TOKEN_FILE to the "
+            f"file that holds the token.",
+        "configured credential file is unavailable":
+            f"{target} could not be opened or inspected; check that it is a file the account "
+            f"running the shim can read, and that no other program holds it locked.",
+        "credential path ancestors cannot be inspected":
+            f"A directory above {target} could not be inspected; check that the account "
+            f"running the shim can read every directory on that path.",
+        "credential path must not contain redirects":
+            f"A directory on the path to {target} is a symlink or junction; set "
+            f"PSEUDOLIFE_MCP_TOKEN_FILE to the real path.",
+        "credential file must be a private regular file":
+            f"{target} is a link, a junction, a hard link or not a file; replace it with a "
+            f"regular file holding only the token.",
+        "credential file contains an invalid bearer token":
+            f"Write only the token to {target}: one line, no spaces or control characters, "
+            f"at most {MAX_TOKEN_BYTES} bytes.",
+        "credential file changed while it was being repaired":
+            f"Another program replaced {target} meanwhile (a token rotation); if the shim "
+            f"still refuses it, run the repair again.",
+    }
+    return fixes.get(reason)
 
 
 @dataclass(frozen=True)
@@ -125,6 +197,21 @@ def _secure_windows_file(path: Path) -> None:
 
 
 def _windows_owner_only(fd: int) -> bool:
+    return _windows_file_access(fd) == "owner-only"
+
+
+def _windows_file_access(fd: int, *, default_owner_is_own: bool = False) -> str:
+    """``owner-only`` when the current user owns the file and only its owner
+    may access it; ``owned`` when the current user owns it but the DACL is
+    broader; ``foreign`` when another account owns it; ``unknown`` when its
+    security or this process's user could not be read.
+
+    ``default_owner_is_own`` (writers only) also counts as the current
+    user's a file owned by this token's default owner: an elevated token's
+    is BUILTIN\\Administrators, so a file this process wrote plainly is owned
+    by it (measured 2026-10-18 on the Windows dev VM over SSH, High
+    integrity, and on GitHub's Windows runners). Reading never does: an
+    unelevated shim holds Administrators deny-only."""
     import ctypes
     from ctypes import wintypes
     import msvcrt
@@ -143,6 +230,9 @@ def _windows_owner_only(fd: int) -> bool:
 
     class TOKEN_USER(ctypes.Structure):
         _fields_ = [("User", SID_AND_ATTRIBUTES)]
+
+    class TOKEN_OWNER(ctypes.Structure):
+        _fields_ = [("Owner", ctypes.c_void_p)]
 
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -188,64 +278,115 @@ def _windows_owner_only(fd: int) -> bool:
     if result != 0 or not descriptor or not owner or not dacl:
         if descriptor:
             kernel.LocalFree(descriptor)
-        return False
+        return "unknown"
     try:
         token_handle = wintypes.HANDLE()
         if not open_token(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token_handle)):
-            return False
+            return "unknown"
         try:
             needed = wintypes.DWORD()
             get_token(token_handle, 1, None, 0, ctypes.byref(needed))
             if not needed.value:
-                return False
+                return "unknown"
             token_buffer = ctypes.create_string_buffer(needed.value)
             if not get_token(token_handle, 1, token_buffer, needed, ctypes.byref(needed)):
-                return False
+                return "unknown"
             current_owner = ctypes.cast(token_buffer, ctypes.POINTER(TOKEN_USER)).contents.User.Sid
             if not equal_sid(owner, current_owner):
-                return False
+                if not default_owner_is_own:
+                    return "foreign"
+                owner_needed = wintypes.DWORD()
+                get_token(token_handle, 4, None, 0, ctypes.byref(owner_needed))  # TokenOwner
+                if not owner_needed.value:
+                    return "foreign"
+                owner_buffer = ctypes.create_string_buffer(owner_needed.value)
+                if not get_token(token_handle, 4, owner_buffer, owner_needed,
+                                 ctypes.byref(owner_needed)):
+                    return "foreign"
+                default_owner = ctypes.cast(owner_buffer, ctypes.POINTER(TOKEN_OWNER)).contents.Owner
+                if not equal_sid(owner, default_owner):
+                    return "foreign"
         finally:
             kernel.CloseHandle(token_handle)
         control = wintypes.WORD()
         revision = wintypes.DWORD()
         if not get_control(descriptor, ctypes.byref(control), ctypes.byref(revision)):
-            return False
+            return "owned"
         if not (control.value & 0x1000):  # SE_DACL_PROTECTED
-            return False
+            return "owned"
         owner_allowed = False
         for index in range(dacl.contents.AceCount):
             ace = ctypes.c_void_p()
             if not get_ace(dacl, index, ctypes.byref(ace)):
-                return False
+                return "owned"
             header = ctypes.cast(ace, ctypes.POINTER(ACE_HEADER)).contents
             if header.AceType == 1:  # ACCESS_DENIED_ACE_TYPE
                 continue
             if header.AceType != 0:  # Reject unfamiliar allow/object ACEs.
-                return False
+                return "owned"
             sid = ctypes.c_void_p(ace.value + 8)
             # The protected DACL writer uses the OWNER RIGHTS well-known SID,
             # which resolves to the current file owner without embedding an
             # account identifier in the descriptor.
             if not equal_sid(owner, sid) and not well_known_sid(sid, 71):
-                return False
+                return "owned"
             owner_allowed = True
-        return owner_allowed
+        return "owner-only" if owner_allowed else "owned"
     finally:
         kernel.LocalFree(descriptor)
 
 
-def _validate_file(fd: int, *, allow_unlinked: bool = False) -> os.stat_result:
+def _validate_regular(fd: int, *, allow_unlinked: bool = False) -> os.stat_result:
     info = os.fstat(fd)
     valid_links = info.st_nlink == 1 or (
         allow_unlinked and os.name != "nt" and info.st_nlink == 0)
     if not stat.S_ISREG(info.st_mode) or not valid_links:
         raise CredentialError("credential file must be a private regular file")
+    return info
+
+
+def _validate_file(fd: int, *, allow_unlinked: bool = False) -> os.stat_result:
+    info = _validate_regular(fd, allow_unlinked=allow_unlinked)
+    # Another account's file is told apart from a broad one: the fix for a
+    # broad file (narrow its permissions) would lock this user out of a file
+    # another account owns (review finding, 2026-10-18).
     if os.name == "nt":
-        if not _windows_owner_only(fd):
+        access = _windows_file_access(fd)
+        if access == "foreign":
+            raise CredentialError("credential file is owned by another account")
+        if access != "owner-only":
             raise CredentialError("credential file must be owner-only")
-    elif info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+    elif info.st_uid != os.geteuid():
+        raise CredentialError("credential file is owned by another account")
+    elif stat.S_IMODE(info.st_mode) & 0o077:
         raise CredentialError("credential file must be owner-only")
     return info
+
+
+def _owned_by_current_user(fd: int) -> bool:
+    """Whether a writer may treat the file as its own: this user owns it, or
+    on Windows this token's default owner does (a file this process could
+    have written itself)."""
+    if os.name == "nt":
+        return _windows_file_access(fd, default_owner_is_own=True) in ("owner-only", "owned")
+    return os.fstat(fd).st_uid == os.geteuid()
+
+
+def _validate_replaceable(fd: int) -> None:
+    """Refuse to replace an existing credential file unless it is one
+    ``_validate_file`` accepts, or one whose only faults are its owner or
+    permissions while it is this process's own (``_owned_by_current_user``):
+    the replacement is owner-only and owned by this user, so writing it can
+    only narrow access. A link, a hard link, a non-file, another account's
+    file, or one whose owner cannot be read is still refused."""
+    try:
+        _validate_file(fd)
+    except CredentialError as error:
+        if str(error) not in ("credential file must be owner-only",
+                              "credential file is owned by another account"):
+            raise
+        if not _owned_by_current_user(fd):
+            raise
 
 
 def _decode_token(data: bytes) -> str:
@@ -308,8 +449,17 @@ def _open_token(path: Path) -> tuple[str, _Generation]:
     return token, _Generation(marker)
 
 
-def _write_token_file(path: str | Path, token: str) -> None:
-    """Atomically create or rotate one owner-only credential file."""
+def _identity(info: os.stat_result) -> tuple:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+def _write_token_file(path: str | Path, token: str, *, _repair: tuple | None = None) -> None:
+    """Atomically create or rotate one owner-only credential file.
+
+    ``_repair`` (``repair_token_file`` only) is the identity of the file the
+    repair read: an existing file another account owns is then replaced too
+    (it is still refused when it is not one regular file), and the rename
+    happens only while that same file is still in place."""
     data = token.encode("utf-8")
     _decode_token(data)
     target = Path(os.path.abspath(Path(path).expanduser()))
@@ -320,7 +470,10 @@ def _write_token_file(path: str | Path, token: str) -> None:
         existing_fd = os.open(target, os.O_RDONLY | getattr(os, "O_BINARY", 0)
                               | getattr(os, "O_NOFOLLOW", 0))
         try:
-            _validate_file(existing_fd)
+            if _repair is not None:
+                _validate_regular(existing_fd)
+            else:
+                _validate_replaceable(existing_fd)
         finally:
             os.close(existing_fd)
     fd, temporary = tempfile.mkstemp(prefix=".pseudolife-token-", dir=target.parent)
@@ -336,6 +489,17 @@ def _write_token_file(path: str | Path, token: str) -> None:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
+        if _repair is not None:
+            # A rotation that landed after the repair read the file wins: the
+            # repair must not write the old token back over it (review
+            # finding, 2026-10-18). Only a rename inside this check and the
+            # next line can still race, as any two unlocked writers can.
+            try:
+                current = _identity(target.lstat())
+            except FileNotFoundError:
+                current = None
+            if current != _repair:
+                raise CredentialError("credential file changed while it was being repaired")
         # The 2026-09-13 Windows 40-rotation/100-snapshot stress test observed
         # brief delete-share conflicts; cap recovery at 20 x 5 ms.
         for attempt in range(20):
@@ -356,6 +520,39 @@ def _write_token_file(path: str | Path, token: str) -> None:
             temporary_path.unlink()
         except FileNotFoundError:
             pass
+
+
+def repair_token_file(path: str | Path) -> None:
+    """Rewrite a token file the shim refuses for its permissions or its owner
+    as an owner-only file of the caller's own holding the same token.
+
+    The file is read once (it must be one regular file holding a valid token,
+    reached without a redirect) and rewritten through ``_write_token_file``,
+    which secures the new file before writing to it and renames it over the
+    old one. Running this asserts the token in it is yours; the token is never
+    printed."""
+    target = Path(os.path.abspath(Path(path).expanduser()))
+    _reject_ancestor_redirects(target)
+    try:
+        info = target.lstat()
+    except FileNotFoundError as error:
+        raise CredentialError("configured credential file is missing") from error
+    except OSError as error:
+        raise CredentialError("configured credential file is unavailable") from error
+    if _is_redirect(info):
+        raise CredentialError("credential file must be a private regular file")
+    try:
+        fd = os.open(target, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError as error:
+        raise CredentialError("configured credential file is missing") from error
+    except OSError as error:
+        raise CredentialError("configured credential file is unavailable") from error
+    try:
+        identity = _identity(_validate_regular(fd))
+        data = os.read(fd, MAX_TOKEN_BYTES + 1)
+    finally:
+        os.close(fd)
+    _write_token_file(target, _decode_token(data), _repair=identity)
 
 
 class CredentialProvider:
@@ -390,9 +587,52 @@ class CredentialProvider:
         with self._lock:
             if self._path is None:
                 return CredentialSnapshot(self._token, self._static_generation)
-            token, generation = _open_token(self._path)
+            try:
+                token, generation = _open_token(self._path)
+            except CredentialError as error:
+                error.path = self._path
+                raise
             return CredentialSnapshot(token, generation)
 
     def __repr__(self) -> str:
         source = "file" if self._path is not None else "static"
         return f"CredentialProvider(source={source!r})"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m pseudolife_memory.credentials repair <file>``: the repair a
+    refused token file's error names."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m pseudolife_memory.credentials",
+        description="Rewrite a token file the shim refuses for its permissions or its owner "
+                    "as an owner-only file of your own, holding the same token.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("repair", help="rewrite the token file owner-only").add_argument("file")
+    args = parser.parse_args(argv)
+    target = os.path.abspath(os.path.expanduser(args.file))
+    try:
+        repair_token_file(target)
+    except CredentialError as error:
+        _say(sys.stderr, f"{target}: not repaired: {error}")
+        return 1
+    except OSError as error:
+        _say(sys.stderr, f"{target}: not repaired: {type(error).__name__} while rewriting it; "
+                         f"check that you can write to it and to its directory")
+        return 1
+    _say(sys.stdout, f"{target}: rewritten owner-only; the token is unchanged")
+    return 0
+
+
+def _say(stream, text: str) -> None:
+    # A path the console encoding cannot show is escaped: raising here would
+    # report a failure after the file was already rewritten (review finding,
+    # 2026-10-18).
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    stream.write(text.encode(encoding, "backslashreplace").decode(encoding) + "\n")
+    stream.flush()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
