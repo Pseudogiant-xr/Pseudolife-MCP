@@ -192,7 +192,8 @@ async fn chain(ready: &crate::service::Ready, entity: &str, limit: usize) -> any
     }
     // 4. lessons whose task or about names the entity.
     if !crate::mutants::active("mcp-history-chain-no-lessons") {
-        for r in ready.lessons.current_records() {
+        let lessons = ready.lessons.snapshot();
+        for r in lessons.current_records() {
             let about = r
                 .about
                 .as_deref()
