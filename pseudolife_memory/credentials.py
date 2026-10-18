@@ -29,6 +29,19 @@ class CredentialError(RuntimeError):
         return credential_recovery(str(self), self.path)
 
 
+def _windows_restrict(target: str, path: Path | None) -> str:
+    # S-1-3-4 is OWNER RIGHTS: a protected DACL with only that entry is
+    # exactly what this module's own writers produce (D:P(A;;FA;;;OW)).
+    # /reset first drops explicit entries, which /inheritance:r keeps.
+    # Verified on Windows 11, 2026-10-18, unelevated, from PowerShell and
+    # cmd: a plainly written file, and one with an explicit Everyone grant
+    # and an explicit deny, fail the owner-only check and pass after these
+    # two commands. (Set-Acl needs SeSecurityPrivilege there, so it is not
+    # offered.)
+    quoted = f'"{target}"' if path is not None else target
+    return f"icacls {quoted} /reset, then icacls {quoted} /inheritance:r /grant:r *S-1-3-4:F"
+
+
 def credential_recovery(reason: str, path: Path | None, *,
                         windows: bool | None = None) -> str | None:
     """The one fix for a credential file refusal, naming the file. ``None``
@@ -38,24 +51,37 @@ def credential_recovery(reason: str, path: Path | None, *,
     target = str(path) if path is not None else "the configured credential file"
     if reason == "credential file must be owner-only":
         if windows:
-            # S-1-3-4 is OWNER RIGHTS: a protected DACL with only that entry is
-            # exactly what this module's own writers produce (D:P(A;;FA;;;OW)).
-            # Verified on Windows 11, 2026-10-18: a plainly written file fails
-            # the owner-only check and passes after this command.
-            quoted = f'"{target}"' if path is not None else target
-            return (f"Other accounts can read it; restrict it to its owner from PowerShell "
-                    f"or cmd: icacls {quoted} /inheritance:r /grant:r *S-1-3-4:F (the file "
-                    f"must be owned by the account that runs the shim).")
+            return (f"Other accounts can read it; restrict it to its owner with two commands, "
+                    f"from PowerShell or cmd: {_windows_restrict(target, path)}.")
         quoted = shlex.quote(target) if path is not None else target
-        return (f"Other users can read it; restrict it to its owner: chmod 600 {quoted} "
-                f"(the file must be owned by the user that runs the shim).")
+        return f"Other users can read it; restrict it to its owner: chmod 600 {quoted}"
+    if reason == "credential file is owned by another account":
+        if windows:
+            # Copy-Item creates a new file, owned by the account that runs it
+            # unelevated, with inherited permissions (the source's explicit
+            # entries are not copied: verified 2026-10-18, Windows 11). A file
+            # written from an elevated prompt is owned by Administrators.
+            quoted = f'"{target}"' if path is not None else target
+            copy = f'"{target}.copy"' if path is not None else "a copy"
+            return (f"Another account owns it (a file written from an elevated prompt is owned "
+                    f"by Administrators). As the account that runs the shim, replace it with "
+                    f"a copy you own, in PowerShell: Copy-Item -LiteralPath {quoted} "
+                    f"-Destination {copy}; Move-Item -Force -LiteralPath {copy} -Destination "
+                    f"{quoted}; then restrict it: {_windows_restrict(target, path)}.")
+        if path is None:
+            return ("Another user owns it; as the user that runs the shim, replace it with an "
+                    "owner-only copy of your own.")
+        quoted, copy = shlex.quote(target), shlex.quote(target + ".copy")
+        return (f"Another user owns it; as the user that runs the shim, replace it with an "
+                f"owner-only copy of your own: (umask 077; cp {quoted} {copy}) && "
+                f"mv -f {copy} {quoted}")
     fixes = {
         "configured credential file is missing":
             f"Restore the token file at {target}, or set PSEUDOLIFE_MCP_TOKEN_FILE to the "
             f"file that holds the token.",
         "configured credential file is unavailable":
-            f"{target} exists but could not be opened; check that the account running the "
-            f"shim can read it and that no other program holds it locked.",
+            f"{target} could not be opened or inspected; check that it is a file the account "
+            f"running the shim can read, and that no other program holds it locked.",
         "credential path ancestors cannot be inspected":
             f"A directory above {target} could not be inspected; check that the account "
             f"running the shim can read every directory on that path.",
@@ -185,7 +211,8 @@ def _windows_owner_only(fd: int) -> bool:
 def _windows_file_access(fd: int) -> str:
     """``owner-only`` when the current user owns the file and only its owner
     may access it; ``owned`` when the current user owns it but the DACL is
-    broader; ``foreign`` when another account owns it or it cannot be read."""
+    broader; ``foreign`` when another account owns it; ``unknown`` when its
+    security or this process's user could not be read."""
     import ctypes
     from ctypes import wintypes
     import msvcrt
@@ -249,19 +276,19 @@ def _windows_file_access(fd: int) -> str:
     if result != 0 or not descriptor or not owner or not dacl:
         if descriptor:
             kernel.LocalFree(descriptor)
-        return "foreign"
+        return "unknown"
     try:
         token_handle = wintypes.HANDLE()
         if not open_token(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token_handle)):
-            return "foreign"
+            return "unknown"
         try:
             needed = wintypes.DWORD()
             get_token(token_handle, 1, None, 0, ctypes.byref(needed))
             if not needed.value:
-                return "foreign"
+                return "unknown"
             token_buffer = ctypes.create_string_buffer(needed.value)
             if not get_token(token_handle, 1, token_buffer, needed, ctypes.byref(needed)):
-                return "foreign"
+                return "unknown"
             current_owner = ctypes.cast(token_buffer, ctypes.POINTER(TOKEN_USER)).contents.User.Sid
             if not equal_sid(owner, current_owner):
                 return "foreign"
@@ -301,17 +328,25 @@ def _validate_file(fd: int, *, allow_unlinked: bool = False) -> os.stat_result:
         allow_unlinked and os.name != "nt" and info.st_nlink == 0)
     if not stat.S_ISREG(info.st_mode) or not valid_links:
         raise CredentialError("credential file must be a private regular file")
+    # Another account's file is told apart from a broad one: the fix for a
+    # broad file (narrow its permissions) would lock this user out of a file
+    # another account owns (review finding, 2026-10-18).
     if os.name == "nt":
-        if not _windows_owner_only(fd):
+        access = _windows_file_access(fd)
+        if access == "foreign":
+            raise CredentialError("credential file is owned by another account")
+        if access != "owner-only":
             raise CredentialError("credential file must be owner-only")
-    elif info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+    elif info.st_uid != os.geteuid():
+        raise CredentialError("credential file is owned by another account")
+    elif stat.S_IMODE(info.st_mode) & 0o077:
         raise CredentialError("credential file must be owner-only")
     return info
 
 
 def _owned_by_current_user(fd: int) -> bool:
     if os.name == "nt":
-        return _windows_file_access(fd) != "foreign"
+        return _windows_file_access(fd) in ("owner-only", "owned")
     return os.fstat(fd).st_uid == os.geteuid()
 
 
@@ -319,8 +354,9 @@ def _validate_replaceable(fd: int) -> None:
     """Refuse to replace an existing credential file unless it is one
     ``_validate_file`` accepts, or one whose only fault is permissions broader
     than owner-only on a file the current user owns: the replacement is
-    owner-only, so writing it repairs them. A link, a hard link, a non-file or
-    another account's file is still refused."""
+    owner-only, so writing it repairs them. A link, a hard link, a non-file,
+    another account's file, or one whose owner cannot be read is still
+    refused."""
     try:
         _validate_file(fd)
     except CredentialError as error:

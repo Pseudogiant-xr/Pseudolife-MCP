@@ -301,24 +301,40 @@ def test_a_broad_permission_refusal_names_the_file_and_the_owner_only_fix(tmp_pa
     assert error.path == path
     fix = error.recovery()
     if os.name == "nt":
-        assert f'icacls "{path}" /inheritance:r /grant:r *S-1-3-4:F' in fix
+        assert (f'icacls "{path}" /reset, then icacls "{path}" /inheritance:r /grant:r '
+                f'*S-1-3-4:F') in fix
     else:
-        assert f"chmod 600 {path}" in fix
+        assert fix.endswith(f"chmod 600 {path}")
     assert "fixture-secret" not in fix
 
 
+WINDOWS_FIX = (["/reset"], ["/inheritance:r", "/grant:r", "*S-1-3-4:F"])
+
+
 @pytest.mark.skipif(os.name != "nt", reason="the Windows ACL fix")
-def test_the_named_windows_fix_makes_the_file_usable(tmp_path: Path) -> None:
-    """Run exactly the command the refusal names: it must make the same file
-    pass the shim's own check, with its token unchanged."""
+# (WD), not W: FILE_GENERIC_WRITE carries SYNCHRONIZE, and denying it makes
+# the file unopenable, which is a different refusal.
+@pytest.mark.parametrize("explicit", [[], [["/grant", "*S-1-1-0:R"], ["/deny", "*S-1-5-32-545:(WD)"]]],
+                         ids=["inherited", "explicit-entries"])
+def test_the_named_windows_fix_makes_the_file_usable(tmp_path: Path, explicit) -> None:
+    """Run exactly the commands the refusal names: they must make the same
+    file pass the shim's own check, with its token unchanged, also when it
+    carries explicit entries (which /inheritance:r alone keeps: review
+    finding, 2026-10-18)."""
     import subprocess
+
+    def icacls(*arguments):
+        completed = subprocess.run(["icacls", str(path), *arguments], capture_output=True, text=True)
+        assert completed.returncode == 0, completed.stdout + completed.stderr
 
     path = tmp_path / "claude-code.token"
     shared_token(path, "fixture-secret")
-    assert "icacls" in _refusal(path).recovery()
-    completed = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", "*S-1-3-4:F"],
-                               capture_output=True, text=True)
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    for entry in explicit:
+        icacls(*entry)
+    fix = _refusal(path).recovery()
+    for step in WINDOWS_FIX:
+        assert f'icacls "{path}" {" ".join(step)}' in fix
+        icacls(*step)
     assert CredentialProvider(path=path).snapshot().token == "fixture-secret"
 
 
@@ -381,9 +397,21 @@ def test_every_reading_reason_has_a_fix_and_unknown_ones_have_none() -> None:
                    "credential file must be a private regular file",
                    "credential file contains an invalid bearer token"):
         assert str(path) in credential_recovery(reason, path, windows=False), reason
-    assert "chmod 600 /fixture/dir/token" in credential_recovery(
-        "credential file must be owner-only", path, windows=False)
-    assert r'icacls "C:\fixture\token" /inheritance:r /grant:r *S-1-3-4:F' in credential_recovery(
+    assert credential_recovery("credential file must be owner-only", path,
+                               windows=False).endswith("chmod 600 /fixture/dir/token")
+    assert ("(umask 077; cp /fixture/dir/token /fixture/dir/token.copy) && "
+            "mv -f /fixture/dir/token.copy /fixture/dir/token") in credential_recovery(
+        "credential file is owned by another account", path, windows=False)
+    foreign = credential_recovery("credential file is owned by another account",
+                                  PureWindowsPath("C:/fixture/token"), windows=True)
+    assert r'Copy-Item -LiteralPath "C:\fixture\token" -Destination "C:\fixture\token.copy"' in foreign
+    assert r'icacls "C:\fixture\token" /reset' in foreign
+    for reason in ("credential file must be owner-only",
+                   "credential file is owned by another account"):
+        for windows in (True, False):
+            assert "None" not in credential_recovery(reason, None, windows=windows)
+    assert (r'icacls "C:\fixture\token" /reset, then icacls "C:\fixture\token" '
+            r'/inheritance:r /grant:r *S-1-3-4:F') in credential_recovery(
         "credential file must be owner-only", PureWindowsPath("C:/fixture/token"), windows=True)
     # A path with a space stays one shell word.
     assert "chmod 600 '/fixture/my dir/token'" in credential_recovery(
@@ -413,7 +441,40 @@ def test_writer_replaces_an_own_file_whose_permissions_are_too_broad(tmp_path: P
         assert path.stat().st_mode & 0o777 == 0o600
 
 
-def test_writer_still_refuses_a_broad_file_another_account_owns(tmp_path: Path, monkeypatch) -> None:
+def _another_account_owns_every_file(monkeypatch) -> None:
+    from pseudolife_memory import credentials
+
+    if os.name == "nt":
+        monkeypatch.setattr(credentials, "_windows_file_access", lambda fd: "foreign")
+    else:
+        real = os.geteuid()
+        monkeypatch.setattr(credentials.os, "geteuid", lambda: real + 1)
+
+
+def test_another_accounts_file_gets_its_own_reason_not_the_permissions_fix(
+        tmp_path: Path, monkeypatch) -> None:
+    """Narrowing permissions on a file another account owns (say, Administrators,
+    after an elevated write) would lock this user out of it: that case has its
+    own reason and fix (review finding, 2026-10-18)."""
+    path = tmp_path / "token"
+    private_token(path, "fixture-secret")
+    _another_account_owns_every_file(monkeypatch)
+    error = _refusal(path)
+    assert str(error) == "credential file is owned by another account"
+    assert "copy you own" in error.recovery()
+    assert "Other accounts can read it" not in error.recovery()
+
+
+def test_writer_still_refuses_a_file_another_account_owns(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "token"
+    shared_token(path, "old-fixture")
+    _another_account_owns_every_file(monkeypatch)
+    with pytest.raises(CredentialError, match="owned by another account"):
+        _write_token_file(path, "new-fixture")
+    assert path.read_bytes() == b"old-fixture"
+
+
+def test_writer_refuses_a_broad_file_whose_owner_cannot_be_proven(tmp_path: Path, monkeypatch) -> None:
     from pseudolife_memory import credentials
 
     path = tmp_path / "token"

@@ -1947,6 +1947,7 @@ def test_an_owner_only_refusal_names_the_reason_the_file_and_the_fix(tmp_path):
     ("credential path must not contain redirects", "real path"),
     ("credential file must be a private regular file", "regular file"),
     ("credential file contains an invalid bearer token", "only the token"),
+    ("credential file is owned by another account", "copy you own"),
 ])
 def test_each_reading_reason_reaches_the_refusal_with_its_fix(tmp_path, reason, fix):
     refused = _credential_refusal(reason, tmp_path / "token")
@@ -1988,3 +1989,23 @@ def test_an_unrelated_error_named_credentialerror_is_not_echoed():
     assert "fixture-secret-token" not in refused.message
     assert "fixture-secret-token" not in json.dumps(refused.data)
     assert "reason" not in refused.data
+
+
+def test_a_rotation_after_dispatch_never_says_the_call_did_not_run():
+    """The post-call check can find the file rotated after the daemon ran the
+    call: the refusal keeps "check its result before retrying" and must not
+    claim the old token went unused (review finding, 2026-10-18)."""
+    group = ExceptionGroup("fixture", [_shim._CredentialChangedError()])
+    refused = _shim._transport_error(
+        group, _shim._UpstreamAttempt(phase="call", dispatched=True), "call")
+    assert refused.data["operation_outcome"] == "unknown"
+    assert "may have completed" in refused.message
+    assert "changed during this operation" in refused.message
+    assert "not used" not in refused.message and "retry it" not in refused.message
+
+
+def test_a_refusal_after_dispatch_does_not_also_say_then_retry(tmp_path):
+    refused = _credential_refusal("credential file must be owner-only", tmp_path / "token",
+                                  phase="call", dispatched=True)
+    assert "Check its result before retrying" in refused.message
+    assert "Then retry" not in refused.message

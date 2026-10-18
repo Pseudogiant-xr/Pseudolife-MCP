@@ -1319,8 +1319,9 @@ def test_a_token_file_that_loses_its_owner_only_permissions_is_refused_with_the_
             assert len(upstream.requests) == request_count
             if os.name == "nt":
                 assert "icacls" in data["recovery"]
-                subprocess.run(["icacls", str(token_file), "/inheritance:r", "/grant:r",
-                                "*S-1-3-4:F"], check=True, capture_output=True)
+                for step in (["/reset"], ["/inheritance:r", "/grant:r", "*S-1-3-4:F"]):
+                    subprocess.run(["icacls", str(token_file), *step], check=True,
+                                   capture_output=True)
             else:
                 assert "chmod 600" in data["recovery"]
                 token_file.chmod(0o600)

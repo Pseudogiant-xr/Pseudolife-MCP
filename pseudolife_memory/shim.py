@@ -251,11 +251,13 @@ _CREDENTIAL_UNAVAILABLE_MESSAGE = (
     "The memory credential is unavailable; restore the configured credential and retry.")
 
 
-def _credential_refusal(leaves) -> tuple[str, dict]:
+def _credential_refusal(leaves, *, after_dispatch: bool = False) -> tuple[str, dict]:
     """The message and data for a credential failure: the sanitized reason
     and the one fix when the provider raised a ``CredentialError`` (it never
     holds token bytes), the rotation notice for ``_CredentialChangedError``,
-    and the general advice otherwise. Before 2026-10-18 every case read
+    and the general advice otherwise. ``after_dispatch`` drops the retry
+    advice: the call may have run, and the caller's message already says to
+    check its result before retrying. Before 2026-10-18 every case read
     "restore the configured credential", which sent an agent to restore a
     token file that held the right token but had lost its owner-only ACL."""
     from pseudolife_memory.credentials import CredentialError
@@ -266,16 +268,22 @@ def _credential_refusal(leaves) -> tuple[str, dict]:
         data = {"reason": reason}
         fix = failure.recovery()
         if fix is None:
+            if after_dispatch:
+                return f"The memory credential cannot be used: {reason}.", data
             return (f"The memory credential cannot be used: {reason}. Restore the configured "
                     f"credential and retry.", data)
         if failure.path is not None:
             data["credential_file"] = str(failure.path)
         data["recovery"] = fix
-        return f"The memory credential cannot be used: {reason}. {fix} Then retry.", data
+        return (f"The memory credential cannot be used: {reason}. {fix}"
+                + ("" if after_dispatch else " Then retry."), data)
     if any(isinstance(leaf, _CredentialChangedError) for leaf in leaves):
+        data = {"reason": "credential changed during the operation"}
+        if after_dispatch:
+            return ("The memory credential file changed during this operation (a token "
+                    "rotation).", data)
         return ("The memory credential file changed during this operation (a token rotation), "
-                "so the old token was not used for it; retry it.",
-                {"reason": "credential changed during the operation"})
+                "so the old token was not used for it; retry it.", data)
     return _CREDENTIAL_UNAVAILABLE_MESSAGE, {}
 
 
@@ -481,7 +489,7 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         if classification == "response_lost":
             message = f"{_RESPONSE_LOST_MESSAGE} {message}"
         elif credential_data:
-            message = f"{message} {_credential_refusal(leaves)[0]}"
+            message = f"{message} {_credential_refusal(leaves, after_dispatch=True)[0]}"
 
     data = {
         "classification": classification,
