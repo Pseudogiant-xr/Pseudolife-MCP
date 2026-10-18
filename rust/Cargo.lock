@@ -1755,7 +1755,7 @@ dependencies = [
 
 [[package]]
 name = "pseudolife-stdio"
-version = "0.18.2"
+version = "0.19.0"
 dependencies = [
  "bytes",
  "chrono",
