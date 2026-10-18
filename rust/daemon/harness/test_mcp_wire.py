@@ -76,7 +76,10 @@ class UnbufferedSend(http.client.HTTPConnection):
 
     def connect(self):
         super().connect()
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 0)
+        try:
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 0)
+        except OSError:  # macOS and the BSDs refuse 0; Linux clamps it up
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1)
 
 
 def test_refusal_with_most_of_the_body_unread_is_read():
@@ -99,7 +102,7 @@ def test_body_limit_refusal_survives_the_reset_repeatedly(overshoot):
     # The live body_limit shapes: a 4 MiB budget and a 47- or 1-byte
     # overshoot. Read after send lost the 413 to WinError 10054 in about 1 of
     # 100 calls on an idle Windows 11 host, and a reader waiting under a
-    # CPython timeout in 7 of 1000; this reader lost 0 of 6000 (2026-10-18).
+    # CPython timeout in 21-30 of 3000; this reader lost 0 of 6000 (2026-10-18).
     listener, seen = budget_server(4 * 1024 * 1024)
     body = b"a" * (4 * 1024 * 1024 + overshoot)
     with listener:
@@ -113,6 +116,7 @@ def test_body_limit_refusal_survives_the_reset_repeatedly(overshoot):
 def test_windows_receive_is_posted_in_the_kernel_with_the_timeout_kept():
     # The near miss that looks fixed: a reader waiting under a CPython timeout
     # sits in select() with no receive posted, and lost 22 of 3000 refusals.
+    assert mcp_wire.KERNEL_TIMEOUTS
     sock = socket.socket()
     with sock:
         sock.settimeout(2.5)
@@ -160,12 +164,11 @@ def test_daemon_that_closes_without_a_complete_answer_still_fails(answer, size, 
 
 def test_drained_request_carries_no_send_error_and_leaves_no_thread():
     listener, seen = budget_server(0, answer="drain")
-    before = threading.active_count()
     with listener:
         r = post(listener, b'{"jsonrpc":"2.0","id":1,"method":"ping"}')
     assert (r["status"], r["body"], "send_error" in r) == (200, b"{}", False)
     assert seen == [40]
-    assert threading.active_count() == before
+    assert not [t for t in threading.enumerate() if t.name == "mcp_wire-read"]
 
 
 def test_supplied_connection_is_reused_across_body_exchanges():

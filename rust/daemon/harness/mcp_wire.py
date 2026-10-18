@@ -63,12 +63,14 @@ def _send_while_reading(c, method, data):
     the budget, then closes with the overshoot unread, so its stack resets
     the connection (divergences.md, MCP-REFUSAL-CLEANUP). Read only after the
     send, body_limit's 413 was lost to WinError 10054 in about 1 of 100 calls
-    on an idle Windows 11 host (2026-10-18). The reader signals just before
-    it reads and holds the GIL until its receive blocks, so the send starts
-    after that. A complete response is returned even if the send was cut
-    off, which the result records as ``send_error``; without one the read's
-    error is raised, so a daemon that closes without a complete answer still
-    fails.
+    on an idle Windows 11 host (2026-10-18). The send starts once the reader
+    signals that it is about to read, and the daemon reads 4 MiB before it
+    answers, so the receive is waiting by then. A response split across
+    segments with the reset right behind can still lose its tail, which
+    raises, never passes. A complete response is returned even if the send
+    was cut off, which the result records as ``send_error``; without one the
+    read's error is raised, so a daemon that closes without a complete
+    answer still fails.
     """
     if c.sock is None:
         c.connect()
