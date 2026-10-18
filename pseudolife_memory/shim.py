@@ -247,6 +247,38 @@ class _CoordinationUnavailableError(Exception):
         self.message = message
 
 
+_CREDENTIAL_UNAVAILABLE_MESSAGE = (
+    "The memory credential is unavailable; restore the configured credential and retry.")
+
+
+def _credential_refusal(leaves) -> tuple[str, dict]:
+    """The message and data for a credential failure: the sanitized reason
+    and the one fix when the provider raised a ``CredentialError`` (it never
+    holds token bytes), the rotation notice for ``_CredentialChangedError``,
+    and the general advice otherwise. Before 2026-10-18 every case read
+    "restore the configured credential", which sent an agent to restore a
+    token file that held the right token but had lost its owner-only ACL."""
+    from pseudolife_memory.credentials import CredentialError
+
+    failure = next((leaf for leaf in leaves if isinstance(leaf, CredentialError)), None)
+    if failure is not None:
+        reason = str(failure)
+        data = {"reason": reason}
+        fix = failure.recovery()
+        if fix is None:
+            return (f"The memory credential cannot be used: {reason}. Restore the configured "
+                    f"credential and retry.", data)
+        if failure.path is not None:
+            data["credential_file"] = str(failure.path)
+        data["recovery"] = fix
+        return f"The memory credential cannot be used: {reason}. {fix} Then retry.", data
+    if any(isinstance(leaf, _CredentialChangedError) for leaf in leaves):
+        return ("The memory credential file changed during this operation (a token rotation), "
+                "so the old token was not used for it; retry it.",
+                {"reason": "credential changed during the operation"})
+    return _CREDENTIAL_UNAVAILABLE_MESSAGE, {}
+
+
 def _require_current_credential(provider, snapshot) -> None:
     if provider.snapshot().generation != snapshot.generation:
         raise _CredentialChangedError
@@ -376,6 +408,7 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         None)
     refusal = _daemon_refusal(sdk_error)
     revoked = False
+    credential_data: dict = {}
     if coordination_failure is not None:
         classification = "coordination_unavailable"
         message = (coordination_failure.message
@@ -383,7 +416,7 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         outcome = "not_dispatched"
     elif names & {"CredentialError", "_CredentialChangedError"}:
         classification = "credential_unavailable"
-        message = "The memory credential is unavailable; restore the configured credential and retry."
+        message, credential_data = _credential_refusal(leaves)
         outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
     elif refusal == _UNAUTHORIZED_CODE:
         # Checked and no longer listed: retrying cannot help, and nothing ran.
@@ -447,11 +480,14 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         )
         if classification == "response_lost":
             message = f"{_RESPONSE_LOST_MESSAGE} {message}"
+        elif credential_data:
+            message = f"{message} {_credential_refusal(leaves)[0]}"
 
     data = {
         "classification": classification,
         "phase": phase,
         "operation_outcome": outcome,
+        **credential_data,
     }
     if coordination_failure is not None and coordination_failure.hint:
         data["hint"] = coordination_failure.hint

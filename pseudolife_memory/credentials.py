@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import hashlib
 import os
 from pathlib import Path
+import shlex
 import stat
 import tempfile
 import threading
@@ -15,7 +16,60 @@ MAX_TOKEN_BYTES = 4096
 
 
 class CredentialError(RuntimeError):
-    """A sanitized credential failure safe to surface to a caller."""
+    """A sanitized credential failure safe to surface to a caller.
+
+    The message is the reason and never holds token bytes. ``path`` is the
+    credential file it concerns, set by :class:`CredentialProvider` when it
+    read one; :meth:`recovery` names the one fix for the reason, or ``None``
+    when the reason has no specific fix."""
+
+    path: Path | None = None
+
+    def recovery(self) -> str | None:
+        return credential_recovery(str(self), self.path)
+
+
+def credential_recovery(reason: str, path: Path | None, *,
+                        windows: bool | None = None) -> str | None:
+    """The one fix for a credential file refusal, naming the file. ``None``
+    when the reason has no specific fix (a writer's own failures)."""
+    if windows is None:
+        windows = os.name == "nt"
+    target = str(path) if path is not None else "the configured credential file"
+    if reason == "credential file must be owner-only":
+        if windows:
+            # S-1-3-4 is OWNER RIGHTS: a protected DACL with only that entry is
+            # exactly what this module's own writers produce (D:P(A;;FA;;;OW)).
+            # Verified on Windows 11, 2026-10-18: a plainly written file fails
+            # the owner-only check and passes after this command.
+            quoted = f'"{target}"' if path is not None else target
+            return (f"Other accounts can read it; restrict it to its owner from PowerShell "
+                    f"or cmd: icacls {quoted} /inheritance:r /grant:r *S-1-3-4:F (the file "
+                    f"must be owned by the account that runs the shim).")
+        quoted = shlex.quote(target) if path is not None else target
+        return (f"Other users can read it; restrict it to its owner: chmod 600 {quoted} "
+                f"(the file must be owned by the user that runs the shim).")
+    fixes = {
+        "configured credential file is missing":
+            f"Restore the token file at {target}, or set PSEUDOLIFE_MCP_TOKEN_FILE to the "
+            f"file that holds the token.",
+        "configured credential file is unavailable":
+            f"{target} exists but could not be opened; check that the account running the "
+            f"shim can read it and that no other program holds it locked.",
+        "credential path ancestors cannot be inspected":
+            f"A directory above {target} could not be inspected; check that the account "
+            f"running the shim can read every directory on that path.",
+        "credential path must not contain redirects":
+            f"A directory on the path to {target} is a symlink or junction; set "
+            f"PSEUDOLIFE_MCP_TOKEN_FILE to the real path.",
+        "credential file must be a private regular file":
+            f"{target} is a link, a junction, a hard link or not a file; replace it with a "
+            f"regular file holding only the token.",
+        "credential file contains an invalid bearer token":
+            f"Write only the token to {target}: one line, no spaces or control characters, "
+            f"at most {MAX_TOKEN_BYTES} bytes.",
+    }
+    return fixes.get(reason)
 
 
 @dataclass(frozen=True)
@@ -125,6 +179,13 @@ def _secure_windows_file(path: Path) -> None:
 
 
 def _windows_owner_only(fd: int) -> bool:
+    return _windows_file_access(fd) == "owner-only"
+
+
+def _windows_file_access(fd: int) -> str:
+    """``owner-only`` when the current user owns the file and only its owner
+    may access it; ``owned`` when the current user owns it but the DACL is
+    broader; ``foreign`` when another account owns it or it cannot be read."""
     import ctypes
     from ctypes import wintypes
     import msvcrt
@@ -188,48 +249,48 @@ def _windows_owner_only(fd: int) -> bool:
     if result != 0 or not descriptor or not owner or not dacl:
         if descriptor:
             kernel.LocalFree(descriptor)
-        return False
+        return "foreign"
     try:
         token_handle = wintypes.HANDLE()
         if not open_token(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token_handle)):
-            return False
+            return "foreign"
         try:
             needed = wintypes.DWORD()
             get_token(token_handle, 1, None, 0, ctypes.byref(needed))
             if not needed.value:
-                return False
+                return "foreign"
             token_buffer = ctypes.create_string_buffer(needed.value)
             if not get_token(token_handle, 1, token_buffer, needed, ctypes.byref(needed)):
-                return False
+                return "foreign"
             current_owner = ctypes.cast(token_buffer, ctypes.POINTER(TOKEN_USER)).contents.User.Sid
             if not equal_sid(owner, current_owner):
-                return False
+                return "foreign"
         finally:
             kernel.CloseHandle(token_handle)
         control = wintypes.WORD()
         revision = wintypes.DWORD()
         if not get_control(descriptor, ctypes.byref(control), ctypes.byref(revision)):
-            return False
+            return "owned"
         if not (control.value & 0x1000):  # SE_DACL_PROTECTED
-            return False
+            return "owned"
         owner_allowed = False
         for index in range(dacl.contents.AceCount):
             ace = ctypes.c_void_p()
             if not get_ace(dacl, index, ctypes.byref(ace)):
-                return False
+                return "owned"
             header = ctypes.cast(ace, ctypes.POINTER(ACE_HEADER)).contents
             if header.AceType == 1:  # ACCESS_DENIED_ACE_TYPE
                 continue
             if header.AceType != 0:  # Reject unfamiliar allow/object ACEs.
-                return False
+                return "owned"
             sid = ctypes.c_void_p(ace.value + 8)
             # The protected DACL writer uses the OWNER RIGHTS well-known SID,
             # which resolves to the current file owner without embedding an
             # account identifier in the descriptor.
             if not equal_sid(owner, sid) and not well_known_sid(sid, 71):
-                return False
+                return "owned"
             owner_allowed = True
-        return owner_allowed
+        return "owner-only" if owner_allowed else "owned"
     finally:
         kernel.LocalFree(descriptor)
 
@@ -246,6 +307,25 @@ def _validate_file(fd: int, *, allow_unlinked: bool = False) -> os.stat_result:
     elif info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
         raise CredentialError("credential file must be owner-only")
     return info
+
+
+def _owned_by_current_user(fd: int) -> bool:
+    if os.name == "nt":
+        return _windows_file_access(fd) != "foreign"
+    return os.fstat(fd).st_uid == os.geteuid()
+
+
+def _validate_replaceable(fd: int) -> None:
+    """Refuse to replace an existing credential file unless it is one
+    ``_validate_file`` accepts, or one whose only fault is permissions broader
+    than owner-only on a file the current user owns: the replacement is
+    owner-only, so writing it repairs them. A link, a hard link, a non-file or
+    another account's file is still refused."""
+    try:
+        _validate_file(fd)
+    except CredentialError as error:
+        if str(error) != "credential file must be owner-only" or not _owned_by_current_user(fd):
+            raise
 
 
 def _decode_token(data: bytes) -> str:
@@ -320,7 +400,7 @@ def _write_token_file(path: str | Path, token: str) -> None:
         existing_fd = os.open(target, os.O_RDONLY | getattr(os, "O_BINARY", 0)
                               | getattr(os, "O_NOFOLLOW", 0))
         try:
-            _validate_file(existing_fd)
+            _validate_replaceable(existing_fd)
         finally:
             os.close(existing_fd)
     fd, temporary = tempfile.mkstemp(prefix=".pseudolife-token-", dir=target.parent)
@@ -390,7 +470,11 @@ class CredentialProvider:
         with self._lock:
             if self._path is None:
                 return CredentialSnapshot(self._token, self._static_generation)
-            token, generation = _open_token(self._path)
+            try:
+                token, generation = _open_token(self._path)
+            except CredentialError as error:
+                error.path = self._path
+                raise
             return CredentialSnapshot(token, generation)
 
     def __repr__(self) -> str:

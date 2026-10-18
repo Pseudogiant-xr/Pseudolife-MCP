@@ -269,3 +269,166 @@ def test_concurrent_atomic_rotation_never_returns_torn_credentials(tmp_path: Pat
     worker.join()
     assert not failures
     assert observed <= set(tokens)
+
+
+# --- refusals name their cause and their fix ----------------------------------
+# 2026-10-18: a token rotation rewrote ~/.pseudolife-mcp/claude-code.token with
+# a plain temp file and os.replace, so it lost the owner-only ACL. Every MCP
+# call then failed with "restore the configured credential", and the file the
+# message said to restore already held the right token. The reason and the one
+# fix travel with the error now.
+
+def shared_token(path: Path, token: str) -> None:
+    """A token file this user owns whose permissions are broader than owner-only,
+    as a plain write leaves it: inherited ACL on Windows, mode 0644 elsewhere."""
+    path.unlink(missing_ok=True)
+    path.write_bytes(token.encode("utf-8"))
+    if os.name != "nt":
+        path.chmod(0o644)
+
+
+def _refusal(path: Path) -> CredentialError:
+    with pytest.raises(CredentialError) as raised:
+        CredentialProvider(path=path).snapshot()
+    return raised.value
+
+
+def test_a_broad_permission_refusal_names_the_file_and_the_owner_only_fix(tmp_path: Path) -> None:
+    path = tmp_path / "claude-code.token"
+    shared_token(path, "fixture-secret")
+    error = _refusal(path)
+    assert str(error) == "credential file must be owner-only"
+    assert error.path == path
+    fix = error.recovery()
+    if os.name == "nt":
+        assert f'icacls "{path}" /inheritance:r /grant:r *S-1-3-4:F' in fix
+    else:
+        assert f"chmod 600 {path}" in fix
+    assert "fixture-secret" not in fix
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows ACL fix")
+def test_the_named_windows_fix_makes_the_file_usable(tmp_path: Path) -> None:
+    """Run exactly the command the refusal names: it must make the same file
+    pass the shim's own check, with its token unchanged."""
+    import subprocess
+
+    path = tmp_path / "claude-code.token"
+    shared_token(path, "fixture-secret")
+    assert "icacls" in _refusal(path).recovery()
+    completed = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", "*S-1-3-4:F"],
+                               capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert CredentialProvider(path=path).snapshot().token == "fixture-secret"
+
+
+def test_a_missing_file_refusal_names_the_file(tmp_path: Path) -> None:
+    path = tmp_path / "missing.token"
+    error = _refusal(path)
+    assert str(error) == "configured credential file is missing"
+    assert error.path == path
+    assert str(path) in error.recovery()
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in error.recovery()
+
+
+@pytest.mark.parametrize("payload", [b"", b"\n", b"two words"])
+def test_an_invalid_token_refusal_says_what_the_file_must_hold(tmp_path: Path, payload: bytes) -> None:
+    path = tmp_path / "token"
+    private_token(path, "temporary")
+    path.write_bytes(payload)
+    if os.name != "nt":
+        path.chmod(0o600)
+    error = _refusal(path)
+    assert str(error) == "credential file contains an invalid bearer token"
+    assert "only the token" in error.recovery()
+    assert "words" not in error.recovery()
+
+
+def test_a_hardlink_refusal_says_to_use_a_regular_file(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    private_token(source, "fixture-secret")
+    hardlink = tmp_path / "hardlink"
+    os.link(source, hardlink)
+    error = _refusal(hardlink)
+    assert str(error) == "credential file must be a private regular file"
+    assert "regular file" in error.recovery()
+
+
+def test_a_redirected_ancestor_refusal_says_to_name_the_real_path(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    private_token(real / "token", "fixture-secret")
+    redirect = tmp_path / "redirect"
+    try:
+        redirect.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    error = _refusal(redirect / "token")
+    assert str(error) == "credential path must not contain redirects"
+    assert "real path" in error.recovery()
+
+
+def test_every_reading_reason_has_a_fix_and_unknown_ones_have_none() -> None:
+    from pathlib import PurePosixPath, PureWindowsPath
+
+    from pseudolife_memory.credentials import credential_recovery
+
+    path = PurePosixPath("/fixture/dir/token")
+    for reason in ("configured credential file is missing",
+                   "configured credential file is unavailable",
+                   "credential path ancestors cannot be inspected",
+                   "credential path must not contain redirects",
+                   "credential file must be a private regular file",
+                   "credential file contains an invalid bearer token"):
+        assert str(path) in credential_recovery(reason, path, windows=False), reason
+    assert "chmod 600 /fixture/dir/token" in credential_recovery(
+        "credential file must be owner-only", path, windows=False)
+    assert r'icacls "C:\fixture\token" /inheritance:r /grant:r *S-1-3-4:F' in credential_recovery(
+        "credential file must be owner-only", PureWindowsPath("C:/fixture/token"), windows=True)
+    # A path with a space stays one shell word.
+    assert "chmod 600 '/fixture/my dir/token'" in credential_recovery(
+        "credential file must be owner-only", PurePosixPath("/fixture/my dir/token"), windows=False)
+    assert credential_recovery("credential file validation failed", path) is None
+    # Without a known path the fix still reads as a sentence, not "None".
+    assert "None" not in credential_recovery("configured credential file is missing", None)
+
+
+def test_a_usable_owner_only_file_is_not_refused(tmp_path: Path) -> None:
+    """The near miss: the file every writer produces passes untouched."""
+    path = tmp_path / "token"
+    private_token(path, "fixture-secret")
+    assert CredentialProvider(path=path).snapshot().token == "fixture-secret"
+
+
+# --- the writer repairs what it owns -------------------------------------------
+
+def test_writer_replaces_an_own_file_whose_permissions_are_too_broad(tmp_path: Path) -> None:
+    """Replacing it can only narrow access, so refusing helped nobody: the
+    2026-10-18 repair had to delete the file before the writer would act."""
+    path = tmp_path / "token"
+    shared_token(path, "old-fixture")
+    _write_token_file(path, "new-fixture")
+    assert CredentialProvider(path=path).snapshot().token == "new-fixture"
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_writer_still_refuses_a_broad_file_another_account_owns(tmp_path: Path, monkeypatch) -> None:
+    from pseudolife_memory import credentials
+
+    path = tmp_path / "token"
+    shared_token(path, "old-fixture")
+    monkeypatch.setattr(credentials, "_owned_by_current_user", lambda fd: False)
+    with pytest.raises(CredentialError, match="owner-only"):
+        _write_token_file(path, "new-fixture")
+    assert path.read_bytes() == b"old-fixture"
+
+
+def test_writer_still_refuses_a_hardlinked_file(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    private_token(source, "fixture-secret")
+    hardlink = tmp_path / "hardlink"
+    os.link(source, hardlink)
+    with pytest.raises(CredentialError, match="private regular file"):
+        _write_token_file(hardlink, "new-fixture")
+    assert hardlink.read_bytes() == source.read_bytes() == b"fixture-secret"
