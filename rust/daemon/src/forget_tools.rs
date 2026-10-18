@@ -347,14 +347,19 @@ async fn forget_entries(
     let client = ready.storage.client();
     // `slots_for_entries(ids)`: the last row per slot names it (the largest
     // source id), as the resident retirement reads it.
-    let trace_rows = client
-        .query(
-            "SELECT entity_norm, attribute_norm, entry_id FROM memory_traces \
-             WHERE entry_id = ANY($1) ORDER BY entity_norm, attribute_norm, entry_id",
-            &[&ids],
-        )
+    let trace_rows = {
+        let ids = &ids;
+        crate::txn::with_client(client, |c| async move {
+            c.query(
+                "SELECT entity_norm, attribute_norm, entry_id FROM memory_traces \
+                 WHERE entry_id = ANY($1) ORDER BY entity_norm, attribute_norm, entry_id",
+                &[ids],
+            )
+            .await
+        })
         .await
-        .map_err(internal)?;
+        .map_err(internal)?
+    };
     let mut source_for_slot: HashMap<(String, String), i64> = HashMap::new();
     for r in &trace_rows {
         source_for_slot.insert((r.get(0), r.get(1)), r.get(2));
@@ -381,14 +386,16 @@ async fn forget_entries(
             .collect();
         (surviving, digests)
     };
-    let raw_cursor: Option<Value> = client
-        .query_opt(
+    let raw_cursor: Option<Value> = crate::txn::with_client(client, |c| async move {
+        c.query_opt(
             "SELECT value FROM meta WHERE key = $1",
             &[&DIGEST_CURSOR_KEY],
         )
         .await
-        .map_err(internal)?
-        .map(|r| r.get(0));
+    })
+    .await
+    .map_err(internal)?
+    .map(|r| r.get(0));
     let regenerate: BTreeSet<String> = roots.intersection(&surviving_roots).cloned().collect();
     let cursor = digest_cursor(raw_cursor, &regenerate).map_err(ToolError::Invalid)?;
     let now = episodes::now();
@@ -749,16 +756,16 @@ pub(crate) async fn ensure_lessons_refreshed(ready: &Ready) -> Result<(), String
 /// `_refresh_source_retired_lessons_locked`: mirror the cascade's committed
 /// lesson retirements (`superseded_by_value = 'source_forgotten'`).
 async fn refresh_source_retired_lessons(ready: &Ready) -> Result<(), ToolError> {
-    let rows = ready
-        .storage
-        .client()
-        .query(
+    let rows = crate::txn::with_client(ready.storage.client(), |c| async move {
+        c.query(
             "SELECT entity_norm, attribute_norm, value, asserted_at, superseded_at \
              FROM lessons WHERE status = 'retired' AND superseded_by_value = $1 ORDER BY id",
             &[&SOURCE_FORGOTTEN],
         )
         .await
-        .map_err(internal)?;
+    })
+    .await
+    .map_err(internal)?;
     let retired: Vec<(String, String, String, f64, Option<f64>)> = rows
         .iter()
         .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
@@ -784,24 +791,25 @@ async fn cortex_forget(
         crate::fact_set::save_cortex(svc, ready).await?;
         if !crate::mutants::active("mcp-forget-slot-reads-kept") {
             let ne = norm_key(entity);
-            let res =
-                match attribute {
+            // `delete_slot_reads`: its own transaction.
+            let na = attribute.map(norm_key);
+            let (ne, na) = (&ne, &na);
+            let res = crate::txn::run(ready.storage.client(), |c| async move {
+                match na {
                     None => {
-                        ready
-                            .storage
-                            .client()
-                            .execute("DELETE FROM slot_reads WHERE entity_norm = $1", &[&ne])
+                        c.execute("DELETE FROM slot_reads WHERE entity_norm = $1", &[ne])
                             .await
                     }
-                    Some(a) => ready
-                        .storage
-                        .client()
-                        .execute(
+                    Some(a) => {
+                        c.execute(
                             "DELETE FROM slot_reads WHERE entity_norm = $1 AND attribute_norm = $2",
-                            &[&ne, &norm_key(a)],
+                            &[ne, a],
                         )
-                        .await,
-                };
+                        .await
+                    }
+                }
+            })
+            .await;
             if let Err(e) = res {
                 crate::read::stats::record_slot_read_error();
                 eprintln!("slot-read cleanup failed: {e}");
