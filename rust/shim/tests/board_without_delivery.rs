@@ -4,7 +4,7 @@ mod board_fixture;
 use board_fixture::*;
 use pseudolife_stdio::board::{Board, Preparation};
 use serde_json::json;
-use std::{io::ErrorKind, net::TcpListener, time::Duration};
+use std::{io::ErrorKind, net::TcpListener};
 
 #[tokio::test]
 async fn disabled_delivery_keeps_pull_and_doorbell_without_connecting_to_bridge() {
@@ -39,7 +39,6 @@ async fn disabled_delivery_keeps_pull_and_doorbell_without_connecting_to_bridge(
         "PSEUDOLIFE_CODEX_BIN".into(),
         command.to_string_lossy().into_owned(),
     );
-    options.timing.startup = Duration::from_secs(1);
     let board = Board::attach_options(runtime, options).await;
     let Preparation::Forward(call) = board
         .prepare_call(
