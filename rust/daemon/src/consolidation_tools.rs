@@ -303,12 +303,15 @@ fn mcp_memory_consolidation_candidates<'a>(
                     .map(|&(i, _)| bank.entries[i].id)
                     .collect()
             };
-            match ready
-                .storage
-                .client()
-                .query("SELECT id FROM entries WHERE id = ANY($1)", &[&ids])
+            let lookup = {
+                let ids = &ids;
+                crate::txn::with_client(ready.storage.client(), |c| async move {
+                    c.query("SELECT id FROM entries WHERE id = ANY($1)", &[ids])
+                        .await
+                })
                 .await
-            {
+            };
+            match lookup {
                 Ok(rows) => {
                     let present: HashSet<i64> = rows.iter().map(|r| r.get(0)).collect();
                     candidates = candidates

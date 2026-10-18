@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Map, Value, json};
 
@@ -182,8 +183,8 @@ async fn delete(
             "hint": "pass confirm_bulk=true to remove them",
         }));
     }
-    let retained = if matches.is_empty() {
-        HashSet::new()
+    let (retained, lessons_retired) = if matches.is_empty() {
+        (HashSet::new(), false)
     } else {
         forget_entries(ready, &ws, &matches).await?
     };
@@ -198,6 +199,15 @@ async fn delete(
             if gone.contains(&bank.entries[i].id) {
                 bank.remove(i);
             }
+        }
+    }
+    // `_refresh_source_retired_lessons_locked` after the resident delete: a
+    // failure never fails the committed forget; the refresh stays pending
+    // and runs before the next lesson read or save.
+    if lessons_retired && !crate::mutants::active("mcp-forget-lessons-stale") {
+        LESSON_REFRESH_PENDING.store(true, Ordering::SeqCst);
+        if let Err(e) = ensure_lessons_refreshed(ready).await {
+            eprintln!("forget committed; lesson refresh pending ({e})");
         }
     }
     let texts: Vec<&str> = removed.iter().take(20).map(|d| d.text.as_str()).collect();
@@ -295,7 +305,7 @@ async fn forget_entries(
     ready: &Arc<Ready>,
     ws: &WriteState,
     matches: &[Doomed],
-) -> Result<HashSet<i64>, ToolError> {
+) -> Result<(HashSet<i64>, bool), ToolError> {
     let root_of = |episode_id: Option<&str>| -> Option<String> {
         let mut ep = episode_id.and_then(|id| ws.log.get(id))?;
         let mut seen = HashSet::new();
@@ -332,19 +342,24 @@ async fn forget_entries(
         .map(|d| d.id)
         .collect();
     if ids.is_empty() {
-        return Ok(HashSet::new());
+        return Ok((HashSet::new(), false));
     }
     let client = ready.storage.client();
     // `slots_for_entries(ids)`: the last row per slot names it (the largest
     // source id), as the resident retirement reads it.
-    let trace_rows = client
-        .query(
-            "SELECT entity_norm, attribute_norm, entry_id FROM memory_traces \
-             WHERE entry_id = ANY($1) ORDER BY entity_norm, attribute_norm, entry_id",
-            &[&ids],
-        )
+    let trace_rows = {
+        let ids = &ids;
+        crate::txn::with_client(client, |c| async move {
+            c.query(
+                "SELECT entity_norm, attribute_norm, entry_id FROM memory_traces \
+                 WHERE entry_id = ANY($1) ORDER BY entity_norm, attribute_norm, entry_id",
+                &[ids],
+            )
+            .await
+        })
         .await
-        .map_err(internal)?;
+        .map_err(internal)?
+    };
     let mut source_for_slot: HashMap<(String, String), i64> = HashMap::new();
     for r in &trace_rows {
         source_for_slot.insert((r.get(0), r.get(1)), r.get(2));
@@ -371,14 +386,16 @@ async fn forget_entries(
             .collect();
         (surviving, digests)
     };
-    let raw_cursor: Option<Value> = client
-        .query_opt(
+    let raw_cursor: Option<Value> = crate::txn::with_client(client, |c| async move {
+        c.query_opt(
             "SELECT value FROM meta WHERE key = $1",
             &[&DIGEST_CURSOR_KEY],
         )
         .await
-        .map_err(internal)?
-        .map(|r| r.get(0));
+    })
+    .await
+    .map_err(internal)?
+    .map(|r| r.get(0));
     let regenerate: BTreeSet<String> = roots.intersection(&surviving_roots).cloned().collect();
     let cursor = digest_cursor(raw_cursor, &regenerate).map_err(ToolError::Invalid)?;
     let now = episodes::now();
@@ -408,10 +425,7 @@ async fn forget_entries(
             e.superseded_by_text = Some(by_text.clone());
         }
     }
-    if changed.lessons_retired && !crate::mutants::active("mcp-forget-lessons-stale") {
-        refresh_source_retired_lessons(ready).await?;
-    }
-    Ok(retained)
+    Ok((retained, changed.lessons_retired))
 }
 
 /// `PostgresStorage.forget_entry_ids` (`storage/postgres.py:1225-1314`) with
@@ -616,11 +630,12 @@ async fn retire_lessons_for_entries(
                 continue;
             };
             let same_lesson = a.get("lesson").and_then(Value::as_str) == Some(value.as_str());
-            let same_time = a
-                .get("asserted_at")
-                .filter(|v| !v.is_boolean())
-                .and_then(crate::mcp::binding::float_arg)
-                == Some(asserted_at);
+            // Python's `==`: a JSON number, or a boolean as 1.0 / 0.0.
+            let same_time = match a.get("asserted_at") {
+                Some(Value::Bool(b)) => Some(f64::from(u8::from(*b))),
+                Some(v) => crate::mcp::binding::float_arg(v),
+                None => None,
+            } == Some(asserted_at);
             if let (true, true, Some(Value::Array(list))) =
                 (same_lesson, same_time, a.get("source_entry_ids"))
             {
@@ -721,19 +736,36 @@ async fn record_store_decision(
     .map(|_| ())
 }
 
+/// `storage._lesson_source_refresh`: a forget retired lessons that the
+/// resident store has not mirrored yet.
+static LESSON_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
+
+/// The refresh barrier before a lesson read or save: mirror pending
+/// retirements, keeping the flag on failure.
+pub(crate) async fn ensure_lessons_refreshed(ready: &Ready) -> Result<(), String> {
+    if !LESSON_REFRESH_PENDING.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    refresh_source_retired_lessons(ready)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    LESSON_REFRESH_PENDING.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
 /// `_refresh_source_retired_lessons_locked`: mirror the cascade's committed
 /// lesson retirements (`superseded_by_value = 'source_forgotten'`).
 async fn refresh_source_retired_lessons(ready: &Ready) -> Result<(), ToolError> {
-    let rows = ready
-        .storage
-        .client()
-        .query(
+    let rows = crate::txn::with_client(ready.storage.client(), |c| async move {
+        c.query(
             "SELECT entity_norm, attribute_norm, value, asserted_at, superseded_at \
              FROM lessons WHERE status = 'retired' AND superseded_by_value = $1 ORDER BY id",
             &[&SOURCE_FORGOTTEN],
         )
         .await
-        .map_err(internal)?;
+    })
+    .await
+    .map_err(internal)?;
     let retired: Vec<(String, String, String, f64, Option<f64>)> = rows
         .iter()
         .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
@@ -759,24 +791,25 @@ async fn cortex_forget(
         crate::fact_set::save_cortex(svc, ready).await?;
         if !crate::mutants::active("mcp-forget-slot-reads-kept") {
             let ne = norm_key(entity);
-            let res =
-                match attribute {
+            // `delete_slot_reads`: its own transaction.
+            let na = attribute.map(norm_key);
+            let (ne, na) = (&ne, &na);
+            let res = crate::txn::run(ready.storage.client(), |c| async move {
+                match na {
                     None => {
-                        ready
-                            .storage
-                            .client()
-                            .execute("DELETE FROM slot_reads WHERE entity_norm = $1", &[&ne])
+                        c.execute("DELETE FROM slot_reads WHERE entity_norm = $1", &[ne])
                             .await
                     }
-                    Some(a) => ready
-                        .storage
-                        .client()
-                        .execute(
+                    Some(a) => {
+                        c.execute(
                             "DELETE FROM slot_reads WHERE entity_norm = $1 AND attribute_norm = $2",
-                            &[&ne, &norm_key(a)],
+                            &[ne, a],
                         )
-                        .await,
-                };
+                        .await
+                    }
+                }
+            })
+            .await;
             if let Err(e) = res {
                 crate::read::stats::record_slot_read_error();
                 eprintln!("slot-read cleanup failed: {e}");
@@ -843,6 +876,9 @@ async fn lesson_forget(
     });
     if !snaps.is_empty() {
         for (en, an, snap) in &snaps {
+            if crate::mutants::active("mcp-forget-no-lesson-audit") {
+                break;
+            }
             write_store_decision(ready, "lesson", (en, an), snap, now).await?;
         }
         save_lessons(svc, ready).await?;
@@ -872,6 +908,7 @@ async fn write_store_decision(
 /// `_save_lessons` (`service.py:3774-3785`): the per-slot sync; a failure is
 /// counted and raised.
 async fn save_lessons(svc: &Service, ready: &Ready) -> Result<(), ToolError> {
+    ensure_lessons_refreshed(ready).await.map_err(internal)?;
     let snap = ready.lessons.snapshot();
     let synced = crate::stores::lessons::sync_slot_rows(ready.storage.client(), &snap).await;
     drop(snap);
