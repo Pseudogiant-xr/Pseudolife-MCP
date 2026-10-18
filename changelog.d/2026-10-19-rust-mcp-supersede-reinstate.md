@@ -1,0 +1,3 @@
+### Added (2026-10-19 — the Rust daemon serves memory_supersede and memory_reinstate)
+
+- The Rust daemon's MCP endpoint now answers `memory_supersede` and `memory_reinstate` as the Python daemon does, with the same database changes. A correction retires the old memory and stores its replacement in one transaction, by entry id or by its exact text, and reports the canonical facts that were built on the corrected memory. A reviewed reinstatement makes a retired memory live again: it needs a named principal and the exact retirement it reverses, writes an append-only audit row, and replays safely under the same operation id.

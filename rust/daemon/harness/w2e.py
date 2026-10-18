@@ -84,6 +84,11 @@ exit flush rewrites ``facts`` from its resident cortex and would drop rows
 it never loaded (the set-cap scenario's hundred members, with NULL
 embeddings so that no cosine decides the cap).
 
+An operation may be ``external(statement)``: a write by another process,
+run on both banks between two calls (its result is not compared, only what
+the next call makes of it), for a row changed behind the daemons' backs.
+Only the scenarios in ``EXTERNAL_WRITES`` may use it.
+
 Exit status: 0 only when no response and no bank state differs.
 Environment: ``ORT_DYLIB_PATH`` and ``PSEUDOLIFE_DAEMON_ONNX_DIR`` for the
 Rust daemon; the test login (``pgdisposable``) for the banks.
@@ -1193,6 +1198,15 @@ def supersede(new_text, headers=(), **kw) -> dict:
             "headers": list(headers)}
 
 
+# Scenarios whose operations may include ``external`` writes.
+EXTERNAL_WRITES = {"supersede-branches"}
+
+
+def external(statement: str) -> dict:
+    """An out-of-band write, run on both banks between two calls."""
+    return {"op": "sql", "sql": statement, "external": True}
+
+
 def trace_sql(text, entity_norm, attribute_norm) -> dict:
     """Seed-only: a memory_traces row tying ``text``'s entry to a slot."""
     return sql("INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at) "
@@ -1266,13 +1280,13 @@ SCENARIOS.update({
             supersede("x", old_text="Gamma retired note."),
             supersede("x", entry_id="@id:Gamma retired note."),
             supersede("x", old_text="Delta duplicated note."),
-            # the meta filter refuses the replacement: the source stays live
+            # the meta filter is off by default: this replacement is stored
             supersede("No relevant memories about the deploy.", old_text="Gamma replacement note."),
             # a row deleted behind the daemon's back
-            sql("DELETE FROM entries WHERE text = 'Epsilon row to vanish.'"),
+            external("DELETE FROM entries WHERE text = 'Epsilon row to vanish.'"),
             supersede("x", old_text="Epsilon row to vanish."),
             # a row retired behind the daemon's back: supersede_entries refuses
-            sql("UPDATE entries SET superseded_at = 1700000000.5, superseded_by_text = 'elsewhere' "
+            external("UPDATE entries SET superseded_at = 1700000000.5, superseded_by_text = 'elsewhere' "
                 "WHERE text = 'Zeta row retired behind the daemon''s back.'"),
             supersede("x", old_text="Zeta row retired behind the daemon's back."),
         ],
@@ -1292,6 +1306,24 @@ SCENARIOS.update({
             supersede("Agent note about the revised release checklist.",
                       old_text="Agent note about the release checklist."),
             supersede("System prompt one, revised.", old_text="System prompt one, retained."),
+        ],
+    },
+    # The meta filter refuses a replacement: the whole correction rolls back,
+    # the trace invalidation included, and the source stays live.
+    "supersede-meta-filter": {
+        "config": "memory:
+  meta_filter:
+    enabled: true
+",
+        "seed": [
+            store("The on-call rotation changes on Mondays."),
+            trace_sql("The on-call rotation changes on Mondays.", "on-call", "rotation"),
+        ],
+        "ops": [
+            supersede("No relevant memories about the rotation.",
+                      old_text="The on-call rotation changes on Mondays."),
+            supersede("The on-call rotation changes on Tuesdays.",
+                      old_text="The on-call rotation changes on Mondays."),
         ],
     },
     # Traces off: no derived slots are read, but the invalidations still land.

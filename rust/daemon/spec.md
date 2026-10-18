@@ -862,6 +862,77 @@ exactly. The `mcp-world-set-no-confirm`,
 `mcp-world-set-unsafe-allowed`, `mcp-world-set-no-save` and
 `mcp-world-search-no-correct-with` mutants must be caught.
 
+### memory_supersede and memory_reinstate over MCP (2026-10-19)
+
+`correction_tools.rs` (both tools and their service bodies), on
+`store.rs`'s admission split (`admit`, `record_surprise`,
+`insert_entry_row`, `delete_evicted_rows`: `memory_store` runs the same
+pieces in its old order) and the resident cortex snapshot; registered in
+`mcp::dispatch::registry`. Python: `mcp_server.py` `_correction_noted`
+(753-760), `memory_supersede` (1346-1376), `memory_reinstate`
+(1379-1418); `service.py` `DERIVED_FLAGGED_CAP` (453), `_inherited_labels`
+(682-692), `_correction_noop` (2250-2263), `reinstate` (2681-2807),
+`_stage_correction_locked` (2809-2850), `_apply_correction_locked`
+(2852-2884), `_apply_correction_under_mutation_lock_locked` (2927-3102),
+`_resolve_correction_targets_locked` (3104-3199), `supersede` (3201-3229),
+`_retire_entries_locked` (3231-3262), `_derived_from_entries_locked`
+(4359-4407); `storage/postgres.py` `supersede_entries` (962-1029),
+`_reinstatement_request` (1031-1083), `entry_reinstatement_decision`
+(1085-1105), `reinstate_entry` (1107-1204), `slots_for_entries`
+(4169-4187), `existing_entry_ids` (4359-4368); `memory/cms.py` `store` and
+`_store` (411-611); `memory/labels.py` `_strictest` and its ranks
+(254-278).
+
+| # | Exact item | Source |
+|---|---|---|
+| CO1 | Bound arguments: `memory_supersede(old_text=None, *, new_text, entry_id=None)` (`entry_id` a strict int of any size). Not read-only (an internal failure carries `mutation: "unknown"`); the body runs detached from the request, under the service lock (Rust: `Ready.write`). The answer goes through `_correction_noted`: a refusal's sentence moves from `error` to `note`. | `mcp_server.py:753-760, 1346-1376` |
+| CO2 | `new_text` stripped empty answers the no-op `empty_input` ("Replacement text must be non-empty.") before any selector check. A no-op is `{superseded_count: 0, superseded_texts: [], superseded_ids: [], new_memory_stored: false, derived_flagged: [], derived_flagged_total: 0, derived_flagged_truncated: false, reason, note, target_errors}`; nothing is written. | `service.py:2250-2263, 3214-3216` |
+| CO3 | Selector checks, in order: both or neither of `old_text` / `entry_id` is `invalid_selector`; an id not positive is `invalid_selector` ("Entry IDs must be positive integers, not coerced values."); a text stripped empty is `empty_input` ("Exact-text targets must be non-empty."). | `service.py:3114-3135` |
+| CO4 | Resolution over every resident entry, bands in configured order: an id matches `db_id`, a text matches the stored text exactly (unstripped). No match is `target_not_found`; an id with other than one match, or a text with more than one LIVE match, is `ambiguous_target` with `candidates` (`id`, `source`, `episode_id`, `superseded`) over every match; matches all retired is `target_superseded` with the first match's `superseded_by_text`. A retired twin never makes a text ambiguous. Each error is the selector (`entry_id` as bound, or `text`) plus `reason`; the no-op takes the first error's reason and the sentence "No entries changed. Resolve the reported targets and resubmit exact IDs or unique texts." | `service.py:3137-3173` |
+| CO5 | Then `SELECT id FROM entries WHERE id = ANY(...)`: a failed read is `target_unavailable` ("Could not verify selected rows; retry when storage is available."); a missing row is `target_unavailable` ("Selected rows are no longer persisted; reselect after recovery.") with `[{entry_id, reason: "target_unavailable"}]`. | `service.py:3175-3198`; `postgres.py:4359-4368` |
+| CO6 | Labels (`_inherited_labels`): `infer_authority(new_text)` or the strictest target authority (`quoted` 3 > `directive` 2 > `observation` 1); `infer_distortion_tolerance(new_text)` or the strictest target tolerance (`constraint` 5 > `procedural` 4 > `belief` 3 > `preference` 2 > `episodic` 1); unknown labels rank nothing. Then the embedding of the stripped text, and the writer session (`_resolve_writer`; an invalid TTL setting is the `invalid_argument` prose). | `service.py:682-692, 2938-2939, 2839`; `labels.py:254-278` |
+| CO7 | One transaction, at one clock reading `stamp`: `supersede_entries` locks the sorted distinct target rows (`FOR UPDATE`, id order); a missing or already retired row raises `ValueError("supersede_entries: missing=[..], already_retired=[..]")` (an `invalid_argument` answer, nothing written); else `UPDATE entries SET superseded_at = stamp, superseded_by_text = new_text`, then one `memory_trace_invalidations` row (`cause 'source_superseded'`, `invalidated_at` = stamp) per `memory_traces` row of the targets, `ON CONFLICT DO NOTHING`. Lessons are untouched. | `postgres.py:962-1029`; `service.py:3231-3262` |
+| CO8 | Still in the transaction, with traces enabled, the derived slots: the targets' `memory_traces` rows grouped by `(entity_norm, attribute_norm)`; named by the first current cortex record with that normalized key, else the first record of any status, else the key itself; `has_current_value` when a current record has the key; `source_entry_ids` sorted and distinct; ordered live first, then by normalized key. Traces disabled reads none. | `service.py:4359-4407`; `postgres.py:4169-4187` |
+| CO9 | Then the replacement through `ContinuumMemorySystem.store` with `source="correction"`, no tags, the writer session, the CO6 labels, `bypass_surprise_gate` and strict storage: the meta filter refusing it is `_ReplacementRejected`, which rolls the transaction back and answers `replacement_rejected` ("Replacement was rejected; no source entries were retired."). Otherwise W1.5-W1.8 (surprise, slots, episode stamp; the gate bypassed), with the first band's capacity victim chosen as if the targets were already retired (so a full band can evict a target), its row deleted and `meta.capacity_true_drops` counted in the same transaction (`last_superseded` as staged), then the insert. Any failure rolls back; a database error is an internal error. | `service.py:2809-2850, 2969-3009`; `cms.py:411-611` |
+| CO10 | After commit, the resident bank takes exactly the staged changes: the victim removed, the targets retired at `stamp` with `superseded_by_text`, the replacement appended under its row id; the surprise history, coreference anchor and interaction count advance. The answer: `{superseded_count, superseded_texts, superseded_ids, new_memory_stored: true, new_memory_surprise (4 places), derived_flagged (the first 50), derived_flagged_total, derived_flagged_truncated}`. | `service.py:3043-3102` |
+| RI1 | Bound arguments: `memory_reinstate(entry_id, *, operation_id, expected_text_sha256, expected_source_sha256, expected_superseded_at, expected_superseded_by_text_sha256, evidence_packet_sha256, reviewer_ids, reason)` (`entry_id` a strict int, `expected_superseded_at` a lax float that may be non-finite). Idempotent, not read-only; detached and under the service lock. | `mcp_server.py:330, 1379-1418` |
+| RI2 | The caller's principal is the default principal (the singular token, an open install): `ValueError("named_principal_required")` before the service runs, initialization included. The decision's `decided_by` is the named principal. | `mcp_server.py:1404-1409`; `service.py:2694-2696` |
+| RI3 | `_reinstatement_request`, in order, each an `invalid_request: <detail>` refusal: `entry_id` positive; `operation_id` a UUID that `uuid.UUID` parses (`urn:` / `uuid:` removed, braces stripped from the ends, hyphens removed, 32 characters, `int(…, 16)`: whitespace, a sign, `0x`, single underscores, Unicode decimal digits) else "must be a UUID", and exactly its canonical lowercase hyphenated form else "must be canonical"; the four hashes 64 lowercase hex characters; `expected_superseded_at` finite; `reviewer_ids` non-empty, each stripped non-empty; `reason` and `decided_by` stripped non-empty. | `postgres.py:1031-1072` |
+| RI4 | The request fingerprint: SHA-256 of `json.dumps({version: 1, entry_id, operation_id, the four hashes, expected_superseded_at, reviewer_ids, reason, decided_by}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)` (Python float `repr`, the integer's digits). | `postgres.py:1073-1083` |
+| RI5 | A decision already stored under the UUID: another fingerprint is `operation_conflict`; the same one replays through RI8 before any resident check. | `service.py:2738-2746` |
+| RI6 | Otherwise the resident entry with the id: none is `target_not_found`, more than one `resident_durable_mismatch`; not retired is `target_not_retired`; no `superseded_by_text` is `retirement_text_missing`; the SHA-256 of its text, source and `superseded_by_text`, or its exact `superseded_at`, differing from the request is `preimage_mismatch`. Nothing is written. | `service.py:2748-2768` |
+| RI7 | `reinstate_entry` in one transaction: `pg_advisory_xact_lock(hashtextextended(operation_id, 41))`; a decision under the UUID now replays (RI8); else the row `FOR UPDATE` and the RI6 checks against the row; any `memory_trace_invalidations` row for the entry is `trace_invalidations_present`; then the append-only `entry_reinstatement_decisions` row (the request's hashes, the prior `superseded_at` and `superseded_by_text`, `reviewer_ids` as JSON, `reason`, `decided_by`, `decided_at` now) and `UPDATE entries SET superseded_at = NULL, superseded_by_text = NULL` guarded on the prior values (not one row is an internal error, rolled back). The resident entry then goes live. | `postgres.py:1107-1204`; `service.py:2778-2807` |
+| RI8 | Answers: committed `{action: "reinstated", decision: "committed", operation_id, entry_id, current_state: "live", changed_by_this_call: true, idempotent_replay: false}`; a replay `{action: "already_reinstated", …, current_state, changed_by_this_call: false, idempotent_replay: true}` with `current_state` `missing`, `live` or `retired_again` from the row now; both plus `cortex_changed: false` and `trace_invalidations_changed: 0`. | `postgres.py:1141-1152, 1198-1204`; `service.py:2743-2746, 2804-2807` |
+
+`harness/w2e.py live --only supersede-branches supersede-capacity supersede-meta-filter supersede-traces-off reinstate`
+compares every answer and the full bank after each call, on templates whose
+entries, retirements, cortex records and set history the Python daemon's
+own tools wrote (an exact-duplicate row and the `memory_traces` rows are
+SQL seeds: no tool writes either). Supersede: by id with a session header;
+the retired source and its replacement as the resident bank now holds
+them; by exact text; label inheritance (quoted carried over, a directive
+text winning its axis); a retired twin that leaves a text unambiguous;
+derived slots that are live, named only by a removed member's records, and
+named by their key; every selector refusal (both, neither, zero, negative,
+past BIGINT, blank text, blank replacement, unknown id and text, retired by
+text and by id, ambiguous with candidates); a replacement the meta filter
+refuses when enabled (the whole correction rolls back) and stores when off
+(the default); a row deleted and a row retired behind the daemon's back; a full
+band evicting the target itself and then a cheaper entry; traces disabled
+(no derived slots, the invalidations still written). Reinstate: the
+default principal; every request refusal (the UUID forms included); every
+target refusal (unknown, past BIGINT, live, retired before the replacement
+text was recorded, a mismatched hash, trace invalidations present); a
+commit, its replay, a conflicting request under the same UUID, and the
+replay after a correction retired the entry again (`retired_again`). The
+correction clocks keep only null-or-not; the replacement's embedding and
+surprise compare within the measured tolerance. The
+`mcp-supersede-text-first-live`, `mcp-supersede-derived-current-only`,
+`mcp-supersede-surprise-gate`, `mcp-supersede-no-trace-invalidation`,
+`mcp-supersede-resident-stale`, `mcp-reinstate-default-principal`,
+`mcp-reinstate-ignore-invalidations` and `mcp-reinstate-resident-stale`
+mutants must be caught.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

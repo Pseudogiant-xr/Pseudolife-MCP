@@ -15,9 +15,9 @@ normalizers, which replace nondeterministic values by rule, never by hand:
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import date, datetime, time
 from decimal import Decimal
-import uuid
 
 import psycopg
 
