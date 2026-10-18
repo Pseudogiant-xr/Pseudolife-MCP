@@ -148,7 +148,7 @@ fn recent(
 }
 
 /// `_FADED_NOTE` (`mcp_server.py:718`).
-const FADED_NOTE: &str = "No entry with this id: a wrong id, a forgotten or evicted entry, or a bank without Postgres (file mode cannot read ids). Search again for a current id.";
+pub(crate) const FADED_NOTE: &str = "No entry with this id: a wrong id, a forgotten or evicted entry, or a bank without Postgres (file mode cannot read ids). Search again for a current id.";
 /// `_SUPERSESSION_SERVICE_KEYS` (`mcp_server.py:910`).
 const SUPERSESSION_SERVICE_KEYS: [&str; 5] = [
     "superseded_at",
@@ -271,7 +271,7 @@ fn mcp_memory_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFutu
             );
             // `_record_retrieval_use`: never raises.
             if let Err(e) = crate::txn::run(db, |db| async move {
-                credit_retrieval_use(db, id, header, transport, window).await
+                credit_retrieval_use(db, id, header, transport, window, "get").await
             })
             .await
             {
@@ -322,15 +322,17 @@ fn mcp_memory_get<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFutu
     })
 }
 
-/// `credit_retrieval_use` (storage/postgres.py:2189) for `used_via="get"`:
-/// the most recent event in the window served `entry_id` under the caller's
-/// session (`_resolve_writer`) gains one `retrieval_uses` row.
-async fn credit_retrieval_use(
+/// `credit_retrieval_use` (storage/postgres.py:2200) for a dereference
+/// (`used_via` "get" or "reinforce"): the most recent event in the window
+/// that served `entry_id` under the caller's session (`_resolve_writer`)
+/// gains one `retrieval_uses` row.
+pub(crate) async fn credit_retrieval_use(
     db: &tokio_postgres::Client,
     entry_id: i64,
     header: Option<String>,
     transport: Option<String>,
     window: f64,
+    used_via: &str,
 ) -> anyhow::Result<()> {
     let t = now();
     let session =
@@ -347,8 +349,8 @@ async fn credit_retrieval_use(
     if let Some(event) = event {
         db.execute(
             "INSERT INTO retrieval_uses (event_id, entry_id, used_via, created_at) \
-             VALUES ($1, $2, 'get', $3) ON CONFLICT DO NOTHING",
-            &[&event, &entry_id, &t],
+             VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+            &[&event, &entry_id, &used_via, &t],
         )
         .await?;
     }
