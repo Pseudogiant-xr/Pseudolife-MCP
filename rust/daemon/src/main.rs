@@ -53,6 +53,7 @@ mod storage;
 mod store;
 mod stores;
 mod txn;
+mod world_tools;
 
 use std::path::PathBuf;
 use std::sync::Arc;

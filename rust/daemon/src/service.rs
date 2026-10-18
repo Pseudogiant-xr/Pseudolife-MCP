@@ -32,6 +32,8 @@ pub struct Ready {
     pub startup: Arc<StartupState>,
     /// The resident cortex; `fact_set.rs` writes it under `write`.
     pub cortex: crate::stores::cortex::SharedCortex,
+    /// The resident world cortex (`world_tools.rs` writes it under `write`).
+    pub world: crate::stores::world::SharedWorld,
     /// The service hybrid logical clock (`MemoryService._hlc`).
     pub hlc: std::sync::Mutex<crate::hlc::Clock>,
 }
@@ -272,11 +274,12 @@ impl Service {
             let mut cortex =
                 crate::stores::cortex::hydrate(storage.client(), embedder.embedding_dim()).await?;
             cortex.configure(&self.config.memory.cortex, &startup.metadata);
-            Ok::<_, anyhow::Error>((bank, startup, write, cortex))
+            let world = crate::stores::world::hydrate(storage.client()).await?;
+            Ok::<_, anyhow::Error>((bank, startup, write, cortex, world))
         }
         .await;
         match candidate {
-            Ok((bank, startup, write, cortex)) => {
+            Ok((bank, startup, write, cortex, world)) => {
                 inner.failures = 0;
                 inner.backoff_s = 0.0;
                 inner.retry_at = None;
@@ -292,6 +295,7 @@ impl Service {
                     writes: self.writes.clone(),
                     startup: Arc::new(startup),
                     cortex: crate::stores::cortex::SharedCortex::new(cortex),
+                    world: crate::stores::world::SharedWorld::new(world),
                     hlc: std::sync::Mutex::new(crate::hlc::Clock::default()),
                 });
                 inner.ready = Some(ready.clone());

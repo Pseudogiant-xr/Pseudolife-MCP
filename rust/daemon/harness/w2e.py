@@ -11,8 +11,9 @@ usage:
 Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_set_add``, ``memory_set_remove``, ``memory_fact_resolve``,
 ``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
-``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce`` and
-``memory_history`` (slot mode) on ``/mcp`` (``--features mutants`` adds the
+``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce``,
+``memory_history`` (slot mode), ``memory_world_set`` and
+``memory_world_search`` on ``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -35,8 +36,16 @@ Normalizers (declared, spec "Free for W1 and W2"):
 * ``entries.embedding`` and ``entries.surprise`` are compared numerically
   per entry id against tolerances set from a measurement
   (``goldens/w2e-tolerance.json``), then replaced by a token; so is
-  ``facts.embedding`` per fact id, against the same embedding tolerances
-  (both sides rewrite a slot's rows in the same order, so fact ids match);
+  ``facts.embedding`` and ``world_facts.embedding`` per row id, against the
+  same embedding tolerances (both sides rewrite a slot's rows in the same
+  order, so the ids match);
+* the world cortex clocks: ``world_facts`` ``asserted_at``,
+  ``last_confirmed``, ``superseded_at``, ``tx_time``, ``valid_time`` and
+  ``hlc_phys`` keep only null-or-not; ``retrieved_at`` (column and answer)
+  does only when it lies within a day of now (a write without one takes the
+  clock), and an explicit past value compares exactly;
+* a search ``score`` in a response compares within 1.5e-4: the two embedders
+  agree to the measured tolerance, and the score is rounded to 4 places;
 * the canonical-fact clocks: ``facts`` ``asserted_at``, ``last_confirmed``,
   ``superseded_at``, ``tx_time``, ``valid_time`` and ``hlc_phys`` (the HLC's
   wall-clock milliseconds; ``hlc_logical`` stays exact),
@@ -100,10 +109,21 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("outcome_signals", "created_at"), ("entities", "created_at"),
          ("coordination_agents", "name_set_at"), ("coordination_events", "created_at"),
          ("coordination_events", "hash"), ("coordination_events", "prev_hash"),
-         ("retrieval_uses", "created_at")}
+         ("retrieval_uses", "created_at"),
+         ("world_facts", "asserted_at"), ("world_facts", "last_confirmed"),
+         ("world_facts", "superseded_at"), ("world_facts", "tx_time"),
+         ("world_facts", "valid_time"), ("world_facts", "hlc_phys")}
+# Columns that are wall-clock only when written from the clock: a value
+# within RECENT_S of now keeps null-or-not, anything else compares exactly.
+RECENT_CLOCK = {("world_facts", "retrieved_at")}
+RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
                   "started_at", "ended_at"}
+RESPONSE_RECENT_CLOCK = {"retrieved_at"}
+# A response score's allowance: embeddings within the measured tolerance
+# move a 4-place cosine by at most one rounding unit.
+SCORE_TOLERANCE = 1.5e-4
 # meta key -> paths (keys) inside its JSON value that are wall-clock.
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -134,7 +154,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-reinforce-no-use-credit",
            # memory_history slot mode (spec HI1-HI7): caught by history-slot.
            "mcp-history-ignore-as-of", "mcp-history-set-unsorted",
-           "mcp-history-set-no-removed", "mcp-history-asserted-order"]
+           "mcp-history-set-no-removed", "mcp-history-asserted-order",
+           # the world cortex (spec WD1-WD12): caught by the world-* scenarios.
+           "mcp-world-set-no-confirm", "mcp-world-set-unsafe-allowed",
+           "mcp-world-set-no-save", "mcp-world-search-no-correct-with"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -273,6 +296,14 @@ def reinforce(entry_id, headers=()) -> dict:
 def search(query, headers=(), top_k=1) -> dict:
     """Seed-only here: a logged search whose served ids an outcome credits."""
     return tool("memory_search", headers, query=query, top_k=top_k)
+
+
+def world_set(entity, attribute, value, headers=(), **kw) -> dict:
+    return tool("memory_world_set", headers, entity=entity, attribute=attribute, value=value, **kw)
+
+
+def world_search(query, **kw) -> dict:
+    return tool("memory_world_search", query=query, **kw)
 
 
 def history(entity, attribute, **kw) -> dict:
@@ -870,6 +901,68 @@ SCENARIOS.update({
 })
 
 
+# The world cortex (spec WD1-WD12), on templates whose world facts the
+# Python daemon's own tool wrote. A retrieved_at of 1.0 makes a fact stale.
+WORLD_SEED = [
+    world_set("Rust", "latest stable version", "1.90.0",
+              source_url="https://blog.rust-lang.org/", source_quote="Rust 1.90.0 is out.",
+              freshness_class="slow"),
+    world_set("Python", "latest version", "3.13.0", source_url="https://www.python.org/",
+              retrieved_at=1.0),
+    world_set("PostgreSQL", "license", "PostgreSQL License", freshness_class="evergreen",
+              source_url="https://www.postgresql.org/about/licence/"),
+]
+
+SCENARIOS.update({
+    "world-facts": {
+        "config": None,
+        # A non-finite retrieved_at: Python stores and reloads it, so the
+        # Rust daemon must start on a bank that holds one.
+        "seed": WORLD_SEED + [world_set("Clock", "skew", "unknown", retrieved_at="inf")],
+        "ops": [
+            # compact entries; the stale one carries correct_with and the note
+            world_search("what is the newest Rust release"),
+            world_search("python version", verbose=True),
+            world_search("database license", top_k=1),
+            # the same value restated: confirmed, confidence lifted, citation
+            # kept when empty, a new hash recorded
+            world_set("rust", "Latest Stable Version", " 1.90.0 ", confidence=0.95,
+                      content_hash="sha256:abc"),
+            # a different value supersedes, with a session header
+            world_set("Rust", "latest stable version", "1.91.0", [sess("sess-w")],
+                      source_url="https://blog.rust-lang.org/2026/", retrieved_at=1600000000.0),
+            # unsafe schemes are refused before anything runs
+            world_set("Evil", "link", "x", source_url="javascript:alert(1)"),
+            world_set("Evil", "link", "x", source_url="\tJaVaScRiPt:alert(1)"),
+            # a scheme-less citation is inert and allowed
+            world_set("Example", "home page", "example.com/page", source_url="example.com/page"),
+            world_search("rust release", top_k=10),
+            # the non-finite retrieved_at: never stale, undecayed, echoed null
+            world_search("clock skew", top_k=1, verbose=True),
+            history("Rust", "latest stable version"),
+        ],
+    },
+    "world-facts-demote": {
+        "config": "memory:\n  search:\n    stale_policy: demote\n",
+        "seed": WORLD_SEED,
+        "ops": [
+            # the stale fact sorts last and carries the warning
+            world_search("python version and rust version", top_k=5),
+            world_set("Python", "latest version", "3.14.0", source_url="https://www.python.org/"),
+        ],
+    },
+    "world-facts-quarantine": {
+        "config": "memory:\n  search:\n    stale_policy: quarantine\n",
+        "seed": WORLD_SEED,
+        "ops": [
+            # the stale value moves to last_known_value, in both projections
+            world_search("python version"),
+            world_search("python version", verbose=True),
+        ],
+    },
+})
+
+
 # The episode tools (spec EP1-EP12), on templates whose sessions, board rows
 # and active-session pointer the Python daemon's own calls created.
 SCENARIOS.update({
@@ -1031,9 +1124,11 @@ def extract_numeric(state: dict) -> dict:
     return out
 
 
-def extract_fact_numeric(state: dict) -> dict:
-    """Pull fact embeddings out by fact id, leaving tokens."""
-    t = _table(state, "facts")
+def extract_fact_numeric(state: dict, table: str = "facts") -> dict:
+    """Pull a canonical table's embeddings out by row id, leaving tokens."""
+    t = _table(state, table)
+    if t is None:
+        return {}
     out = {}
     i_id, i_emb = _col(t, "id"), _col(t, "embedding")
     if i_id is None or i_emb is None:
@@ -1045,14 +1140,15 @@ def extract_fact_numeric(state: dict) -> dict:
     return out
 
 
-def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
+def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict,
+                         table: str = "facts") -> list[str]:
     diffs = []
     for fid in sorted(set(py) & set(rs)):
         ea, eb = py[fid], rs[fid]
         if (ea is None) != (eb is None):
-            diffs.append(f"facts[{fid}].embedding: python/rust presence mismatch")
+            diffs.append(f"{table}[{fid}].embedding: python/rust presence mismatch")
         elif ea is not None and len(ea) != len(eb):
-            diffs.append(f"facts[{fid}].embedding: length python {len(ea)} vs rust {len(eb)}")
+            diffs.append(f"{table}[{fid}].embedding: length python {len(ea)} vs rust {len(eb)}")
         elif ea:
             mad = max(abs(x - y) for x, y in zip(ea, eb))
             cos = sum(x * y for x, y in zip(ea, eb)) / (
@@ -1060,7 +1156,7 @@ def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str
             stats["max_abs_diff"] = max(stats.get("max_abs_diff", 0.0), mad)
             stats["min_cosine"] = min(stats.get("min_cosine", 1.0), cos)
             if tol and (mad > tol["embedding_max_abs_diff"] or cos < tol["embedding_min_cosine"]):
-                diffs.append(f"facts[{fid}].embedding: max abs diff {mad:.3e}, cosine {cos:.9f}")
+                diffs.append(f"{table}[{fid}].embedding: max abs diff {mad:.3e}, cosine {cos:.9f}")
     return diffs
 
 
@@ -1101,6 +1197,13 @@ def _clock(v):
     return None if v is None else "<clock>"
 
 
+def _recent_clock(v):
+    """A clock-written value keeps null-or-not; an explicit past one stays."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)             and abs(v - time.time()) < RECENT_S:
+        return "<clock>"
+    return v
+
+
 HEX_RUN = re.compile(r"[0-9a-f]{8,32}")
 
 
@@ -1123,6 +1226,7 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
     state = dbstate.normalize(state, w1a.DB_NONDETERMINISTIC, before)
     numeric = extract_numeric(state)
     numeric["facts"] = extract_fact_numeric(state)
+    numeric["world_facts"] = extract_fact_numeric(state, "world_facts")
     emap = episode_map(state)
     for qualified, t in state["rows"].items():
         name = qualified.split(".", 1)[1]
@@ -1130,6 +1234,9 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
             if (name, col) in CLOCK:
                 for row in t["rows"]:
                     row[idx] = _clock(row[idx])
+            elif (name, col) in RECENT_CLOCK:
+                for row in t["rows"]:
+                    row[idx] = _recent_clock(row[idx])
         if name == "meta":
             for row in t["rows"]:
                 key, value = row
@@ -1170,8 +1277,10 @@ def state_diff(a: dict, b: dict) -> list[str]:
 
 def compare_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     diffs = compare_fact_numeric(py.get("facts", {}), rs.get("facts", {}), tol, stats)
-    py = {k: v for k, v in py.items() if k != "facts"}
-    rs = {k: v for k, v in rs.items() if k != "facts"}
+    diffs += compare_fact_numeric(py.get("world_facts", {}), rs.get("world_facts", {}), tol,
+                                  stats, "world_facts")
+    py = {k: v for k, v in py.items() if k not in ("facts", "world_facts")}
+    rs = {k: v for k, v in rs.items() if k not in ("facts", "world_facts")}
     for eid in sorted(set(py) | set(rs)):
         a, b = py.get(eid), rs.get(eid)
         if a is None or b is None:
@@ -1223,19 +1332,30 @@ def _age_adjacent(x, y) -> bool:
     return (a, b) in {((0, 0), (1, 1)), ((1, 59), (2, 1)), ((2, 23), (3, 1))}
 
 
-def normalize_records(a, b):
-    """Record clocks keep null-or-not; an ``age`` one step apart compares equal."""
+def normalize_records(a, b, stats=None):
+    """Record clocks keep null-or-not; an ``age`` one step apart compares equal;
+    a search ``score`` within ``SCORE_TOLERANCE`` compares equal."""
     if isinstance(a, dict) and isinstance(b, dict):
         for k in set(a) & set(b):
             if k in RESPONSE_CLOCK:
                 a[k], b[k] = _clock(a[k]), _clock(b[k])
+            elif k in RESPONSE_RECENT_CLOCK:
+                a[k], b[k] = _recent_clock(a[k]), _recent_clock(b[k])
+            elif (k == "score" and isinstance(a[k], (int, float))
+                  and isinstance(b[k], (int, float)) and not isinstance(a[k], bool)):
+                d = abs(a[k] - b[k])
+                if stats is not None:
+                    stats["response_score_max_diff"] = max(
+                        stats.get("response_score_max_diff", 0.0), d)
+                if d <= SCORE_TOLERANCE:
+                    a[k] = b[k] = "<score>"
             elif k == "age" and a[k] != b[k] and _age_adjacent(a[k], b[k]):
                 a[k] = b[k] = "<age>"
             else:
-                normalize_records(a[k], b[k])
+                normalize_records(a[k], b[k], stats)
     elif isinstance(a, list) and isinstance(b, list):
         for x, y in zip(a, b):
-            normalize_records(x, y)
+            normalize_records(x, y, stats)
 
 
 def generic_titles(v):
@@ -1251,7 +1371,7 @@ def generic_titles(v):
 
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     a, b = generic_titles(json.loads(json.dumps(py))), generic_titles(json.loads(json.dumps(rs)))
-    normalize_records(a, b)
+    normalize_records(a, b, stats)
     out = []
     va, vb = a.get("value"), b.get("value")
     if isinstance(va, dict) and isinstance(vb, dict) and "surprise" in va and "surprise" in vb:
@@ -1426,7 +1546,7 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 
 # Tables the write path touches: recorded every step (the rest only at init).
 WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions", "facts", "entities",
-                "outcome_signals")
+                "outcome_signals", "world_facts")
 
 
 def pack(state: dict, full: bool) -> dict:
@@ -1443,7 +1563,7 @@ def pack_numeric(numeric: dict, seen: set) -> dict:
     import struct
     out = {}
     for eid, v in numeric.items():
-        if eid == "facts" or eid in seen:
+        if eid in ("facts", "world_facts") or eid in seen:
             continue  # fact embeddings are compared live only (declared)
         seen.add(eid)
         emb = v["embedding"]
