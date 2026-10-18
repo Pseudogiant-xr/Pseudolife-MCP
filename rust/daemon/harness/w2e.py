@@ -1317,6 +1317,18 @@ SCENARIOS.update({
             supersede("System prompt one, revised.", old_text="System prompt one, retained."),
         ],
     },
+    # A surprise threshold: a correction bypasses the gate, so a replacement
+    # close to what is held is stored where a plain store would be refused.
+    "supersede-gate": {
+        "config": "memory:\n  surprise_threshold: 0.35\n",
+        "seed": [store("The release freeze starts on Friday at noon.")],
+        "ops": [
+            # a paraphrase: a plain store is refused below the threshold
+            store("Release freeze begins Friday at noon."),
+            supersede("Release freeze begins Friday at noon.",
+                      old_text="The release freeze starts on Friday at noon."),
+        ],
+    },
     # The meta filter refuses a replacement: the whole correction rolls back,
     # the trace invalidation included, and the source stays live.
     "supersede-meta-filter": {
