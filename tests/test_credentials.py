@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shlex
+import subprocess
+import sys
 import threading
 
 import pytest
@@ -293,6 +296,9 @@ def _refusal(path: Path) -> CredentialError:
     return raised.value
 
 
+REPAIR = "-m pseudolife_memory.credentials repair"
+
+
 def test_a_broad_permission_refusal_names_the_file_and_the_owner_only_fix(tmp_path: Path) -> None:
     path = tmp_path / "claude-code.token"
     shared_token(path, "fixture-secret")
@@ -301,41 +307,107 @@ def test_a_broad_permission_refusal_names_the_file_and_the_owner_only_fix(tmp_pa
     assert error.path == path
     fix = error.recovery()
     if os.name == "nt":
-        assert (f'icacls "{path}" /reset, then icacls "{path}" /inheritance:r /grant:r '
-                f'*S-1-3-4:F') in fix
+        assert f'"{sys.executable}" {REPAIR} "{path}"' in fix
     else:
         assert fix.endswith(f"chmod 600 {path}")
     assert "fixture-secret" not in fix
 
 
-WINDOWS_FIX = (["/reset"], ["/inheritance:r", "/grant:r", "*S-1-3-4:F"])
+def _run_repair(path: Path) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, "-m", "pseudolife_memory.credentials", "repair",
+                           str(path)], capture_output=True, text=True, timeout=60)
 
 
-@pytest.mark.skipif(os.name != "nt", reason="the Windows ACL fix")
 # (WD), not W: FILE_GENERIC_WRITE carries SYNCHRONIZE, and denying it makes
 # the file unopenable, which is a different refusal.
+@pytest.mark.skipif(os.name != "nt", reason="Windows explicit ACL entries")
 @pytest.mark.parametrize("explicit", [[], [["/grant", "*S-1-1-0:R"], ["/deny", "*S-1-5-32-545:(WD)"]]],
                          ids=["inherited", "explicit-entries"])
-def test_the_named_windows_fix_makes_the_file_usable(tmp_path: Path, explicit) -> None:
-    """Run exactly the commands the refusal names: they must make the same
-    file pass the shim's own check, with its token unchanged, also when it
-    carries explicit entries (which /inheritance:r alone keeps: review
-    finding, 2026-10-18)."""
-    import subprocess
-
-    def icacls(*arguments):
-        completed = subprocess.run(["icacls", str(path), *arguments], capture_output=True, text=True)
-        assert completed.returncode == 0, completed.stdout + completed.stderr
-
+def test_the_named_repair_makes_a_broad_windows_file_usable(tmp_path: Path, explicit) -> None:
+    """Run the command the refusal names: the same file passes the shim's own
+    check afterwards with its token unchanged, also when it carried explicit
+    entries (an icacls recipe kept those: review finding, 2026-10-18)."""
     path = tmp_path / "claude-code.token"
     shared_token(path, "fixture-secret")
     for entry in explicit:
-        icacls(*entry)
-    fix = _refusal(path).recovery()
-    for step in WINDOWS_FIX:
-        assert f'icacls "{path}" {" ".join(step)}' in fix
-        icacls(*step)
+        subprocess.run(["icacls", str(path), *entry], check=True, capture_output=True)
+    assert REPAIR in _refusal(path).recovery()
+    completed = _run_repair(path)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "fixture-secret" not in completed.stdout + completed.stderr
     assert CredentialProvider(path=path).snapshot().token == "fixture-secret"
+
+
+def test_repair_rewrites_a_broad_file_owner_only_with_its_token(tmp_path: Path) -> None:
+    from pseudolife_memory.credentials import repair_token_file
+
+    path = tmp_path / "token"
+    shared_token(path, "fixture-secret")
+    repair_token_file(path)
+    assert CredentialProvider(path=path).snapshot().token == "fixture-secret"
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_repair_replaces_a_file_another_account_owns(tmp_path: Path, monkeypatch) -> None:
+    """The fix the foreign-owner refusal names: a new owner-only file of the
+    caller's own, written before it replaces the old one, with the same token."""
+    from pseudolife_memory import credentials
+
+    path = tmp_path / "token"
+    private_token(path, "fixture-secret")
+    original = path.stat().st_ino
+    if os.name == "nt":
+        real = credentials._windows_file_access
+        monkeypatch.setattr(credentials, "_windows_file_access",
+                            lambda fd: "foreign" if os.fstat(fd).st_ino == original else real(fd))
+    else:
+        real_fstat = os.fstat
+        uid = os.geteuid()
+
+        def fstat(fd):
+            info = real_fstat(fd)
+            if info.st_ino != original:
+                return info
+            fields = list(info)
+            fields[4] = uid + 1  # st_uid
+            return os.stat_result(fields)
+        monkeypatch.setattr(credentials.os, "fstat", fstat)
+    assert str(_refusal(path)) == "credential file is owned by another account"
+    credentials.repair_token_file(path)
+    assert path.stat().st_ino != original
+    assert CredentialProvider(path=path).snapshot().token == "fixture-secret"
+
+
+def test_repair_refuses_what_it_cannot_safely_rewrite(tmp_path: Path) -> None:
+    from pseudolife_memory.credentials import repair_token_file
+
+    with pytest.raises(CredentialError, match="missing"):
+        repair_token_file(tmp_path / "missing")
+    source = tmp_path / "source"
+    private_token(source, "fixture-secret")
+    hardlink = tmp_path / "hardlink"
+    os.link(source, hardlink)
+    with pytest.raises(CredentialError, match="private regular file"):
+        repair_token_file(hardlink)
+    invalid = tmp_path / "invalid"
+    shared_token(invalid, "two words")
+    with pytest.raises(CredentialError, match="invalid bearer token"):
+        repair_token_file(invalid)
+    assert invalid.read_bytes() == b"two words"
+
+
+def test_repair_command_reports_without_the_token(tmp_path: Path) -> None:
+    path = tmp_path / "token"
+    shared_token(path, "fixture-secret")
+    completed = _run_repair(path)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert str(path) in completed.stdout and "owner-only" in completed.stdout
+    assert "fixture-secret" not in completed.stdout + completed.stderr
+    missing = _run_repair(tmp_path / "missing")
+    assert missing.returncode == 1
+    assert "configured credential file is missing" in missing.stderr
+    assert "Traceback" not in missing.stderr
 
 
 def test_a_missing_file_refusal_names_the_file(tmp_path: Path) -> None:
@@ -395,24 +467,21 @@ def test_every_reading_reason_has_a_fix_and_unknown_ones_have_none() -> None:
                    "credential path ancestors cannot be inspected",
                    "credential path must not contain redirects",
                    "credential file must be a private regular file",
-                   "credential file contains an invalid bearer token"):
+                   "credential file contains an invalid bearer token",
+                   "credential file is owned by another account"):
         assert str(path) in credential_recovery(reason, path, windows=False), reason
     assert credential_recovery("credential file must be owner-only", path,
                                windows=False).endswith("chmod 600 /fixture/dir/token")
-    assert ("(umask 077; cp /fixture/dir/token /fixture/dir/token.copy) && "
-            "mv -f /fixture/dir/token.copy /fixture/dir/token") in credential_recovery(
+    python = sys.executable
+    assert f"{shlex.quote(python)} {REPAIR} /fixture/dir/token" in credential_recovery(
         "credential file is owned by another account", path, windows=False)
-    foreign = credential_recovery("credential file is owned by another account",
-                                  PureWindowsPath("C:/fixture/token"), windows=True)
-    assert r'Copy-Item -LiteralPath "C:\fixture\token" -Destination "C:\fixture\token.copy"' in foreign
-    assert r'icacls "C:\fixture\token" /reset' in foreign
+    windows_path = PureWindowsPath("C:/fixture/token")
     for reason in ("credential file must be owner-only",
                    "credential file is owned by another account"):
+        assert f'"{python}" {REPAIR} "C:\\fixture\\token"' in credential_recovery(
+            reason, windows_path, windows=True), reason
         for windows in (True, False):
             assert "None" not in credential_recovery(reason, None, windows=windows)
-    assert (r'icacls "C:\fixture\token" /reset, then icacls "C:\fixture\token" '
-            r'/inheritance:r /grant:r *S-1-3-4:F') in credential_recovery(
-        "credential file must be owner-only", PureWindowsPath("C:/fixture/token"), windows=True)
     # A path with a space stays one shell word.
     assert "chmod 600 '/fixture/my dir/token'" in credential_recovery(
         "credential file must be owner-only", PurePosixPath("/fixture/my dir/token"), windows=False)
@@ -461,7 +530,7 @@ def test_another_accounts_file_gets_its_own_reason_not_the_permissions_fix(
     _another_account_owns_every_file(monkeypatch)
     error = _refusal(path)
     assert str(error) == "credential file is owned by another account"
-    assert "copy you own" in error.recovery()
+    assert REPAIR in error.recovery()
     assert "Other accounts can read it" not in error.recovery()
 
 

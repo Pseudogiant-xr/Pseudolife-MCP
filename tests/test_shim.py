@@ -1930,7 +1930,7 @@ def test_an_owner_only_refusal_names_the_reason_the_file_and_the_fix(tmp_path):
     assert refused.code == -32603
     assert "credential file must be owner-only" in refused.message
     assert str(path) in refused.message
-    fix = "icacls" if os.name == "nt" else "chmod 600"
+    fix = "pseudolife_memory.credentials repair" if os.name == "nt" else "chmod 600"
     assert fix in refused.message
     assert "restore the configured credential" not in refused.message.lower()
     assert refused.data["classification"] == "credential_unavailable"
@@ -1947,7 +1947,7 @@ def test_an_owner_only_refusal_names_the_reason_the_file_and_the_fix(tmp_path):
     ("credential path must not contain redirects", "real path"),
     ("credential file must be a private regular file", "regular file"),
     ("credential file contains an invalid bearer token", "only the token"),
-    ("credential file is owned by another account", "copy you own"),
+    ("credential file is owned by another account", "pseudolife_memory.credentials repair"),
 ])
 def test_each_reading_reason_reaches_the_refusal_with_its_fix(tmp_path, reason, fix):
     refused = _credential_refusal(reason, tmp_path / "token")

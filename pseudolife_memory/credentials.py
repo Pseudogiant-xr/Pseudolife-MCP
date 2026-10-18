@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shlex
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -29,17 +30,19 @@ class CredentialError(RuntimeError):
         return credential_recovery(str(self), self.path)
 
 
-def _windows_restrict(target: str, path: Path | None) -> str:
-    # S-1-3-4 is OWNER RIGHTS: a protected DACL with only that entry is
-    # exactly what this module's own writers produce (D:P(A;;FA;;;OW)).
-    # /reset first drops explicit entries, which /inheritance:r keeps.
-    # Verified on Windows 11, 2026-10-18, unelevated, from PowerShell and
-    # cmd: a plainly written file, and one with an explicit Everyone grant
-    # and an explicit deny, fail the owner-only check and pass after these
-    # two commands. (Set-Acl needs SeSecurityPrivilege there, so it is not
-    # offered.)
-    quoted = f'"{target}"' if path is not None else target
-    return f"icacls {quoted} /reset, then icacls {quoted} /inheritance:r /grant:r *S-1-3-4:F"
+def _repair_command(target: str, path: Path | None, windows: bool) -> str:
+    """The command that rewrites the file through this module's own writer:
+    secured before a byte is written, then renamed over the old file, so the
+    token is never in a file other accounts can read. Shell recipes for the
+    same repair (icacls, a copy and a move) each left a window: a reset ACL,
+    an inherited copy, a reusable copy name (review findings, 2026-10-18)."""
+    module = "-m pseudolife_memory.credentials repair"
+    if windows:
+        file = f'"{target}"' if path is not None else "<token file>"
+        return (f'"{sys.executable}" {module} {file} (in PowerShell, start the line '
+                f'with "& ")')
+    file = shlex.quote(target) if path is not None else "<token file>"
+    return f"{shlex.quote(sys.executable)} {module} {file}"
 
 
 def credential_recovery(reason: str, path: Path | None, *,
@@ -51,30 +54,16 @@ def credential_recovery(reason: str, path: Path | None, *,
     target = str(path) if path is not None else "the configured credential file"
     if reason == "credential file must be owner-only":
         if windows:
-            return (f"Other accounts can read it; restrict it to its owner with two commands, "
-                    f"from PowerShell or cmd: {_windows_restrict(target, path)}.")
+            return (f"Other accounts can read it; rewrite it owner-only with the same token, "
+                    f"as the account that runs the shim: {_repair_command(target, path, True)}.")
         quoted = shlex.quote(target) if path is not None else target
         return f"Other users can read it; restrict it to its owner: chmod 600 {quoted}"
     if reason == "credential file is owned by another account":
-        if windows:
-            # Copy-Item creates a new file, owned by the account that runs it
-            # unelevated, with inherited permissions (the source's explicit
-            # entries are not copied: verified 2026-10-18, Windows 11). A file
-            # written from an elevated prompt is owned by Administrators.
-            quoted = f'"{target}"' if path is not None else target
-            copy = f'"{target}.copy"' if path is not None else "a copy"
-            return (f"Another account owns it (a file written from an elevated prompt is owned "
-                    f"by Administrators). As the account that runs the shim, replace it with "
-                    f"a copy you own, in PowerShell: Copy-Item -LiteralPath {quoted} "
-                    f"-Destination {copy}; Move-Item -Force -LiteralPath {copy} -Destination "
-                    f"{quoted}; then restrict it: {_windows_restrict(target, path)}.")
-        if path is None:
-            return ("Another user owns it; as the user that runs the shim, replace it with an "
-                    "owner-only copy of your own.")
-        quoted, copy = shlex.quote(target), shlex.quote(target + ".copy")
-        return (f"Another user owns it; as the user that runs the shim, replace it with an "
-                f"owner-only copy of your own: (umask 077; cp {quoted} {copy}) && "
-                f"mv -f {copy} {quoted}")
+        elevated = (" (a file written from an elevated prompt is owned by Administrators)"
+                    if windows else "")
+        return (f"Another account owns {target}{elevated}; as the account that runs the shim, "
+                f"replace it with an owner-only file of your own holding the same token: "
+                f"{_repair_command(target, path, windows)}.")
     fixes = {
         "configured credential file is missing":
             f"Restore the token file at {target}, or set PSEUDOLIFE_MCP_TOKEN_FILE to the "
@@ -322,12 +311,17 @@ def _windows_file_access(fd: int) -> str:
         kernel.LocalFree(descriptor)
 
 
-def _validate_file(fd: int, *, allow_unlinked: bool = False) -> os.stat_result:
+def _validate_regular(fd: int, *, allow_unlinked: bool = False) -> os.stat_result:
     info = os.fstat(fd)
     valid_links = info.st_nlink == 1 or (
         allow_unlinked and os.name != "nt" and info.st_nlink == 0)
     if not stat.S_ISREG(info.st_mode) or not valid_links:
         raise CredentialError("credential file must be a private regular file")
+    return info
+
+
+def _validate_file(fd: int, *, allow_unlinked: bool = False) -> os.stat_result:
+    info = _validate_regular(fd, allow_unlinked=allow_unlinked)
     # Another account's file is told apart from a broad one: the fix for a
     # broad file (narrow its permissions) would lock this user out of a file
     # another account owns (review finding, 2026-10-18).
@@ -424,8 +418,12 @@ def _open_token(path: Path) -> tuple[str, _Generation]:
     return token, _Generation(marker)
 
 
-def _write_token_file(path: str | Path, token: str) -> None:
-    """Atomically create or rotate one owner-only credential file."""
+def _write_token_file(path: str | Path, token: str, *, _repair: bool = False) -> None:
+    """Atomically create or rotate one owner-only credential file.
+
+    ``_repair`` (``repair_token_file`` only) also replaces an existing file
+    another account owns; it is still refused when it is not one regular
+    file."""
     data = token.encode("utf-8")
     _decode_token(data)
     target = Path(os.path.abspath(Path(path).expanduser()))
@@ -436,7 +434,10 @@ def _write_token_file(path: str | Path, token: str) -> None:
         existing_fd = os.open(target, os.O_RDONLY | getattr(os, "O_BINARY", 0)
                               | getattr(os, "O_NOFOLLOW", 0))
         try:
-            _validate_replaceable(existing_fd)
+            if _repair:
+                _validate_regular(existing_fd)
+            else:
+                _validate_replaceable(existing_fd)
         finally:
             os.close(existing_fd)
     fd, temporary = tempfile.mkstemp(prefix=".pseudolife-token-", dir=target.parent)
@@ -472,6 +473,39 @@ def _write_token_file(path: str | Path, token: str) -> None:
             temporary_path.unlink()
         except FileNotFoundError:
             pass
+
+
+def repair_token_file(path: str | Path) -> None:
+    """Rewrite a token file the shim refuses for its permissions or its owner
+    as an owner-only file of the caller's own holding the same token.
+
+    The file is read once (it must be one regular file holding a valid token,
+    reached without a redirect) and rewritten through ``_write_token_file``,
+    which secures the new file before writing to it and renames it over the
+    old one. Running this asserts the token in it is yours; the token is never
+    printed."""
+    target = Path(os.path.abspath(Path(path).expanduser()))
+    _reject_ancestor_redirects(target)
+    try:
+        info = target.lstat()
+    except FileNotFoundError as error:
+        raise CredentialError("configured credential file is missing") from error
+    except OSError as error:
+        raise CredentialError("configured credential file is unavailable") from error
+    if _is_redirect(info):
+        raise CredentialError("credential file must be a private regular file")
+    try:
+        fd = os.open(target, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError as error:
+        raise CredentialError("configured credential file is missing") from error
+    except OSError as error:
+        raise CredentialError("configured credential file is unavailable") from error
+    try:
+        _validate_regular(fd)
+        data = os.read(fd, MAX_TOKEN_BYTES + 1)
+    finally:
+        os.close(fd)
+    _write_token_file(target, _decode_token(data), _repair=True)
 
 
 class CredentialProvider:
@@ -516,3 +550,32 @@ class CredentialProvider:
     def __repr__(self) -> str:
         source = "file" if self._path is not None else "static"
         return f"CredentialProvider(source={source!r})"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m pseudolife_memory.credentials repair <file>``: the repair a
+    refused token file's error names."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m pseudolife_memory.credentials",
+        description="Rewrite a token file the shim refuses for its permissions or its owner "
+                    "as an owner-only file of your own, holding the same token.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("repair", help="rewrite the token file owner-only").add_argument("file")
+    args = parser.parse_args(argv)
+    try:
+        repair_token_file(args.file)
+    except CredentialError as error:
+        print(f"{args.file}: not repaired: {error}", file=sys.stderr)
+        return 1
+    except OSError as error:
+        print(f"{args.file}: not repaired: {type(error).__name__} while rewriting it; check that "
+              f"you can write to its directory", file=sys.stderr)
+        return 1
+    print(f"{os.path.abspath(args.file)}: rewritten owner-only; the token is unchanged")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1318,10 +1318,9 @@ def test_a_token_file_that_loses_its_owner_only_permissions_is_refused_with_the_
             assert NEW_TOKEN not in message and NEW_TOKEN not in json.dumps(data)
             assert len(upstream.requests) == request_count
             if os.name == "nt":
-                assert "icacls" in data["recovery"]
-                for step in (["/reset"], ["/inheritance:r", "/grant:r", "*S-1-3-4:F"]):
-                    subprocess.run(["icacls", str(token_file), *step], check=True,
-                                   capture_output=True)
+                assert "pseudolife_memory.credentials repair" in data["recovery"]
+                subprocess.run([sys.executable, "-m", "pseudolife_memory.credentials", "repair",
+                                str(token_file)], check=True, capture_output=True)
             else:
                 assert "chmod 600" in data["recovery"]
                 token_file.chmod(0o600)
