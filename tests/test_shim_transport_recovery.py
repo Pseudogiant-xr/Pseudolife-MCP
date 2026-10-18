@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import subprocess
 from pathlib import Path
 import socket
 import sys
@@ -563,6 +564,7 @@ def test_each_operation_uses_one_fresh_credential_snapshot(tmp_path, upstream):
                 "classification": "credential_unavailable",
                 "phase": "initialize",
                 "operation_outcome": "not_dispatched",
+                "reason": "credential changed during the operation",
             }
             assert json.loads(new_result.content[0].text)["label"] == "new"
 
@@ -708,6 +710,7 @@ def test_a_stale_credential_outranks_a_daemon_refusal():
             "classification": "credential_unavailable",
             "phase": "call",
             "operation_outcome": "unknown",
+            "reason": "credential changed during the operation",
         }
 
 
@@ -953,10 +956,14 @@ def test_missing_dynamic_credential_fails_closed_then_recovers(tmp_path, upstrea
             request_count = len(upstream.requests)
             with pytest.raises(Exception) as caught:
                 await client.call_tool("read", {})
-            assert _error_data(caught.value) == {
+            data = _error_data(caught.value)
+            assert data.pop("recovery").startswith(f"Restore the token file at {token_file}")
+            assert data == {
                 "classification": "credential_unavailable",
                 "phase": "initialize",
                 "operation_outcome": "not_dispatched",
+                "reason": "configured credential file is missing",
+                "credential_file": str(token_file),
             }
             assert len(upstream.requests) == request_count
             _replace_token(token_file, NEW_TOKEN)
@@ -1281,3 +1288,48 @@ def test_cancellation_remains_cancellation():
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(cancel())
+
+
+def test_a_token_file_that_loses_its_owner_only_permissions_is_refused_with_the_fix(
+        tmp_path, upstream):
+    """2026-10-18: a rotation rewrote the token file with a plain write, so the
+    shim refused a file that held the right token. The refusal names that
+    cause and the fix; applying the fix lets the very next call through."""
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+    stderr = tmp_path / "stderr.log"
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, stderr) as client:
+            token_file.unlink()
+            token_file.write_bytes(NEW_TOKEN.encode())
+            if os.name != "nt":
+                token_file.chmod(0o644)
+            request_count = len(upstream.requests)
+            with pytest.raises(Exception) as caught:
+                await client.call_tool("read", {})
+            data = _error_data(caught.value)
+            assert data["classification"] == "credential_unavailable"
+            assert data["operation_outcome"] == "not_dispatched"
+            # Elevated (hosted Windows runners), a plain write is owned by
+            # Administrators, which the shim reports as another account's.
+            reasons = {"credential file must be owner-only"}
+            if os.name == "nt":
+                reasons.add("credential file is owned by another account")
+            assert data["reason"] in reasons
+            assert data["credential_file"] == str(token_file)
+            message = caught.value.error.message
+            assert data["reason"] in message and str(token_file) in message
+            assert NEW_TOKEN not in message and NEW_TOKEN not in json.dumps(data)
+            assert len(upstream.requests) == request_count
+            if os.name == "nt":
+                assert "pseudolife_memory.credentials repair" in data["recovery"]
+                subprocess.run([sys.executable, "-m", "pseudolife_memory.credentials", "repair",
+                                str(token_file)], check=True, capture_output=True)
+            else:
+                assert "chmod 600" in data["recovery"]
+                token_file.chmod(0o600)
+            recovered = await client.call_tool("read", {})
+            assert json.loads(recovered.content[0].text)["writes"] == 0
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=8))

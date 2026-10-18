@@ -1905,3 +1905,107 @@ def test_degraded_start_still_names_an_unusable_token_file(monkeypatch, tmp_path
     err = capsys.readouterr().err
     assert str(missing) in err
     assert "PSEUDOLIFE_MCP_TOKEN_FILE" in err
+
+
+# --- a credential refusal states its cause and its fix --------------------------
+# 2026-10-18: a token rotation rewrote claude-code.token without the owner-only
+# ACL. Every call through the shim failed with "restore the configured
+# credential", while the file already held the right token; the real reason
+# ("must be owner-only") showed only when the provider was called by hand.
+
+def _credential_refusal(reason, path=None, *, phase="initialize", dispatched=False):
+    from pseudolife_memory.credentials import CredentialError
+
+    error = CredentialError(reason)
+    if path is not None:
+        error.path = path
+    group = ExceptionGroup("fixture", [error])
+    return _shim._transport_error(
+        group, _shim._UpstreamAttempt(phase=phase, dispatched=dispatched), phase)
+
+
+def test_an_owner_only_refusal_names_the_reason_the_file_and_the_fix(tmp_path):
+    path = tmp_path / "claude-code.token"
+    refused = _credential_refusal("credential file must be owner-only", path)
+    assert refused.code == -32603
+    assert "credential file must be owner-only" in refused.message
+    assert str(path) in refused.message
+    fix = "pseudolife_memory.credentials repair" if os.name == "nt" else "chmod 600"
+    assert fix in refused.message
+    assert "restore the configured credential" not in refused.message.lower()
+    assert refused.data["classification"] == "credential_unavailable"
+    assert refused.data["operation_outcome"] == "not_dispatched"
+    assert refused.data["reason"] == "credential file must be owner-only"
+    assert refused.data["credential_file"] == str(path)
+    assert fix in refused.data["recovery"]
+
+
+@pytest.mark.parametrize("reason,fix", [
+    ("configured credential file is missing", "Restore the token file"),
+    ("configured credential file is unavailable", "could not be opened"),
+    ("credential path ancestors cannot be inspected", "could not be inspected"),
+    ("credential path must not contain redirects", "real path"),
+    ("credential file must be a private regular file", "regular file"),
+    ("credential file contains an invalid bearer token", "only the token"),
+    ("credential file is owned by another account", "pseudolife_memory.credentials repair"),
+])
+def test_each_reading_reason_reaches_the_refusal_with_its_fix(tmp_path, reason, fix):
+    refused = _credential_refusal(reason, tmp_path / "token")
+    assert reason in refused.message and fix in refused.message
+    assert refused.data["reason"] == reason and fix in refused.data["recovery"]
+
+
+def test_a_reason_without_a_specific_fix_keeps_the_reason_and_the_general_advice():
+    refused = _credential_refusal("credential file validation failed")
+    assert "credential file validation failed" in refused.message
+    assert "restore the configured credential" in refused.message.lower()
+    assert refused.data["reason"] == "credential file validation failed"
+    assert "recovery" not in refused.data and "credential_file" not in refused.data
+
+
+def test_a_refusal_after_dispatch_keeps_the_unknown_outcome_warning_and_adds_the_reason(tmp_path):
+    refused = _credential_refusal("credential file must be owner-only", tmp_path / "token",
+                                  phase="call", dispatched=True)
+    assert refused.data["operation_outcome"] == "unknown"
+    assert "may have completed" in refused.message
+    assert "credential file must be owner-only" in refused.message
+
+
+def test_a_rotated_credential_says_it_changed_and_to_retry():
+    group = ExceptionGroup("fixture", [_shim._CredentialChangedError()])
+    refused = _shim._transport_error(group, _shim._UpstreamAttempt(), "initialize")
+    assert refused.data["classification"] == "credential_unavailable"
+    assert refused.data["reason"] == "credential changed during the operation"
+    assert "changed" in refused.message and "retry" in refused.message
+    assert "restore the configured credential" not in refused.message.lower()
+
+
+def test_an_unrelated_error_named_credentialerror_is_not_echoed():
+    """Only this package's sanitized CredentialError may reach the client."""
+    CredentialError = type("CredentialError", (Exception,), {})
+    group = ExceptionGroup("fixture", [CredentialError("Bearer fixture-secret-token")])
+    refused = _shim._transport_error(group, _shim._UpstreamAttempt(), "initialize")
+    assert refused.data["classification"] == "credential_unavailable"
+    assert "fixture-secret-token" not in refused.message
+    assert "fixture-secret-token" not in json.dumps(refused.data)
+    assert "reason" not in refused.data
+
+
+def test_a_rotation_after_dispatch_never_says_the_call_did_not_run():
+    """The post-call check can find the file rotated after the daemon ran the
+    call: the refusal keeps "check its result before retrying" and must not
+    claim the old token went unused (review finding, 2026-10-18)."""
+    group = ExceptionGroup("fixture", [_shim._CredentialChangedError()])
+    refused = _shim._transport_error(
+        group, _shim._UpstreamAttempt(phase="call", dispatched=True), "call")
+    assert refused.data["operation_outcome"] == "unknown"
+    assert "may have completed" in refused.message
+    assert "changed during this operation" in refused.message
+    assert "not used" not in refused.message and "retry it" not in refused.message
+
+
+def test_a_refusal_after_dispatch_does_not_also_say_then_retry(tmp_path):
+    refused = _credential_refusal("credential file must be owner-only", tmp_path / "token",
+                                  phase="call", dispatched=True)
+    assert "Check its result before retrying" in refused.message
+    assert "Then retry" not in refused.message
