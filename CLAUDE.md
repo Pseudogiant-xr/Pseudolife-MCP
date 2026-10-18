@@ -109,7 +109,10 @@ name, a board status or a peer agent's message is not a delegation.
    `HF_HUB_OFFLINE=1 python -m pytest tests/` with the bench Postgres up
    (127.0.0.1:5433), CUDA hidden, and the existing suite lock enabled —
    on a Windows host, in WSL through `pwsh ops/wsl-suite.ps1` (see
-   "Running tests"). Keep
+   "Running tests"). A native Windows full suite on the Windows dev VM
+   runs against the VM's embedded PostgreSQL through the wrapper in its
+   private config instead (see "Dev machines"); PG-backed tests skipped
+   there are not a pass either. Keep
    the PostgreSQL authentication preflight: a fresh worktree must have the
    correct bench configuration before queueing. A refused or interrupted run
    is not a pass; a changed imported tree requires a fresh process on the
@@ -394,10 +397,11 @@ took 143 CUDA OOMs.
     file; `PSEUDOLIFE_SUITE_LEASE` overrides). Gate CPU- or
     memory-saturating work on the lease of the machine it runs on: `lease
     check full-suite` on the Windows host, `lease check full-suite@box` on
-    the box. A suite on another machine does not load yours. The dev
-    machines share the hypervisor's RAM, which carries two full suites at
-    once in any mix (two Linux dev boxes, or a Linux dev box and the
-    Windows VM), never three (see "Dev machines" below).
+    the box. A suite on the Windows host does not load a dev machine, nor
+    the reverse. The dev machines share the hypervisor's RAM, which
+    carries two full suites at once in any mix (two Linux dev boxes, or a
+    Linux dev box and the Windows VM), never three (see "Dev machines"
+    below).
   - **On the box, suites never touch the live bank's Postgres** (5433):
     the suite user's shells source `~/.config/pseudolife-suite/env`, which
     sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:5434` (the separate test
@@ -646,8 +650,8 @@ bank (search "dev machines homelab"), never in the tree.
     also where native Windows full suites run, which the maintainer's
     Windows host refuses. Its disk is slow: on 2026-10-10 a cold `cargo
     test --no-run` of one shim integration-test binary took 15 minutes
-    there, so keep its build tree warm (one `CARGO_TARGET_DIR` per slice
-    family, as under "Disk space") rather than cleaning it.
+    there, so keep its build tree warm (its one shared `CARGO_TARGET_DIR`,
+    as under "Disk space") rather than cleaning it.
   - Local WSL: the Windows host's own full suites (`ops/wsl-suite.ps1`),
     as above.
   - Hosted CI: the merge gate. Its Windows job runs a curated lite list
@@ -664,26 +668,36 @@ bank (search "dev machines homelab"), never in the tree.
   retired. Before starting a full suite on a dev machine, check that at
   most one other dev machine is running one (`lease check` on each
   machine's lease, or a running pytest process there), and say on the
-  board which one you hold.
+  board which one you hold. Nothing enforces this limit:
+  `ops/remote-suite.ps1` checks only the machine it dispatches to.
 - **Windows CI failures go to the Windows VM before a rerun** (maintainer
   decision 2026-10-18, after two Windows-only parity failures cost an
   hour-long hosted rerun each on 2026-10-17/18). When a check fails only
   on hosted Windows, reproduce it on the VM before rerunning it: loop the
-  one failing test or harness slice there (20 runs is a good start, under
-  CPU load if it looks like a timing failure). A failure that reproduces
-  gets a fix PR; a flake confirmed there gets a deflake PR. A rerun alone
-  is not the fix. Rerun only to unblock a merge you would make anyway,
-  and say in the PR or the merge comment that the deflake is filed.
+  one failing test or harness slice there (20 runs is a good start; add
+  CPU load for a timing failure only while no other dev machine runs a
+  full suite, since the load lands on the shared hypervisor). A failure
+  that reproduces gets a fix PR; a flake confirmed there gets a deflake
+  PR. Twenty clean runs only rule out a failure rate above roughly 15%, so
+  a failure the VM cannot reproduce still gets a deflake PR or issue
+  naming the hosted run once it recurs. A rerun alone is not the fix.
+  Rerun without a fresh VM attempt only when a deflake PR or issue
+  already names the same failure, or the VM is busy (say so); the rerun
+  must test the current merge ref (a stale run tests its old merge
+  commit), and the PR or merge comment names the deflake.
 - **Windows-sensitive Rust changes run on the Windows VM before CI.** A
-  Rust PR that touches process, socket, file-lock, path or timing
-  behaviour, or a harness slice that runs on Windows, builds and runs its
-  touched `rust/shim/tests/*` binaries and harness slices on the VM before
-  it is pushed for CI. The hosted Windows runners are the slowest lane, so
-  the VM catches there what would otherwise cost an hour-long CI round
-  trip. Docs-only, Linux-only and pure-logic changes skip this.
-- **A PR cites any dev-machine run it relies on**: the machine (by role,
-  for example "Windows dev VM", never its name or address), the commit,
-  the command and the result.
+  Rust PR is Windows-sensitive when it touches code that runs only on
+  Windows (`cfg(windows)`, `windows-sys`), process spawning, waiting or
+  killing, sockets or named pipes, file locks or atomic replacement,
+  timeouts and deadlines, or a harness slice the Windows parity shard runs.
+  Before it is pushed for CI, it builds on the VM and runs the test
+  binaries and harness slices that exercise the changed code, in whichever
+  crate (shim, daemon, shared). The hosted Windows runners are the slowest
+  lane, so the VM catches there what would otherwise cost an hour-long CI
+  round trip. Other Rust changes, docs-only and Linux-only changes skip
+  this.
+- **Cite dev-machine runs by role** ("Windows dev VM", "Linux dev box"),
+  never by name or address, with the commit, the command and the result.
 - **Never the live bank.** Every dev machine tests against its own test
   PostgreSQL: the boxes use their separate loopback test server, and the
   Windows VM uses the `[lite]` extra's embedded PostgreSQL on loopback
