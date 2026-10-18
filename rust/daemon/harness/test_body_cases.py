@@ -4,6 +4,7 @@ import copy
 import http.client
 import json
 import socket
+import struct
 import threading
 from unittest.mock import Mock, patch
 
@@ -143,8 +144,11 @@ def test_early_response_is_read_when_request_send_is_refused(chunked, send_error
     connection.close.assert_called_once()
 
 
-def early_refusal_server(respond: bool):
-    """Answer (or not) as soon as the headers arrive, then close with the body unread."""
+def early_refusal_server(respond: bool, reset_first: bool = False):
+    """Answer (or not) as soon as the headers arrive, then close with the body unread.
+
+    ``reset_first`` makes the first connection a daemon fault: an abortive
+    close that never writes its response, while later ones answer."""
     listener = socket.create_server(("127.0.0.1", 0))
     seen = []
 
@@ -162,6 +166,9 @@ def early_refusal_server(respond: bool):
                         break
                     data += chunk
                 seen.append(data)
+                if reset_first and len(seen) == 1:
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                    continue
                 if respond:
                     conn.sendall(b"HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\n"
                                  b"content-length: 28\r\nconnection: close\r\n\r\n"
@@ -181,14 +188,28 @@ def test_early_refusal_survives_the_host_discarding_it_on_reset():
             actual = run.call(port, "POST", "/api/nope", [("Origin", "http://evil.example")],
                               b" " * 262145)
             assert (actual["status"], actual["json"]) == (403, {"error": "forbidden_origin"})
+            assert set(actual) - {"status", "headers", "json", "raw"} <= {"_transport_replay"}
     # Every connection, replays included, announced the same request framing.
     assert all(b"Content-Length: 262145" in request for request in seen)
 
 
-def test_daemon_that_closes_without_answering_still_fails():
+@pytest.mark.parametrize("host_discards", [False, True])
+def test_daemon_that_closes_without_answering_still_fails(monkeypatch, host_discards):
+    monkeypatch.setattr(run, "HOST_DISCARDS_ON_RESET", host_discards)
     listener, seen = early_refusal_server(respond=False)
     with listener, pytest.raises((ConnectionError, RuntimeError)):
         run.call(listener.getsockname()[1], "POST", "/api/nope", body=b" " * 262145, timeout=10)
+
+
+def test_reset_without_a_response_is_not_replayed_where_the_host_keeps_data(monkeypatch):
+    # The near miss: a daemon that drops its response with an abortive close
+    # would answer the headers-only replay. Off Windows that reset is the
+    # daemon's own, so the case must fail rather than compare the replay.
+    monkeypatch.setattr(run, "HOST_DISCARDS_ON_RESET", False)
+    listener, seen = early_refusal_server(respond=True, reset_first=True)
+    with listener, pytest.raises(ConnectionError):
+        run.call(listener.getsockname()[1], "POST", "/api/nope", body=b" " * 262145, timeout=10)
+    assert len(seen) == 1
 
 
 def lost_response_connection(error):
@@ -199,7 +220,8 @@ def lost_response_connection(error):
 
 @pytest.mark.parametrize("error", [ConnectionAbortedError(10053, "aborted by host"),
                                    ConnectionResetError(10054, "reset by peer")])
-def test_lost_early_response_is_replayed_headers_only(error, capsys):
+def test_lost_early_response_is_replayed_headers_only(error, capsys, monkeypatch):
+    monkeypatch.setattr(run, "HOST_DISCARDS_ON_RESET", True)
     replay = Mock()
     replay.sock.recv.return_value = b"HTTP/1.1 403 For"
     response = replay.getresponse.return_value
@@ -211,7 +233,8 @@ def test_lost_early_response_is_replayed_headers_only(error, capsys):
         actual = run.call(1, "PUT", "/api/nope", [("Origin", "http://evil.example")], b"large")
     assert actual == {"status": 403, "headers": {"content-type": "application/json"},
                       "json": {"error": "forbidden_origin"},
-                      "raw": '{"error":"forbidden_origin"}'}
+                      "raw": '{"error":"forbidden_origin"}',
+                      "_transport_replay": f"{type(error).__name__}: {error}"}
     first.endheaders.assert_called_once_with(b"large")
     first.close.assert_called_once()
     replay.putrequest.assert_called_once_with("PUT", "/api/nope", skip_host=False,
@@ -222,7 +245,8 @@ def test_lost_early_response_is_replayed_headers_only(error, capsys):
     assert "headers-only replay answered 403" in capsys.readouterr().err
 
 
-def test_replay_that_gets_no_final_status_reports_both_failures():
+def test_replay_that_gets_no_final_status_reports_both_failures(monkeypatch):
+    monkeypatch.setattr(run, "HOST_DISCARDS_ON_RESET", True)
     replay = Mock()
     replay.sock.recv.return_value = b""
     with patch("http.client.HTTPConnection",
@@ -232,19 +256,38 @@ def test_replay_that_gets_no_final_status_reports_both_failures():
     replay.getresponse.assert_not_called()
 
 
-@pytest.mark.parametrize("error, body", [
+@pytest.mark.parametrize("error, body, host_discards", [
     # A clean EOF before any status is the daemon's own close, not the host's.
-    (http.client.RemoteDisconnected("closed without response"), b"large"),
+    (http.client.RemoteDisconnected("closed without response"), b"large", True),
     # Without a body in flight there is no unread data to provoke a reset.
-    (ConnectionResetError(10054, "reset"), None),
-    (ConnectionAbortedError(10053, "aborted"), None),
+    (ConnectionResetError(10054, "reset"), None, True),
+    (ConnectionAbortedError(10053, "aborted"), None, True),
+    (ConnectionResetError(10054, "reset"), b"", True),
+    # A host that keeps received data never lost a response to the reset.
+    (ConnectionResetError(104, "reset"), b"large", False),
+    (ConnectionAbortedError(103, "aborted"), b"large", False),
 ])
-def test_closes_the_host_did_not_cause_are_not_replayed(error, body):
+def test_closes_the_host_did_not_cause_are_not_replayed(error, body, host_discards, monkeypatch):
+    monkeypatch.setattr(run, "HOST_DISCARDS_ON_RESET", host_discards)
     first = lost_response_connection(error)
     with patch("http.client.HTTPConnection", side_effect=[first]) as connect, \
             pytest.raises(type(error)):
         run.call(1, "POST", "/api/nope", body=body)
     assert connect.call_count == 1
+
+
+@pytest.mark.parametrize("side", ["python", "rust"])
+def test_replayed_response_is_recorded_in_the_row_not_diffed(side):
+    c = run.case("foreign origin", "GET", "/api/nope")
+    response = {"status": 403, "headers": {}, "json": {"error": "forbidden_origin"}}
+    replayed = dict(response, _transport_replay="ConnectionAbortedError: [WinError 10053]")
+    py, rs = (replayed, response) if side == "python" else (response, replayed)
+    row = run.compare_case(c, py, rs)
+    assert row["diffs"] == []
+    assert row["transport_replays"] == {side: "ConnectionAbortedError: [WinError 10053]"}
+    assert "_transport_replay" in replayed  # the caller's response is not mutated
+    assert "_transport_replay" not in run.normalize_response(replayed, "/api/nope", [])
+    assert "transport_replays" not in run.compare_case(c, response, response)
 
 
 def test_scenario_crash_cannot_count_as_a_caught_mutant(tmp_path, monkeypatch):
