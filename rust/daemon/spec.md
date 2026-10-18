@@ -920,17 +920,18 @@ text and by id, ambiguous with candidates); a replacement the meta filter
 refuses when enabled (the whole correction rolls back) and stores when off
 (the default); a row deleted and a row retired behind the daemon's back; a full
 band evicting the target itself and then a cheaper entry; a surprise
-threshold that refuses a paraphrase as a store and admits it as a
-correction (the gate bypassed); traces disabled
+threshold that refuses a near-duplicate as a store and admits it as the
+correction of an unrelated entry (the gate bypassed); traces disabled
 (no derived slots, the invalidations still written); fifty-two derived
 slots (the first fifty, the total, truncated). Reinstate: the default
 principal; every request refusal (uppercase, braced, `urn:uuid:`, unhyphenated
 and `0x` UUID forms included; the other `int()` forms are unit-checked only);
 every target refusal (unknown, past BIGINT, live, retired before the
 replacement text was recorded, a mismatched hash, trace invalidations
-present); a commit, its replay, a conflicting request under the same UUID,
-the replay after a correction retired the entry again (`retired_again`) and
-after the row was deleted (`missing`); an integral retirement time in the
+present); a commit followed at once by a correction of the entry (the
+resident entry is live), the replay after that correction
+(`retired_again`), a conflicting request under the same UUID, the replay of
+a live commit, and the replay after the row was deleted (`missing`); an integral retirement time in the
 fingerprint; and the RI5 mirror for a row retired, a row inserted and a row
 deleted behind the daemons' backs (the deleted row then cannot be corrected
 either). The

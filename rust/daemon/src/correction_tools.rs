@@ -243,11 +243,11 @@ async fn resolve_target(
 
     // A failed insert can leave a phantom row id resident; never correct it.
     let ids = vec![target.id];
-    let rows = ready
-        .storage
-        .client()
-        .query("SELECT id FROM entries WHERE id = ANY($1)", &[&ids])
-        .await;
+    let rows = crate::txn::with_client(ready.storage.client(), |c| async move {
+        c.query("SELECT id FROM entries WHERE id = ANY($1)", &[&ids])
+            .await
+    })
+    .await;
     let Ok(rows) = rows else {
         return Err(noop(
             "target_unavailable",
@@ -804,15 +804,18 @@ async fn reinstate(
     if !crate::mutants::active("mcp-reinstate-no-mirror") {
         mirror_target(ready, cfg, req.entry_id).await?;
     }
-    let durable: Option<String> = client
-        .query_opt(
+    let op = &req.operation_id;
+    let durable: Option<String> = crate::txn::with_client(client, |c| async move {
+        c.query_opt(
             "SELECT request_sha256 FROM entry_reinstatement_decisions \
              WHERE operation_id = $1::text::uuid",
-            &[&req.operation_id],
+            &[op],
         )
         .await
-        .map_err(internal)?
-        .map(|r| r.get(0));
+    })
+    .await
+    .map_err(internal)?
+    .map(|r| r.get(0));
     let extras = |mut v: Value| {
         if let Some(m) = v.as_object_mut() {
             m.insert("cortex_changed".into(), json!(false));
@@ -882,15 +885,18 @@ async fn mirror_target(
     id: Option<i64>,
 ) -> Result<(), ToolError> {
     let Some(id) = id else { return Ok(()) };
-    let row = ready
-        .storage
-        .client()
-        .query_opt(
-            "SELECT id, band, text, embedding::real[], surprise::text, ts, access_count,              source, superseded_at, superseded_by_text, episode_id, episode_title, tags,              slots, authority, distortion_tolerance, reinforcements, last_logical_turn,              dream_state FROM entries WHERE id = $1",
+    let row = crate::txn::with_client(ready.storage.client(), |c| async move {
+        c.query_opt(
+            "SELECT id, band, text, embedding::real[], surprise::text, ts, access_count, \
+             source, superseded_at, superseded_by_text, episode_id, episode_title, tags, \
+             slots, authority, distortion_tolerance, reinforcements, last_logical_turn, \
+             dream_state FROM entries WHERE id = $1",
             &[&id],
         )
         .await
-        .map_err(|e| internal(format!("reinstatement commit reconciliation required: {e}")))?;
+    })
+    .await
+    .map_err(|e| internal(format!("reinstatement commit reconciliation required: {e}")))?;
     let mut bank = ready.bank.write().expect("bank lock");
     let holders: Vec<usize> = (0..bank.entries.len())
         .filter(|&i| bank.entries[i].id == id)
