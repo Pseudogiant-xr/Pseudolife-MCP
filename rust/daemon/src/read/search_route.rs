@@ -76,12 +76,12 @@ fn normalize_tags(tags: &[String]) -> Vec<String> {
 /// The cross-encoder, loaded on first use from `PSEUDOLIFE_DAEMON_RERANK_DIR`
 /// (`reranker.py:_ensure_loaded`): a failed load disables it for the life of
 /// the process.
-struct LazyReranker {
+pub(crate) struct LazyReranker {
     state: Mutex<Option<Option<Arc<rerank::Reranker>>>>,
 }
 
 impl LazyReranker {
-    fn get() -> &'static LazyReranker {
+    pub(crate) fn get() -> &'static LazyReranker {
         static SLOT: OnceLock<LazyReranker> = OnceLock::new();
         SLOT.get_or_init(|| LazyReranker {
             state: Mutex::new(None),

@@ -13,8 +13,8 @@ Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
 ``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce``,
 ``memory_history``, ``memory_world_set``, ``memory_world_search``,
-``memory_lesson_search``, ``memory_supersede``, ``memory_reinstate`` and
-``memory_forget`` on ``/mcp`` (``--features mutants`` adds the
+``memory_lesson_search``, ``memory_supersede``, ``memory_reinstate``,
+``memory_forget`` and ``memory_consolidation_candidates`` on ``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -45,7 +45,8 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``hlc_phys`` keep only null-or-not; ``retrieved_at`` (column and answer)
   does only when it lies within a day of now (a write without one takes the
   clock), and an explicit past value compares exactly;
-* a search ``score`` in a response, and each ``score`` in a
+* a search ``score`` in a response (and a candidate cluster's ``cohesion``
+  and ``seed_score``), and each ``score`` in a
   ``lesson_search_events.served`` list, compares within 1.5e-4: the two
   embedders agree to the measured tolerance, and scores are rounded to 4
   places;
@@ -199,7 +200,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # memory_forget (spec FG1-FG16): caught by the forget-* scenarios.
            "mcp-forget-no-bulk-guard", "mcp-forget-delete-digests", "mcp-forget-cortex-stale",
            "mcp-forget-no-lesson-cascade", "mcp-forget-lessons-stale", "mcp-forget-facts-kept",
-           "mcp-forget-edges-kept", "mcp-forget-slot-reads-kept", "mcp-forget-no-world-audit"]
+           "mcp-forget-edges-kept", "mcp-forget-slot-reads-kept", "mcp-forget-no-world-audit",
+           # memory_consolidation_candidates (spec CC1-CC9): caught by
+           # consolidation-candidates.
+           "mcp-consolidation-unsorted", "mcp-consolidation-unverified"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1210,7 +1214,7 @@ def supersede(new_text, headers=(), **kw) -> dict:
 
 
 # Scenarios whose operations may include ``external`` writes.
-EXTERNAL_WRITES = {"supersede-branches", "reinstate"}
+EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates"}
 
 
 def external(statement: str) -> dict:
@@ -1624,6 +1628,56 @@ SCENARIOS.update({
 })
 
 
+# memory_consolidation_candidates (spec CC1-CC9), read-only, on templates
+# whose entries (near-duplicates across sessions, a retired one, a tagged
+# one) the Python daemon's own tools wrote.
+def candidates(headers=(), **kw) -> dict:
+    return {"op": "tool", "name": "memory_consolidation_candidates", "args": kw,
+            "headers": list(headers)}
+
+
+STAGING = "staging database host"
+SCENARIOS.update({
+    "consolidation-candidates": {
+        "config": None,
+        "seed": [
+            store("The staging database lives on host db-stage-1.", [sess("sess-c1")]),
+            store("Staging DB host is db-stage-1.", [sess("sess-c2")]),
+            store("db-stage-1 hosts the staging database.", [sess("sess-c3")], source="user"),
+            store("Our CI runs on GitHub Actions.", [sess("sess-c1")]),
+            store("Continuous integration uses GitHub Actions runners.", [sess("sess-c2")]),
+            store("I like oat milk in my coffee.", [sess("sess-c1")]),
+            store("Deploys happen on Tuesdays after the staging database check.",
+                  [sess("sess-c1")], tags=["ops"]),
+            store("The staging database used to be on db-stage-0.", [sess("sess-c1")]),
+            supersede("The staging database moved off db-stage-0 to db-stage-1.",
+                      old_text="The staging database used to be on db-stage-0."),
+        ],
+        "ops": [
+            # no anchor (an empty query is none): nothing to cluster
+            candidates(),
+            candidates(query=""),
+            # the query anchor: retrieval (access accrual), retired entries
+            # excluded, clusters by cosine to the seed
+            candidates(query=STAGING),
+            candidates(query=STAGING, min_cohesion=0.95),
+            candidates(query="continuous integration", sources=["agent"], top_k=5),
+            candidates(query=STAGING, tags=[" OPS "]),
+            candidates(query="what do we run", min_cluster_size=1, max_clusters=2),
+            candidates(query=STAGING, min_cohesion="nan"),
+            candidates(query=STAGING, episode="@root:sess-c2:32"),
+            # the episode anchor: its entries in band order, score 1.0
+            candidates(episode="@root:sess-c1:32", min_cohesion=0.3),
+            candidates(episode="@root:sess-c1:32", sources=["user"]),
+            candidates(episode="@root:sess-c1:32", tags=["ops"], min_cluster_size=1),
+            # a row gone behind the daemons' backs is filtered out
+            external("DELETE FROM entries WHERE text = 'Staging DB host is db-stage-1.'"),
+            candidates(query=STAGING),
+        ],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -1998,7 +2052,7 @@ def normalize_records(a, b, stats=None):
                 a[k], b[k] = _clock(a[k]), _clock(b[k])
             elif k in RESPONSE_RECENT_CLOCK:
                 a[k], b[k] = _recent_clock(a[k]), _recent_clock(b[k])
-            elif (k == "score" and isinstance(a[k], (int, float))
+            elif (k in ("score", "cohesion", "seed_score") and isinstance(a[k], (int, float))
                   and isinstance(b[k], (int, float)) and not isinstance(a[k], bool)):
                 d = abs(a[k] - b[k])
                 if stats is not None:
