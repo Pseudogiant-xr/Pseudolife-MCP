@@ -978,7 +978,7 @@ in `config.rs`; registered in `mcp::dispatch::registry`. Python:
 | FG6 | The digest cursor (`meta.session_digest_cursor`, `_load_digest_cursor`): `ts` as a float (0.0 when absent), `retry` as an object, `regenerate` / `context_deferred` kept when present, then `regenerate` = the sorted union with the roots that survive. | `service.py:3309-3311`; `service_dream.py:3197-3210` |
 | FG7 | `forget_entry_ids`, one transaction, at one clock reading: lock the sorted deleted and digest rows (`FOR UPDATE`); FG8's lesson cascade; the trace slots of the deleted ids that no surviving live entry supports; the agent-origin live edges whose evidence no surviving live entry supports; each such slot's current facts `retired` (`superseded_by_value` names its smallest deleted source); the edges' `superseded_at`; the digests retired (`superseded_by_text` names the smallest deleted id; not exactly the expected set is an internal error); the cursor written (always); the rows deleted (not every one is an internal error). | `postgres.py:1225-1314` |
 | FG8 | `retire_lessons_for_entries`: current lessons whose provenance names a deleted id (`entry:<id>`, `?|`), locked in id order; each retires when its synthesis lineage audits (`store_decisions`: `lesson`, `lineage`, `lesson_synthesis`, `verified_dependencies`, the same lesson text and `asserted_at`, integer `source_entry_ids`) name a deleted id and no other named entry still exists; each gets a `retire` audit (`source_cascade`, `source_forgotten`, a snapshot of the row's fields plus `task`, `aspect`, `lesson`, `status: retired`, `superseded_at`, `superseded_by_value`); then one UPDATE. | `postgres.py:1332-1389` |
-| FG9 | After commit: the resident cortex retires each FG7 slot (`retire_unsupported`: every current record `retired` at the clock, `superseded_by_value` naming the FG5 source id, one audit row each with no new value and a zero delta; the slot leaves both indexes and is marked dirty, saved with the next cortex save); the resident digests are retired (`superseded_by_text` naming the first deleted id in match order); retired lessons are mirrored onto the resident store by `(entity_norm, attribute_norm, value, asserted_at)`; the deleted matches leave the resident bank. The answer: `{deleted_count, deleted_texts (the first 20)}`. | `service.py:3316-3323, 3386-3396, 5173-5203`; `cortex.py:731-748, 1162-1181`; `cms.py:2684-2707` |
+| FG9 | After commit: the resident cortex retires each FG7 slot (`retire_unsupported`: every current record `retired` at the clock, `superseded_by_value` naming the FG5 source id, one audit row each with no new value and a zero delta; the slot leaves both indexes and is marked dirty, saved with the next cortex save); the resident digests are retired (`superseded_by_text` naming the first deleted id in match order); the deleted matches leave the resident bank; then, when lessons retired, they are mirrored onto the resident store by `(entity_norm, attribute_norm, value, asserted_at)`: a failure is logged, never the forget's, and the mirror stays pending, retried before the next lesson read (`memory_lesson_search`, the history chain) or lesson save, whose failure is then an internal error. The answer: `{deleted_count, deleted_texts (the first 20)}`. | `service.py:3316-3323, 3386-3396, 5173-5203`; `cortex.py:731-748, 1162-1181`; `cms.py:2684-2707` |
 | FG10 | Scope `fact` (`cortex_forget`): every record at the entity, or the one slot (normalized keys), is removed (the indexes rebuilt without healing, the slots marked dirty); if any, the cortex save (the per-slot rewrite and the supersession log; a failure counts a persistence error and is an internal error), then the slot-read counters deleted (`slot_reads`, the entity or the slot; a failure is counted, never the call's). Answer `{removed, entity, attribute}`. | `service.py:6161-6183`; `cortex.py:1610-1636`; `postgres.py:4403-4417` |
 | FG11 | Scope `world` (`world_forget`, `decided_by="agent"`, no reason): every current record at the entity or slot `retired` at the clock (kept, slot dirty, the current index rebuilt); per record an audit row in its own transaction (`world`, `retire`, the verbatim snapshot: entity, attribute, value, polarity, status, confidence to 4 places, origin `source`, citation, class, `retrieved_at`, hash, `source_doc_id`, `asserted_at`, `last_confirmed`); then the world save. Answer `{removed, retired, entity, attribute}`. | `service.py:506-519, 4876-4897, 5539-5551`; `world_cortex.py:259-282`; `postgres.py:3527-3543` |
 | FG12 | Scope `lesson` (`lesson_forget`): the same over lessons (`task` / `aspect`); the snapshot is `_lesson_record_to_dict` (confidence to 4 places, provenance sorted) plus the sorted `support`; then `_save_lessons`. Answer `{removed, retired, task, aspect}`. | `service.py:411-430, 5449-5474`; `lessons.py:258-282` |
@@ -987,7 +987,7 @@ in `config.rs`; registered in `mcp::dispatch::registry`. Python:
 | FG15 | The cortex, world and lesson saves are the existing per-slot paths, so a forget's dirty state persists exactly as Python's does: at its own save (fact, world, lesson scopes), or the next one (the cascade's cortex retirements). | `service.py:3746-3785` |
 | FG16 | Not reachable: the restore path (`memory_graph_review(action="restore_slot")`, W3-H) and file mode. | `divergences.md` |
 
-`harness/w2e.py live --only forget-memory forget-slots` compares every
+`harness/w2e.py live --only forget-memory forget-slots forget-unbounded` compares every
 answer and the full bank after each call, on templates whose entries,
 facts, world facts, graph edge and slot reads the Python daemon's own
 tools wrote (the digest, the trace rows, the lineage lessons with their
@@ -999,18 +999,23 @@ regeneration), the bulk refusal and its confirmation, the tag filter
 normalized, the trace cascade (one slot retired, one kept by a surviving
 source; both read back through `memory_fact_get`), the lesson cascade (one
 lesson retired with its audit, one kept; read back through
-`memory_lesson_search`), the dream edge retired, an episode filter, and a
-digest-only selection. Other scopes: a missing and an empty entity, nothing
+`memory_lesson_search`), the dream edge retired, an episode filter, a source
+with its session's already retired digest (kept), two sources of one slot
+forgotten together and then a cortex save (the retired slot rewritten with
+the larger source named, and its audit log row), an existing digest cursor
+(kept keys, merged `regenerate`), a digest-only selection, and the bulk
+guard disabled (`forget-unbounded`). Other scopes: a missing and an empty entity, nothing
 removed, one fact slot with every version and its read counter, a whole
 entity, a world slot and then the entity (read back through
 `memory_world_search`, then nothing left), and lessons by slot and by task
-(the rewritten rows linked to their entities, read back through
-`memory_lesson_search`). The forget clocks keep only null-or-not. The
+(the rewritten rows linked to their entities, a subject entity included,
+read back through `memory_lesson_search`). The forget clocks keep only null-or-not. The
 `mcp-forget-no-bulk-guard`, `mcp-forget-delete-digests`,
 `mcp-forget-cortex-stale`, `mcp-forget-no-lesson-cascade`,
 `mcp-forget-lessons-stale`, `mcp-forget-facts-kept`,
-`mcp-forget-edges-kept`, `mcp-forget-slot-reads-kept` and
-`mcp-forget-no-world-audit` mutants must be caught.
+`mcp-forget-edges-kept`, `mcp-forget-slot-reads-kept`,
+`mcp-forget-no-world-audit` and `mcp-forget-no-lesson-audit` mutants must be
+caught.
 
 ### Board tools over MCP (2026-10-16)
 

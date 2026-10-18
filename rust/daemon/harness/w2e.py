@@ -139,7 +139,7 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("memory_trace_invalidations", "invalidated_at"),
          ("entry_reinstatement_decisions", "decided_at"),
          ("lessons", "superseded_at"), ("edges", "superseded_at"),
-         ("store_decisions", "decided_at")}
+         ("store_decisions", "decided_at"), ("slot_reads", "last_read_at")}
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
 RECENT_CLOCK = {("world_facts", "retrieved_at")}
@@ -199,7 +199,8 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # memory_forget (spec FG1-FG16): caught by the forget-* scenarios.
            "mcp-forget-no-bulk-guard", "mcp-forget-delete-digests", "mcp-forget-cortex-stale",
            "mcp-forget-no-lesson-cascade", "mcp-forget-lessons-stale", "mcp-forget-facts-kept",
-           "mcp-forget-edges-kept", "mcp-forget-slot-reads-kept", "mcp-forget-no-world-audit"]
+           "mcp-forget-edges-kept", "mcp-forget-slot-reads-kept", "mcp-forget-no-world-audit",
+           "mcp-forget-no-lesson-audit"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1528,6 +1529,10 @@ FORGET_SEED = [
     store("The backup job runs at 02:00 nightly.", [sess("sess-h")]),
     store("The flaky test needs a warm cache.", [sess("sess-h")]),
     store("A sess-h aside about lunch.", [sess("sess-h")]),
+    store("An on-call handover note.", [sess("sess-m")]),
+    store("Payments DB replica is db-2.", [sess("sess-n")]),
+    store("Payments DB replica confirmed as db-2 by the DBA.", [sess("sess-n")]),
+    fact("Payments DB", "replica", "db-2", origin="user", confidence=0.9),
     tool("memory_graph_relate", src="flaky test", relation="uses", dst="warm cache"),
     # the digest of sess-f's root, retired as history by a source forget
     sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, source, "
@@ -1535,6 +1540,23 @@ FORGET_SEED = [
         f"'{DIGEST_TEXT}', embedding, surprise, ts + 1, 0, 'digest', episode_id, "
         "episode_title, '[]'::jsonb, '[]'::jsonb, 'pending' FROM entries "
         "WHERE text = 'Keep the deploy checklist current.'", after_stop=True),
+    # a retired digest of sess-m's root: kept as history by a source forget
+    sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, source, "
+        "superseded_at, superseded_by_text, episode_id, episode_title, tags, slots, "
+        "dream_state) SELECT band, 'Retired digest of the handover session.', embedding, "
+        "surprise, ts + 1, 0, 'digest', 1700000000.5, 'an older digest', episode_id, "
+        "episode_title, '[]'::jsonb, '[]'::jsonb, 'pending' FROM entries "
+        "WHERE text = 'An on-call handover note.'", after_stop=True),
+    # an existing digest cursor: ts, retry and context_deferred kept,
+    # regenerate merged
+    sql("INSERT INTO meta (key, value) VALUES ('session_digest_cursor', "
+        "'{\"ts\": 5, \"retry\": {\"x\": 1}, \"regenerate\": [\"zz-root\"], "
+        "\"context_deferred\": [\"q\"]}'::jsonb) ON CONFLICT (key) DO UPDATE "
+        "SET value = EXCLUDED.value", after_stop=True),
+    # replica rests on two entries forgotten together: the bank names the
+    # larger source, the facts row the smaller, until the next cortex save
+    trace_sql("Payments DB replica is db-2.", "payments-db", "replica"),
+    trace_sql("Payments DB replica confirmed as db-2 by the DBA.", "payments-db", "replica"),
     # host rests on one entry; port on two, one of which survives
     trace_sql("Payments DB moved to host 10.0.0.9 per the runbook.", "payments-db", "host"),
     trace_sql("Payments DB moved to host 10.0.0.9 per the runbook.", "payments-db", "port"),
@@ -1584,7 +1606,13 @@ SCENARIOS.update({
             forget("memory", text="The flaky test needs a warm cache."),
             # by episode id
             forget("memory", episode="@root:sess-h:32"),
-            # a digest-only selection deletes the digest
+            # a source with its session's retired digest: the digest is kept
+            forget("memory", substring="handover"),
+            # two sources of one slot together; then a cortex save writes the
+            # retired slot (the larger source named) and the audit log
+            forget("memory", episode="@root:sess-n:32"),
+            fact("Payments DB", "owner", "the ops team", origin="user", confidence=0.9),
+            # a digest-only selection deletes the digests
             forget("memory", source="digest"),
         ],
     },
@@ -1604,6 +1632,11 @@ SCENARIOS.update({
             world_set("Python", "latest version", "3.13.0", source_url="https://www.python.org/"),
             *lineage_lesson("deploy engine to host", "approach", "deploy-engine-to-host",
                             "approach", "Deploy through the pipeline.", "Payments DB",
+                            ["A note so the bank is not empty."],
+                            "A note so the bank is not empty."),
+            # a lesson whose task is a graph entity (fact_set minted it)
+            *lineage_lesson("Payments DB", "tuning", "payments-db", "tuning",
+                            "Tune the pool before the replica.", None,
                             ["A note so the bank is not empty."],
                             "A note so the bank is not empty."),
             *lineage_lesson("deploy engine to host", "pitfall", "deploy-engine-to-host",
@@ -1631,7 +1664,15 @@ SCENARIOS.update({
             lesson_search("how do I deploy the engine"),
             forget("lesson", entity="deploy engine to host"),
             forget("lesson", entity="nothing here"),
+            # the rewritten row links its subject entity
+            forget("lesson", entity="Payments DB", attribute="tuning"),
         ],
+    },
+    # The bulk guard disabled: any match count is removed.
+    "forget-unbounded": {
+        "config": "memory:\n  delete_confirm_threshold: 0\n",
+        "seed": [store(f"Status probe {n}.", source="status") for n in ("one", "two", "three")],
+        "ops": [forget("memory", source="status")],
     },
 })
 
