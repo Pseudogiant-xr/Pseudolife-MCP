@@ -200,11 +200,18 @@ def _windows_owner_only(fd: int) -> bool:
     return _windows_file_access(fd) == "owner-only"
 
 
-def _windows_file_access(fd: int) -> str:
+def _windows_file_access(fd: int, *, default_owner_is_own: bool = False) -> str:
     """``owner-only`` when the current user owns the file and only its owner
     may access it; ``owned`` when the current user owns it but the DACL is
     broader; ``foreign`` when another account owns it; ``unknown`` when its
-    security or this process's user could not be read."""
+    security or this process's user could not be read.
+
+    ``default_owner_is_own`` (writers only) also counts as the current
+    user's a file owned by this token's default owner: an elevated token's
+    is BUILTIN\\Administrators, so a file this process wrote plainly is owned
+    by it (measured 2026-10-18 on the Windows dev VM over SSH, High
+    integrity, and on GitHub's Windows runners). Reading never does: an
+    unelevated shim holds Administrators deny-only."""
     import ctypes
     from ctypes import wintypes
     import msvcrt
@@ -223,6 +230,9 @@ def _windows_file_access(fd: int) -> str:
 
     class TOKEN_USER(ctypes.Structure):
         _fields_ = [("User", SID_AND_ATTRIBUTES)]
+
+    class TOKEN_OWNER(ctypes.Structure):
+        _fields_ = [("Owner", ctypes.c_void_p)]
 
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -283,7 +293,19 @@ def _windows_file_access(fd: int) -> str:
                 return "unknown"
             current_owner = ctypes.cast(token_buffer, ctypes.POINTER(TOKEN_USER)).contents.User.Sid
             if not equal_sid(owner, current_owner):
-                return "foreign"
+                if not default_owner_is_own:
+                    return "foreign"
+                owner_needed = wintypes.DWORD()
+                get_token(token_handle, 4, None, 0, ctypes.byref(owner_needed))  # TokenOwner
+                if not owner_needed.value:
+                    return "foreign"
+                owner_buffer = ctypes.create_string_buffer(owner_needed.value)
+                if not get_token(token_handle, 4, owner_buffer, owner_needed,
+                                 ctypes.byref(owner_needed)):
+                    return "foreign"
+                default_owner = ctypes.cast(owner_buffer, ctypes.POINTER(TOKEN_OWNER)).contents.Owner
+                if not equal_sid(owner, default_owner):
+                    return "foreign"
         finally:
             kernel.CloseHandle(token_handle)
         control = wintypes.WORD()
@@ -342,22 +364,28 @@ def _validate_file(fd: int, *, allow_unlinked: bool = False) -> os.stat_result:
 
 
 def _owned_by_current_user(fd: int) -> bool:
+    """Whether a writer may treat the file as its own: this user owns it, or
+    on Windows this token's default owner does (a file this process could
+    have written itself)."""
     if os.name == "nt":
-        return _windows_file_access(fd) in ("owner-only", "owned")
+        return _windows_file_access(fd, default_owner_is_own=True) in ("owner-only", "owned")
     return os.fstat(fd).st_uid == os.geteuid()
 
 
 def _validate_replaceable(fd: int) -> None:
     """Refuse to replace an existing credential file unless it is one
-    ``_validate_file`` accepts, or one whose only fault is permissions broader
-    than owner-only on a file the current user owns: the replacement is
-    owner-only, so writing it repairs them. A link, a hard link, a non-file,
-    another account's file, or one whose owner cannot be read is still
-    refused."""
+    ``_validate_file`` accepts, or one whose only faults are its owner or
+    permissions while it is this process's own (``_owned_by_current_user``):
+    the replacement is owner-only and owned by this user, so writing it can
+    only narrow access. A link, a hard link, a non-file, another account's
+    file, or one whose owner cannot be read is still refused."""
     try:
         _validate_file(fd)
     except CredentialError as error:
-        if str(error) != "credential file must be owner-only" or not _owned_by_current_user(fd):
+        if str(error) not in ("credential file must be owner-only",
+                              "credential file is owned by another account"):
+            raise
+        if not _owned_by_current_user(fd):
             raise
 
 

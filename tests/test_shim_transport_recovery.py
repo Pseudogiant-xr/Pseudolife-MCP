@@ -1311,10 +1311,15 @@ def test_a_token_file_that_loses_its_owner_only_permissions_is_refused_with_the_
             data = _error_data(caught.value)
             assert data["classification"] == "credential_unavailable"
             assert data["operation_outcome"] == "not_dispatched"
-            assert data["reason"] == "credential file must be owner-only"
+            # Elevated (hosted Windows runners), a plain write is owned by
+            # Administrators, which the shim reports as another account's.
+            reasons = {"credential file must be owner-only"}
+            if os.name == "nt":
+                reasons.add("credential file is owned by another account")
+            assert data["reason"] in reasons
             assert data["credential_file"] == str(token_file)
             message = caught.value.error.message
-            assert "owner-only" in message and str(token_file) in message
+            assert data["reason"] in message and str(token_file) in message
             assert NEW_TOKEN not in message and NEW_TOKEN not in json.dumps(data)
             assert len(upstream.requests) == request_count
             if os.name == "nt":

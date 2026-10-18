@@ -282,8 +282,25 @@ def test_concurrent_atomic_rotation_never_returns_torn_credentials(tmp_path: Pat
 # fix travel with the error now.
 
 def shared_token(path: Path, token: str) -> None:
-    """A token file this user owns whose permissions are broader than owner-only,
-    as a plain write leaves it: inherited ACL on Windows, mode 0644 elsewhere."""
+    """A token file this user owns whose permissions are broader than owner-only:
+    an explicit Everyone read entry on Windows, mode 0644 elsewhere. Written by
+    the writer first, which pins the owner to this user, so the fixture does not
+    depend on elevation: an elevated process's plain write is owned by
+    Administrators (hosted Windows runners, 2026-10-18)."""
+    path.unlink(missing_ok=True)
+    _write_token_file(path, "placeholder")
+    path.write_bytes(token.encode("utf-8"))
+    if os.name == "nt":
+        subprocess.run(["icacls", str(path), "/grant", "*S-1-1-0:R"], check=True,
+                       capture_output=True)
+    else:
+        path.chmod(0o644)
+
+
+def plain_token(path: Path, token: str) -> None:
+    """A token file as a plain write leaves it (the 2026-10-18 rotation): mode
+    0644 on POSIX; on Windows inherited permissions, and owned by
+    Administrators instead of this user when the process is elevated."""
     path.unlink(missing_ok=True)
     path.write_bytes(token.encode("utf-8"))
     if os.name != "nt":
@@ -360,7 +377,7 @@ def test_repair_replaces_a_file_another_account_owns(tmp_path: Path, monkeypatch
     if os.name == "nt":
         real = credentials._windows_file_access
         monkeypatch.setattr(credentials, "_windows_file_access",
-                            lambda fd: "foreign" if os.fstat(fd).st_ino == original else real(fd))
+                            lambda fd, **kw: "foreign" if os.fstat(fd).st_ino == original else real(fd, **kw))
     else:
         real_fstat = os.fstat
         uid = os.geteuid()
@@ -522,7 +539,7 @@ def _another_account_owns_every_file(monkeypatch) -> None:
     from pseudolife_memory import credentials
 
     if os.name == "nt":
-        monkeypatch.setattr(credentials, "_windows_file_access", lambda fd: "foreign")
+        monkeypatch.setattr(credentials, "_windows_file_access", lambda fd, **_: "foreign")
     else:
         real = os.geteuid()
         monkeypatch.setattr(credentials.os, "geteuid", lambda: real + 1)
@@ -560,6 +577,24 @@ def test_writer_refuses_a_broad_file_whose_owner_cannot_be_proven(tmp_path: Path
     with pytest.raises(CredentialError, match="owner-only"):
         _write_token_file(path, "new-fixture")
     assert path.read_bytes() == b"old-fixture"
+
+
+def test_a_plainly_written_file_is_refused_and_the_writer_replaces_it(tmp_path: Path) -> None:
+    """Elevated or not: unelevated it is this user's broad file; elevated it is
+    owned by Administrators, this token's default owner, which the shim
+    refuses as another account's and the writer may still replace (2026-10-18,
+    the Windows lite lane's elevated runners)."""
+    path = tmp_path / "token"
+    plain_token(path, "old-fixture")
+    error = _refusal(path)
+    if os.name == "nt":
+        assert str(error) in ("credential file must be owner-only",
+                              "credential file is owned by another account")
+        assert REPAIR in error.recovery()
+    else:
+        assert str(error) == "credential file must be owner-only"
+    _write_token_file(path, "new-fixture")
+    assert CredentialProvider(path=path).snapshot().token == "new-fixture"
 
 
 def test_writer_still_refuses_a_hardlinked_file(tmp_path: Path) -> None:
