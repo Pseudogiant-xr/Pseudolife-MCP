@@ -12,8 +12,9 @@ Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_set_add``, ``memory_set_remove``, ``memory_fact_resolve``,
 ``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
 ``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce``,
-``memory_history``, ``memory_world_set``, ``memory_world_search`` and
-``memory_lesson_search`` on ``/mcp`` (``--features mutants`` adds the
+``memory_history``, ``memory_world_set``, ``memory_world_search``,
+``memory_lesson_search``, ``memory_supersede`` and ``memory_reinstate`` on
+``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -54,6 +55,10 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``outcome_signals.created_at``, ``retrieval_uses.created_at``,
   ``entities.created_at`` and each
   ``cortex_supersession_log`` row's ``timestamp`` keep only null-or-not;
+* the correction clocks: ``memory_trace_invalidations.invalidated_at``
+  (the correction's own clock, like ``entries.superseded_at``) and
+  ``entry_reinstatement_decisions.decided_at`` keep only null-or-not; a
+  correction's ``new_memory_surprise`` compares like a store's ``surprise``;
 * the board columns a session title writes: ``coordination_agents.name_set_at``
   and ``coordination_events.created_at`` keep only null-or-not, and so do the
   audit chain's ``hash`` and ``prev_hash`` (they cover ``created_at``; the
@@ -64,6 +69,12 @@ Normalizers (declared, spec "Free for W1 and W2"):
   "1 minute ago"), since the two daemons answer seconds apart;
 * rows are compared as sorted sets (row order is the primary key's order,
   which renamed ids change), except that entry ids themselves must match.
+
+Arguments may name rows by content, resolved on each side's own bank
+just before the call: ``@id:<text>`` (the first row with that text),
+``@idn:<n>:<text>`` (the n-th, from 0), and for the first RETIRED row with
+that text ``@sup:<text>`` (its ``superseded_at``) and ``@sha:<field>:<text>``
+(the SHA-256 of its ``text``, ``source`` or ``by``, ``superseded_by_text``).
 
 Seed operations may also be ``{"op": "sql"}``: a statement run on the
 template only, for state no tool writes (``entity_kinds``, which only an
@@ -115,7 +126,9 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("world_facts", "asserted_at"), ("world_facts", "last_confirmed"),
          ("world_facts", "superseded_at"), ("world_facts", "tx_time"),
          ("world_facts", "valid_time"), ("world_facts", "hlc_phys"),
-         ("lesson_search_events", "created_at")}
+         ("lesson_search_events", "created_at"),
+         ("memory_trace_invalidations", "invalidated_at"),
+         ("entry_reinstatement_decisions", "decided_at")}
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
 RECENT_CLOCK = {("world_facts", "retrieved_at")}
@@ -164,7 +177,13 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # lessons and the history chain (spec LS1-LS10, CH1-CH6): caught
            # by the lessons scenario.
            "mcp-lesson-search-no-graph-resolve", "mcp-lesson-search-no-log",
-           "mcp-history-chain-no-lessons"]
+           "mcp-history-chain-no-lessons",
+           # memory_supersede and memory_reinstate (spec CO1-CO10, RI1-RI10):
+           # caught by the supersede-* and reinstate scenarios.
+           "mcp-supersede-text-first-live", "mcp-supersede-derived-current-only",
+           "mcp-supersede-surprise-gate", "mcp-supersede-no-trace-invalidation",
+           "mcp-supersede-resident-stale", "mcp-reinstate-default-principal",
+           "mcp-reinstate-ignore-invalidations", "mcp-reinstate-resident-stale"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1165,6 +1184,198 @@ SCENARIOS.update({
 
 # ── per-side argument templates ───────────────────────────────────────────
 
+# memory_supersede (spec CO1-CO10): corrections by id and by exact text on
+# templates the Python daemon's own tools wrote. The duplicate row and the
+# trace rows are SQL seeds: no tool writes a live exact duplicate, and only
+# the dream writes memory_traces.
+def supersede(new_text, headers=(), **kw) -> dict:
+    return {"op": "tool", "name": "memory_supersede", "args": {"new_text": new_text, **kw},
+            "headers": list(headers)}
+
+
+def trace_sql(text, entity_norm, attribute_norm) -> dict:
+    """Seed-only: a memory_traces row tying ``text``'s entry to a slot."""
+    return sql("INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at) "
+               f"SELECT '{entity_norm}', '{attribute_norm}', id, 1000.0 FROM entries "
+               f"WHERE text = '{text}' ORDER BY id LIMIT 1")
+
+
+SUPERSEDE_SEED = [
+    store("The daemon port is 8765.", [sess("sess-a")]),
+    store("Our build server hostname is ci-box-2."),
+    store("According to the docs, the bank volume is external."),
+    store("Never deploy on Fridays."),
+    # a retired "Alpha config is red." twin and a live one
+    store("Alpha config is red."),
+    supersede("Alpha config is blue.", old_text="Alpha config is red."),
+    supersede("Alpha config is red.", old_text="Alpha config is blue."),
+    store("Gamma retired note."),
+    supersede("Gamma replacement note.", old_text="Gamma retired note."),
+    # derived slots: a live one, one whose only member was removed (named by
+    # its records), and one no record names (named by its key)
+    store("Payments DB host is 10.0.0.5 per the runbook."),
+    fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9),
+    set_add("Home Lab", "hosts", "alpha"),
+    set_remove("Home Lab", "hosts", "alpha"),
+    trace_sql("Payments DB host is 10.0.0.5 per the runbook.", "payments-db", "host"),
+    trace_sql("Payments DB host is 10.0.0.5 per the runbook.", "home-lab", "hosts"),
+    trace_sql("Payments DB host is 10.0.0.5 per the runbook.", "old-box", "ip"),
+    store("Delta duplicated note."),
+    store("Epsilon row to vanish."),
+    store("Zeta row retired behind the daemon's back."),
+    dict(sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, source, "
+             "episode_id, episode_title, tags, slots, authority, distortion_tolerance, "
+             "dream_state) SELECT band, text, embedding, surprise, ts + 1, 0, 'user', "
+             "episode_id, episode_title, tags, slots, authority, distortion_tolerance, "
+             "dream_state FROM entries WHERE text = 'Delta duplicated note.'"), after_stop=True),
+]
+
+SCENARIOS.update({
+    "supersede-branches": {
+        "config": None,
+        "seed": SUPERSEDE_SEED,
+        "ops": [
+            # by id, with a session header
+            supersede("The daemon port is 8766.", [sess("sess-a")],
+                      entry_id="@id:The daemon port is 8765."),
+            # the retired source is resident as retired; the replacement is resident
+            supersede("x", entry_id="@id:The daemon port is 8765."),
+            supersede("The daemon port is 8767.", old_text="The daemon port is 8766."),
+            # by exact text, an observation
+            supersede("Our build server hostname is ci-box-3.",
+                      old_text="Our build server hostname is ci-box-2."),
+            # labels: quoted carries over; the new text's directive wins its axis
+            supersede("The bank volume is internal now.",
+                      old_text="According to the docs, the bank volume is external."),
+            supersede("Always deploy on Fridays after review.", old_text="Never deploy on Fridays."),
+            # a retired twin does not make an exact text ambiguous
+            supersede("Alpha config is green.", old_text="Alpha config is red."),
+            # the derived slots, live first, the cap's totals
+            supersede("Payments DB host is 10.0.0.6 per the runbook.",
+                      old_text="Payments DB host is 10.0.0.5 per the runbook."),
+            # refusals: nothing changes
+            supersede("x", old_text="Gamma replacement note.", entry_id=1),
+            supersede("x"),
+            supersede("x", entry_id=0),
+            supersede("x", entry_id=-3),
+            supersede("x", entry_id=99999999999999999999),
+            supersede("x", old_text="   "),
+            supersede("   ", old_text="Gamma replacement note."),
+            supersede("x", entry_id=999999),
+            supersede("x", old_text="no such note"),
+            supersede("x", old_text="Gamma retired note."),
+            supersede("x", entry_id="@id:Gamma retired note."),
+            supersede("x", old_text="Delta duplicated note."),
+            # the meta filter refuses the replacement: the source stays live
+            supersede("No relevant memories about the deploy.", old_text="Gamma replacement note."),
+            # a row deleted behind the daemon's back
+            sql("DELETE FROM entries WHERE text = 'Epsilon row to vanish.'"),
+            supersede("x", old_text="Epsilon row to vanish."),
+            # a row retired behind the daemon's back: supersede_entries refuses
+            sql("UPDATE entries SET superseded_at = 1700000000.5, superseded_by_text = 'elsewhere' "
+                "WHERE text = 'Zeta row retired behind the daemon''s back.'"),
+            supersede("x", old_text="Zeta row retired behind the daemon's back."),
+        ],
+    },
+    # Capacity: the victim is chosen with the target already retired, so a
+    # full band evicts the target itself when nothing cheaper is there.
+    "supersede-capacity": {
+        "config": "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: flat\n        max_entries: 5\n",
+        "seed": [
+            store("System prompt one, retained.", source="system"),
+            store("System prompt two, retained.", source="system"),
+            store("System prompt three, retained.", source="system"),
+            store("Agent note about the release checklist."),
+            store("Thinking trace about the index rebuild.", source="llm_thinking"),
+        ],
+        "ops": [
+            supersede("Agent note about the revised release checklist.",
+                      old_text="Agent note about the release checklist."),
+            supersede("System prompt one, revised.", old_text="System prompt one, retained."),
+        ],
+    },
+    # Traces off: no derived slots are read, but the invalidations still land.
+    "supersede-traces-off": {
+        "config": "memory:\n  traces:\n    enabled: false\n",
+        "seed": [
+            store("The queue depth limit is 64."),
+            trace_sql("The queue depth limit is 64.", "queue", "depth-limit"),
+        ],
+        "ops": [
+            supersede("The queue depth limit is 128.", old_text="The queue depth limit is 64."),
+        ],
+    },
+})
+
+
+# memory_reinstate (spec RI1-RI10): reviewed reinstatements of retirements the
+# Python daemon's own supersede wrote. The reviewer is a named principal
+# (PSEUDOLIFE_MCP_TOKENS); the singular token is the default principal.
+REVIEWER = ("Authorization", "Bearer tok-rev-w2e-0002")
+OP_A = "0f1e2d3c-4b5a-4968-8776-655443322110"
+OP_B = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+
+
+def reinstate(text, headers=(REVIEWER,), **kw) -> dict:
+    args = {"entry_id": f"@id:{text}", "operation_id": OP_A,
+            "expected_text_sha256": f"@sha:text:{text}",
+            "expected_source_sha256": f"@sha:source:{text}",
+            "expected_superseded_at": f"@sup:{text}",
+            "expected_superseded_by_text_sha256": f"@sha:by:{text}",
+            "evidence_packet_sha256": "ab" * 32, "reviewer_ids": ["reviewer-1", "Zoë"],
+            "reason": "the replacement was wrong"}
+    args.update(kw)
+    return {"op": "tool", "name": "memory_reinstate", "args": args, "headers": list(headers)}
+
+
+TTL = "The cache TTL is 300 seconds."
+SCENARIOS.update({
+    "reinstate": {
+        "config": None,
+        "env": {"PSEUDOLIFE_MCP_TOKENS": "tok-rev-w2e-0002:reviewer"},
+        "seed": [
+            store(TTL),
+            supersede("The cache TTL is 600 seconds.", old_text=TTL),
+            store("Backups run nightly at 02:00."),
+            trace_sql("Backups run nightly at 02:00.", "backups", "schedule"),
+            supersede("Backups run nightly at 03:00.", old_text="Backups run nightly at 02:00."),
+            store("The release train leaves on Tuesdays."),
+            store("The legacy importer is retired."),
+            dict(sql("UPDATE entries SET superseded_at = 1700000000.25, superseded_by_text = NULL "
+                     "WHERE text = 'The legacy importer is retired.'"), after_stop=True),
+        ],
+        "ops": [
+            # the default principal is refused before anything runs
+            reinstate(TTL, headers=()),
+            # request validation, in order
+            reinstate(TTL, entry_id=0),
+            reinstate(TTL, operation_id="not-a-uuid"),
+            reinstate(TTL, operation_id=OP_A.upper()),
+            reinstate(TTL, operation_id="{" + OP_A + "}"),
+            reinstate(TTL, expected_text_sha256="AB" * 32),
+            reinstate(TTL, expected_superseded_at="inf"),
+            reinstate(TTL, reviewer_ids=[]),
+            reinstate(TTL, reviewer_ids=["  "]),
+            reinstate(TTL, reason="   "),
+            # the target
+            reinstate(TTL, entry_id=999999),
+            reinstate(TTL, entry_id=99999999999999999999),
+            reinstate("The release train leaves on Tuesdays."),
+            reinstate("The legacy importer is retired."),
+            reinstate(TTL, expected_text_sha256="0" * 64),
+            reinstate("Backups run nightly at 02:00.", operation_id=OP_B),
+            # committed, then replayed, then a different request under the UUID
+            reinstate(TTL),
+            reinstate(TTL),
+            reinstate(TTL, reason="a different reason"),
+            # retired again by a correction: the replay reports it
+            supersede("The cache TTL is 900 seconds.", old_text=TTL),
+            reinstate(TTL),
+        ],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -1192,6 +1403,43 @@ def resolve_args(args: dict, dsn: str) -> dict:
                 row = c.execute("SELECT id FROM episodes WHERE title = %s "
                                 "ORDER BY started_at LIMIT 1", (title,)).fetchone()
             v = row[0] if row else "0" * 32
+        elif isinstance(v, str) and v.startswith(("@id:", "@idn:")):
+            if v.startswith("@idn:"):
+                _, n, text = v.split(":", 2)
+            else:
+                n, text = 0, v[len("@id:"):]
+            with psycopg.connect(dsn) as c:
+                rows = c.execute("SELECT id FROM entries WHERE text = %s ORDER BY id",
+                                 (text,)).fetchall()
+            v = rows[int(n)][0] if len(rows) > int(n) else 999999
+        elif isinstance(v, str) and v.startswith(("@sup:", "@sha:")):
+            # The text and source hashes read the first row with the text.
+            # The retirement prefers the first reinstatement decision's prior
+            # values for that row (a replay repeats its request), then the
+            # first retired row with the text; a live row yields values that
+            # cannot match.
+            import hashlib
+            if v.startswith("@sup:"):
+                field, text = "sup", v[len("@sup:"):]
+            else:
+                _, field, text = v.split(":", 2)
+            with psycopg.connect(dsn) as c:
+                row = c.execute("SELECT id, text, source FROM entries WHERE text = %s "
+                                "ORDER BY id LIMIT 1", (text,)).fetchone()
+                prior = c.execute(
+                    "SELECT prior_superseded_at, prior_superseded_by_text FROM "
+                    "entry_reinstatement_decisions WHERE entry_id = %s ORDER BY decided_at "
+                    "LIMIT 1", (row[0] if row else -1,)).fetchone()
+                retired = c.execute(
+                    "SELECT superseded_at, superseded_by_text FROM entries WHERE text = %s "
+                    "AND superseded_at IS NOT NULL ORDER BY id LIMIT 1", (text,)).fetchone()
+            retirement = prior or retired or (1.0, "")
+            if field == "sup":
+                v = retirement[0]
+            else:
+                value = {"text": row[1] if row else "", "source": row[2] if row else "",
+                         "by": retirement[1] or ""}[field]
+                v = hashlib.sha256(value.encode("utf-8")).hexdigest()
         elif isinstance(v, str) and v.startswith("@tomb:"):
             n = int(v.split(":")[1])
             with psycopg.connect(dsn) as c:
@@ -1514,14 +1762,16 @@ def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     normalize_records(a, b, stats)
     out = []
     va, vb = a.get("value"), b.get("value")
-    if isinstance(va, dict) and isinstance(vb, dict) and "surprise" in va and "surprise" in vb:
-        d = abs(float(va["surprise"]) - float(vb["surprise"]))
-        stats["response_surprise_max_diff"] = max(stats.get("response_surprise_max_diff", 0.0), d)
-        # The response is rounded to 4 dp, so one rounding unit is allowed
-        # on top of the stored tolerance; the decision (`reason`) stays exact.
-        if tol and d > tol["surprise_abs"] + 1e-4:
-            out.append(f"surprise: python {va['surprise']} vs rust {vb['surprise']}")
-        va["surprise"] = vb["surprise"] = "<surprise>"
+    for key in ("surprise", "new_memory_surprise"):
+        if isinstance(va, dict) and isinstance(vb, dict) and key in va and key in vb:
+            d = abs(float(va[key]) - float(vb[key]))
+            stats["response_surprise_max_diff"] = max(
+                stats.get("response_surprise_max_diff", 0.0), d)
+            # The response is rounded to 4 dp, so one rounding unit is allowed
+            # on top of the stored tolerance; the decision (`reason`) stays exact.
+            if tol and d > tol["surprise_abs"] + 1e-4:
+                out.append(f"{key}: python {va[key]} vs rust {vb[key]}")
+            va[key] = vb[key] = "<surprise>"
     out += w1a.diff_values(a, b)
     return out
 
@@ -1686,7 +1936,8 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 
 # Tables the write path touches: recorded every step (the rest only at init).
 WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions", "facts", "entities",
-                "outcome_signals", "world_facts")
+                "outcome_signals", "world_facts", "memory_trace_invalidations",
+                "entry_reinstatement_decisions")
 
 
 def pack(state: dict, full: bool) -> dict:

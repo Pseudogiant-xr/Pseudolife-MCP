@@ -10,6 +10,7 @@ mod bank;
 mod board;
 mod config;
 mod contradiction;
+mod correction_tools;
 mod dream;
 mod embed;
 mod embedding_math;

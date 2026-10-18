@@ -106,6 +106,12 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
 /// `RetentionPolicy.source_weighted_score` under `balanced`
 /// (`protocols.py:84-103`, `retention.py:37-47`).
 fn retention_score(e: &Entry, now: f64, boost: f64) -> f64 {
+    retention_score_as(e, e.superseded_at.is_some(), now, boost)
+}
+
+/// [`retention_score`] with the entry's retirement given: a correction
+/// chooses its eviction victim with its targets already retired.
+fn retention_score_as(e: &Entry, superseded: bool, now: f64, boost: f64) -> f64 {
     let age = (now - e.ts).max(1.0);
     let balanced = e.access_count.load(Ordering::Relaxed) as f64 / age + e.surprise_value * 0.1;
     let weight = match e.source.as_str() {
@@ -116,7 +122,7 @@ fn retention_score(e: &Entry, now: f64, boost: f64) -> f64 {
         _ => 1.0,
     };
     let mut score = (balanced + 1.0) * weight + boost * (e.reinforcements as f64).ln_1p();
-    if e.superseded_at.is_some() {
+    if superseded {
         score *= 0.05;
     }
     score
@@ -175,53 +181,98 @@ async fn delete_evicted(
     client: &tokio_postgres::Client,
     e: &Entry,
 ) -> Result<(), tokio_postgres::Error> {
-    let record = json!({
-        "count": 1,
-        "last_at": episodes::now(),
-        "last_entry_id": e.id,
-        "last_source": e.source,
-        "last_superseded": e.superseded_at.is_some(),
-    });
+    let superseded = e.superseded_at.is_some();
     txn::run(client, |c| async move {
-        c.execute("DELETE FROM entries WHERE id = $1", &[&e.id])
-            .await?;
-        c.execute(
-            "INSERT INTO meta (key, value) VALUES ('capacity_true_drops', $1) \
-             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value \
-             || jsonb_build_object('count', CASE \
-             WHEN jsonb_typeof(meta.value->'count') IS DISTINCT FROM 'number' THEN 0 \
-             WHEN (meta.value->>'count')::numeric >= 0 \
-             AND (meta.value->>'count')::numeric < 9223372036854775807 \
-             THEN floor((meta.value->>'count')::numeric)::bigint \
-             ELSE 0 END + 1)",
-            &[&record],
-        )
-        .await
-        .map(|_| ())
+        delete_evicted_rows(c, e.id, &e.source, superseded).await
     })
     .await
 }
 
-struct NewEntry<'a> {
-    text: &'a str,
-    row: Vec<f32>,
-    source: &'a str,
-    tags: Vec<String>,
-    session_key: Option<&'a str>,
-    attribution: Option<&'a str>,
-    authority: Option<String>,
-    distortion: Option<String>,
+/// The statements of [`delete_evicted`], on a transaction the caller holds.
+/// `superseded` is the victim's retirement as the caller staged it.
+pub(crate) async fn delete_evicted_rows(
+    c: &tokio_postgres::Client,
+    id: i64,
+    source: &str,
+    superseded: bool,
+) -> Result<(), tokio_postgres::Error> {
+    let record = json!({
+        "count": 1,
+        "last_at": episodes::now(),
+        "last_entry_id": id,
+        "last_source": source,
+        "last_superseded": superseded,
+    });
+    c.execute("DELETE FROM entries WHERE id = $1", &[&id])
+        .await?;
+    c.execute(
+        "INSERT INTO meta (key, value) VALUES ('capacity_true_drops', $1) \
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value \
+         || jsonb_build_object('count', CASE \
+         WHEN jsonb_typeof(meta.value->'count') IS DISTINCT FROM 'number' THEN 0 \
+         WHEN (meta.value->>'count')::numeric >= 0 \
+         AND (meta.value->>'count')::numeric < 9223372036854775807 \
+         THEN floor((meta.value->>'count')::numeric)::bigint \
+         ELSE 0 END + 1)",
+        &[&record],
+    )
+    .await
+    .map(|_| ())
 }
 
-/// `ContinuumMemorySystem._store` (W1.4-W1.10): `(stored, surprise)`.
-async fn cms_store(
+pub(crate) struct NewEntry<'a> {
+    pub text: &'a str,
+    pub row: Vec<f32>,
+    pub source: &'a str,
+    pub tags: Vec<String>,
+    pub session_key: Option<&'a str>,
+    pub attribution: Option<&'a str>,
+    pub authority: Option<String>,
+    pub distortion: Option<String>,
+}
+
+/// What `ContinuumMemorySystem._store` decides before its write-through.
+pub(crate) enum Admit {
+    /// The meta filter refused it (`(False, 0.0)`, no surprise recorded).
+    Filtered,
+    /// The surprise gate refused it; the per-band surprises still count.
+    BelowGate {
+        overall: f64,
+        per_band: Vec<f64>,
+    },
+    Admitted(Box<Admission>),
+}
+
+/// An admitted entry, fully stamped, not yet written or resident.
+pub(crate) struct Admission {
+    pub entry: Entry,
+    /// The band-normalized row the resident matrix holds.
+    pub unit: Vec<f32>,
+    /// The encoder's row, as the insert writes it.
+    pub row: Vec<f32>,
+    pub overall: f64,
+    pub per_band: Vec<f64>,
+    /// The first band's capacity victim, a resident index.
+    pub victim: Option<usize>,
+    /// The coreference anchor this entry sets (`_last_entity_seen`).
+    pub anchor: Option<String>,
+}
+
+/// `ContinuumMemorySystem._store` up to its write-through (W1.4-W1.8):
+/// the meta filter, the per-band surprise, the contradiction scan, the gate
+/// (unless `bypass`, `bypass_surprise_gate`), the capacity victim and the
+/// stamped entry. Nothing is written and nothing resident changes. The
+/// victim is chosen as if every row in `retiring` were already retired.
+pub(crate) async fn admit(
     ready: &Ready,
     cfg: &MemoryConfig,
-    ws: &mut WriteState,
+    ws: &WriteState,
     new: NewEntry<'_>,
-) -> Result<(bool, f64), ToolError> {
+    bypass: bool,
+    retiring: &[i64],
+) -> Result<Admit, ToolError> {
     if cfg.meta_filter_enabled && crate::meta_filter::is_meta_statement(new.text, new.source) {
-        return Ok((false, 0.0));
+        return Ok(Admit::Filtered);
     }
     // The band normalizes both the stored rows and the query again
     // (band.py:104-106, 207-214), on top of the encoder's own normalization.
@@ -239,20 +290,15 @@ async fn cms_store(
     .await
     .map_err(|e| ToolError::Internal(e.to_string()))?;
     let overall = found.per_band.iter().copied().fold(f64::INFINITY, f64::min);
-    for (band, s) in cfg.bands.iter().zip(&found.per_band) {
-        let h = ws.surprise_history.entry(band.clone()).or_default();
-        h.push(*s);
-        if h.len() > MAX_HISTORY {
-            h.drain(..h.len() - MAX_HISTORY);
-        }
-    }
-    if !found.contradiction && overall < cfg.surprise_threshold {
-        return Ok((false, overall));
+    if !bypass && !found.contradiction && overall < cfg.surprise_threshold {
+        return Ok(Admit::BelowGate {
+            overall,
+            per_band: found.per_band,
+        });
     }
 
-    let client = ready.storage.client();
-    // Capacity first (band.py:130-132): the victim is chosen and deleted
-    // before the new entry exists.
+    // Capacity first (band.py:130-132): the victim is chosen before the new
+    // entry exists.
     let band0 = cfg.bands[0].clone();
     let cap = cfg
         .band_specs
@@ -264,12 +310,17 @@ async fn cms_store(
         let held: Vec<usize> = (0..bank.entries.len())
             .filter(|&i| bank.entries[i].band == band0)
             .collect();
+        let score = |i: usize, t: f64| {
+            let e = &bank.entries[i];
+            let superseded = e.superseded_at.is_some() || retiring.contains(&e.id);
+            retention_score_as(e, superseded, t, cfg.retention_boost)
+        };
         (held.len() as i64 >= cap && !held.is_empty()).then(|| {
             let t = episodes::now();
             let mut worst = held[0];
-            let mut worst_score = retention_score(&bank.entries[worst], t, cfg.retention_boost);
+            let mut worst_score = score(worst, t);
             for &i in &held[1..] {
-                let s = retention_score(&bank.entries[i], t, cfg.retention_boost);
+                let s = score(i, t);
                 if s < worst_score {
                     worst = i;
                     worst_score = s;
@@ -278,19 +329,6 @@ async fn cms_store(
             worst
         })
     };
-    if let Some(idx) = victim {
-        let gone = ready.bank.write().expect("bank lock").remove(idx);
-        crate::read::stats::record_true_drop();
-        // Only the last band's overflow is a true drop; a deeper band would
-        // take the entry (not ported: see divergences).
-        if let Err(e) = delete_evicted(client, &gone).await {
-            eprintln!("evict write-through failed: {e}");
-        }
-        eprintln!(
-            "capacity eviction true drop: entry_id={} source={:?}",
-            gone.id, gone.source
-        );
-    }
 
     let mut entry = Entry {
         band: band0.clone(),
@@ -319,48 +357,114 @@ async fn cms_store(
             entry.episode_title = Some(ep.title.clone());
         }
     }
-    if let Some(s) = found
+    let anchor = found
         .slots
         .iter()
         .find(|s| s.attribute == "name" || s.attribute == "type")
-    {
-        ws.last_entity_seen = Some(s.entity.clone());
+        .map(|s| s.entity.clone());
+    Ok(Admit::Admitted(Box::new(Admission {
+        entry,
+        unit,
+        row: new.row,
+        overall,
+        per_band: found.per_band,
+        victim,
+        anchor,
+    })))
+}
+
+/// Append one store's per-band surprises to `_surprise_history`.
+pub(crate) fn record_surprise(ws: &mut WriteState, cfg: &MemoryConfig, per_band: &[f64]) {
+    for (band, s) in cfg.bands.iter().zip(per_band) {
+        let h = ws.surprise_history.entry(band.clone()).or_default();
+        h.push(*s);
+        if h.len() > MAX_HISTORY {
+            h.drain(..h.len() - MAX_HISTORY);
+        }
     }
-    let tags = Value::from(entry.tags.clone());
-    let slot_rows = Value::from(entry.slots.clone());
-    let surprise32 = overall as f32;
+}
+
+/// The write-through insert (`storage.insert_entry(entry_to_row(entry))`),
+/// on a transaction the caller holds: the new row's id.
+pub(crate) async fn insert_entry_row(
+    c: &tokio_postgres::Client,
+    e: &Entry,
+    row: &Vec<f32>,
+) -> Result<i64, tokio_postgres::Error> {
+    let tags = Value::from(e.tags.clone());
+    let slot_rows = Value::from(e.slots.clone());
+    let r = c
+        .query_one(
+            "INSERT INTO entries (band, text, embedding, surprise, ts, access_count, \
+             source, superseded_at, superseded_by_text, last_logical_turn, episode_id, \
+             episode_title, tags, slots, authority, distortion_tolerance, dream_state) \
+             VALUES ($1, $2, $3::real[]::vector, $4, $5, 0, $6, NULL, NULL, NULL, $7, \
+             $8, $9, $10, $11, $12, 'pending') RETURNING id",
+            &[
+                &e.band,
+                &e.text,
+                row,
+                &e.surprise,
+                &e.ts,
+                &e.source,
+                &e.episode_id,
+                &e.episode_title,
+                &tags,
+                &slot_rows,
+                &e.authority,
+                &e.distortion_tolerance,
+            ],
+        )
+        .await?;
+    Ok(r.get(0))
+}
+
+/// `ContinuumMemorySystem._store` (W1.4-W1.10): `(stored, surprise)`.
+async fn cms_store(
+    ready: &Ready,
+    cfg: &MemoryConfig,
+    ws: &mut WriteState,
+    new: NewEntry<'_>,
+) -> Result<(bool, f64), ToolError> {
+    let adm = match admit(ready, cfg, ws, new, false, &[]).await? {
+        Admit::Filtered => return Ok((false, 0.0)),
+        Admit::BelowGate { overall, per_band } => {
+            record_surprise(ws, cfg, &per_band);
+            return Ok((false, overall));
+        }
+        Admit::Admitted(adm) => adm,
+    };
+    record_surprise(ws, cfg, &adm.per_band);
+    let client = ready.storage.client();
+    if let Some(idx) = adm.victim {
+        let gone = ready.bank.write().expect("bank lock").remove(idx);
+        crate::read::stats::record_true_drop();
+        // Only the last band's overflow is a true drop; a deeper band would
+        // take the entry (not ported: see divergences).
+        if let Err(e) = delete_evicted(client, &gone).await {
+            eprintln!("evict write-through failed: {e}");
+        }
+        eprintln!(
+            "capacity eviction true drop: entry_id={} source={:?}",
+            gone.id, gone.source
+        );
+    }
+    let Admission {
+        mut entry,
+        unit,
+        row,
+        overall,
+        anchor,
+        ..
+    } = *adm;
+    if let Some(a) = anchor {
+        ws.last_entity_seen = Some(a);
+    }
     let id: i64 = {
-        let e = &entry;
-        let row = &new.row;
-        let (tags, slot_rows) = (&tags, &slot_rows);
-        txn::run(client, |c| async move {
-            let r = c
-                .query_one(
-                    "INSERT INTO entries (band, text, embedding, surprise, ts, access_count, \
-                     source, superseded_at, superseded_by_text, last_logical_turn, episode_id, \
-                     episode_title, tags, slots, authority, distortion_tolerance, dream_state) \
-                     VALUES ($1, $2, $3::real[]::vector, $4, $5, 0, $6, NULL, NULL, NULL, $7, \
-                     $8, $9, $10, $11, $12, 'pending') RETURNING id",
-                    &[
-                        &e.band,
-                        &e.text,
-                        row,
-                        &surprise32,
-                        &e.ts,
-                        &e.source,
-                        &e.episode_id,
-                        &e.episode_title,
-                        tags,
-                        slot_rows,
-                        &e.authority,
-                        &e.distortion_tolerance,
-                    ],
-                )
-                .await?;
-            Ok::<_, tokio_postgres::Error>(r.get(0))
-        })
-        .await
-        .map_err(|e| ToolError::Internal(format!("entry insert failed: {e}")))?
+        let (e, row) = (&entry, &row);
+        txn::run(client, |c| async move { insert_entry_row(c, e, row).await })
+            .await
+            .map_err(|e| ToolError::Internal(format!("entry insert failed: {e}")))?
     };
     entry.id = id;
     debug_assert_eq!(unit.len(), ready.bank.read().expect("bank lock").dim);
