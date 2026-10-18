@@ -71,7 +71,8 @@ Normalizers (declared, spec "Free for W1 and W2"):
   which renamed ids change), except that entry ids themselves must match.
 
 Arguments may name rows by content, resolved on each side's own bank
-just before the call: ``@id:<text>`` (the first row with that text),
+just before the call: ``@id:<text>`` (the first row with that text, or for
+a deleted row the entry of its first reinstatement decision),
 ``@idn:<n>:<text>`` (the n-th, from 0), and for the first RETIRED row with
 that text ``@sup:<text>`` (its ``superseded_at``) and ``@sha:<field>:<text>``
 (the SHA-256 of its ``text``, ``source`` or ``by``, ``superseded_by_text``).
@@ -183,12 +184,13 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # by the lessons scenario.
            "mcp-lesson-search-no-graph-resolve", "mcp-lesson-search-no-log",
            "mcp-history-chain-no-lessons",
-           # memory_supersede and memory_reinstate (spec CO1-CO10, RI1-RI10):
+           # memory_supersede and memory_reinstate (spec CO1-CO10, RI1-RI9):
            # caught by the supersede-* and reinstate scenarios.
            "mcp-supersede-text-first-live", "mcp-supersede-derived-current-only",
            "mcp-supersede-surprise-gate", "mcp-supersede-no-trace-invalidation",
            "mcp-supersede-resident-stale", "mcp-reinstate-default-principal",
-           "mcp-reinstate-ignore-invalidations", "mcp-reinstate-resident-stale"]
+           "mcp-reinstate-ignore-invalidations", "mcp-reinstate-resident-stale",
+           "mcp-reinstate-no-mirror"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1199,7 +1201,7 @@ def supersede(new_text, headers=(), **kw) -> dict:
 
 
 # Scenarios whose operations may include ``external`` writes.
-EXTERNAL_WRITES = {"supersede-branches"}
+EXTERNAL_WRITES = {"supersede-branches", "reinstate"}
 
 
 def external(statement: str) -> dict:
@@ -1234,6 +1236,10 @@ SUPERSEDE_SEED = [
     trace_sql("Payments DB host is 10.0.0.5 per the runbook.", "payments-db", "host"),
     trace_sql("Payments DB host is 10.0.0.5 per the runbook.", "home-lab", "hosts"),
     trace_sql("Payments DB host is 10.0.0.5 per the runbook.", "old-box", "ip"),
+    store("Omega note behind many derived slots."),
+    sql("INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at) "
+        "SELECT 'slot-' || lpad(g::text, 3, '0'), 'attr', e.id, 1000.0 FROM entries e, "
+        "generate_series(1, 52) AS g WHERE e.text = 'Omega note behind many derived slots.'"),
     store("Delta duplicated note."),
     store("Epsilon row to vanish."),
     store("Zeta row retired behind the daemon's back."),
@@ -1267,6 +1273,9 @@ SCENARIOS.update({
             # the derived slots, live first, the cap's totals
             supersede("Payments DB host is 10.0.0.6 per the runbook.",
                       old_text="Payments DB host is 10.0.0.5 per the runbook."),
+            # fifty-two derived slots: the first fifty, the total, truncated
+            supersede("Omega note behind fewer derived slots.",
+                      old_text="Omega note behind many derived slots."),
             # refusals: nothing changes
             supersede("x", old_text="Gamma replacement note.", entry_id=1),
             supersede("x"),
@@ -1337,12 +1346,16 @@ SCENARIOS.update({
 })
 
 
-# memory_reinstate (spec RI1-RI10): reviewed reinstatements of retirements the
+# memory_reinstate (spec RI1-RI9): reviewed reinstatements of retirements the
 # Python daemon's own supersede wrote. The reviewer is a named principal
 # (PSEUDOLIFE_MCP_TOKENS); the singular token is the default principal.
 REVIEWER = ("Authorization", "Bearer tok-rev-w2e-0002")
 OP_A = "0f1e2d3c-4b5a-4968-8776-655443322110"
 OP_B = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+OP_C = "2b3c4d5e-6f70-4b8c-9dae-1f2a3b4c5d6e"
+OP_D = "3c4d5e6f-7081-4c9d-aebf-2a3b4c5d6e7f"
+OP_E = "4d5e6f70-8192-4dae-bfc0-3b4c5d6e7f80"
+OP_F = "5e6f7081-92a3-4ebf-c0d1-4c5d6e7f8091"
 
 
 def reinstate(text, headers=(REVIEWER,), **kw) -> dict:
@@ -1372,6 +1385,12 @@ SCENARIOS.update({
             store("The legacy importer is retired."),
             dict(sql("UPDATE entries SET superseded_at = 1700000000.25, superseded_by_text = NULL "
                      "WHERE text = 'The legacy importer is retired.'"), after_stop=True),
+            store("The proxy listens on port 3128."),
+            # entry 8: deleted behind the daemons' backs below
+            store("Feature flags live in the config service."),
+            store("The audit log rotates weekly."),
+            sql("UPDATE entries SET superseded_at = 1700000000, superseded_by_text = 'older text' "
+                "WHERE text = 'The audit log rotates weekly.'", after_stop=True),
         ],
         "ops": [
             # the default principal is refused before anything runs
@@ -1381,6 +1400,9 @@ SCENARIOS.update({
             reinstate(TTL, operation_id="not-a-uuid"),
             reinstate(TTL, operation_id=OP_A.upper()),
             reinstate(TTL, operation_id="{" + OP_A + "}"),
+            reinstate(TTL, operation_id="urn:uuid:" + OP_A),
+            reinstate(TTL, operation_id=OP_A.replace("-", "")),
+            reinstate(TTL, operation_id="0x" + OP_A.replace("-", "")[2:]),
             reinstate(TTL, expected_text_sha256="AB" * 32),
             reinstate(TTL, expected_superseded_at="inf"),
             reinstate(TTL, reviewer_ids=[]),
@@ -1399,6 +1421,31 @@ SCENARIOS.update({
             reinstate(TTL, reason="a different reason"),
             # retired again by a correction: the replay reports it
             supersede("The cache TTL is 900 seconds.", old_text=TTL),
+            reinstate(TTL),
+            # an integral retirement time: the fingerprint carries 1700000000.0
+            reinstate("The audit log rotates weekly.", operation_id=OP_F,
+                      expected_superseded_at=1700000000),
+            # the target's row is mirrored before the checks: retired, then
+            # inserted, behind the daemons' backs
+            external("UPDATE entries SET superseded_at = 1700000002.5, "
+                     "superseded_by_text = 'retired elsewhere' "
+                     "WHERE text = 'The proxy listens on port 3128.'"),
+            reinstate("The proxy listens on port 3128.", operation_id=OP_C),
+            external("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, "
+                     "source, superseded_at, superseded_by_text, tags, slots, dream_state) "
+                     "SELECT band, 'Inserted elsewhere, then retired.', embedding, surprise, "
+                     "ts + 1, 0, 'agent', 1700000003.5, 'replacement elsewhere', '[]'::jsonb, "
+                     "'[]'::jsonb, 'pending' FROM entries "
+                     "WHERE text = 'The proxy listens on port 3128.'"),
+            reinstate("Inserted elsewhere, then retired.", operation_id=OP_D),
+            # deleted: the mirror drops the resident entry, which then cannot
+            # be corrected either
+            external("DELETE FROM entries WHERE text = 'Feature flags live in the config service.'"),
+            reinstate("Feature flags live in the config service.", operation_id=OP_E, entry_id=8),
+            supersede("Feature flags live in the deploy repo.",
+                      old_text="Feature flags live in the config service."),
+            # a replay after the row is gone reports it missing
+            external(f"DELETE FROM entries WHERE text = '{TTL}'"),
             reinstate(TTL),
         ],
     },
@@ -1437,9 +1484,15 @@ def resolve_args(args: dict, dsn: str) -> dict:
                 _, n, text = v.split(":", 2)
             else:
                 n, text = 0, v[len("@id:"):]
+            import hashlib
             with psycopg.connect(dsn) as c:
                 rows = c.execute("SELECT id FROM entries WHERE text = %s ORDER BY id",
                                  (text,)).fetchall()
+                if not rows:
+                    rows = c.execute(
+                        "SELECT entry_id FROM entry_reinstatement_decisions "
+                        "WHERE entry_text_sha256 = %s ORDER BY decided_at LIMIT 1",
+                        (hashlib.sha256(text.encode("utf-8")).hexdigest(),)).fetchall()
             v = rows[int(n)][0] if len(rows) > int(n) else 999999
         elif isinstance(v, str) and v.startswith(("@sup:", "@sha:")):
             # The text and source hashes read the first row with the text.
@@ -1452,19 +1505,29 @@ def resolve_args(args: dict, dsn: str) -> dict:
                 field, text = "sup", v[len("@sup:"):]
             else:
                 _, field, text = v.split(":", 2)
+            text_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
             with psycopg.connect(dsn) as c:
                 row = c.execute("SELECT id, text, source FROM entries WHERE text = %s "
                                 "ORDER BY id LIMIT 1", (text,)).fetchone()
+                if row is None:
+                    # A deleted row resolves through its first decision (the
+                    # audit has no foreign key): a replay repeats its request.
+                    gone = c.execute(
+                        "SELECT entry_id, entry_source_sha256 FROM "
+                        "entry_reinstatement_decisions WHERE entry_text_sha256 = %s "
+                        "ORDER BY decided_at LIMIT 1", (text_sha,)).fetchone()
                 prior = c.execute(
                     "SELECT prior_superseded_at, prior_superseded_by_text FROM "
                     "entry_reinstatement_decisions WHERE entry_id = %s ORDER BY decided_at "
-                    "LIMIT 1", (row[0] if row else -1,)).fetchone()
+                    "LIMIT 1", (row[0] if row else (gone[0] if gone else -1),)).fetchone()
                 retired = c.execute(
                     "SELECT superseded_at, superseded_by_text FROM entries WHERE text = %s "
                     "AND superseded_at IS NOT NULL ORDER BY id LIMIT 1", (text,)).fetchone()
             retirement = prior or retired or (1.0, "")
             if field == "sup":
                 v = retirement[0]
+            elif row is None and gone is not None and field in ("text", "source"):
+                v = text_sha if field == "text" else gone[1]
             else:
                 value = {"text": row[1] if row else "", "source": row[2] if row else "",
                          "by": retirement[1] or ""}[field]
