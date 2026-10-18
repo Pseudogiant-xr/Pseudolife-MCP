@@ -1,9 +1,9 @@
 {
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
-  "version": "0.18.2",
+  "version": "0.19.0",
   "schema": 56,
-  "verified": "2026-10-17"
+  "verified": "2026-10-18"
  },
  "groups": {
   "clients": {
@@ -1131,6 +1131,7 @@
     "console_snapshot uses a repeatable-read, read-only transaction over roster, unsettled leases, principal-visible pending counts and a bounded metadata-only event timeline; it never receives mail or settles a lease",
     "v48: to, reply_to and ack's message ids resolve from a unique prefix of 8-31 lowercase hex characters (is_id_prefix; ambiguous_recipient / ambiguous_message_id / ambiguous_reply carry the candidates' distinguishing prefixes in CoordinationError.detail; to resolves among unrevoked addresses, reply_to and ack among the caller's own mail); to project:<name> or all reaches every attached non-idle peer but the sender (the adapter_available rows of list_agents, _fanout_rows), at most FANOUT_MAX (50), atomically under one request id whose fingerprint covers the resolved address, one row and one send event (payload fanout: {to, recipients}) with its own salt per recipient, counted once against SEND_RATE (distinct request ids); the sender and every recipient are locked in id order after an unlocked read of the set, which is re-read under the locks; send receipts carry recipient_agent_id, the stored wake decision and a path (live for an attached wake-enabled peer, else pull); resolve_agent_id serves the operator CLIs (export --agent against addresses and the log, rebind --agent among registered addresses, revoked included)",
     "Conservative experiment bounds: 8 KB bodies, 256 pending, 60 sends/minute, 24h bodies, 7-day request keys",
+    "_txn raises CommitOutcomeUnknown (an OperationalError subclass) when COMMIT was sent but no definite answer came back, so lease break and lease delegate say the change may have been committed instead of claiming nothing changed",
     "The coordination_hlc_highwater meta row only ever moves forward (numeric compare), so pruning mail cannot regress mailbox stamps",
     "Live delivery is bounded to MAX_ATTEMPTS (3) per message across attachments; the adapter's receive skips exhausted mail, an explicit receive still returns it",
     "prune() removes an address with no retained message once it has had neither its own activity nor a lease for seven days, or one hour when registered resumable:false; a heartbeat renews the lease but is activity only with active:true, and a re-attach under the row's own attachment_id is lease recovery, not activity; list_agents shows peers active within ACTIVE_WINDOW (ATTACHED_IDLE_WINDOW, 3 h, while leased), leased first, stamps each with status_set_at/status_age/status_stale (newest register or status update in the audit log, stale past STATUS_STALE_AFTER = 2 h) and counts the rest as idle_omitted",

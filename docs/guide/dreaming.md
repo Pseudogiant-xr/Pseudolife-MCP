@@ -955,7 +955,8 @@ proposal already joins the pair (so a reject reopened by a new link's
 evidence change never files a second one). A filing that fails is logged
 and never undoes the reject. The link judge then settles the proposal at
 its own gates; the merge judge never writes an edge, and a shadow verdict
-files nothing. A row whose first verdict sat
+files nothing. Untyped `related-to` proposals filed before 2026-10-17 stay
+in the Review queue until someone rejects them. A row whose first verdict sat
 below that gate gets a **second opinion** on a later sweep
 (`judge_second_opinion`, optionally `judge_second_model` — both Console knobs) — a fresh batch,
 so an independent sample. The second opinion is asked on the first

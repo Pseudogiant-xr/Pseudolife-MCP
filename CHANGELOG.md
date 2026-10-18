@@ -6,6 +6,101 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-18 — The review-queue judges can settle their own disagreements and report how often they agree with you, the merge judge stops filling the link queue with untyped proposals, and lease break says when a COMMIT's answer was lost
+
+### Added (2026-10-18 — a judge-agreement report, the number a shadow judge mode is promoted on)
+- A judge mode in `shadow` records votes and applies nothing, and nothing scored those votes against the decisions that followed: the v56 link second opinion and merge tiebreak shipped in shadow with no path out of it, and the merge second opinion before them was promoted on a ladder panel from another month. `dream_status` (`memory_dream(action="status")`, `GET /api/dream/status`) now carries `review_queue.judge_agreement`: every recorded vote scored against the decision a human (Console) or agent (`memory_graph_review`) later took on the same row, over the last 90 days. Per queue (`merge`, `junk`, `link`) and opinion (`judge`, `judge2`, `judge3`): `voted`, `agree`, `abstain`, `precision` and `by_verdict`; `agreed_two` (merge and link) scores the rows whose first two opinions agreed from distinct models at the two-vote gates, and `majority_three` the rows whose 2-of-3 majority cleared its gate — what `auto` would have applied. `scored` counts the decisions read and `labels` who took them; decisions the judges applied themselves (`dream-judge`, `dream-auto`) are not labels. "Distinct models" follows the live gates: a pair's two votes carry the model each endpoint reported serving (its `<opinion>_served_model` column; rows judged before v56 stamped the first opinion's have none and are not paired, though the live gate may still apply them from the judging memo until `review_rejudge` re-asks them), the names differ and so do the configured stamps; a majority needs both earlier served names known and a third served by a model other than every name heard. The accept side also replays the live accept path's row-shaped refusals from the audit row (an analyzer-filed proposal, a name veto, a variant conflict: left for a human whatever the votes say). Not replayed: the `low_differential` exclusion (computed from the evidence at judging time), so the accept side of `agreed_two` and `majority_three` counts a few rows `auto` would skip; the dismissed-pair check (`auto` closes such a row as a reject, and a human reject dismisses the pair itself, so it cannot be told apart afterwards); and a decided link row goes with either endpoint when a later merge or junk delete takes it, so links are scored while both endpoints exist. The block never fails the status call (a failure is an `error` field); `MemoryService.judge_agreement(days=...)` widens or narrows the window.
+- Every merge and junk decision — accept, reject, keep, the dream's unattended junk delete — now copies the proposal's judge votes onto its FK-free audit row first, into the `merge_decisions.votes` column schema v56 added for it: per opinion the verdict, confidence, model, served model (when the endpoint reported one) and the relation a relate vote named. An accepted merge CASCADE-deletes its proposal row with the votes on it, which is why the audit row holds them. NULL = a decision from before this release, or one on a row no judge had seen; neither is scored. Link decisions leave their votes on the `edge_proposals` row and are scored from there (links decided before this build carry no `decided_by` and are counted as `unattributed_links`, not scored).
+- Link decisions are attributed. The Console's `accept-proposal` / `reject-proposal` routes and `memory_graph_review`'s `accept_link` / `reject_link` settled a link with no `decided_by` (so the report could score none of them); they now record `human` (the Console's default, or the `decided_by` it sends) and `agent`, and the dream's untyped-edge retype pass names its rejects `dream-auto`. Rows decided before this build keep NULL and are reported as `unattributed_links`, not read as a human's.
+- The `/dream` command reports the number beside the queue counts while a judge mode is in `shadow`; the deep-dream runbook names it as the promotion step.
+
+### Added (2026-10-17 — the Rust daemon serves memory_stats)
+
+- The Rust daemon's MCP endpoint now answers `memory_stats` as the Python daemon does: band sizes, capacities and hit rates, the capacity warning, capacity drops, retrieval-log health, the read audit and graduation candidates. Swallowed telemetry failures are now counted for it instead of only logged.
+
+### Added (2026-10-17 — the Rust daemon serves memory_set_add and memory_set_remove)
+
+- The Rust daemon's MCP endpoint now answers `memory_set_add` and `memory_set_remove` as the Python daemon does, with the same database changes: a member is added, or confirmed when it repeats one (same text or a near-identical embedding); a scalar at the slot converts to a set once, recording the labels and freshness class the conversion drops, unless it is a number-led total, which is kept and the add parked as a contender (or the total confirmed); a slot holding 100 members refuses further adds; a removal retracts a member and keeps its row for audit. Refusals carry the same notes, and the subject gets its graph node unless the name looks like an extraction artifact.
+
+### Added (2026-10-17 — the Rust daemon serves memory_recent)
+
+- The Rust daemon's MCP endpoint now answers `memory_recent` as the Python daemon does: the newest stored memories first, with the same filters, compact entries by default and full records with `verbose`.
+
+### Added (2026-10-17 — the Rust daemon serves memory_get)
+
+- The Rust daemon's MCP endpoint now answers `memory_get` as the Python daemon does: the stored memory with the facts it formed, a gentle reinforcement (its access count rises), credit to the search that served it in the same session, and `replaced_by` for a superseded memory.
+
+### Added (2026-10-17 — the Rust daemon serves memory_fact_set)
+
+- The Rust daemon's MCP endpoint now answers `memory_fact_set` as the Python daemon does, with the same database changes: a new value inserts, a restatement confirms and reinforces, a shorter echo of the standing value confirms it, a newer equal-or-stronger value supersedes (a user correction also records a correction signal), and a weaker or less confident one is parked as a contender. The subject gets its graph node unless the name looks like an extraction artifact, and `"auto"` freshness follows the entity's kind. `memory.cortex.protect_provenance`, `supersede_confidence_margin`, `reinforce_rate` and `memory.lessons.enabled` are read.
+
+### Added (2026-10-17 — the Rust daemon serves memory_fact_resolve)
+
+- The Rust daemon's MCP endpoint now answers `memory_fact_resolve` as the Python daemon does, with the same database changes: accepting a parked contender makes it the slot's current value (the old value kept as superseded history, the contender gaining the user tier and a fresh ordering stamp), and rejecting it retires the contender and keeps the current value. A slot with nothing parked answers `no_contender`; accepting at a slot that has since become a set answers `slot_holds_set`, while rejecting there is still allowed.
+
+### Added (2026-10-17 — the Rust daemon serves memory_fact_get)
+
+- The Rust daemon's MCP endpoint now answers `memory_fact_get` as the Python daemon does: the current value at an (entity, attribute) slot, found through the entity's graph aliases when the name misses, set-valued slots with their removed members, contenders, nearby slots for an empty one, the correction hint and the re-verify warning, compact unless `verbose`.
+
+### Fixed (2026-10-17 — the native lease break and lease delegate no longer claim nothing changed when COMMIT's answer was lost)
+
+- The Rust shim's native `pseudolife-mcp lease break` and `lease delegate` (and the deprecated `lease designate`) now match the Python fix: when COMMIT is answered with a FATAL or PANIC, or not at all, they print ``<verb> lost the answer to its COMMIT (PostgreSQL session ended); it may have been committed: run `pseudolife-mcp lease list` before retrying`` and exit 1, instead of `<verb> failed (PostgreSQL transaction failed); nothing was changed`. Errors before COMMIT, and an ERROR the server returned at COMMIT, keep the certain line. The CLI differential harness's `break-commit-lost` and `delegate-commit-lost` cases expect the new line, a new `delegate-commit-refused` case pins the certain line for an ERROR at COMMIT, and two new source mutants guard each side of the boundary.
+
+### Fixed (2026-10-17 — the merge judge stops filling the link queue with untyped related-to proposals)
+- Since 2026-09-30 an automatic merge reject whose vote names a relation
+  files that relation as a link proposal. On the live bank on 2026-10-17,
+  381 of the 435 pending link proposals came from that path, 274 of them the
+  untyped `related-to`, and the link judge reached its 0.8 gate on none of
+  the 435, so they only accumulated in the review queue. The path now files
+  typed relations only (`part-of`, `implements`, `uses` and the rest);
+  a `related-to` vote still rejects the merge but files nothing, and
+  when the other opinion named a typed relation, that one is filed.
+
+### Fixed (2026-10-17 — mutant controls no longer fail on a reused target dir)
+
+- The CLI harness's mutant control (`python rust/cli_harness --mutants`) now keeps its copy of `rust/` under `$CARGO_TARGET_DIR/mutant-src` exact: files and directories the checkout no longer has are removed before each sync. A target dir reused across master moves had kept a stale `shim/src/cli/doctor.rs` beside the new `doctor/mod.rs`, so every mutant build failed with rustc E0761 and was reported as "mutant build failed".
+
+### Added (2026-10-17 — a second opinion for the link judge and a tiebreak for split merge votes, both in shadow)
+- The review queue kept growing because two judge results never settled anything: the link judge applies a single vote only at confidence 0.8, which none of the 435 pending link proposals on the live bank reached, and a merge proposal whose two opinions disagreed (67 rows that day) waited for a human. Both now get one more vote. Both new modes default to `shadow`: the votes are recorded on the row and shown in the review payloads, and nothing is applied until a maintainer sets `auto`.
+- **Link second opinion** (`memory.deep_dream.link_judge_two_vote: off | shadow | auto`, default `shadow`; gate `link_two_vote_min_confidence`, default 0.7). A link row whose first accept or reject sat below its single-vote gate is judged once more in a fresh batch by the merge judge's second model and endpoint (`judge_second_model` / `judge_second_url`, asked only while `judge_second_opinion` is on; a configuration that makes it the first model again is skipped with no call). In `auto`, and only while `link_judge_mode` is `auto`, two agreeing accepts or rejects from different models at mean >= 0.7 apply. A retype is never applied. Rescoring the 2026-09-29 ladder (`evals/results/queue-judge-ladder-20260929-{opus55,sonnet55}.json`, 37 link rows) at that gate gave 7/7 and 8/8 correct accepts and 6/6 and 7/7 correct rejects per replicate, against 3 accepts and 5 rejects at the single 0.8 gate; the panel is small and predates the current inflow, hence shadow. The link judge result reports `second_opinions`, `two_vote_applied`, `two_vote_refused_same_model` and `second_opinion_skipped_same_model`, and the `proposed_link` listing shows a `judge2` block.
+- **Merge tiebreak** (`memory.deep_dream.judge_tiebreak_mode: off | shadow | auto`, default `shadow`; `judge_third_model`, `judge_third_url`, the latter's bearer key env-only as `PSEUDOLIFE_JUDGE_THIRD_API_KEY`, forwarded by both compose files). A split merge row gets one third opinion in a fresh batch, only when a third model is configured (else `third_opinion_skipped_unconfigured`) and it is neither the first nor the second model (else `third_opinion_skipped_same_model`, no call). In `auto` a 2-of-3 majority applies through the two-vote gates: two reject-class votes at mean >= `judge_reject_min_confidence_2` reject (a relate vote's link is filed as on the two-vote path), and two accepts at mean >= `judge_accept_min_confidence` fold only under `judge_mode: auto` on a non-low-differential row, behind the same name, analyzer-row and snapshot guards. Both need the third vote served by a model other than both earlier ones. The note gains a `| 3rd (<model>): <verdict> <conf> [2-1 reject|2-1 accept|no majority]` tail, and both merge review payloads show a `judge3` block. The result reports `third_opinions`, `tiebreak_applied` (also counted in `auto_rejected` / `auto_accepted`) and `tiebreak_refused_same_model`. No ladder has measured the third vote yet.
+- **Schema v56** (additive, `ADD COLUMN IF NOT EXISTS`): `edge_proposals.judge2_verdict / judge2_confidence / judge2_model / judged2_at / judge2_relation / judge2_served_model / judge2_policy` and `entity_proposals.judge2_served_model / judge2_policy / judge3_verdict / judge3_confidence / judge3_model / judged3_at / judge3_served_model / judge3_policy`, all nullable (NULL = not asked). `judgeN_served_model` is the model the endpoint reported serving (NULL when it named none) and `judgeN_policy` the fingerprint of that endpoint's judging policy, so a decision taken on a later tick than a vote can check and record where the vote came from. `judge_served_model` (both proposal tables, nullable) stamps the model the first opinion's endpoint reported serving — `judge_model` is the configured name, and the served name lived only in the judging memo, which every refresh prunes to pending rows, so a decided row lost it; a stale or requeued first verdict, and a reopened automatic decision, clear it with the verdict. `merge_decisions.votes` (JSONB, nullable) is added in the same bump for the judge-agreement report that follows: the votes a merge or junk proposal carried when it was decided belong on the FK-free audit row, because an accepted merge CASCADE-deletes the proposal row with them; the judge-agreement report entry above describes what writes it.
+- The new votes follow their first verdict: a stale or requeued first verdict, and a reopened automatic decision, clear them too; a vote is recorded only while the earlier votes it pairs with are unchanged. The 3rd note tail is never cut by the 400-character note cap (only the free text is), so its relation survives long model ids. A tiebreak or link two-vote decision records the endpoint policy and served model of each later vote it rests on, read from the row, and reconsideration reopens it when one of those endpoints later reports serving another model under the same policy.
+- An automatic tiebreak is refused, with the vote recorded, when the second vote's served model is unknown (`tiebreak_refused_unknown_second`, note tail `tiebreak needs the second vote's served model`): its stamp then holds only the configured name. Split rows whose second vote was recorded before this build carry no served model, so `auto` refuses them until `review_rejudge` re-asks them. A third model named as the configured `judge_second_model` (other than a launch alias) is skipped with no call.
+- **What re-judges, and what does not.** Setting `judge_third_model` or `judge_third_url`, or changing `link_two_vote_min_confidence`, changes the judging policy: every queue's recorded verdicts are re-judged once and automatic decisions are reconsidered (at their shipped defaults the three are left out of the policy, so the upgrade itself re-judges nothing). The two modes, `link_judge_two_vote` and `judge_tiebreak_mode`, are never part of the policy: promoting either from `shadow` to `auto` keeps the recorded votes and the next tick applies the gates to them with no model call. A row the gate refused (no distinct model, an unknown second served model, a name veto, a variant conflict or an analyzer-filed row) is left for a human, not refused again each tick; a refusal because the graph snapshot failed instead sends the row back to its first opinion on the next tick. A recorded second or third vote whose endpoint has since reported serving another model is cleared and asked again, never applied; a cleared second vote takes the merge third with it. Going back from `auto` to `shadow` reopens none of the decisions `auto` took.
+- While first opinions wait, the link judge's second opinions take at most half the batch, so a backlog of below-gate links cannot hold new links' first opinions back. The merge judge's budget is unchanged. The sweep logs a tick that only took second or third opinions, or refused one. All five knobs are live Console settings.
+
+### Fixed (2026-10-17 — lease break and lease delegate no longer claim nothing changed when COMMIT's answer was lost)
+
+- `pseudolife-mcp lease break` and `lease delegate` (and the deprecated `lease designate`) printed `<verb> failed (<error>); nothing was changed` for any failure, including a connection lost or a session ended by a FATAL after COMMIT was sent, when the change may in fact have been committed. They now say in that case that the verb lost the answer to its COMMIT and may have been committed, and to run `pseudolife-mcp lease list` before retrying. Errors before COMMIT, and an ERROR the server returned at COMMIT (which rolls the transaction back), keep the old line. The board store's transaction raises `CommitOutcomeUnknown`, an `OperationalError` subclass, for the uncertain case.
+
+### Fixed (2026-10-17 — `pseudolife-mcp --help` lists delegate-watch)
+
+- `pseudolife-mcp --help` now lists `delegate-watch`, which shipped in v0.18.2 without a help line. The native shim names it as deferred instead of answering "unknown mode". Two guards keep this from recurring: every mode the CLI dispatches is listed in `--help` or named as deliberately unlisted (`shim`, the no-argument mode by name, and `doorbell-prompt-seen`, the doorbell helper the plugin's prompt hook runs), and every mode the CLI dispatches is served or deferred by the native shim.
+
+### Performance (2026-10-12 — keep light CLI paths free of model imports)
+
+- Configuration loading uses the MIRAS preset registry without importing the
+  embedding stack. Recovery loads its client adapter only for rebind, and
+  tunnel result validation loads the MCP SDK only when validating a response,
+  keeping recovery/tunnel help and offline doctor checks light.
+- Vector adapters load when a storage connection registers them, so board
+  commands stay free of NumPy with the pinned pgvector 0.4.2 as well as newer
+  releases.
+
+### Added (2026-10-09 — native lease operator parity)
+
+- Verify native `lease hold`, `break`, `delegate` and the deprecated
+  `designate` alias through disposable process/database and container
+  comparisons, including the shipped Windows lease launcher.
+  Embedded PostgreSQL retains its declared native refusal; external DSNs
+  and container transport are covered.
+- Prove that a failed `lease break` or `lease delegate` leaves the bank
+  untouched in both implementations: an audit write the server refuses, a
+  refused COMMIT and a session the server ends at COMMIT all roll back.
+  (The 2026-10-17 fixes above correct the last case: a session ended at
+  COMMIT may have committed, and both implementations now say so.)
+
 ## [0.18.2] - 2026-10-17 — Shim and daemon move to the MCP SDK 2.2 line together, board mail is read and acknowledged in one call, and the maintainer's delegate gets a decision watcher
 
 ### Fixed (2026-10-17 — the shim stays correct on an mcp 2.1 runtime, and the next client step moves it to 2.2)
