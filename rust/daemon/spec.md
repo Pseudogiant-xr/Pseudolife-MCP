@@ -745,7 +745,7 @@ snapshot and `read/cortex_search.rs`'s `record_to_dict_age`, with the
 | HI3 | A set slot (`slot_kind` is `set`: no current scalar, and current members or any member row): every member row in record order adds `{"value", "event": "added", "at": asserted_at}` and, when its status is `removed` with a `superseded_at`, `{"value", "event": "removed", "at": superseded_at}`; with a cutoff only events at or before it remain; they sort by `at`, then adds before removes, then member row order. The answer is `{"kind": "set", "entity", "attribute", "count", "versions"}` with the raw arguments. | `service.py:5779-5812`; `cortex.py:1182-1216` |
 | HI4 | Otherwise every record at the slot key (`_norm_key` of both parts), in record order, filtered to `tx_time` (or `asserted_at` when it is unset or zero) at or before a cutoff, stably sorted by that time. The answer is `{"entity", "attribute", "count", "versions"}`, each version `_cortex_record_to_dict` with `config.time.relative_age` and the default `annotate` stale policy (never policy-rendered: the audit surface shows what was stored). | `service.py:5813-5831`; `cortex.py:1526-1528` |
 | HI5 | With a cutoff, `as_of` is appended (the epoch seconds; a NaN or infinite cutoff is null in structured content, as Python's is; Python's text block spells it `NaN`/`Infinity`, declared). | `service.py:5810-5811, 5829-5830` |
-| HI6 | Chain mode (`service.chain`) is not served: it answers the declared stub (`divergences.md`, the `memory_history` row) until the lesson store lands. | `service.py:5833-5927` |
+| HI6 | Chain mode (`attribute` omitted) is CH1-CH6 below. | `mcp_server.py:1826-1827` |
 | HI7 | Not reproduced: the text block's `NaN`/`Infinity` for a non-finite echo (declared). A naive `as_of` reads in each daemon's own local zone, so the harness compares two daemons in one zone. | `divergences.md` |
 
 `harness/w2e.py live --only history-slot` compares every answer and the full
@@ -760,6 +760,56 @@ relative word refused at binding. The `mcp-history-ignore-as-of`,
 `mcp-history-set-unsorted`, `mcp-history-set-no-removed` and
 `mcp-history-asserted-order` mutants must be caught. The epoch is checked natively against `_parse_as_of` answers
 recorded from CPython 3.11.
+
+### Lessons and the memory_history chain over MCP (2026-10-18)
+
+`stores/lessons.rs` (the resident lesson store's read side, hydrated at init
+as `Ready.lessons`), `lesson_tools.rs` (`memory_lesson_search`) and
+`read/history.rs` (`chain`); registered in `mcp::dispatch::registry`.
+Python: `memory/lessons.py` (`LessonRecord`, `current_records`, `search`
+220-238); `storage/sync.py` `hydrate_lessons` (474-505);
+`storage/postgres.py` `load_lessons` (1998-2008), `add_lesson_search_event`
+(2411-2428), `entries_for_entity` (4156-4171), `load_graph` (4370-4393),
+`find_entity` (2840-2867); `service.py` `_lesson_record_to_dict` (411-430),
+`_alias_retry_names` (4157-4183), `lesson_search` (5346-5361),
+`_cortex_change_index` (5399-5412), `_annotate_lesson_staleness`
+(5414-5443), `chain` (5833-5927), `_log_lesson_search` (5979-6003);
+`mcp_server.py` `memory_lesson_search` (2062-2093).
+
+| # | Exact item | Source |
+|---|---|---|
+| LS1 | Hydration at init: every `lessons` row in id order (`confidence` as its REAL text, `support`/`provenance` as their string items). No Rust path writes lessons, so the store is fixed after init. | `sync.py:474-505`; `postgres.py:1998-2008` |
+| LS2 | `memory_lesson_search(query, top_k=5, verbose=False)`; read-only (no `mutation` on an internal failure). Under the service lock (Rust: `Ready.write`, which the log's session resolution needs). | `mcp_server.py:2062-2093` |
+| LS3 | The width is `top_k` (the binder always passes one, so the config's `memory.lessons.top_k` is never read over MCP); the floor is `max(0.0, memory.lessons.min_confidence)`. | `service.py:5353-5354` |
+| LS4 | The query embedding; current lessons with an embedding scored by f32 cosine against the normalised query, at or above the floor, stably sorted by descending score, cut to the width; a stored vector of another length fails (torch raises). | `lessons.py:220-238`; `service.py:5355-5356` |
+| LS5 | Each hit as `_lesson_record_to_dict` (`task, aspect, lesson, about, polarity, outcome, status, confidence` (4 places), `origin`, sorted `provenance`, `asserted_at, last_confirmed, supersedes_value, superseded_by_value, superseded_at`) plus `score` (4 places). | `service.py:411-430, 5357-5358` |
+| LS6 | `re_verify`: with any personal-cortex record (the change index: per normalised entity, the latest `max(asserted_at, superseded_at or 0)` over every record), each row's name (`about`, else `task`, stripped) keys the index directly, else through its graph entity (`find_entity(norm_name(name))`, keyed by its canonical); a change after `max(asserted_at, last_confirmed)` adds `re_verify: true` and `re_verify_reason: "facts about <name> changed since this lesson"`. No index, no graph lookup. | `service.py:5399-5443` |
+| LS7 | With the retrieval log enabled, one `lesson_search_events` row (`query_text`, the session from `_resolve_writer`, its open leaf as `episode_id`, `served` = `[{entity_norm, attribute_norm, rank, score}]` in hit order, `created_at` now), its own transaction; any failure counts a retrieval-log error and never fails the search. A search with no hits logs an empty list. | `service.py:5979-6003`; `postgres.py:2411-2428` |
+| LS8 | The answer `{"count", "entries"}`; without `verbose` each entry keeps only `task, aspect, lesson, about, polarity, outcome, confidence, score, re_verify, re_verify_reason` (those present). | `mcp_server.py:2083-2093` |
+| LS9 | Not served: lesson writes (the dream's synthesis, `lesson_forget`, `lesson_restore`) and `lessons_dump` (no MCP tool reaches them yet). | `service.py:5446-5480, 5363-5371` |
+| LS10 | Not reproduced: non-string `provenance` items (declared). | `divergences.md` |
+| CH1 | `chain(entity, limit=20)`: a name blank after `strip()` answers `{"found": false, "entity", "count": 0, "events": []}` with the raw argument. | `service.py:5845-5849` |
+| CH2 | The keys are the name's `_norm_key`, plus, when `find_entity(norm_name(name))` resolves a node, the `_norm_key` of each `_alias_retry_names` name (its canonical, then its aliases not shadowed by another entity's canonical); the node's `display` replaces the name in the answer. | `service.py:5850-5866, 4157-4183` |
+| CH3 | Facts: every personal-cortex record (all statuses, record order) whose entity's key is in the keys adds `{"t": asserted_at, "kind": "fact_set", "summary": "<attribute> = <value>", "refs": {"attribute"}}` and, when `superseded_at` is set, `{"t": superseded_at, "kind": "superseded", "summary": "<attribute>: <value> superseded[ by <superseded_by_value>]", ...}`. | `service.py:5868-5883` |
+| CH4 | With a node: its source entries (`entries_for_entity`: distinct entries traced to its current facts, newest first, at most `limit`) add `{"t": ts, "kind": "entry", "summary": text[:160], "refs": {"entry_id"[, "episode_title"]}}`; each live edge touching it with a truthy `asserted_at` adds `{"t", "kind": "edge", "summary": "<src display> —<relation>→ <dst display>", "refs": {"relation"}}`. | `service.py:5884-5906`; `postgres.py:4156-4171, 4370-4393` |
+| CH5 | Lessons: every current lesson whose task's key, or whose `about`'s, is in the keys adds `{"t": asserted_at, "kind": "lesson", "summary": the lesson, "refs": {"task", "aspect"}}`. | `service.py:5907-5917` |
+| CH6 | No events answers CH1's not-found shape; else the events stably sorted by `t`, the last `max(1, limit)` kept: `{"found": true, "entity": the display name, "count", "events"}`. Read-only. | `service.py:5918-5927` |
+
+`harness/w2e.py live --only lessons` compares every answer and the full bank
+after each call, on a template whose facts, graph alias (`bearer tokens` ->
+`auth tokens`) and edge the Python daemon's own tools wrote, and whose four
+lessons (one superseded) are SQL seeds with embeddings copied from entries
+the Python daemon stored: compact, verbose and `top_k=1` searches, with
+`re_verify` direct and through the alias; a session's search (its
+`lesson_search_events` row, whose scores compare within one rounding unit);
+chains for an entity with facts (one superseded), an edge and an
+about-named lesson, for one whose alias names widen the keys, for a lesson
+matched by its task, for an unknown entity and for a blank one; and, in
+`lessons-config`, the `min_confidence` floor with the retrieval log off (no
+event row). Not exercised: chain entry events (the seeded facts trace no
+entries) and shadowed aliases. The `mcp-lesson-search-no-graph-resolve`,
+`mcp-lesson-search-no-log` and `mcp-history-chain-no-lessons` mutants must be
+caught.
 
 ### World cortex tools over MCP (2026-10-18)
 
