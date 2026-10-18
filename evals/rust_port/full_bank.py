@@ -334,7 +334,9 @@ def observe(corpus, url, token, *, candidate=False):
         raw = response.pop("_wire_body", None)
         original_body = copy.deepcopy(response["body"])
         if response["status"] != case["expect"]["status"] and not candidate:
-            raise ValueError("response status contract failed: " + case["id"])
+            got = response["body"].get("error") if isinstance(response["body"], dict) else None
+            raise ValueError(f"response status contract failed: {case['id']} (expected "
+                             f"{case['expect']['status']}, got {response['status']} {got!r})")
         if case["surface"] == "mcp" and response["body"] and "result" in response["body"]:
             result = response["body"]["result"]
             envelope_matches = bool(result.get("isError")) == case["expect"].get("tool_error", False)
