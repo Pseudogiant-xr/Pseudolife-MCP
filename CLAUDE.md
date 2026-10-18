@@ -395,9 +395,9 @@ took 143 CUDA OOMs.
     memory-saturating work on the lease of the machine it runs on: `lease
     check full-suite` on the Windows host, `lease check full-suite@box` on
     the box. A suite on another machine does not load yours. The dev
-    machines share the hypervisor's RAM, which carries one Linux dev box
-    full suite and one Windows VM full suite at once, but never two Linux
-    dev box suites (see "Dev machines" below).
+    machines share the hypervisor's RAM, which carries two full suites at
+    once in any mix (two Linux dev boxes, or a Linux dev box and the
+    Windows VM), never three (see "Dev machines" below).
   - **On the box, suites never touch the live bank's Postgres** (5433):
     the suite user's shells source `~/.config/pseudolife-suite/env`, which
     sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:5434` (the separate test
@@ -657,14 +657,14 @@ bank (search "dev machines homelab"), never in the tree.
   machine mirrors its suite on the board under its own `full-suite@<name>`
   lease, set in its private `full-suite.lease`; without that file a run
   falls back to `full-suite`, the Windows host's lease, and the board
-  mislabels it. **The hypervisor carries one Linux and one Windows full
-  suite at once, never two Linux** (maintainer decision 2026-10-18; the
+  mislabels it. **The hypervisor carries two full suites at once, never
+  three** (maintainer decision 2026-10-18): two Linux dev boxes, or a
+  Linux dev box and the Windows VM, each still one suite per machine. The
   earlier rule that the Windows VM and a Linux box could not overlap is
-  retired, the hypervisor has the RAM for both). A Windows VM suite may
-  run beside a Linux dev box suite. Before starting a Linux dev box full
-  suite, check that no full suite is running on the other Linux box
-  (`lease check` on its lease, or a running pytest process there), and
-  say on the board which one you hold.
+  retired. Before starting a full suite on a dev machine, check that at
+  most one other dev machine is running one (`lease check` on each
+  machine's lease, or a running pytest process there), and say on the
+  board which one you hold.
 - **Windows CI failures go to the Windows VM before a rerun** (maintainer
   decision 2026-10-18, after two Windows-only parity failures cost an
   hour-long hosted rerun each on 2026-10-17/18). When a check fails only
