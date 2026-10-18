@@ -61,9 +61,9 @@ def credential_recovery(reason: str, path: Path | None, *,
     if reason == "credential file is owned by another account":
         elevated = (" (a file written from an elevated prompt is owned by Administrators)"
                     if windows else "")
-        return (f"Another account owns {target}{elevated}; as the account that runs the shim, "
-                f"replace it with an owner-only file of your own holding the same token: "
-                f"{_repair_command(target, path, windows)}.")
+        return (f"Another account owns {target}{elevated}. If the token in it is yours, "
+                f"replace it, as the account that runs the shim, with an owner-only file of "
+                f"your own holding the same token: {_repair_command(target, path, windows)}.")
     fixes = {
         "configured credential file is missing":
             f"Restore the token file at {target}, or set PSEUDOLIFE_MCP_TOKEN_FILE to the "
@@ -83,6 +83,9 @@ def credential_recovery(reason: str, path: Path | None, *,
         "credential file contains an invalid bearer token":
             f"Write only the token to {target}: one line, no spaces or control characters, "
             f"at most {MAX_TOKEN_BYTES} bytes.",
+        "credential file changed while it was being repaired":
+            f"Another program replaced {target} meanwhile (a token rotation); if the shim "
+            f"still refuses it, run the repair again.",
     }
     return fixes.get(reason)
 
@@ -418,12 +421,17 @@ def _open_token(path: Path) -> tuple[str, _Generation]:
     return token, _Generation(marker)
 
 
-def _write_token_file(path: str | Path, token: str, *, _repair: bool = False) -> None:
+def _identity(info: os.stat_result) -> tuple:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+def _write_token_file(path: str | Path, token: str, *, _repair: tuple | None = None) -> None:
     """Atomically create or rotate one owner-only credential file.
 
-    ``_repair`` (``repair_token_file`` only) also replaces an existing file
-    another account owns; it is still refused when it is not one regular
-    file."""
+    ``_repair`` (``repair_token_file`` only) is the identity of the file the
+    repair read: an existing file another account owns is then replaced too
+    (it is still refused when it is not one regular file), and the rename
+    happens only while that same file is still in place."""
     data = token.encode("utf-8")
     _decode_token(data)
     target = Path(os.path.abspath(Path(path).expanduser()))
@@ -434,7 +442,7 @@ def _write_token_file(path: str | Path, token: str, *, _repair: bool = False) ->
         existing_fd = os.open(target, os.O_RDONLY | getattr(os, "O_BINARY", 0)
                               | getattr(os, "O_NOFOLLOW", 0))
         try:
-            if _repair:
+            if _repair is not None:
                 _validate_regular(existing_fd)
             else:
                 _validate_replaceable(existing_fd)
@@ -453,6 +461,17 @@ def _write_token_file(path: str | Path, token: str, *, _repair: bool = False) ->
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
+        if _repair is not None:
+            # A rotation that landed after the repair read the file wins: the
+            # repair must not write the old token back over it (review
+            # finding, 2026-10-18). Only a rename inside this check and the
+            # next line can still race, as any two unlocked writers can.
+            try:
+                current = _identity(target.lstat())
+            except FileNotFoundError:
+                current = None
+            if current != _repair:
+                raise CredentialError("credential file changed while it was being repaired")
         # The 2026-09-13 Windows 40-rotation/100-snapshot stress test observed
         # brief delete-share conflicts; cap recovery at 20 x 5 ms.
         for attempt in range(20):
@@ -501,11 +520,11 @@ def repair_token_file(path: str | Path) -> None:
     except OSError as error:
         raise CredentialError("configured credential file is unavailable") from error
     try:
-        _validate_regular(fd)
+        identity = _identity(_validate_regular(fd))
         data = os.read(fd, MAX_TOKEN_BYTES + 1)
     finally:
         os.close(fd)
-    _write_token_file(target, _decode_token(data), _repair=True)
+    _write_token_file(target, _decode_token(data), _repair=identity)
 
 
 class CredentialProvider:
@@ -564,17 +583,27 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("repair", help="rewrite the token file owner-only").add_argument("file")
     args = parser.parse_args(argv)
+    target = os.path.abspath(os.path.expanduser(args.file))
     try:
-        repair_token_file(args.file)
+        repair_token_file(target)
     except CredentialError as error:
-        print(f"{args.file}: not repaired: {error}", file=sys.stderr)
+        _say(sys.stderr, f"{target}: not repaired: {error}")
         return 1
     except OSError as error:
-        print(f"{args.file}: not repaired: {type(error).__name__} while rewriting it; check that "
-              f"you can write to its directory", file=sys.stderr)
+        _say(sys.stderr, f"{target}: not repaired: {type(error).__name__} while rewriting it; "
+                         f"check that you can write to it and to its directory")
         return 1
-    print(f"{os.path.abspath(args.file)}: rewritten owner-only; the token is unchanged")
+    _say(sys.stdout, f"{target}: rewritten owner-only; the token is unchanged")
     return 0
+
+
+def _say(stream, text: str) -> None:
+    # A path the console encoding cannot show is escaped: raising here would
+    # report a failure after the file was already rewritten (review finding,
+    # 2026-10-18).
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    stream.write(text.encode(encoding, "backslashreplace").decode(encoding) + "\n")
+    stream.flush()
 
 
 if __name__ == "__main__":

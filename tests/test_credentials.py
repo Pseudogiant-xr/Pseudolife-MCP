@@ -462,7 +462,10 @@ def test_every_reading_reason_has_a_fix_and_unknown_ones_have_none() -> None:
     from pseudolife_memory.credentials import credential_recovery
 
     path = PurePosixPath("/fixture/dir/token")
-    for reason in ("configured credential file is missing",
+    assert "If the token in it is yours" in credential_recovery(
+        "credential file is owned by another account", path, windows=False)
+    for reason in ("credential file changed while it was being repaired",
+                   "configured credential file is missing",
                    "configured credential file is unavailable",
                    "credential path ancestors cannot be inspected",
                    "credential path must not contain redirects",
@@ -562,3 +565,56 @@ def test_writer_still_refuses_a_hardlinked_file(tmp_path: Path) -> None:
     with pytest.raises(CredentialError, match="private regular file"):
         _write_token_file(hardlink, "new-fixture")
     assert hardlink.read_bytes() == source.read_bytes() == b"fixture-secret"
+
+
+def test_repair_never_undoes_a_rotation_that_lands_while_it_runs(tmp_path: Path, monkeypatch) -> None:
+    """A rotation between repair's read and its rename must win: repair refuses
+    rather than write the old token back (Codex review, 2026-10-18)."""
+    from pseudolife_memory import credentials
+
+    path = tmp_path / "token"
+    shared_token(path, "old-fixture")
+    real_secure = credentials._secure_windows_file
+    real_fchmod = getattr(os, "fchmod", None)
+    rotated = []
+
+    def rotate_once():
+        if not rotated:
+            rotated.append(True)
+            private_token(path, "rotated-fixture")
+
+    if os.name == "nt":
+        def secure(temporary):
+            real_secure(temporary)
+            if Path(temporary) != path:
+                rotate_once()
+        monkeypatch.setattr(credentials, "_secure_windows_file", secure)
+    else:
+        def fchmod(fd, mode):
+            real_fchmod(fd, mode)
+            rotate_once()
+        monkeypatch.setattr(credentials.os, "fchmod", fchmod)
+    with pytest.raises(CredentialError, match="changed"):
+        credentials.repair_token_file(path)
+    monkeypatch.undo()
+    assert rotated
+    assert CredentialProvider(path=path).snapshot().token == "rotated-fixture"
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".pseudolife-token-")]
+
+
+def test_repair_command_survives_a_console_that_cannot_print_the_path(tmp_path: Path) -> None:
+    """A path the console encoding cannot show is escaped, not a traceback after
+    the file was already rewritten (Codex review, 2026-10-18)."""
+    directory = tmp_path / "t\u00f8ken-\u2713"
+    directory.mkdir()
+    path = directory / "token"
+    shared_token(path, "fixture-secret")
+    environment = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    for target, code in ((path, 0), (directory / "missing", 1)):
+        completed = subprocess.run(
+            [sys.executable, "-m", "pseudolife_memory.credentials", "repair", str(target)],
+            capture_output=True, timeout=60, env=environment)
+        output = (completed.stdout + completed.stderr).decode("cp1252", "replace")
+        assert completed.returncode == code, output
+        assert "Traceback" not in output
+    assert CredentialProvider(path=path).snapshot().token == "fixture-secret"
