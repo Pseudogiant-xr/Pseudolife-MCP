@@ -13,6 +13,7 @@ mod contradiction;
 mod dream;
 mod embed;
 mod embedding_math;
+mod episode_tools;
 #[cfg_attr(not(feature = "harness"), allow(dead_code))]
 mod episodes;
 mod fact_resolve;

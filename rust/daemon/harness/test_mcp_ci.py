@@ -16,7 +16,7 @@ def baseline():
     rs = copy.deepcopy(py)
     rs["headers"]["connection"] = "close"
     diffs = [line(f"body_limit[{i}]", py, rs) for i in (0, 2, 3, 4, 5)]
-    return {"summary": {"responses": 339, "cases": 18, "diffs": 5, "unserved_checked": list(UNSERVED)},
+    return {"summary": {"responses": 335, "cases": 18, "diffs": 5, "unserved_checked": list(UNSERVED)},
             "diffs": diffs}
 
 

@@ -507,25 +507,25 @@ Phase 5: artifact/static guards can run unchanged because they inspect files; di
 
 ## Complete MCP registration checklist
 
-All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`test_mcp_string_arguments.py` oracle pools; the differential harness must freeze tool inputSchema, descriptions, annotations, defaults, response and invalid-argument semantics for each. These registrations are source-derived, not an imported server introspection result.
+All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`test_mcp_string_arguments.py` oracle pools; the differential harness must freeze tool inputSchema, descriptions, annotations, defaults, response and invalid-argument semantics for each. These registrations are source-derived, not an imported server introspection result. `ported` means the Rust daemon serves the tool's body and the differential harnesses compare its answers and bank effects with Python's; each tool's declared divergences are in `rust/daemon/divergences.md`, and `deferred` tools answer the declared `not_implemented` stub.
 
 | Tool | Assigned tier | Port phase | Status |
 |---|---|---:|---|
-| memory_agents | core | 1/4 | deferred |
-| memory_message | core | 1/4 | deferred |
-| memory_store | minimal | 4 | deferred |
-| memory_search | minimal | 3 | deferred |
-| memory_recent | full | 3 | deferred |
+| memory_agents | core | 1/4 | ported |
+| memory_message | core | 1/4 | ported |
+| memory_store | minimal | 4 | ported |
+| memory_search | minimal | 3 | ported |
+| memory_recent | full | 3 | ported |
 | memory_supersede | full | 4 | deferred |
 | memory_reinstate | full | 4 | deferred |
-| memory_stats | core | 3 | deferred |
-| memory_get | core | 3 | deferred |
+| memory_stats | core | 3 | ported |
+| memory_get | core | 3 | ported |
 | memory_reinforce | full | 4 | deferred |
-| memory_fact_get | minimal | 3 | deferred |
-| memory_fact_set | minimal | 4 | deferred |
-| memory_set_add | minimal | 4 | deferred |
-| memory_set_remove | minimal | 4 | deferred |
-| memory_fact_resolve | core | 4 | deferred |
+| memory_fact_get | minimal | 3 | ported |
+| memory_fact_set | minimal | 4 | ported |
+| memory_set_add | minimal | 4 | ported |
+| memory_set_remove | minimal | 4 | ported |
+| memory_fact_resolve | core | 4 | ported |
 | memory_history | full | 3 | deferred |
 | memory_world_set | core | 4 | deferred |
 | memory_world_search | core | 3 | deferred |
@@ -534,10 +534,10 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_forget | full | 4 | deferred |
 | memory_dream | full | 4 | deferred |
 | memory_graph_review | full | 4 | deferred |
-| memory_episode_start | core | 4 | deferred |
-| memory_episode_end | core | 4 | deferred |
-| memory_session_title | minimal | 4 | deferred |
-| memory_episode_summary | full | 3 | deferred |
+| memory_episode_start | core | 4 | ported |
+| memory_episode_end | core | 4 | ported |
+| memory_session_title | minimal | 4 | ported |
+| memory_episode_summary | full | 3 | ported |
 | memory_consolidation_candidates | full | 3 | deferred |
 | memory_consolidate | full | 4 | deferred |
 | memory_graph_relate | core | 4 | deferred |
