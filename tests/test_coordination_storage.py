@@ -851,6 +851,68 @@ def test_a_park_record_is_set_kept_cleared_and_listed(store):
     assert out["park_reason"] == "waiting_peer"
 
 
+def test_a_status_that_clears_a_standing_park_says_so(store):
+    """A status without park fields still clears a standing park (a working
+    session is not parked), but the result says so and names the fix.
+    2026-10-19: the maintainer's delegate parked waiting_peer, then sent a
+    status-only update before a heartbeat wait; the park went without a
+    word and the watcher's wake mail no longer had a park to ring."""
+    from pseudolife_memory.storage.coordination import PARK_CLEARED_WARNING
+    a, b = pair(store)
+    store.update(*creds(a), park_reason="waiting_peer", park_needs="CI on #830",
+                 park_clear_by=b["agent_id"], park_resume="merge it")
+    out = store.update(*creds(a), status="waiting on CI for #830")
+    assert out["park_reason"] is None
+    assert out["warning"] == PARK_CLEARED_WARNING.format(reason="waiting_peer")
+    assert "waiting_peer" in out["warning"] and "park_reason" in out["warning"]
+    # The warning rides on the result only; the stored row carries none.
+    assert "warning" not in store.authenticate(*creds(a))
+
+
+def test_the_rust_daemon_words_the_park_warning_the_same():
+    """The Rust board (rust/daemon/src/board/store.rs) formats the same
+    warning; its continuation lines join with single spaces."""
+    import re
+    from pathlib import Path
+    from pseudolife_memory.storage.coordination import PARK_CLEARED_WARNING
+    source = (Path(__file__).resolve().parents[1] / "rust" / "daemon" / "src" / "board"
+              / "store.rs").read_text(encoding="utf-8")
+    body = re.search(r'fn park_cleared_warning\(reason: &str\) -> String \{\s*format!\(\s*'
+                     r'"((?:[^"\\]|\\.)*)"', source, re.DOTALL)
+    assert body, "park_cleared_warning not found in store.rs"
+    rust = re.sub(r"\\\n\s*", "", body.group(1))
+    assert rust == PARK_CLEARED_WARNING
+
+
+def test_a_status_sent_with_its_park_keeps_it_without_a_warning(store):
+    """The near-miss: the same status sent with the park fields keeps the
+    park, and an explicit empty reason drops it, neither with a warning."""
+    a, b = pair(store)
+    store.update(*creds(a), park_reason="waiting_peer", park_needs="CI on #830",
+                 park_clear_by=b["agent_id"], park_resume="merge it")
+    store.test_time[0] = 1010.0
+    out = store.update(*creds(a), status="waiting on CI for #830", park_reason="waiting_peer")
+    assert _park(out) == {"park_reason": "waiting_peer", "park_needs": "CI on #830",
+                          "park_clear_by": b["agent_id"], "park_resume": "merge it",
+                          "park_expires": 1000.0 + 12 * 3600, "park_set_at": 1010.0}
+    assert out["status"] == "waiting on CI for #830"
+    assert "warning" not in out
+    out = store.update(*creds(a), status="back to work", park_reason="")
+    assert out["park_reason"] is None and "warning" not in out
+
+
+@pytest.mark.parametrize("before", ["unparked", "lapsed"])
+def test_a_status_with_no_standing_park_carries_no_warning(store, before):
+    """Only a standing park is worth the warning: with none, or a lapsed one
+    (which no longer withholds or rings), a status update reads as always."""
+    a = store.register("alice")
+    if before == "lapsed":
+        store.update(*creds(a), park_reason="blocked", park_expires=1500.0)
+        store.test_time[0] = 2000.0
+    out = store.update(*creds(a), status="working")
+    assert out["park_reason"] is None and "warning" not in out
+
+
 def test_park_fields_without_a_reason_need_a_park_to_refine(store):
     a = store.register("alice")
     with pytest.raises(CoordinationError, match="invalid_park") as caught:

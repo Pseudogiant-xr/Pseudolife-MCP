@@ -6718,10 +6718,13 @@ it is a new park, with the 12-hour default counted from then and none of
 the lapsed park's `park_needs`, `park_clear_by` or `park_resume` carried
 over. A plain status
 update while parked clears the record,
-since a session that is working is not parked; a task or `children` update
-leaves it. A park field on its own refines a standing park and is refused
-(`invalid_park`) on an unparked row or a lapsed park, as are an unknown
-reason and a bad expiry; credential-shaped text is `secret_like_body`. Every peer row in
+since a session that is working is not parked, and when that park was
+standing its result carries a `warning` naming the cleared reason and
+saying to send the park fields with the status to stay parked; a task or
+`children` update leaves it. A park field on its own refines a standing park
+and is refused (`invalid_park`) on an unparked row or a lapsed park, as are an
+unknown reason and a bad expiry (the MCP tool's schema lists the six reasons
+and `""`, and refuses any other value with that list); credential-shaped text is `secret_like_body`. Every peer row in
 `memory_agents(action="list")`, and the caller's own row in the update result,
 carries the six `park_*` fields, `park_set_at` being the daemon's stamp.
 `memory_agents`' description asks sessions to park when they stop, and the

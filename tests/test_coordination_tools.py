@@ -210,12 +210,58 @@ def test_agents_refusals_name_the_parameter():
     assert park["error"] == "unexpected_parameter" and park["param"] == "park_reason"
 
 
-def test_an_unknown_park_reason_reaches_the_model_with_the_accepted_ones(monkeypatch):
-    """The storage refusal's detail, param and accepted list survive the
-    dispatch boundary into the MCP tool error."""
+def test_the_park_reason_schema_lists_the_accepted_reasons():
+    """The tool schema enumerates park_reason, so a client sees the choices
+    before guessing; "" stays the tool's spelling of a clear."""
+    from pseudolife_memory import mcp_server as mod
+    from pseudolife_memory.storage.coordination import PARK_REASONS
+    schema = mod.mcp._tool_manager.get_tool("memory_agents").parameters
+    choices = schema["properties"]["park_reason"]["anyOf"]
+    assert {"enum": [*PARK_REASONS, ""], "type": "string"} in choices
+    assert {"type": "null"} in choices
+    # The binding's JSON pre-parse leaves the clear and a reason as text.
+    meta = mod.mcp._tool_manager.get_tool("memory_agents").fn_metadata
+    for raw in ("", "waiting_peer"):
+        parsed = meta.arg_model.model_validate(meta.pre_parse_json({"park_reason": raw}))
+        assert parsed.park_reason == raw
+
+
+@pytest.mark.parametrize("reason", [
+    # 2026-10-19, live: the long one was refused with "String should have at
+    # most 20 characters", and only the second guess learned the real list.
+    "waiting on master ec99f8fe backstop and the CI run",
+    "waiting_ci",
+    "sleeping",
+])
+def test_an_unknown_park_reason_is_refused_with_the_accepted_ones(monkeypatch, reason):
+    """Any value outside the reasons, long or short, gets a refusal that
+    names every accepted reason, not a length limit, and reaches no store."""
+    from pseudolife_memory import coordination
+    from pseudolife_memory.storage.coordination import PARK_REASONS
+    seen = []
+    monkeypatch.setattr(coordination, "dispatch", lambda svc, action, args: seen.append(
+        (action, args)) or {})
+    out = _refusal("memory_agents", {"action": "update", "park_reason": reason})
+    assert out["error"] == "invalid_argument" and out["param"] == "park_reason"
+    assert all(f"'{r}'" in out["message"] for r in PARK_REASONS)
+    assert "characters" not in out["message"]
+    assert seen == []
+
+
+def test_the_tool_describes_the_status_clear_and_its_warning():
+    """The served description says a status-only update clears the park and
+    that the result's warning says so, so the fix is learnable up front."""
+    from pseudolife_memory import mcp_server as mod
+    tool = mod.mcp._tool_manager.get_tool("memory_agents")
+    assert "warning" in tool.description
+    assert "park fields" in tool.parameters["properties"]["status"]["description"]
+
+
+def test_a_rest_park_reason_outside_the_list_still_names_the_accepted_ones(monkeypatch):
+    """The storage refusal (what REST callers meet) keeps its detail, param
+    and accepted list across the dispatch boundary."""
     from pseudolife_memory import coordination
     from pseudolife_memory.storage.coordination import PARK_REASONS, CoordinationStore
-    real = coordination.dispatch
 
     class Store:
         def update(self, principal, agent_id, credential, **fields):
@@ -224,9 +270,10 @@ def test_an_unknown_park_reason_reaches_the_model_with_the_accepted_ones(monkeyp
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
     monkeypatch.setattr(coordination, "_store", lambda svc: Store())
-    monkeypatch.setattr(coordination, "dispatch", lambda svc, action, params: real(
-        _board_service(), action, params, headers=_HEADERS))
-    out = _refusal("memory_agents", {"action": "update", "park_reason": "sleeping"})
-    assert out["error"] == "invalid_park" and out["param"] == "park_reason"
-    assert out["accepted"] == list(PARK_REASONS)
-    assert all(reason in out["message"] for reason in PARK_REASONS)
+    with pytest.raises(coordination.CoordinationRefused) as caught:
+        coordination.dispatch(_board_service(), "update", {"park_reason": "sleeping"},
+                              headers=_HEADERS)
+    refused = caught.value
+    assert refused.code == "invalid_park" and refused.param == "park_reason"
+    assert refused.accepted == list(PARK_REASONS)
+    assert all(reason in refused.detail for reason in PARK_REASONS)

@@ -528,11 +528,14 @@ def memory_agents(
         description="update: at most 8 distinct nonempty labels, each up to "
                     "40 chars. [] clears manual labels; automatic children "
                     "remain.")] = None,
-    park_reason: Annotated[str | None, Field(
-        max_length=20,
+    # The storage's PARK_REASONS plus "" (tests pin the two together), so
+    # the schema lists the choices and a wrong guess is refused with them
+    # rather than with a length limit (2026-10-19).
+    park_reason: Annotated[Literal["done", "blocked", "needs_approval", "needs_info",
+                                   "needs_resource", "waiting_peer", ""] | None, Field(
         description="update: done, blocked, needs_approval, needs_info, "
-                    "needs_resource or waiting_peer (max 20 chars). Empty "
-                    "string clears; null/omitted sends no reason.")] = None,
+                    "needs_resource or waiting_peer. Empty string clears; "
+                    "null/omitted sends no reason.")] = None,
     park_needs: Annotated[str | None, Field(
         max_length=120,
         description="update: what would unblock you, up to 120 chars; "
@@ -565,8 +568,9 @@ def memory_agents(
     authenticated adapter.
 
     update: omitted fields stay. A status update with no park fields
-    clears any park. Park when you stop (park_reason, park_needs,
-    park_clear_by, park_resume); done means no follow-up expected.
+    clears any park, and its result's warning says so. Park when you stop
+    (park_reason, park_needs, park_clear_by, park_resume); done means no
+    follow-up expected.
     Automatic wake needs a live listener; otherwise mail waits for your
     next turn.
 
