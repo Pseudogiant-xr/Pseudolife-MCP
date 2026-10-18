@@ -67,7 +67,7 @@ def expected_summary(args):
         return {"responses": 10, "cases": 2, "unserved_checked": []}
     if "--tokenless" in args:
         return {"responses": 30, "cases": 3, "unserved_checked": []}
-    return {"responses": 333, "cases": 18, "unserved_checked": sorted(UNSERVED)}
+    return {"responses": 329, "cases": 18, "unserved_checked": sorted(UNSERVED)}
 
 
 def report_complete(report, expected):
