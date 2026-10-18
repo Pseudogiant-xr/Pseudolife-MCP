@@ -526,11 +526,11 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_set_add | minimal | 4 | ported |
 | memory_set_remove | minimal | 4 | ported |
 | memory_fact_resolve | core | 4 | ported |
-| memory_history | full | 3 | deferred |
-| memory_world_set | core | 4 | deferred |
-| memory_world_search | core | 3 | deferred |
+| memory_history | full | 3 | ported |
+| memory_world_set | core | 4 | ported |
+| memory_world_search | core | 3 | ported |
 | memory_outcome | minimal | 4 | ported |
-| memory_lesson_search | minimal | 3 | deferred |
+| memory_lesson_search | minimal | 3 | ported |
 | memory_forget | full | 4 | deferred |
 | memory_dream | full | 4 | deferred |
 | memory_graph_review | full | 4 | deferred |

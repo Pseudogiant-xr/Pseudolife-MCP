@@ -1,0 +1,3 @@
+### Added (2026-10-18 — the Rust daemon serves the world cortex tools)
+
+- The Rust daemon now keeps the world cortex (sourced external facts, apart from your own facts) resident, and its MCP endpoint answers `memory_world_set` and `memory_world_search` as the Python daemon does, with the same database changes. A world fact restated from a new source is confirmed, a different value supersedes the old one, and a citation with an unsafe scheme (such as `javascript:`) is refused. Search entries carry their age-decayed confidence, a stale flag, the copy-paste correction call for aged facts, and their citation.

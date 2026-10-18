@@ -11,8 +11,9 @@ usage:
 Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_set_add``, ``memory_set_remove``, ``memory_fact_resolve``,
 ``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
-``memory_episode_summary``, ``memory_outcome`` and ``memory_reinforce`` on
-``/mcp`` (``--features mutants`` adds the
+``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce``,
+``memory_history``, ``memory_world_set``, ``memory_world_search`` and
+``memory_lesson_search`` on ``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -35,8 +36,18 @@ Normalizers (declared, spec "Free for W1 and W2"):
 * ``entries.embedding`` and ``entries.surprise`` are compared numerically
   per entry id against tolerances set from a measurement
   (``goldens/w2e-tolerance.json``), then replaced by a token; so is
-  ``facts.embedding`` per fact id, against the same embedding tolerances
-  (both sides rewrite a slot's rows in the same order, so fact ids match);
+  ``facts.embedding`` and ``world_facts.embedding`` per row id, against the
+  same embedding tolerances (both sides rewrite a slot's rows in the same
+  order, so the ids match);
+* the world cortex clocks: ``world_facts`` ``asserted_at``,
+  ``last_confirmed``, ``superseded_at``, ``tx_time``, ``valid_time`` and
+  ``hlc_phys`` keep only null-or-not; ``retrieved_at`` (column and answer)
+  does only when it lies within a day of now (a write without one takes the
+  clock), and an explicit past value compares exactly;
+* a search ``score`` in a response, and each ``score`` in a
+  ``lesson_search_events.served`` list, compares within 1.5e-4: the two
+  embedders agree to the measured tolerance, and scores are rounded to 4
+  places;
 * the canonical-fact clocks: ``facts`` ``asserted_at``, ``last_confirmed``,
   ``superseded_at``, ``tx_time``, ``valid_time`` and ``hlc_phys`` (the HLC's
   wall-clock milliseconds; ``hlc_logical`` stays exact),
@@ -100,10 +111,22 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("outcome_signals", "created_at"), ("entities", "created_at"),
          ("coordination_agents", "name_set_at"), ("coordination_events", "created_at"),
          ("coordination_events", "hash"), ("coordination_events", "prev_hash"),
-         ("retrieval_uses", "created_at")}
+         ("retrieval_uses", "created_at"),
+         ("world_facts", "asserted_at"), ("world_facts", "last_confirmed"),
+         ("world_facts", "superseded_at"), ("world_facts", "tx_time"),
+         ("world_facts", "valid_time"), ("world_facts", "hlc_phys"),
+         ("lesson_search_events", "created_at")}
+# Columns that are wall-clock only when written from the clock: a value
+# within RECENT_S of now keeps null-or-not, anything else compares exactly.
+RECENT_CLOCK = {("world_facts", "retrieved_at")}
+RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
                   "started_at", "ended_at"}
+RESPONSE_RECENT_CLOCK = {"retrieved_at"}
+# A response score's allowance: embeddings within the measured tolerance
+# move a 4-place cosine by at most one rounding unit.
+SCORE_TOLERANCE = 1.5e-4
 # meta key -> paths (keys) inside its JSON value that are wall-clock.
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -131,7 +154,17 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # the outcome-labels scenario.
            "mcp-outcome-no-used-ids-record", "mcp-outcome-credit-latest-only",
            "mcp-outcome-ignore-handle", "mcp-reinforce-no-explicit",
-           "mcp-reinforce-no-use-credit"]
+           "mcp-reinforce-no-use-credit",
+           # memory_history slot mode (spec HI1-HI7): caught by history-slot.
+           "mcp-history-ignore-as-of", "mcp-history-set-unsorted",
+           "mcp-history-set-no-removed", "mcp-history-asserted-order",
+           # the world cortex (spec WD1-WD12): caught by the world-* scenarios.
+           "mcp-world-set-no-confirm", "mcp-world-set-unsafe-allowed",
+           "mcp-world-set-no-save", "mcp-world-search-no-correct-with",
+           # lessons and the history chain (spec LS1-LS10, CH1-CH6): caught
+           # by the lessons scenario.
+           "mcp-lesson-search-no-graph-resolve", "mcp-lesson-search-no-log",
+           "mcp-history-chain-no-lessons"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -270,6 +303,44 @@ def reinforce(entry_id, headers=()) -> dict:
 def search(query, headers=(), top_k=1) -> dict:
     """Seed-only here: a logged search whose served ids an outcome credits."""
     return tool("memory_search", headers, query=query, top_k=top_k)
+
+
+def world_set(entity, attribute, value, headers=(), **kw) -> dict:
+    return tool("memory_world_set", headers, entity=entity, attribute=attribute, value=value, **kw)
+
+
+def world_search(query, **kw) -> dict:
+    return tool("memory_world_search", query=query, **kw)
+
+
+def lesson_search(query, headers=(), **kw) -> dict:
+    return tool("memory_lesson_search", headers, query=query, **kw)
+
+
+def history_chain(entity) -> dict:
+    return tool("memory_history", entity=entity)
+
+
+def lesson_row(task, aspect, task_norm, aspect_norm, lesson, about, polarity, outcome,
+               status, entry_text) -> dict:
+    """Seed-only: a ``lessons`` row (only the dream writes lessons), its
+    embedding copied from an entry the Python daemon stored, so both banks
+    hold the same vector. After the seeding daemon stops: its exit flush
+    rewrites the lessons it holds."""
+    def q(v):
+        return "NULL" if v is None else "'" + v.replace("'", "''") + "'"
+    return sql(
+        "INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, about, "
+        "polarity, outcome, status, confidence, origin, support, provenance, asserted_at, "
+        "last_confirmed, embedding) SELECT "
+        f"{q(task)}, {q(aspect)}, {q(task_norm)}, {q(aspect_norm)}, {q(lesson)}, {q(about)}, "
+        f"{q(polarity)}, {q(outcome)}, {q(status)}, 0.8, 'agent', '[]', "
+        "'[\"signal:2\", \"signal:1\"]', 1700000000, 1700000000, embedding "
+        f"FROM entries WHERE text = {q(entry_text)}", after_stop=True)
+
+
+def history(entity, attribute, **kw) -> dict:
+    return tool("memory_history", entity=entity, attribute=attribute, **kw)
 
 
 def register(episode: str, **fields) -> dict:
@@ -812,6 +883,190 @@ SCENARIOS.update({
 })
 
 
+# memory_history slot mode (spec HI1-HI7), on cortex records written through
+# the Python daemon's own fact tools. Chain mode answers the declared stub
+# and is not compared here.
+SCENARIOS.update({
+    "history-slot": {
+        "config": None,
+        "seed": [
+            fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9),
+            fact("Payments DB", "host", "10.0.0.6", origin="user", confidence=0.9),
+            fact("Payments DB", "host", "10.0.0.7", origin="user", confidence=0.9),
+            set_add("Home Lab", "hosts", "alpha"),
+            set_add("Home Lab", "hosts", "beta"),
+            set_remove("Home Lab", "hosts", "alpha"),
+            set_add("Home Lab", "hosts", "gamma"),
+            # a contender parked below the margin, then the current value
+            # restated: its re-confirmation moves its tx_time past the
+            # contender's, so transaction order differs from assertion order
+            fact("Build Server", "hostname", "ci-box-2", origin="user", confidence=0.9),
+            fact("Build Server", "hostname", "ci-box-3", origin="user", confidence=0.5),
+            fact("Build Server", "hostname", "ci-box-2", origin="user", confidence=0.9),
+        ],
+        "ops": [
+            history("Payments DB", "host"),
+            # the slot key is case- and separator-insensitive
+            history("payments db", "HOST"),
+            # a cutoff between the first two versions keeps the first
+            history("Payments DB", "host", as_of="@txmid:payments-db:host"),
+            # ISO with an offset, a naive date (local time), epoch zero
+            history("Payments DB", "host", as_of="1970-01-02T00:00:00+00:00"),
+            history("Payments DB", "host", as_of="2000-01-01"),
+            history("Payments DB", "host", as_of=0.0),
+            # float spellings: NaN keeps nothing, infinity everything; both
+            # echo as null in structured content (the text block differs,
+            # declared)
+            history("Payments DB", "host", as_of="nan"),
+            history("Payments DB", "host", as_of="inf"),
+            # set slot: adds and the removal in time order
+            history("Home Lab", "hosts"),
+            history("home lab", "Hosts", as_of="9999-12-31T00:00:00+00:00"),
+            history("Home Lab", "hosts", as_of="1970-01-02"),
+            # transaction time orders the chain, not assertion time
+            history("Build Server", "hostname"),
+            # an empty slot
+            history("Nobody", "nothing"),
+            # refused at binding
+            history("Payments DB", "host", as_of="yesterday"),
+        ],
+    },
+})
+
+
+# The world cortex (spec WD1-WD12), on templates whose world facts the
+# Python daemon's own tool wrote. A retrieved_at of 1.0 makes a fact stale.
+WORLD_SEED = [
+    world_set("Rust", "latest stable version", "1.90.0",
+              source_url="https://blog.rust-lang.org/", source_quote="Rust 1.90.0 is out.",
+              freshness_class="slow"),
+    world_set("Python", "latest version", "3.13.0", source_url="https://www.python.org/",
+              retrieved_at=1.0),
+    world_set("PostgreSQL", "license", "PostgreSQL License", freshness_class="evergreen",
+              source_url="https://www.postgresql.org/about/licence/"),
+]
+
+SCENARIOS.update({
+    "world-facts": {
+        "config": None,
+        # A non-finite retrieved_at: Python stores and reloads it, so the
+        # Rust daemon must start on a bank that holds one.
+        "seed": WORLD_SEED + [world_set("Clock", "skew", "unknown", retrieved_at="inf")],
+        "ops": [
+            # compact entries; the stale one carries correct_with and the note
+            world_search("what is the newest Rust release"),
+            world_search("python version", verbose=True),
+            world_search("database license", top_k=1),
+            # the same value restated: confirmed, confidence lifted, citation
+            # kept when empty, a new hash recorded
+            world_set("rust", "Latest Stable Version", " 1.90.0 ", confidence=0.95,
+                      content_hash="sha256:abc"),
+            # a different value supersedes, with a session header
+            world_set("Rust", "latest stable version", "1.91.0", [sess("sess-w")],
+                      source_url="https://blog.rust-lang.org/2026/", retrieved_at=1600000000.0),
+            # unsafe schemes are refused before anything runs
+            world_set("Evil", "link", "x", source_url="javascript:alert(1)"),
+            world_set("Evil", "link", "x", source_url="\tJaVaScRiPt:alert(1)"),
+            # a scheme-less citation is inert and allowed
+            world_set("Example", "home page", "example.com/page", source_url="example.com/page"),
+            world_search("rust release", top_k=10),
+            # the non-finite retrieved_at: never stale, undecayed, echoed null
+            world_search("clock skew", top_k=1, verbose=True),
+            history("Rust", "latest stable version"),
+        ],
+    },
+    "world-facts-demote": {
+        "config": "memory:\n  search:\n    stale_policy: demote\n",
+        "seed": WORLD_SEED,
+        "ops": [
+            # the stale fact sorts last and carries the warning
+            world_search("python version and rust version", top_k=5),
+            world_set("Python", "latest version", "3.14.0", source_url="https://www.python.org/"),
+        ],
+    },
+    "world-facts-quarantine": {
+        "config": "memory:\n  search:\n    stale_policy: quarantine\n",
+        "seed": WORLD_SEED,
+        "ops": [
+            # the stale value moves to last_known_value, in both projections
+            world_search("python version"),
+            world_search("python version", verbose=True),
+        ],
+    },
+})
+
+
+# Lessons (spec LS1-LS10) and the memory_history chain (CH1-CH6). The
+# lessons are SQL seeds (only the dream writes them), asserted in 2023, so a
+# fact written now about their subject makes them re_verify: directly for
+# "blue-green pipeline", and through the graph alias "bearer tokens" ->
+# "auth tokens" for the credentials lesson.
+LESSON_TEXTS = [
+    "Deploy the engine through the blue-green pipeline, never by hand.",
+    "The flaky integration test needs the bench Postgres on port 5433.",
+    "Rotate the bearer tokens with the CLI, not by editing files.",
+]
+
+SCENARIOS.update({
+    "lessons": {
+        "config": None,
+        "seed": [
+            *[store(t, [sess("sess-l")]) for t in LESSON_TEXTS],
+            fact("blue-green pipeline", "status", "retired", origin="user", confidence=0.9),
+            fact("auth tokens", "rotation", "monthly", origin="user", confidence=0.9),
+            tool("memory_alias", entity="auth tokens", alias="bearer tokens"),
+            tool("memory_graph_relate", src="blue-green pipeline", relation="uses",
+                 dst="Jenkins"),
+            # a user rewrite supersedes: the chain's superseded event
+            fact("blue-green pipeline", "status", "decommissioned", origin="user",
+                 confidence=0.9),
+            lesson_row("deploy engine to host", "approach", "deploy-engine-to-host", "approach",
+                       "Deploy through the blue-green pipeline, never by hand.",
+                       "blue-green pipeline", "+", "success", "current", LESSON_TEXTS[0]),
+            lesson_row("run integration tests", "pitfall", "run-integration-tests", "pitfall",
+                       "The suite needs the bench Postgres on port 5433.", None, "-",
+                       "failure", "current", LESSON_TEXTS[1]),
+            lesson_row("rotate credentials", "tool-choice", "rotate-credentials", "tool-choice",
+                       "Rotate bearer tokens with the CLI.", "bearer tokens", "+", "success",
+                       "current", LESSON_TEXTS[2]),
+            lesson_row("deploy engine to host", "approach", "deploy-engine-to-host", "approach",
+                       "Deploy by hand over ssh.", "blue-green pipeline", "+", "success",
+                       "superseded", LESSON_TEXTS[0]),
+        ],
+        "ops": [
+            # compact entries; re_verify directly and through the graph alias
+            lesson_search("how do I deploy the engine to a host"),
+            lesson_search("integration tests keep failing", verbose=True),
+            lesson_search("rotating credentials", top_k=1),
+            # a session's search logs its session and open episode
+            lesson_search("deploy and rotate", [sess("sess-l")], top_k=3),
+            # the chain: facts, the edge and the about-named lesson
+            history_chain("blue-green pipeline"),
+            # alias names widen the keys: the bearer-tokens lesson joins
+            history_chain("auth tokens"),
+            # a lesson matched by its task key
+            history_chain("deploy engine to host"),
+            history_chain("Nobody at all"),
+            history_chain("   "),
+        ],
+    },
+})
+
+
+SCENARIOS.update({
+    # The score floor and a disabled retrieval log: lessons under 0.55 are cut
+    # and no lesson_search_events row is written.
+    "lessons-config": {
+        "config": "memory:\n  lessons:\n    min_confidence: 0.55\n"
+                  "  retrieval_log:\n    enabled: false\n",
+        "seed": SCENARIOS["lessons"]["seed"],
+        "ops": [
+            lesson_search("deploy and rotate and test", [sess("sess-l")], top_k=5),
+        ],
+    },
+})
+
+
 # The episode tools (spec EP1-EP12), on templates whose sessions, board rows
 # and active-session pointer the Python daemon's own calls created.
 SCENARIOS.update({
@@ -920,6 +1175,16 @@ def resolve_args(args: dict, dsn: str) -> dict:
                 row = c.execute("SELECT id FROM episodes WHERE session_key = %s AND parent_id IS NULL "
                                 "ORDER BY started_at LIMIT 1", (key,)).fetchone()
             v = row[0][:int(n)] if row else "0" * int(n)
+        elif isinstance(v, str) and v.startswith("@txmid:"):
+            # ``@txmid:<entity_norm>:<attribute_norm>``: the midpoint between
+            # the slot's first two transaction times (a cutoff that keeps
+            # exactly the first version); both banks hold the same clocks.
+            _, ent, attr = v.split(":")
+            with psycopg.connect(dsn) as c:
+                rows = c.execute("SELECT tx_time FROM facts WHERE entity_norm = %s "
+                                 "AND attribute_norm = %s ORDER BY tx_time LIMIT 2",
+                                 (ent, attr)).fetchall()
+            v = (rows[0][0] + rows[1][0]) / 2
         elif isinstance(v, str) and v.startswith("@ep:"):
             # ``@ep:<title>``: the first episode with that title, whole.
             title = v[len("@ep:"):]
@@ -963,9 +1228,11 @@ def extract_numeric(state: dict) -> dict:
     return out
 
 
-def extract_fact_numeric(state: dict) -> dict:
-    """Pull fact embeddings out by fact id, leaving tokens."""
-    t = _table(state, "facts")
+def extract_fact_numeric(state: dict, table: str = "facts") -> dict:
+    """Pull a canonical table's embeddings out by row id, leaving tokens."""
+    t = _table(state, table)
+    if t is None:
+        return {}
     out = {}
     i_id, i_emb = _col(t, "id"), _col(t, "embedding")
     if i_id is None or i_emb is None:
@@ -977,14 +1244,47 @@ def extract_fact_numeric(state: dict) -> dict:
     return out
 
 
-def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
+def extract_lesson_scores(state: dict) -> dict:
+    """Pull each ``lesson_search_events.served`` score out by row id, leaving
+    tokens (compared within ``SCORE_TOLERANCE``)."""
+    t = _table(state, "lesson_search_events")
+    if t is None:
+        return {}
+    i_id, i_served = _col(t, "id"), _col(t, "served")
+    out = {}
+    for row in t["rows"]:
+        served = row[i_served]
+        if isinstance(served, list):
+            out[row[i_id]] = [x.get("score") if isinstance(x, dict) else None for x in served]
+            row[i_served] = [{**x, "score": "<score>"} if isinstance(x, dict) else x
+                             for x in served]
+    return out
+
+
+def compare_lesson_scores(py: dict, rs: dict, stats: dict) -> list[str]:
+    diffs = []
+    for rid in sorted(set(py) & set(rs)):
+        for i, (a, b) in enumerate(zip(py[rid], rs[rid])):
+            if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+                if a != b:
+                    diffs.append(f"lesson_search_events[{rid}].served[{i}].score: {a} vs {b}")
+                continue
+            d = abs(a - b)
+            stats["lesson_score_max_diff"] = max(stats.get("lesson_score_max_diff", 0.0), d)
+            if d > SCORE_TOLERANCE:
+                diffs.append(f"lesson_search_events[{rid}].served[{i}].score: {a} vs {b}")
+    return diffs
+
+
+def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict,
+                         table: str = "facts") -> list[str]:
     diffs = []
     for fid in sorted(set(py) & set(rs)):
         ea, eb = py[fid], rs[fid]
         if (ea is None) != (eb is None):
-            diffs.append(f"facts[{fid}].embedding: python/rust presence mismatch")
+            diffs.append(f"{table}[{fid}].embedding: python/rust presence mismatch")
         elif ea is not None and len(ea) != len(eb):
-            diffs.append(f"facts[{fid}].embedding: length python {len(ea)} vs rust {len(eb)}")
+            diffs.append(f"{table}[{fid}].embedding: length python {len(ea)} vs rust {len(eb)}")
         elif ea:
             mad = max(abs(x - y) for x, y in zip(ea, eb))
             cos = sum(x * y for x, y in zip(ea, eb)) / (
@@ -992,7 +1292,7 @@ def compare_fact_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str
             stats["max_abs_diff"] = max(stats.get("max_abs_diff", 0.0), mad)
             stats["min_cosine"] = min(stats.get("min_cosine", 1.0), cos)
             if tol and (mad > tol["embedding_max_abs_diff"] or cos < tol["embedding_min_cosine"]):
-                diffs.append(f"facts[{fid}].embedding: max abs diff {mad:.3e}, cosine {cos:.9f}")
+                diffs.append(f"{table}[{fid}].embedding: max abs diff {mad:.3e}, cosine {cos:.9f}")
     return diffs
 
 
@@ -1033,6 +1333,13 @@ def _clock(v):
     return None if v is None else "<clock>"
 
 
+def _recent_clock(v):
+    """A clock-written value keeps null-or-not; an explicit past one stays."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)             and abs(v - time.time()) < RECENT_S:
+        return "<clock>"
+    return v
+
+
 HEX_RUN = re.compile(r"[0-9a-f]{8,32}")
 
 
@@ -1055,6 +1362,8 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
     state = dbstate.normalize(state, w1a.DB_NONDETERMINISTIC, before)
     numeric = extract_numeric(state)
     numeric["facts"] = extract_fact_numeric(state)
+    numeric["world_facts"] = extract_fact_numeric(state, "world_facts")
+    numeric["lesson_scores"] = extract_lesson_scores(state)
     emap = episode_map(state)
     for qualified, t in state["rows"].items():
         name = qualified.split(".", 1)[1]
@@ -1062,6 +1371,9 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
             if (name, col) in CLOCK:
                 for row in t["rows"]:
                     row[idx] = _clock(row[idx])
+            elif (name, col) in RECENT_CLOCK:
+                for row in t["rows"]:
+                    row[idx] = _recent_clock(row[idx])
         if name == "meta":
             for row in t["rows"]:
                 key, value = row
@@ -1102,8 +1414,13 @@ def state_diff(a: dict, b: dict) -> list[str]:
 
 def compare_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     diffs = compare_fact_numeric(py.get("facts", {}), rs.get("facts", {}), tol, stats)
-    py = {k: v for k, v in py.items() if k != "facts"}
-    rs = {k: v for k, v in rs.items() if k != "facts"}
+    diffs += compare_fact_numeric(py.get("world_facts", {}), rs.get("world_facts", {}), tol,
+                                  stats, "world_facts")
+    diffs += compare_lesson_scores(py.get("lesson_scores", {}), rs.get("lesson_scores", {}),
+                                   stats)
+    skip = ("facts", "world_facts", "lesson_scores")
+    py = {k: v for k, v in py.items() if k not in skip}
+    rs = {k: v for k, v in rs.items() if k not in skip}
     for eid in sorted(set(py) | set(rs)):
         a, b = py.get(eid), rs.get(eid)
         if a is None or b is None:
@@ -1155,19 +1472,30 @@ def _age_adjacent(x, y) -> bool:
     return (a, b) in {((0, 0), (1, 1)), ((1, 59), (2, 1)), ((2, 23), (3, 1))}
 
 
-def normalize_records(a, b):
-    """Record clocks keep null-or-not; an ``age`` one step apart compares equal."""
+def normalize_records(a, b, stats=None):
+    """Record clocks keep null-or-not; an ``age`` one step apart compares equal;
+    a search ``score`` within ``SCORE_TOLERANCE`` compares equal."""
     if isinstance(a, dict) and isinstance(b, dict):
         for k in set(a) & set(b):
             if k in RESPONSE_CLOCK:
                 a[k], b[k] = _clock(a[k]), _clock(b[k])
+            elif k in RESPONSE_RECENT_CLOCK:
+                a[k], b[k] = _recent_clock(a[k]), _recent_clock(b[k])
+            elif (k == "score" and isinstance(a[k], (int, float))
+                  and isinstance(b[k], (int, float)) and not isinstance(a[k], bool)):
+                d = abs(a[k] - b[k])
+                if stats is not None:
+                    stats["response_score_max_diff"] = max(
+                        stats.get("response_score_max_diff", 0.0), d)
+                if d <= SCORE_TOLERANCE:
+                    a[k] = b[k] = "<score>"
             elif k == "age" and a[k] != b[k] and _age_adjacent(a[k], b[k]):
                 a[k] = b[k] = "<age>"
             else:
-                normalize_records(a[k], b[k])
+                normalize_records(a[k], b[k], stats)
     elif isinstance(a, list) and isinstance(b, list):
         for x, y in zip(a, b):
-            normalize_records(x, y)
+            normalize_records(x, y, stats)
 
 
 def generic_titles(v):
@@ -1183,7 +1511,7 @@ def generic_titles(v):
 
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     a, b = generic_titles(json.loads(json.dumps(py))), generic_titles(json.loads(json.dumps(rs)))
-    normalize_records(a, b)
+    normalize_records(a, b, stats)
     out = []
     va, vb = a.get("value"), b.get("value")
     if isinstance(va, dict) and isinstance(vb, dict) and "surprise" in va and "surprise" in vb:
@@ -1358,7 +1686,7 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 
 # Tables the write path touches: recorded every step (the rest only at init).
 WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions", "facts", "entities",
-                "outcome_signals")
+                "outcome_signals", "world_facts")
 
 
 def pack(state: dict, full: bool) -> dict:
@@ -1375,7 +1703,7 @@ def pack_numeric(numeric: dict, seen: set) -> dict:
     import struct
     out = {}
     for eid, v in numeric.items():
-        if eid == "facts" or eid in seen:
+        if eid in ("facts", "world_facts", "lesson_scores") or eid in seen:
             continue  # fact embeddings are compared live only (declared)
         seen.add(eid)
         emb = v["embedding"]

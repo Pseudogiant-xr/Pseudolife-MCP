@@ -815,6 +815,15 @@ hook does not see.
   in the PR (or the commit body when there is no PR yet), each finding
   labelled by source with its verdict. A missing, signed-out or failed
   Codex run is recorded as a single-reviewer pass, never skipped silently.
+- **The two review-pass rules above bind only the session that owns the
+  PR** — the main thread opening it or forwarding it for merge — which runs
+  both the Claude review and the Codex review. A reviewer (a `codex exec
+  review` run, a reviewer subagent, any agent asked only to review) reviews
+  the diff it was given: it does not start other reviews, subagents or Codex
+  runs, and does not call its own pass single-reviewer. (2026-10-18: a Codex
+  second reviewer read the bullet above through AGENTS.md and tried to
+  launch a nested `codex exec review`; only its sandbox stopped the
+  recursion.)
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
