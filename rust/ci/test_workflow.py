@@ -916,6 +916,10 @@ def test_dream_reuses_candidate_and_checks_cancel_control():
     assert "rust/target/release" in step["run"]
     assert "dream-cancel-drop-task" in step["run"]
     assert "$cancelExit -ne 1" in step["run"]
+    # The control's expected AssertionError is tailed into a passing step's
+    # log; label it, or it reads as a failure (runs 39033993990, 39088038765).
+    label = step["run"].index("the test below MUST fail (expected)")
+    assert label < step["run"].index("Get-Content -Tail 20 $cancelLog")
     build = next(s for s in jobs["candidate"]["steps"] if s.get("name") == "Build embedding candidate")
     words = commands(build["run"])[0]
     assert "contract-harness" in words[words.index("--features") + 1].split(",")
