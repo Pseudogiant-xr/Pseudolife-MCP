@@ -1311,10 +1311,7 @@ SCENARIOS.update({
     # The meta filter refuses a replacement: the whole correction rolls back,
     # the trace invalidation included, and the source stays live.
     "supersede-meta-filter": {
-        "config": "memory:
-  meta_filter:
-    enabled: true
-",
+        "config": "memory:\n  meta_filter:\n    enabled: true\n",
         "seed": [
             store("The on-call rotation changes on Mondays."),
             trace_sql("The on-call rotation changes on Mondays.", "on-call", "rotation"),
