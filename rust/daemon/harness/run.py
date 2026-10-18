@@ -81,9 +81,46 @@ T_COLON = "tok:with:colons-0003"
 
 # ---- HTTP ---------------------------------------------------------------------------
 
+# A daemon that refuses before reading a request body closes with it unread,
+# so its stack answers the rest with RST, and Windows discards a received
+# response when that RST lands before the read: an immediate 403 to a 256 KiB
+# POST was lost to WinError 10053/10054 in 120 of 200 calls on an idle
+# Windows 11 host (2026-10-18); hosted runs 39033993990 and 39088038765 failed
+# security-open on it. Other hosts keep received data readable, so there a
+# reset without a response is the daemon's own fault and is never replayed.
+HOST_DISCARDS_ON_RESET = os.name == "nt"
+
+
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
          timeout: float = 120.0, compare_length: bool = False, body_bytes: bool = False,
          chunked: bool = False, headers_only: bool = False) -> dict:
+    options = dict(timeout=timeout, compare_length=compare_length, body_bytes=body_bytes,
+                   chunked=chunked)
+    try:
+        return _exchange(port, method, path, headers, body, headers_only=headers_only, **options)
+    except http.client.RemoteDisconnected:
+        raise  # a clean EOF before any status is the daemon's own close
+    except (ConnectionResetError, ConnectionAbortedError) as lost:
+        if not body or headers_only or not HOST_DISCARDS_ON_RESET:
+            raise
+        # Replay the same request line, headers and framing without the body:
+        # a refusal decided on headers answers again, while a daemon that
+        # closes without answering, or waits for the body, still fails here.
+        # The replay is recorded in the case row (compare_case).
+        try:
+            replay = _exchange(port, method, path, headers, body, headers_only=True, **options)
+        except Exception as failed:
+            raise RuntimeError(f"{type(lost).__name__}: {lost}; headers-only replay: "
+                               f"{type(failed).__name__}: {failed}") from lost
+        print(f"transport: {method} {path} lost its response to {type(lost).__name__} ({lost}); "
+              f"headers-only replay answered {replay['status']}", file=sys.stderr, flush=True)
+        replay["_transport_replay"] = f"{type(lost).__name__}: {lost}"
+        return replay
+
+
+def _exchange(port: int, method: str, path: str, headers, body: bytes | None, *,
+              timeout: float, compare_length: bool, body_bytes: bool, chunked: bool,
+              headers_only: bool) -> dict:
     started_at = time.time()
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     c.putrequest(method, path, skip_host=any(k.lower() == "host" for k, _ in headers),
@@ -120,8 +157,12 @@ def call(port: int, method: str, path: str, headers=(), body: bytes | None = Non
         except Exception:
             c.close()
             raise
-    r = c.getresponse()
-    raw = r.read()
+    try:
+        r = c.getresponse()
+        raw = r.read()
+    except Exception:
+        c.close()
+        raise
     hdrs = {k.lower(): v for k, v in r.getheaders() if k.lower() in HEADERS_COMPARED
             or (compare_length and k.lower() == "content-length")}
     ctype = hdrs.get("content-type", "")
@@ -265,6 +306,7 @@ def normalize_response(resp: dict, path: str, declared: list[str], *, golden: bo
     if path == "/api/agents?view=coordination" and snapshot_clock_valid(resp):
         resp["json"]["snapshot_at"] = "<request clock>"
     resp.pop("_clock_window", None)
+    resp.pop("_transport_replay", None)
     if urllib.parse.unquote(path.split("?")[0]) == "/health" and "json" in resp:
         resp["json"] = normalize_health(resp["json"], declared, golden=golden)
     if urllib.parse.unquote(path.split("?")[0]) == "/api/search" and isinstance(resp.get("json"), dict):
@@ -1635,8 +1677,18 @@ def settle_before_cases(scn: Scenario, ports: list[int]) -> None:
 
 def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) -> dict:
     declared: list[str] = []
+    # A replayed early refusal (call) is evidence, never part of the comparison.
+    replays = {}
+    if py is not None and "_transport_replay" in py:
+        py = dict(py)
+        replays["python"] = py.pop("_transport_replay")
+    if "_transport_replay" in rs:
+        rs = dict(rs)
+        replays["rust"] = rs.pop("_transport_replay")
     row = {"case": c["name"], "method": c["method"], "path": c["path"][:120],
            "python_status": py and py["status"], "rust_status": rs["status"], "diffs": [], "declared": None}
+    if replays:
+        row["transport_replays"] = replays
     if c["path"] == "/api/agents?view=coordination":
         for side, response in (("python", py), ("rust", rs)):
             if response and isinstance(response.get("json"), dict) and "snapshot_at" in response["json"]:
