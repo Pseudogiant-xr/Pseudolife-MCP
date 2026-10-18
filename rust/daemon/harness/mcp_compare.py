@@ -41,6 +41,8 @@ FREE_PREFIXES = ("Parse error: ", "Validation error: ")
 UNSERVED = {
     "memory_recall": "W2-D", "memory_world_search": "W2-D",
     "memory_lesson_search": "W2-D",
+    # memory_history: the probe sends only entity (chain mode), which stays
+    # the stub; slot mode is served and compared by harness/w2e.py.
     "memory_history": "W2-D", "memory_graph": "W2-D",
     "document_search": "W2-D",
     "memory_consolidation_candidates": "W2-D",

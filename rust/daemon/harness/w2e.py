@@ -11,8 +11,8 @@ usage:
 Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_set_add``, ``memory_set_remove``, ``memory_fact_resolve``,
 ``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
-``memory_episode_summary``, ``memory_outcome`` and ``memory_reinforce`` on
-``/mcp`` (``--features mutants`` adds the
+``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce`` and
+``memory_history`` (slot mode) on ``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -131,7 +131,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # the outcome-labels scenario.
            "mcp-outcome-no-used-ids-record", "mcp-outcome-credit-latest-only",
            "mcp-outcome-ignore-handle", "mcp-reinforce-no-explicit",
-           "mcp-reinforce-no-use-credit"]
+           "mcp-reinforce-no-use-credit",
+           # memory_history slot mode (spec HI1-HI7): caught by history-slot.
+           "mcp-history-ignore-as-of", "mcp-history-set-unsorted",
+           "mcp-history-set-no-removed", "mcp-history-asserted-order"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -270,6 +273,10 @@ def reinforce(entry_id, headers=()) -> dict:
 def search(query, headers=(), top_k=1) -> dict:
     """Seed-only here: a logged search whose served ids an outcome credits."""
     return tool("memory_search", headers, query=query, top_k=top_k)
+
+
+def history(entity, attribute, **kw) -> dict:
+    return tool("memory_history", entity=entity, attribute=attribute, **kw)
 
 
 def register(episode: str, **fields) -> dict:
@@ -812,6 +819,57 @@ SCENARIOS.update({
 })
 
 
+# memory_history slot mode (spec HI1-HI7), on cortex records written through
+# the Python daemon's own fact tools. Chain mode answers the declared stub
+# and is not compared here.
+SCENARIOS.update({
+    "history-slot": {
+        "config": None,
+        "seed": [
+            fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9),
+            fact("Payments DB", "host", "10.0.0.6", origin="user", confidence=0.9),
+            fact("Payments DB", "host", "10.0.0.7", origin="user", confidence=0.9),
+            set_add("Home Lab", "hosts", "alpha"),
+            set_add("Home Lab", "hosts", "beta"),
+            set_remove("Home Lab", "hosts", "alpha"),
+            set_add("Home Lab", "hosts", "gamma"),
+            # a contender parked below the margin, then the current value
+            # restated: its re-confirmation moves its tx_time past the
+            # contender's, so transaction order differs from assertion order
+            fact("Build Server", "hostname", "ci-box-2", origin="user", confidence=0.9),
+            fact("Build Server", "hostname", "ci-box-3", origin="user", confidence=0.5),
+            fact("Build Server", "hostname", "ci-box-2", origin="user", confidence=0.9),
+        ],
+        "ops": [
+            history("Payments DB", "host"),
+            # the slot key is case- and separator-insensitive
+            history("payments db", "HOST"),
+            # a cutoff between the first two versions keeps the first
+            history("Payments DB", "host", as_of="@txmid:payments-db:host"),
+            # ISO with an offset, a naive date (local time), epoch zero
+            history("Payments DB", "host", as_of="1970-01-02T00:00:00+00:00"),
+            history("Payments DB", "host", as_of="2000-01-01"),
+            history("Payments DB", "host", as_of=0.0),
+            # float spellings: NaN keeps nothing, infinity everything; both
+            # echo as null in structured content (the text block differs,
+            # declared)
+            history("Payments DB", "host", as_of="nan"),
+            history("Payments DB", "host", as_of="inf"),
+            # set slot: adds and the removal in time order
+            history("Home Lab", "hosts"),
+            history("home lab", "Hosts", as_of="9999-12-31T00:00:00+00:00"),
+            history("Home Lab", "hosts", as_of="1970-01-02"),
+            # transaction time orders the chain, not assertion time
+            history("Build Server", "hostname"),
+            # an empty slot
+            history("Nobody", "nothing"),
+            # refused at binding
+            history("Payments DB", "host", as_of="yesterday"),
+        ],
+    },
+})
+
+
 # The episode tools (spec EP1-EP12), on templates whose sessions, board rows
 # and active-session pointer the Python daemon's own calls created.
 SCENARIOS.update({
@@ -920,6 +978,16 @@ def resolve_args(args: dict, dsn: str) -> dict:
                 row = c.execute("SELECT id FROM episodes WHERE session_key = %s AND parent_id IS NULL "
                                 "ORDER BY started_at LIMIT 1", (key,)).fetchone()
             v = row[0][:int(n)] if row else "0" * int(n)
+        elif isinstance(v, str) and v.startswith("@txmid:"):
+            # ``@txmid:<entity_norm>:<attribute_norm>``: the midpoint between
+            # the slot's first two transaction times (a cutoff that keeps
+            # exactly the first version); both banks hold the same clocks.
+            _, ent, attr = v.split(":")
+            with psycopg.connect(dsn) as c:
+                rows = c.execute("SELECT tx_time FROM facts WHERE entity_norm = %s "
+                                 "AND attribute_norm = %s ORDER BY tx_time LIMIT 2",
+                                 (ent, attr)).fetchall()
+            v = (rows[0][0] + rows[1][0]) / 2
         elif isinstance(v, str) and v.startswith("@ep:"):
             # ``@ep:<title>``: the first episode with that title, whole.
             title = v[len("@ep:"):]
