@@ -12,14 +12,15 @@ import pytest
 from . import daemon
 from .test_baseline import launcher_directory
 
-# /health answers at once; /api/search answers ``SEARCH`` until ``LOADS_AFTER``
-# seconds have passed, then 401, like a daemon whose principal refresher has
-# not finished its first read yet.
+# /health answers at once; the first ``early`` /api/search requests get
+# ``early_status``/``early_error``, later ones 401, like a daemon whose
+# principal refresher has not finished its first read yet. Counted, not
+# timed, so a slow runner cannot close the window before the probe arrives.
 STAND_IN = """
-import json, os, sys, time
+import json, os, sys, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-started = time.monotonic()
-loads_after, early_status, early_error = float(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+early, early_status, early_error = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+seen, lock = [0], threading.Lock()
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def answer(self, status, payload):
@@ -32,15 +33,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/health':
             return self.answer(200, {'status': 'ok', 'baseline_instance': {
                 'nonce': os.environ.get('PSEUDOLIFE_BASELINE_NONCE'), 'pid': os.getpid()}})
-        if time.monotonic() - started < loads_after:
+        with lock:
+            seen[0] += 1
+            refused = seen[0] <= early
+        if refused:
             return self.answer(early_status, {'error': early_error})
         return self.answer(401, {'error': 'unauthorized'})
 ThreadingHTTPServer(('127.0.0.1', int(os.environ['PSEUDOLIFE_MCP_PORT'])), Handler).serve_forever()
 """
 
 
-def stand_in(loads_after, status=503, error="principals_unavailable"):
-    return [sys.executable, "-c", STAND_IN, str(loads_after), str(status), error]
+def stand_in(early, status=503, error="principals_unavailable"):
+    return [sys.executable, "-c", STAND_IN, str(early), str(status), error]
 
 
 def wrong_bearer(url):
@@ -51,17 +55,17 @@ def wrong_bearer(url):
 
 def test_launch_waits_for_the_stored_principal_view():
     with launcher_directory() as directory, \
-            patch.object(daemon, "_daemon_command", return_value=stand_in(1.0)):
+            patch.object(daemon, "_daemon_command", return_value=stand_in(3)):
         with daemon.launched_daemon("synthetic-not-connected", directory, startup_timeout=30) as (_, url, cleanup):
             assert wrong_bearer(url) == (401, "unauthorized")
-            assert cleanup["principals_unavailable_before_ready"] >= 1
+            assert cleanup["principals_unavailable_before_ready"] == 3
             assert "principals_unavailable_before_ready" in json.loads(json.dumps(cleanup))
 
 
 def test_view_that_never_loads_fails_the_launch():
     started = time.monotonic()
     with launcher_directory() as directory, \
-            patch.object(daemon, "_daemon_command", return_value=stand_in(3600)), \
+            patch.object(daemon, "_daemon_command", return_value=stand_in(10**9)), \
             pytest.raises(RuntimeError, match="stored-principal view did not load"):
         with daemon.launched_daemon("synthetic-not-connected", directory, startup_timeout=3):
             pass
@@ -74,6 +78,6 @@ def test_only_the_exact_refusal_delays_readiness(status, error):
     # The near miss: another 503, or the code under another status, is the
     # daemon's own answer for the corpus contract to judge, not a load wait.
     with launcher_directory() as directory, \
-            patch.object(daemon, "_daemon_command", return_value=stand_in(3600, status, error)):
+            patch.object(daemon, "_daemon_command", return_value=stand_in(10**9, status, error)):
         with daemon.launched_daemon("synthetic-not-connected", directory, startup_timeout=30) as (_, url, cleanup):
             assert cleanup["principals_unavailable_before_ready"] == 0

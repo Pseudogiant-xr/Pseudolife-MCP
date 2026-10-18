@@ -41,8 +41,9 @@ def wait_for_principals(url, deadline, *, alive=lambda: True) -> int:
 
     Only that exact refusal means "not loaded yet": any other answer (401, an
     open daemon's search, a stand-in's 200) is the daemon's own and is left
-    for the caller's contract to judge. The refusal precedes every handler, so
-    the probe writes nothing."""
+    for the caller's contract to judge. On a token-mode daemon (every current
+    caller) the refusal precedes every handler, so the probe writes nothing;
+    on an open daemon the probe is a real search."""
     import httpx
     unavailable = 0
     while True:

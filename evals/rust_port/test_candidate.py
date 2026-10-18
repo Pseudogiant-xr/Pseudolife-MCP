@@ -238,9 +238,9 @@ def test_owned_candidate_waits_for_its_stored_principal_view(tmp_path):
     # not 503 principals_unavailable, before the corpus starts.
     import httpx
     from evals.rust_baseline.test_principals_readiness import stand_in
-    with candidate.launched_candidate(stand_in(1.0), "synthetic-minted-bank", tmp_path,
+    with candidate.launched_candidate(stand_in(3), "synthetic-minted-bank", tmp_path,
             source_root=tmp_path, cache_overrides={}, startup_timeout=30) as (url, cleanup):
         response = httpx.get(url + "/api/search?q=apricot", headers={"Authorization": "Bearer synthetic-invalid"},
                              trust_env=False, timeout=5)
         assert (response.status_code, response.json()["error"]) == (401, "unauthorized")
-        assert cleanup["principals_unavailable_before_ready"] >= 1
+        assert cleanup["principals_unavailable_before_ready"] == 3
