@@ -365,13 +365,18 @@ def test_repair_replaces_a_file_another_account_owns(tmp_path: Path, monkeypatch
         real_fstat = os.fstat
         uid = os.geteuid()
 
+        class ForeignOwned:
+            # Every attribute of the real result (st_mtime_ns included: the
+            # repair's identity check reads it), with another account's uid.
+            def __init__(self, info):
+                self._info = info
+
+            def __getattr__(self, name):
+                return uid + 1 if name == "st_uid" else getattr(self._info, name)
+
         def fstat(fd):
             info = real_fstat(fd)
-            if info.st_ino != original:
-                return info
-            fields = list(info)
-            fields[4] = uid + 1  # st_uid
-            return os.stat_result(fields)
+            return info if info.st_ino != original else ForeignOwned(info)
         monkeypatch.setattr(credentials.os, "fstat", fstat)
     assert str(_refusal(path)) == "credential file is owned by another account"
     credentials.repair_token_file(path)
