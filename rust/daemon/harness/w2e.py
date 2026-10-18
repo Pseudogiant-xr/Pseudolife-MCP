@@ -1321,12 +1321,14 @@ SCENARIOS.update({
     # close to what is held is stored where a plain store would be refused.
     "supersede-gate": {
         "config": "memory:\n  surprise_threshold: 0.35\n",
-        "seed": [store("The release freeze starts on Friday at noon.")],
+        "seed": [store("The cafeteria opens at 8am on weekdays."),
+                 store("Lunch is served from noon in the atrium.")],
         "ops": [
-            # a paraphrase: a plain store is refused below the threshold
-            store("Release freeze begins Friday at noon."),
-            supersede("Release freeze begins Friday at noon.",
-                      old_text="The release freeze starts on Friday at noon."),
+            # a near-duplicate of another entry: a plain store is refused
+            store("The cafeteria opens at 8 am on weekdays."),
+            # as a correction of an unrelated entry it is stored
+            supersede("The cafeteria opens at 8 am on weekdays.",
+                      old_text="Lunch is served from noon in the atrium."),
         ],
     },
     # The meta filter refuses a replacement: the whole correction rolls back,
@@ -1427,13 +1429,13 @@ SCENARIOS.update({
             reinstate("The legacy importer is retired."),
             reinstate(TTL, expected_text_sha256="0" * 64),
             reinstate("Backups run nightly at 02:00.", operation_id=OP_B),
-            # committed, then replayed, then a different request under the UUID
+            # committed; the resident entry is live at once (a correction by
+            # text finds it); the replay reports it retired again; a
+            # different request under the UUID conflicts
             reinstate(TTL),
-            reinstate(TTL),
-            reinstate(TTL, reason="a different reason"),
-            # retired again by a correction: the replay reports it
             supersede("The cache TTL is 900 seconds.", old_text=TTL),
             reinstate(TTL),
+            reinstate(TTL, reason="a different reason"),
             # an integral retirement time: the fingerprint carries 1700000000.0
             reinstate("The audit log rotates weekly.", operation_id=OP_F,
                       expected_superseded_at=1700000000),
@@ -1442,6 +1444,8 @@ SCENARIOS.update({
             external("UPDATE entries SET superseded_at = 1700000002.5, "
                      "superseded_by_text = 'retired elsewhere' "
                      "WHERE text = 'The proxy listens on port 3128.'"),
+            reinstate("The proxy listens on port 3128.", operation_id=OP_C),
+            # a replay of a live commit
             reinstate("The proxy listens on port 3128.", operation_id=OP_C),
             external("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, "
                      "source, superseded_at, superseded_by_text, tags, slots, dream_state) "
