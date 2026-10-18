@@ -9,8 +9,10 @@ usage:
                         [--mutants NAME ...]   (default: every entry of MUTANTS)
 
 Any Rust build serves ``memory_store``, ``memory_fact_set``,
-``memory_set_add``, ``memory_set_remove`` and ``memory_fact_resolve`` on
-``/mcp`` (``--features mutants`` adds the deliberate breaks). Each scenario prepares
+``memory_set_add``, ``memory_set_remove``, ``memory_fact_resolve``,
+``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``
+and ``memory_episode_summary`` on ``/mcp`` (``--features mutants`` adds the
+deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
 clones it for each side, starts both daemons, then sends every operation to
@@ -39,9 +41,14 @@ Normalizers (declared, spec "Free for W1 and W2"):
   wall-clock milliseconds; ``hlc_logical`` stays exact),
   ``outcome_signals.created_at``, ``entities.created_at`` and each
   ``cortex_supersession_log`` row's ``timestamp`` keep only null-or-not;
-* in responses, the same record clocks keep only null-or-not, and a record's
-  ``age`` may differ by one step ("just now" / "1 minute ago"), since the
-  two daemons answer seconds apart;
+* the board columns a session title writes: ``coordination_agents.name_set_at``
+  and ``coordination_events.created_at`` keep only null-or-not, and so do the
+  audit chain's ``hash`` and ``prev_hash`` (they cover ``created_at``; the
+  board harness proves the chain byte for byte);
+* in responses, the same record clocks and an episode's ``started_at`` and
+  ``ended_at`` keep only null-or-not, a generic session title keeps its
+  shape, and a record's ``age`` may differ by one step ("just now" /
+  "1 minute ago"), since the two daemons answer seconds apart;
 * rows are compared as sorted sets (row order is the primary key's order,
   which renamed ids change), except that entry ids themselves must match.
 
@@ -88,9 +95,12 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("client_sessions", "ended_at"), ("client_sessions", "start_times"),
          ("facts", "asserted_at"), ("facts", "last_confirmed"), ("facts", "superseded_at"),
          ("facts", "tx_time"), ("facts", "valid_time"), ("facts", "hlc_phys"),
-         ("outcome_signals", "created_at"), ("entities", "created_at")}
+         ("outcome_signals", "created_at"), ("entities", "created_at"),
+         ("coordination_agents", "name_set_at"), ("coordination_events", "created_at"),
+         ("coordination_events", "hash"), ("coordination_events", "prev_hash")}
 # Record keys in tool answers holding wall-clock seconds.
-RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time"}
+RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
+                  "started_at", "ended_at"}
 # meta key -> paths (keys) inside its JSON value that are wall-clock.
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -108,7 +118,12 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # memory_fact_resolve (spec FR1-FR8): caught by the fact-resolve-*
            # scenarios.
            "mcp-fact-resolve-no-user-tier", "mcp-fact-resolve-reject-noop",
-           "mcp-fact-resolve-no-set-guard"]
+           "mcp-fact-resolve-no-set-guard",
+           # The episode tools (spec EP1-EP12): caught by the episode-* and
+           # session-title scenarios.
+           "mcp-episode-start-no-anchor", "mcp-episode-end-pops-root",
+           "mcp-session-title-no-entry-stamp", "mcp-session-title-no-board",
+           "mcp-episode-summary-count-order"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -218,6 +233,29 @@ def set_remove(entity, attribute, member, headers=()) -> dict:
 
 def resolve(entity, attribute, accept) -> dict:
     return tool("memory_fact_resolve", entity=entity, attribute=attribute, accept=accept)
+
+
+def ep_start(title, headers=(), **kw) -> dict:
+    return tool("memory_episode_start", headers, title=title, **kw)
+
+
+def ep_end(headers=(), **kw) -> dict:
+    return tool("memory_episode_end", headers, **kw)
+
+
+def session_title(title, headers=(), **kw) -> dict:
+    return tool("memory_session_title", headers, title=title, **kw)
+
+
+def ep_summary(eid) -> dict:
+    return tool("memory_episode_summary", id=eid)
+
+
+def register(episode: str, **fields) -> dict:
+    """Seed-only: a board row registered under ``episode`` (a session key)."""
+    return {"op": "http", "method": "POST", "path": "/api/coordination/register",
+            "body": {"label": "claude-code", "project": "p", "task": "t", "episode": episode,
+                     **fields}}
 
 
 def sql(statement: str, after_stop: bool = False) -> dict:
@@ -679,6 +717,102 @@ SCENARIOS.update({
 })
 
 
+# The episode tools (spec EP1-EP12), on templates whose sessions, board rows
+# and active-session pointer the Python daemon's own calls created.
+SCENARIOS.update({
+    "episode-lifecycle": {
+        "config": None,
+        "seed": [
+            store("First note in session A", [sess("sess-a")]),
+            store("A note in session B", [sess("sess-b")]),
+            store("Closed session note", [sess("sess-closed")]),
+            {"op": "http", "method": "POST", "path": "/api/hook/session-end",
+             "body": {"session_id": "sess-closed"}},
+        ],
+        "ops": [
+            # nested under the session root, then under the open sub-episode
+            ep_start("Sub A", [sess("sess-a")], hint="porting the episode tools"),
+            ep_start("Sub A2", [sess("sess-a")]),
+            store("A note inside the nested sub-episode", [sess("sess-a")]),
+            # each end pops one level; the session root is never closed
+            ep_end([sess("sess-a")]),
+            ep_end([sess("sess-a")]),
+            ep_end([sess("sess-a")]),
+            # another session's sub-episode becomes the global current leaf
+            ep_start("Sub B", [sess("sess-b")]),
+            # the handle anchors to its own root, not the current leaf
+            ep_start("Handle sub", episode="@root:sess-a:12"),
+            ep_end(episode="@root:sess-a:12"),
+            ep_end(episode="@root:sess-a:12"),
+            ep_end([sess("sess-b")]),
+            ep_end([sess("sess-b")]),
+            # an unknown handle degrades to the header's session, which opens
+            # its root lazily, and warns
+            ep_start("Unknown handle", [sess("sess-c")], episode="ffffffffffff"),
+            # an end refuses an unknown or short handle
+            ep_end(episode="ffffffffffff"),
+            ep_end(episode="abc"),
+            # no handle and no session: the open current leaf is another
+            # session's
+            ep_end(episode=""),
+            # an empty title is a title
+            ep_start("", [sess("sess-d")]),
+            # nothing open for the session
+            ep_end([sess("sess-e")]),
+            # no session for a title either
+            session_title("No session on this request"),
+            ep_summary("@root:sess-a:32"),
+            ep_summary("@ep:Sub A2"),
+            ep_summary("ffffffffffffffffffffffffffffffff"),
+            # a closed root: an end refuses its handle, a start reopens it
+            ep_end(episode="@root:sess-closed:12"),
+            ep_start("Reopened by its handle", episode="@root:sess-closed:12"),
+            ep_summary("@root:sess-closed:32"),
+        ],
+    },
+    "session-title": {
+        "config": None,
+        "seed": [
+            store("First note in session A", [sess("sess-a")], tags=["zeta"]),
+            store("Second note in session A", [sess("sess-a")], tags=["alpha", "zeta"]),
+            store("A note in session B", [sess("sess-b")]),
+            # board rows under the sessions: one the title may name, one an
+            # agent named, one in another session
+            register("sess-a"),
+            register("sess-a", name="Named by its agent"),
+            register("sess-b"),
+            store("Closed session note", [sess("sess-closed")]),
+            {"op": "http", "method": "POST", "path": "/api/hook/session-end",
+             "body": {"session_id": "sess-closed"}},
+            {"op": "http", "method": "GET", "path": "/api/hook/session-start?session_id=sess-ptr"},
+        ],
+        "ops": [
+            # the root, its entries' stamps and the unnamed board row
+            session_title("  Pseudolife-MCP - episode tools  ", [sess("sess-a")]),
+            # idempotent: nothing changes
+            session_title("Pseudolife-MCP - episode tools", [sess("sess-a")]),
+            session_title("   ", [sess("sess-a")]),
+            # by handle, without a header
+            session_title("Named through the handle", episode="@root:sess-b:12"),
+            session_title("Unknown handle", episode="ffffffffffff"),
+            session_title("Short handle", episode="abc"),
+            # no header: the active-session pointer's root
+            session_title("Named by the pointer"),
+            # a session with no root yet opens one under the title
+            session_title("A brand new session", [sess("sess-new")]),
+            # a closed root reopens and takes the title
+            session_title("Resumed by its key", [sess("sess-closed")]),
+            # a reserved name retitles the session but names no board row
+            session_title("maintainer notes", [sess("sess-a")]),
+            # the pointer's session nests and pops without a header
+            ep_start("Pointer sub"),
+            ep_end(),
+            ep_summary("@root:sess-a:32"),
+        ],
+    },
+})
+
+
 # ── per-side argument templates ───────────────────────────────────────────
 
 def resolve_args(args: dict, dsn: str) -> dict:
@@ -691,6 +825,13 @@ def resolve_args(args: dict, dsn: str) -> dict:
                 row = c.execute("SELECT id FROM episodes WHERE session_key = %s AND parent_id IS NULL "
                                 "ORDER BY started_at LIMIT 1", (key,)).fetchone()
             v = row[0][:int(n)] if row else "0" * int(n)
+        elif isinstance(v, str) and v.startswith("@ep:"):
+            # ``@ep:<title>``: the first episode with that title, whole.
+            title = v[len("@ep:"):]
+            with psycopg.connect(dsn) as c:
+                row = c.execute("SELECT id FROM episodes WHERE title = %s "
+                                "ORDER BY started_at LIMIT 1", (title,)).fetchone()
+            v = row[0] if row else "0" * 32
         elif isinstance(v, str) and v.startswith("@tomb:"):
             n = int(v.split(":")[1])
             with psycopg.connect(dsn) as c:
@@ -934,8 +1075,19 @@ def normalize_records(a, b):
             normalize_records(x, y)
 
 
+def generic_titles(v):
+    """A generic session title in a response keeps its shape, not its minute."""
+    if isinstance(v, str):
+        return "session - <minute>" if GENERIC.match(v) else v
+    if isinstance(v, list):
+        return [generic_titles(x) for x in v]
+    if isinstance(v, dict):
+        return {k: generic_titles(x) for k, x in v.items()}
+    return v
+
+
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
-    a, b = json.loads(json.dumps(py)), json.loads(json.dumps(rs))
+    a, b = generic_titles(json.loads(json.dumps(py))), generic_titles(json.loads(json.dumps(rs)))
     normalize_records(a, b)
     out = []
     va, vb = a.get("value"), b.get("value")

@@ -181,6 +181,94 @@ impl EpisodeLog {
             e.session_key.as_deref() == Some(key) && e.parent_id.is_none() && e.ended_at.is_none()
         })
     }
+
+    /// `_descends_from`: the parent chain from `i` reaches `root_id`
+    /// (`i` itself included), stopping at a cycle.
+    pub fn descends_from(&self, i: usize, root_id: &str) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        let mut cur = Some(&self.episodes[i]);
+        while let Some(c) = cur {
+            if !seen.insert(c.id.as_str()) {
+                break;
+            }
+            if c.id == root_id {
+                return true;
+            }
+            cur = c.parent_id.as_deref().and_then(|p| self.get(p));
+        }
+        false
+    }
+
+    /// `open_subtree_leaf`: the key's open leaf when it lies strictly below
+    /// `root_id`, else None.
+    pub fn open_subtree_leaf(&self, root_id: &str, key: Option<&str>) -> Option<usize> {
+        let leaf = self.open_leaf_for(key)?;
+        (self.episodes[leaf].id != root_id && self.descends_from(leaf, root_id)).then_some(leaf)
+    }
+
+    /// `start_nested`: a sub-episode under `parent`, or else under the key's
+    /// open leaf (with a key) or the global current leaf (without one); a
+    /// root when nothing is open. It inherits the parent's key when given
+    /// none, and becomes current.
+    pub fn start_nested(
+        &mut self,
+        title: String,
+        hint: Option<String>,
+        key: Option<String>,
+        parent: Option<usize>,
+    ) -> usize {
+        let parent = parent.or_else(|| match key.as_deref() {
+            Some(k) => self.open_leaf_for(Some(k)),
+            None => self.open_episode(),
+        });
+        let parent_id = parent.map(|p| self.episodes[p].id.clone());
+        let session_key = key.or_else(|| parent.and_then(|p| self.episodes[p].session_key.clone()));
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        self.episodes.push(Episode {
+            id: id.clone(),
+            title,
+            started_at: now(),
+            ended_at: None,
+            hint,
+            closed_by_new_start: false,
+            session_key,
+            parent_id,
+        });
+        self.current_id = Some(id);
+        self.episodes.len() - 1
+    }
+
+    /// `end_episode`: close exactly `i`; when it was current, current pops
+    /// to its parent if that is still open, else to none.
+    pub fn end_episode(&mut self, i: usize) -> usize {
+        self.episodes[i].ended_at = Some(now());
+        let parent = self.episodes[i]
+            .parent_id
+            .as_deref()
+            .and_then(|p| self.index(p));
+        let leaf = parent.filter(|&p| self.episodes[p].ended_at.is_none());
+        if self.current_id.as_deref() == Some(self.episodes[i].id.as_str()) {
+            self.current_id = leaf.map(|p| self.episodes[p].id.clone());
+        }
+        i
+    }
+
+    /// `end_leaf`: close the key's open leaf (with a key) or the global
+    /// current leaf (without one); without a key and with nothing open,
+    /// current is cleared.
+    pub fn end_leaf(&mut self, key: Option<&str>) -> Option<usize> {
+        let leaf = match key {
+            Some(k) => self.open_leaf_for(Some(k)),
+            None => self.open_episode(),
+        };
+        let Some(i) = leaf else {
+            if key.is_none() {
+                self.current_id = None;
+            }
+            return None;
+        };
+        Some(self.end_episode(i))
+    }
 }
 
 /// Who is calling: the headers the shim and hooks send (`writer_context.py`).
@@ -363,7 +451,7 @@ impl WriteState {
     }
 
     /// `_resume_closed_session_locked` (spec W2.2).
-    async fn resume_closed_session(
+    pub async fn resume_closed_session(
         &mut self,
         client: &Client,
         key: &str,
@@ -434,6 +522,18 @@ impl WriteState {
         client: &Client,
         handle: Option<&str>,
     ) -> Option<(String, Option<String>)> {
+        self.resolve_handle_with(client, handle, true).await
+    }
+
+    /// `_resolve_episode_handle`: with `resume` false (the lifecycle calls)
+    /// only an open root resolves, still touched; a closed or swept one is
+    /// a miss, never reopened.
+    pub async fn resolve_handle_with(
+        &mut self,
+        client: &Client,
+        handle: Option<&str>,
+        resume: bool,
+    ) -> Option<(String, Option<String>)> {
         let handle = handle.filter(|h| h.chars().count() >= 8)?;
         let open: Vec<usize> = (0..self.log.episodes.len())
             .filter(|&i| {
@@ -448,7 +548,7 @@ impl WriteState {
             self.log.touches.insert(found.0.clone(), now());
             return Some(found);
         }
-        if open.len() > 1 {
+        if open.len() > 1 || !resume {
             return None;
         }
         let window = Self::handle_resume_window();
@@ -593,6 +693,50 @@ mod tests {
             ws.log.tombstones[&id],
             ("key".into(), 105.0, "fixture".into())
         );
+    }
+
+    #[test]
+    fn nested_episodes_anchor_pop_and_stay_inside_their_subtree() {
+        let mut log = EpisodeLog {
+            episodes: vec![
+                ep("root", Some("k"), None, 1.0, None),
+                ep("peer", Some("k"), None, 2.0, None),
+            ],
+            current_id: Some("peer".into()),
+            ..Default::default()
+        };
+        // An explicit parent pins the nest; the key is inherited from it.
+        let a = log.start_nested("a".into(), Some("h".into()), None, Some(0));
+        assert_eq!(log.episodes[a].parent_id.as_deref(), Some("root"));
+        assert_eq!(log.episodes[a].session_key.as_deref(), Some("k"));
+        assert_eq!(log.current_id.as_deref(), Some(log.episodes[a].id.as_str()));
+        let a_id = log.episodes[a].id.clone();
+        // Key leaf lookup picks the deepest open leaf; the subtree check
+        // keeps it to its own root.
+        assert_eq!(log.open_subtree_leaf("root", Some("k")), Some(a));
+        assert_eq!(log.open_subtree_leaf("peer", Some("k")), None);
+        assert_eq!(log.open_subtree_leaf(&a_id, Some("k")), None);
+        assert_eq!(log.open_subtree_leaf("root", None), None);
+        // Without a parent or key, the global current leaf is the parent.
+        let b = log.start_nested("b".into(), None, None, None);
+        assert_eq!(log.episodes[b].parent_id.as_deref(), Some(a_id.as_str()));
+        // Closing the current leaf pops to its open parent.
+        let closed = log.end_leaf(Some("k")).unwrap();
+        assert_eq!(closed, b);
+        assert!(log.episodes[b].ended_at.is_some());
+        assert_eq!(log.current_id.as_deref(), Some(a_id.as_str()));
+        // Closing a non-current episode leaves current alone.
+        log.current_id = Some("peer".into());
+        log.end_episode(a);
+        assert_eq!(log.current_id.as_deref(), Some("peer"));
+        // Nothing open and no key: current clears.
+        log.current_id = Some(a_id.clone());
+        assert_eq!(log.end_leaf(None), None);
+        assert_eq!(log.current_id, None);
+        // A keyed start with nothing open becomes a root.
+        let c = log.start_nested("c".into(), None, Some("j".into()), None);
+        assert_eq!(log.episodes[c].parent_id, None);
+        assert_eq!(log.episodes[c].session_key.as_deref(), Some("j"));
     }
 
     #[test]
