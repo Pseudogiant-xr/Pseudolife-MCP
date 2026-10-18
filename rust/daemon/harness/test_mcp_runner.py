@@ -118,6 +118,81 @@ def test_failed_or_incomplete_oracle_record_is_not_written(tmp_path, monkeypatch
     assert 'record' in output.err.lower()
 
 
+class Clock:
+    """Fake monotonic clock that sleep advances, so polls take no real time."""
+    def __init__(self):
+        self.now, self.sleeps = 0.0, []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def fake_banks(monkeypatch, ready_after):
+    """psycopg.connect stand-in: bank `dsn` reports public.principals from
+    its ready_after[dsn]-th probe on (None = never). Returns probe counts."""
+    import psycopg
+    probes = {dsn: 0 for dsn in ready_after}
+
+    class Conn:
+        def __init__(self, dsn):
+            self.dsn = dsn
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, *params):
+            assert "to_regclass('public.principals')" in sql, sql
+            probes[self.dsn] += 1
+            after = ready_after[self.dsn]
+            found = after is not None and probes[self.dsn] >= after
+            return SimpleNamespace(fetchone=lambda: ("principals" if found else None,))
+
+    monkeypatch.setattr(psycopg, "connect", lambda dsn, **kwargs: Conn(dsn))
+    return probes
+
+
+def test_principals_wait_polls_until_each_bank_has_the_table(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(mcp_run, "time", clock)
+    probes = fake_banks(monkeypatch, {"py-dsn": 1, "rs-dsn": 5})
+    mcp_run.wait_for_principals({"python": "py-dsn", "rust": "rs-dsn"})
+    # A ready bank is not probed again; the slow one is polled until it is.
+    assert probes == {"py-dsn": 1, "rs-dsn": 5}
+    assert clock.now < mcp_run.PRINCIPALS_WAIT_S
+
+
+def test_principals_wait_names_the_bank_that_never_created_it(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(mcp_run, "time", clock)
+    fake_banks(monkeypatch, {"py-dsn": 1, "rs-dsn": None})
+    with pytest.raises(RuntimeError) as failure:
+        mcp_run.wait_for_principals({"python": "py-dsn", "rust": "rs-dsn"})
+    message = str(failure.value)
+    assert "rust" in message and "python" not in message
+    assert "public.principals" in message
+    assert mcp_run.PRINCIPALS_WAIT_S <= clock.now < mcp_run.PRINCIPALS_WAIT_S + 1
+
+
+def test_principals_timeout_is_an_infrastructure_failure(runner, monkeypatch, capsys):
+    sys.argv.remove('--config2')
+    seeded = []
+    monkeypatch.setattr(mcp_run, 'seed_stored', seeded.append)
+    monkeypatch.setattr(mcp_run, 'time', Clock())
+    fake_banks(monkeypatch, {"postgresql://unused/fixture": None})
+    assert mcp_run.main() == 2
+    err = capsys.readouterr().err
+    assert 'infrastructure failed' in err and 'public.principals' in err
+    assert not seeded
+    assert set(runner.stopped) == {'py', 'rs'} and len(runner.dropped) == 2
+
+
 def test_completed_sweep_difference_is_parity_failure(runner, monkeypatch, capsys):
     import time
     import mcp_validation_sweep as sweep
@@ -125,6 +200,7 @@ def test_completed_sweep_difference_is_parity_failure(runner, monkeypatch, capsy
 
     sys.argv.remove('--config2')
     sys.argv.append('--validation-sweep')
+    monkeypatch.setattr(mcp_run, 'wait_for_principals', lambda banks: None)
     monkeypatch.setattr(mcp_run, 'seed_stored', lambda dsn: None)
     monkeypatch.setattr(time, 'sleep', lambda seconds: None)
     ports = iter([1, 2])

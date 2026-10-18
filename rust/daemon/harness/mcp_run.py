@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -48,6 +49,33 @@ ENV = {
 # (principal_store.create_invite, then redeem): name -> (token, tier).
 STORED = {"dave": ("tok-dave-0001", "minimal"), "erin": ("tok-erin-0001", None),
           "frank": ("tok-frank-0001", "full")}
+
+
+# Bound on waiting for each daemon to create public.principals. A fixed 3 s
+# pause after /health was too short twice on the Windows dev VM (2026-10-18,
+# freshly built binaries); 60 s matches the Rust daemon's start bound.
+PRINCIPALS_WAIT_S = 60.0
+
+
+def wait_for_principals(banks, timeout_s=PRINCIPALS_WAIT_S, poll_s=0.25):
+    """Poll until every bank (side name -> DSN) has public.principals.
+
+    Raises RuntimeError naming each side still without the table at the
+    deadline, which main() reports as an infrastructure failure."""
+    import psycopg
+    deadline = time.monotonic() + timeout_s
+    pending = dict(banks)
+    while True:
+        for side, dsn in list(pending.items()):
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                if conn.execute("SELECT to_regclass('public.principals')").fetchone()[0] is not None:
+                    del pending[side]
+        if not pending:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"{' and '.join(pending)} daemon never created public.principals "
+                               f"within {timeout_s:g} s of answering /health")
+        time.sleep(poll_s)
 
 
 def seed_stored(dsn):
@@ -149,10 +177,9 @@ def main():
         started.append(rs)
         rs.start(wait_s=60)
         if "--tokenless" not in args and "--config2" not in args:
-            # Both daemons created the principals table at start; seed, then
+            # Seed once both daemons have created the principals table, then
             # outwait both 10 s snapshot refreshes.
-            import time
-            time.sleep(3)
+            wait_for_principals({"python": py_dsn, "rust": rs_dsn})
             seed_stored(py_dsn)
             seed_stored(rs_dsn)
             time.sleep(13)
