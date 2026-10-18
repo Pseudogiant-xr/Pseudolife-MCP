@@ -1321,13 +1321,13 @@ SCENARIOS.update({
     # close to what is held is stored where a plain store would be refused.
     "supersede-gate": {
         "config": "memory:\n  surprise_threshold: 0.35\n",
-        "seed": [store("The cafeteria opens at 8am on weekdays."),
+        "seed": [store("The cafeteria opens early on weekdays."),
                  store("Lunch is served from noon in the atrium.")],
         "ops": [
             # a near-duplicate of another entry: a plain store is refused
-            store("The cafeteria opens at 8 am on weekdays."),
+            store("On weekdays the cafeteria opens early."),
             # as a correction of an unrelated entry it is stored
-            supersede("The cafeteria opens at 8 am on weekdays.",
+            supersede("On weekdays the cafeteria opens early.",
                       old_text="Lunch is served from noon in the atrium."),
         ],
     },
