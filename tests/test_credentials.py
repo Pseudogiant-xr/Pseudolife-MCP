@@ -597,6 +597,23 @@ def test_a_plainly_written_file_is_refused_and_the_writer_replaces_it(tmp_path: 
     assert CredentialProvider(path=path).snapshot().token == "new-fixture"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows file owners")
+def test_writer_refuses_a_file_owned_by_neither_the_user_nor_its_default_owner(tmp_path: Path) -> None:
+    """The near miss for trusting the token's default owner: a third owner
+    (SYSTEM here) is still another account's file to the writer. Setting it
+    needs an elevated process, as on the hosted Windows runners (Opus review,
+    2026-10-18)."""
+    path = tmp_path / "token"
+    plain_token(path, "old-fixture")
+    completed = subprocess.run(["icacls", str(path), "/setowner", "*S-1-5-18"],
+                               capture_output=True, text=True)
+    if completed.returncode != 0:
+        pytest.skip("giving the file another owner needs an elevated process")
+    with pytest.raises(CredentialError, match="owned by another account"):
+        _write_token_file(path, "new-fixture")
+    assert path.read_bytes() == b"old-fixture"
+
+
 def test_writer_still_refuses_a_hardlinked_file(tmp_path: Path) -> None:
     source = tmp_path / "source"
     private_token(source, "fixture-secret")
