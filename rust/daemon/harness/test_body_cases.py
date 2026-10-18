@@ -1,7 +1,10 @@
 """Wire-size controls for the admission corpus."""
 import asyncio
 import copy
+import http.client
 import json
+import socket
+import threading
 from unittest.mock import Mock, patch
 
 import pytest
@@ -138,6 +141,110 @@ def test_early_response_is_read_when_request_send_is_refused(chunked, send_error
     assert actual["json"] == {"error": "request_too_large"}
     connection.getresponse.assert_called_once()
     connection.close.assert_called_once()
+
+
+def early_refusal_server(respond: bool):
+    """Answer (or not) as soon as the headers arrive, then close with the body unread."""
+    listener = socket.create_server(("127.0.0.1", 0))
+    seen = []
+
+    def serve():
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            with conn:
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+                seen.append(data)
+                if respond:
+                    conn.sendall(b"HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\n"
+                                 b"content-length: 28\r\nconnection: close\r\n\r\n"
+                                 b'{"error":"forbidden_origin"}')
+
+    threading.Thread(target=serve, daemon=True).start()
+    return listener, seen
+
+
+def test_early_refusal_survives_the_host_discarding_it_on_reset():
+    # Windows drops a received response when the peer's RST lands first; an
+    # immediate refusal of a 256 KiB body lost 120 of 200 here (2026-10-18).
+    listener, seen = early_refusal_server(respond=True)
+    with listener:
+        port = listener.getsockname()[1]
+        for _ in range(40):
+            actual = run.call(port, "POST", "/api/nope", [("Origin", "http://evil.example")],
+                              b" " * 262145)
+            assert (actual["status"], actual["json"]) == (403, {"error": "forbidden_origin"})
+    # Every connection, replays included, announced the same request framing.
+    assert all(b"Content-Length: 262145" in request for request in seen)
+
+
+def test_daemon_that_closes_without_answering_still_fails():
+    listener, seen = early_refusal_server(respond=False)
+    with listener, pytest.raises((ConnectionError, RuntimeError)):
+        run.call(listener.getsockname()[1], "POST", "/api/nope", body=b" " * 262145, timeout=10)
+
+
+def lost_response_connection(error):
+    connection = Mock()
+    connection.getresponse.side_effect = error
+    return connection
+
+
+@pytest.mark.parametrize("error", [ConnectionAbortedError(10053, "aborted by host"),
+                                   ConnectionResetError(10054, "reset by peer")])
+def test_lost_early_response_is_replayed_headers_only(error, capsys):
+    replay = Mock()
+    replay.sock.recv.return_value = b"HTTP/1.1 403 For"
+    response = replay.getresponse.return_value
+    response.status = 403
+    response.read.return_value = b'{"error":"forbidden_origin"}'
+    response.getheaders.return_value = [("Content-Type", "application/json")]
+    first = lost_response_connection(error)
+    with patch("http.client.HTTPConnection", side_effect=[first, replay]):
+        actual = run.call(1, "PUT", "/api/nope", [("Origin", "http://evil.example")], b"large")
+    assert actual == {"status": 403, "headers": {"content-type": "application/json"},
+                      "json": {"error": "forbidden_origin"},
+                      "raw": '{"error":"forbidden_origin"}'}
+    first.endheaders.assert_called_once_with(b"large")
+    first.close.assert_called_once()
+    replay.putrequest.assert_called_once_with("PUT", "/api/nope", skip_host=False,
+                                              skip_accept_encoding=True)
+    replay.putheader.assert_any_call("Origin", "http://evil.example")
+    replay.putheader.assert_called_with("Content-Length", "5")
+    replay.endheaders.assert_called_once_with()
+    assert "headers-only replay answered 403" in capsys.readouterr().err
+
+
+def test_replay_that_gets_no_final_status_reports_both_failures():
+    replay = Mock()
+    replay.sock.recv.return_value = b""
+    with patch("http.client.HTTPConnection",
+               side_effect=[lost_response_connection(ConnectionResetError(10054, "reset")), replay]), \
+            pytest.raises(RuntimeError, match="ConnectionResetError.*did not send a final status"):
+        run.call(1, "POST", "/api/nope", body=b"large")
+    replay.getresponse.assert_not_called()
+
+
+@pytest.mark.parametrize("error, body", [
+    # A clean EOF before any status is the daemon's own close, not the host's.
+    (http.client.RemoteDisconnected("closed without response"), b"large"),
+    # Without a body in flight there is no unread data to provoke a reset.
+    (ConnectionResetError(10054, "reset"), None),
+    (ConnectionAbortedError(10053, "aborted"), None),
+])
+def test_closes_the_host_did_not_cause_are_not_replayed(error, body):
+    first = lost_response_connection(error)
+    with patch("http.client.HTTPConnection", side_effect=[first]) as connect, \
+            pytest.raises(type(error)):
+        run.call(1, "POST", "/api/nope", body=body)
+    assert connect.call_count == 1
 
 
 def test_scenario_crash_cannot_count_as_a_caught_mutant(tmp_path, monkeypatch):
