@@ -905,7 +905,7 @@ pieces in its old order) and the resident cortex snapshot; registered in
 | RI8 | `reinstate_entry` in one transaction: `pg_advisory_xact_lock(hashtextextended(operation_id, 41))`; a decision under the UUID now replays (RI9); else the row `FOR UPDATE` and the RI7 checks against the row; any `memory_trace_invalidations` row for the entry is `trace_invalidations_present`; then the append-only `entry_reinstatement_decisions` row (the request's hashes, the prior `superseded_at` and `superseded_by_text`, `reviewer_ids` as JSON, `reason`, `decided_by`, `decided_at` now) and `UPDATE entries SET superseded_at = NULL, superseded_by_text = NULL` guarded on the prior values (not one row is an internal error, rolled back). The resident entry then goes live. | `postgres.py:1107-1204`; `service.py:2778-2807` |
 | RI9 | Answers: committed `{action: "reinstated", decision: "committed", operation_id, entry_id, current_state: "live", changed_by_this_call: true, idempotent_replay: false}`; a replay `{action: "already_reinstated", …, current_state, changed_by_this_call: false, idempotent_replay: true}` with `current_state` `missing`, `live` or `retired_again` from the row now; both plus `cortex_changed: false` and `trace_invalidations_changed: 0`. | `postgres.py:1141-1152, 1198-1204`; `service.py:2743-2746, 2804-2807` |
 
-`harness/w2e.py live --only supersede-branches supersede-capacity supersede-meta-filter supersede-traces-off reinstate`
+`harness/w2e.py live --only supersede-branches supersede-capacity supersede-gate supersede-meta-filter supersede-traces-off reinstate`
 compares every answer and the full bank after each call, on templates whose
 entries, retirements, cortex records and set history the Python daemon's
 own tools wrote (an exact-duplicate row and the `memory_traces` rows are
@@ -919,7 +919,9 @@ past BIGINT, blank text, blank replacement, unknown id and text, retired by
 text and by id, ambiguous with candidates); a replacement the meta filter
 refuses when enabled (the whole correction rolls back) and stores when off
 (the default); a row deleted and a row retired behind the daemon's back; a full
-band evicting the target itself and then a cheaper entry; traces disabled
+band evicting the target itself and then a cheaper entry; a surprise
+threshold that refuses a paraphrase as a store and admits it as a
+correction (the gate bypassed); traces disabled
 (no derived slots, the invalidations still written); fifty-two derived
 slots (the first fifty, the total, truncated). Reinstate: the default
 principal; every request refusal (uppercase, braced, `urn:uuid:`, unhyphenated
