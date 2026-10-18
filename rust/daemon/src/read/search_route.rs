@@ -62,7 +62,7 @@ pub fn list(q: &HashMap<String, String>, key: &str) -> Option<Vec<String>> {
 }
 
 /// `normalize_tags`: lowercased, stripped, de-duplicated in order.
-fn normalize_tags(tags: &[String]) -> Vec<String> {
+pub(crate) fn normalize_tags(tags: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for t in tags {
         let t = py_strip(t).to_lowercase();

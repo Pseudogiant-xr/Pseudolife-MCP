@@ -45,8 +45,10 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``hlc_phys`` keep only null-or-not; ``retrieved_at`` (column and answer)
   does only when it lies within a day of now (a write without one takes the
   clock), and an explicit past value compares exactly;
-* a search ``score`` in a response (and a candidate cluster's ``cohesion``
-  and ``seed_score``), and each ``score`` in a
+* a candidate cluster's ``seed_score`` compares like a search ``score`` and
+  its ``cohesion`` within one rounding unit (1e-4), only inside a cluster
+  (an object with ``members``);
+* a search ``score`` in a response, and each ``score`` in a
   ``lesson_search_events.served`` list, compares within 1.5e-4: the two
   embedders agree to the measured tolerance, and scores are rounded to 4
   places;
@@ -152,6 +154,9 @@ RESPONSE_RECENT_CLOCK = {"retrieved_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
 SCORE_TOLERANCE = 1.5e-4
+# A cluster's cohesion: cosines over vectors both banks hold identically,
+# rounded to 4 places, so at most one rounding unit apart.
+COHESION_TOLERANCE = 1e-4
 # meta key -> paths (keys) inside its JSON value that are wall-clock.
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -1709,6 +1714,12 @@ SCENARIOS.update({
             store("Deploys happen on Tuesdays after the staging database check.",
                   [sess("sess-c1")], tags=["ops"]),
             store("The staging database used to be on db-stage-0.", [sess("sess-c1")]),
+            # an exact twin in sess-c1: the episode walk offers one per text
+            sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, source, "
+                "episode_id, episode_title, tags, slots, dream_state) SELECT band, text, "
+                "embedding, surprise, ts + 1, 0, source, episode_id, episode_title, tags, slots, "
+                "dream_state FROM entries WHERE text = 'Our CI runs on GitHub Actions.'",
+                after_stop=True),
             supersede("The staging database moved off db-stage-0 to db-stage-1.",
                       old_text="The staging database used to be on db-stage-0."),
         ],
@@ -1725,13 +1736,19 @@ SCENARIOS.update({
             candidates(query="what do we run", min_cluster_size=1, max_clusters=2),
             candidates(query=STAGING, min_cohesion="nan"),
             candidates(query=STAGING, episode="@root:sess-c2:32"),
+            # empty lists and an empty episode are no filter
+            candidates(query=STAGING, sources=[], tags=[], episode=""),
             # the episode anchor: its entries in band order, score 1.0
             candidates(episode="@root:sess-c1:32", min_cohesion=0.3),
             candidates(episode="@root:sess-c1:32", sources=["user"]),
             candidates(episode="@root:sess-c1:32", tags=["ops"], min_cluster_size=1),
+            # the episode walk compares tags as stored: no normalization
+            candidates(episode="@root:sess-c1:32", tags=[" OPS "], min_cluster_size=1),
             # a row gone behind the daemons' backs is filtered out
             external("DELETE FROM entries WHERE text = 'Staging DB host is db-stage-1.'"),
             candidates(query=STAGING),
+            # the episode walk's candidates are checked too, before the cut
+            candidates(episode="@root:sess-c2:32", top_k=1, min_cluster_size=1),
         ],
     },
 })
@@ -2111,7 +2128,16 @@ def normalize_records(a, b, stats=None):
                 a[k], b[k] = _clock(a[k]), _clock(b[k])
             elif k in RESPONSE_RECENT_CLOCK:
                 a[k], b[k] = _recent_clock(a[k]), _recent_clock(b[k])
-            elif (k in ("score", "cohesion", "seed_score") and isinstance(a[k], (int, float))
+            elif (k in ("cohesion", "seed_score") and "members" in a and "members" in b
+                  and isinstance(a[k], (int, float)) and isinstance(b[k], (int, float))
+                  and not isinstance(a[k], bool)):
+                # A candidate cluster: its seed score rests on the query
+                # embedding (the score allowance); its cohesion on vectors
+                # both banks hold identically (one rounding unit).
+                allow = COHESION_TOLERANCE if k == "cohesion" else SCORE_TOLERANCE
+                if abs(a[k] - b[k]) <= allow:
+                    a[k] = b[k] = f"<{k}>"
+            elif (k == "score" and isinstance(a[k], (int, float))
                   and isinstance(b[k], (int, float)) and not isinstance(a[k], bool)):
                 d = abs(a[k] - b[k])
                 if stats is not None:

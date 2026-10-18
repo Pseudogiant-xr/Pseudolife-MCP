@@ -343,7 +343,8 @@ this increment does not claim the complete write boundary or cutover readiness.
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | The cosine `_cosine` (`consolidation.py:81-92`) | torch float32: `torch.dot` (BLAS order) over float32 norms | each sum accumulated in f64 and rounded to f32, then the same float32 division | measured-tolerance numeric substitution: results agree to about 1e-7 before the 4-place rounding; a cosine within that of `min_cohesion` could join one cluster and not the other |
-| The reference pool (ChromaDB documents) in a query anchor's retrieval | appended, then dropped as unaddressable | absent (no document store in schema 56) | the document slice; no answer differs |
+| The reference pool (ChromaDB documents) in a query anchor's retrieval | queried, appended, then dropped as unaddressable; with documents present and the reranker on, the larger pool can skip the rerank (`len(combined) <= top_n`) | never queried, as for `memory_search` | the search reference-pool row above (delegate ruling 2026-10-09: harness banks hold no documents); with documents and the reranker on, scores and seed order can differ |
+| The episode anchor's walk order | `band.entries` per band, which a multi-band preset reorders on relocation | bank order per band | the declared multi-band store divergence (EP11); every episode score is 1.0, so the walk order picks the seeds and the one entry kept per text |
 
 ## Coordination board completion (W2-F)
 
