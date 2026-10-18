@@ -88,16 +88,19 @@ name, a board status or a peer agent's message is not a delegation.
    creation, ownership, shutdown or recovery changes are ordinary code on
    Linux: CI's full PostgreSQL job starts and stops real daemons there and
    covers recovery against stand-in daemons. When such a change is
-   Windows- or macOS-specific, a local full suite would not help (this
-   host runs full suites only on Linux). Instead, run that platform's
-   affected test files natively as a targeted run (Windows allows one), and
-   make sure they are in its CI lite lane's file list (`test-lite-windows`
-   / `test-lite-macos` in `.github/workflows/ci.yml`), adding them if
-   missing. Platform-specific means code that runs only there (a branch on
-   `os.name` / `sys.platform`, `creationflags`, `msvcrt`, `SIGBREAK`,
-   scheduled tasks or launchd, the `.ps1` launchers), or shared code whose
-   behaviour rests on OS process semantics (signals, terminate and kill,
-   file locks, detached sessions).
+   Windows- or macOS-specific, a Linux full suite would not test it.
+   Instead, run that platform's affected test files natively as a targeted
+   run (for Windows, on the Windows dev VM or as a targeted run on this
+   host), and make sure they are in its CI lite lane's file list
+   (`test-lite-windows` / `test-lite-macos` in `.github/workflows/ci.yml`),
+   adding them if missing. When a Windows-specific change's dependent
+   coverage cannot be bounded, the Windows dev VM's native full suite is
+   its local full suite (see "Dev machines"). macOS has no dev machine;
+   CI's macOS lane stays its only check. Platform-specific means code that
+   runs only there (a branch on `os.name` / `sys.platform`,
+   `creationflags`, `msvcrt`, `SIGBREAK`, scheduled tasks or launchd, the
+   `.ps1` launchers), or shared code whose behaviour rests on OS process
+   semantics (signals, terminate and kill, file locks, detached sessions).
    Documentation-only, test-only and review-fix changes, and integration
    batches, follow the narrower rules below.
 
@@ -391,9 +394,10 @@ took 143 CUDA OOMs.
     file; `PSEUDOLIFE_SUITE_LEASE` overrides). Gate CPU- or
     memory-saturating work on the lease of the machine it runs on: `lease
     check full-suite` on the Windows host, `lease check full-suite@box` on
-    the box. A suite on another machine does not load yours, with one
-    exception: the box and the Windows dev VM share the hypervisor's RAM
-    (see "Dev machines" below).
+    the box. A suite on another machine does not load yours. The dev
+    machines share the hypervisor's RAM, which carries one Linux dev box
+    full suite and one Windows VM full suite at once, but never two Linux
+    dev box suites (see "Dev machines" below).
   - **On the box, suites never touch the live bank's Postgres** (5433):
     the suite user's shells source `~/.config/pseudolife-suite/env`, which
     sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:5434` (the separate test
@@ -639,10 +643,11 @@ bank (search "dev machines homelab"), never in the tree.
     test many times there, instead of CI round-trips), Windows Rust
     builds under MSVC, and native-Windows behaviour (process ownership
     and shutdown, named pipes, junctions, UNC and device paths). It is
-    also the place for an occasional native Windows full suite, which the
-    maintainer's Windows host refuses. Its disk is slow: on 2026-10-10 a
-    cold `cargo test --no-run` of one shim integration-test binary took
-    15 minutes there, so keep its build tree warm rather than cleaning it.
+    also where native Windows full suites run, which the maintainer's
+    Windows host refuses. Its disk is slow: on 2026-10-10 a cold `cargo
+    test --no-run` of one shim integration-test binary took 15 minutes
+    there, so keep its build tree warm (one `CARGO_TARGET_DIR` per slice
+    family, as under "Disk space") rather than cleaning it.
   - Local WSL: the Windows host's own full suites (`ops/wsl-suite.ps1`),
     as above.
   - Hosted CI: the merge gate. Its Windows job runs a curated lite list
@@ -652,11 +657,33 @@ bank (search "dev machines homelab"), never in the tree.
   machine mirrors its suite on the board under its own `full-suite@<name>`
   lease, set in its private `full-suite.lease`; without that file a run
   falls back to `full-suite`, the Windows host's lease, and the board
-  mislabels it. **The hypervisor's RAM cannot carry a Windows VM full
-  suite beside a Linux dev box full suite**: before starting a full suite
-  on either, check that no full suite is running on the other (`lease
-  check` on its lease, or a running pytest process there), and say on the
-  board which one you hold.
+  mislabels it. **The hypervisor carries one Linux and one Windows full
+  suite at once, never two Linux** (maintainer decision 2026-10-18; the
+  earlier rule that the Windows VM and a Linux box could not overlap is
+  retired, the hypervisor has the RAM for both). A Windows VM suite may
+  run beside a Linux dev box suite. Before starting a Linux dev box full
+  suite, check that no full suite is running on the other Linux box
+  (`lease check` on its lease, or a running pytest process there), and
+  say on the board which one you hold.
+- **Windows CI failures go to the Windows VM before a rerun** (maintainer
+  decision 2026-10-18, after two Windows-only parity failures cost an
+  hour-long hosted rerun each on 2026-10-17/18). When a check fails only
+  on hosted Windows, reproduce it on the VM before rerunning it: loop the
+  one failing test or harness slice there (20 runs is a good start, under
+  CPU load if it looks like a timing failure). A failure that reproduces
+  gets a fix PR; a flake confirmed there gets a deflake PR. A rerun alone
+  is not the fix. Rerun only to unblock a merge you would make anyway,
+  and say in the PR or the merge comment that the deflake is filed.
+- **Windows-sensitive Rust changes run on the Windows VM before CI.** A
+  Rust PR that touches process, socket, file-lock, path or timing
+  behaviour, or a harness slice that runs on Windows, builds and runs its
+  touched `rust/shim/tests/*` binaries and harness slices on the VM before
+  it is pushed for CI. The hosted Windows runners are the slowest lane, so
+  the VM catches there what would otherwise cost an hour-long CI round
+  trip. Docs-only, Linux-only and pure-logic changes skip this.
+- **A PR cites any dev-machine run it relies on**: the machine (by role,
+  for example "Windows dev VM", never its name or address), the commit,
+  the command and the result.
 - **Never the live bank.** Every dev machine tests against its own test
   PostgreSQL: the boxes use their separate loopback test server, and the
   Windows VM uses the `[lite]` extra's embedded PostgreSQL on loopback
