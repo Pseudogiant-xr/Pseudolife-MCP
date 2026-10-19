@@ -310,18 +310,27 @@ bank ("dev machines homelab"), never in the tree.
 - **Never the live bank:** every dev machine tests against its own test
   PostgreSQL, never the live bank's server or the Windows host's bench.
 - **Windows-only CI failures go to the Windows VM before a rerun,** except
-  the transport-reset class (WinError 10053/10054 or a headers-only replay
-  timeout after an early 413/403, issue #830) and first-hit cold-start
-  stalls (first TLS handshake, first process or module load), which the VM
-  reproduces at a fraction of the hosted rate: for those, name the issue
-  or the stall in the merge comment and rerun once. Otherwise loop the
-  failing test or slice there (20 runs to start; CPU load only while no
-  other dev machine runs a suite). A reproduction gets a fix PR, a
-  confirmed flake a deflake PR, and an unreproduced failure a deflake PR or
-  issue naming the hosted run once it recurs (20 clean runs only rule out
-  rates above about 15%). Rerun without a VM attempt only when a deflake PR
-  or issue already names it or the VM is busy (say so), on the current
-  merge ref, and name the deflake in the PR or merge comment.
+  two classes the VM reproduces at a fraction of the hosted rate: a
+  `WinError`/`os error 10053` or `10054` loss followed in the same case by
+  a `headers-only replay` timeout (issue #830), and a timeout on a step's
+  first TLS handshake or first spawn of a binary when later cases in the
+  same step passed (issue #855); those rerun once on the current merge ref
+  naming the open issue in the PR or merge comment, and a second failure
+  takes the VM path. Otherwise loop the failing test or slice there (20
+  runs to start; CPU load only while no other dev machine runs a suite). A
+  reproduction gets a fix PR, a confirmed flake a deflake PR, and an
+  unreproduced failure a deflake PR or issue naming the hosted run once it
+  recurs (20 clean runs only rule out rates above about 15%). Rerun
+  without a VM attempt only when a deflake PR or issue already names it or
+  the VM is busy (say so), on the current merge ref, and name the deflake
+  in the PR or merge comment.
+- **A PR adding a test that runs on `windows-latest` and rests on process
+  spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
+  timeouts (a harness `run.py` scenario included) merges only after 20
+  clean hosted `windows-latest` runs of that test**, because the VM admits
+  what the runner then fails (#835: 0 of 525 on the VM, 3 of 5 hosted);
+  until the stress dispatch (issue #856) lands, the PR names that issue and
+  says the loop was not run, and the dispatch PR deletes this clause.
 - **Windows-sensitive Rust changes** (`cfg(windows)` / `windows-sys`,
   process spawn/wait/kill, sockets or named pipes, file locks or atomic
   replace, timeouts, Windows parity slices) build on the VM and run the
@@ -407,12 +416,6 @@ prove are yours.
   changelog fragment.
 - **TDD with a watched RED;** for invalidation contracts, disable each hook
   and confirm the test goes red (one that never does is decoration: say so).
-- **A new live parity row, or a test whose verdict depends on the timing of
-  a spawned process or socket, joins a required CI lane only after 20 clean
-  hosted `windows-latest` runs of it** (the Rust workflow's stress dispatch
-  once it lands; until then the PR says the loop was not run), because the
-  Windows dev VM reproduces hosted timing classes at a fraction of their
-  hosted rate.
 - **A tuning constant set for a measured reason carries a comment naming
   the measurement** (what, when, scale; see `recency_boost_enabled` in
   `utils/config.py`), added as files are touched, no retrofit sweeps.
