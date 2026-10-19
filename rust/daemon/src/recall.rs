@@ -79,7 +79,17 @@ fn mcp_memory_recall<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
             transport_session: call.ident.transport_session.clone(),
         };
         let ready = app.service.ensure_init().await.map_err(internal)?;
-        let out = recall(&app.service, &ready, query, Some(hops), Some(top_k), &ident).await?;
+        let beyond = a.get("top_k").filter(|n| n.as_i64().is_none()).cloned();
+        let out = recall(
+            &app.service,
+            &ready,
+            query,
+            Some(hops),
+            Some(top_k),
+            beyond,
+            &ident,
+        )
+        .await?;
         Ok(project(out, top_k, verbose))
     })
 }
@@ -411,6 +421,7 @@ struct State {
 struct Knobs {
     hops: i64,
     top_k: i64,
+    top_k_beyond: Option<Value>,
     max_entities: i64,
     gate: bool,
     degrees: HashMap<String, usize>,
@@ -498,12 +509,13 @@ async fn search(
     svc: &Arc<Service>,
     ready: &Arc<Ready>,
     q: &str,
-    top_k: i64,
+    k: &Knobs,
     ident: &Ident,
 ) -> Result<Vec<String>, ToolError> {
     let req = Request {
         query: py_strip(q).to_string(),
-        top_k,
+        top_k: k.top_k,
+        top_k_beyond: k.top_k_beyond.clone(),
         sources: None,
         bands: None,
         tags: None,
@@ -550,7 +562,7 @@ async fn run_recall(
     };
 
     st.searches_issued += 1;
-    let hits = search(svc, ready, query, k.top_k, ident).await?;
+    let hits = search(svc, ready, query, k, ident).await?;
     for t in &hits {
         if !t.is_empty() && !st.texts.contains(t) {
             st.texts.push(t.clone());
@@ -691,7 +703,7 @@ async fn run_recall(
                 if crate::mutants::active("mcp-recall-no-requery") {
                     continue;
                 }
-                for t in search(svc, ready, &format!("{query} {name}"), k.top_k, ident).await? {
+                for t in search(svc, ready, &format!("{query} {name}"), k, ident).await? {
                     if !t.is_empty() && !st.texts.contains(&t) {
                         st.texts.push(t);
                     }
@@ -882,6 +894,7 @@ async fn recall(
     query: &str,
     hops: Option<i64>,
     top_k: Option<i64>,
+    top_k_beyond: Option<Value>,
     ident: &Ident,
 ) -> Result<Map<String, Value>, ToolError> {
     let cfg = &svc.config.memory;
@@ -919,6 +932,7 @@ async fn recall(
     let knobs = Knobs {
         hops,
         top_k,
+        top_k_beyond,
         max_entities: rc.max_entities,
         gate: rc.hub_gate,
         degrees,
