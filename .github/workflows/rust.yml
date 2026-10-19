@@ -321,13 +321,34 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
         # parity-selfhosted reuses this suite list, the include list and the
-        # steps below through YAML anchors, so both lanes run the same shards.
-        suite: &parity_suites [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
+        # steps below through YAML anchors, so both lanes run the same shards;
+        # parity-live reuses the steps.
+        suite: &parity_suites [eval, cli, cli-live, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
+        # The required gate holds only work hosted Windows runs
+        # deterministically: builds, nextest, self-tests, goldens and
+        # replays. cli-live holds the live Python-versus-Rust comparisons
+        # whose verdict depends on sub-second timing and Windows socket
+        # resets on a cold shared runner (the 250 ms hook probe, early
+        # refusals' RST; docs/specs/2026-10-19-merge-queue.md, "The required
+        # Parity gate"). Linux keeps them required; hosted Windows runs
+        # them in parity-live, which reports and never gates.
+        exclude:
+          - os: windows-latest
+            suite: cli-live
         # W1-C row sums: master run 38076979343, 2026-10-10, Windows.
         # Live + golden: doctor 15.3m; pairing 17.6m; connection 20.1m.
         # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice
         # the total. Connection also keeps the existing 20m record budget.
         include: &parity_shards
+          # Hosted Windows cli, master runs 39205533092 and 39236836263
+          # (2026-10-19): 70.4 and 61.5 min with the live comparisons inside.
+          - suite: cli
+            job_timeout: 100
+          # Same runs, the four live steps: Windows 22.4 min (body 2.5,
+          # security 8.6, MCP 8.9, CLI live arms about 2.5) plus about 4 min
+          # setup; Linux 14 min. About twice the Windows total.
+          - suite: cli-live
+            job_timeout: 55
           - suite: w1c-doctor
             w1c_rows: "'doctor'"
             w1c_timeout: 32
@@ -376,11 +397,9 @@ jobs:
             h5_windows_timeout: 30
             job_timeout: 45
     runs-on: ${{ matrix.os }}
-    # Hosted Windows cli jobs for PRs #709/#710 (2026-10-10 UTC) took
-    # 105m55s/104m04s, with about 50m outside W1-C. Master run
-    # 38076979343 (2026-10-10, Windows) confirms ~46m remaining.
-    # W1-C now runs in parallel; allow twice the conservative 50m remainder.
-    timeout-minutes: ${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}
+    # Every cli and W1-C shard names its own budget beside its measurement
+    # in the include list; eval and judges keep the 210-minute fallback.
+    timeout-minutes: ${{ matrix.job_timeout || 210 }}
     env:
       # Artifact names must be unique within a run; parity-selfhosted sets
       # its own prefix so both lanes can upload the same outcomes.
@@ -470,7 +489,7 @@ jobs:
           name: rust-shim-${{ runner.os }}
           path: rust/target/release
       - name: Download debug bind fixture
-        if: matrix.suite == 'cli' || matrix.suite == 'h5-w1a'
+        if: matrix.suite == 'cli-live' || matrix.suite == 'h5-w1a'
         uses: actions/download-artifact@v4
         with:
           name: daemon-bind-fixture-${{ runner.os }}
@@ -539,12 +558,23 @@ jobs:
           $env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'
           python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py rust/cli_harness/test_backup.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row mail --row hook --row episode --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-golden.json')
+          exit $LASTEXITCODE
+      # The same rows against this checkout's Python live: the hook row's
+      # 250 ms health probe is part of what is compared, so a cold Windows
+      # runner's first TLS handshake can decide it (2026-10-16 root cause).
+      - name: CLI differential harness live arms
+        if: matrix.suite == 'cli-live'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           python rust/cli_harness --row mail --row hook --row episode --skip-bank --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python rust/cli_harness --row mail --row hook --row episode --golden --candidate $candidate -v
           exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL for CLI lease row
-        if: matrix.suite == 'cli'
+        # Every cli shard's daemon harnesses take their banks from it.
+        if: startsWith(matrix.suite, 'cli')
         timeout-minutes: 10
         shell: pwsh
         # pg0's initdb inherits the locale on Linux; template1 then retains
@@ -676,7 +706,7 @@ jobs:
           exit $LASTEXITCODE
 
       - name: Daemon body admission parity
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-live'
         timeout-minutes: 10
         shell: pwsh
         env:
@@ -691,14 +721,14 @@ jobs:
           python rust/daemon/harness/run.py golden --rust-bin $candidate --only body-limits body-view-open body-pair-budget body-text-window --out (Join-Path $env:RUNNER_TEMP 'daemon-body-golden.json')
           exit $LASTEXITCODE
       - name: Retain daemon body parity outcomes
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-live'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-body-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-body-*.json
           if-no-files-found: warn
       - name: Daemon security admission parity
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-live'
         timeout-minutes: 10
         shell: pwsh
         env:
@@ -727,7 +757,7 @@ jobs:
       # The tool argument binding sweep and its 14 mutants add 9.4s (Windows
       # release build, 2026-10-16).
       - name: Daemon MCP live parity and controls
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-live'
         # Windows master 2026-10-15: 6m28s and 6m49s (runs 38689105018,
         # 38794022446), so seven minutes had no headroom; fourteen is about
         # twice that gate.
@@ -756,7 +786,7 @@ jobs:
           python rust/daemon/harness/mcp_ci.py --default-bin $candidate --mutant-bin $mutants --out (Join-Path $env:RUNNER_TEMP 'daemon-mcp')
           exit $LASTEXITCODE
       - name: Retain daemon MCP parity outcomes
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-live'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-mcp-${{ runner.os }}
@@ -765,7 +795,7 @@ jobs:
             ${{ runner.temp }}/daemon-mcp/*.log
           if-no-files-found: error
       - name: Retain daemon security parity outcomes
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-live'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-security-${{ runner.os }}
@@ -923,7 +953,7 @@ jobs:
             ${{ runner.temp }}/test-login-linux-record.json
           if-no-files-found: error
       - name: Retain CLI harness summaries
-        if: always() && (matrix.suite == 'cli' || startsWith(matrix.suite, 'w1c-'))
+        if: always() && (startsWith(matrix.suite, 'cli') || startsWith(matrix.suite, 'w1c-'))
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}cli-harness-${{ runner.os }}-${{ matrix.suite }}
@@ -1069,6 +1099,30 @@ jobs:
             ${{ runner.temp }}/lease-header-policy.json
             ${{ runner.temp }}/oracle-selection.json
           if-no-files-found: warn
+
+  parity-live:
+    # Hosted Windows' live comparisons (the cli-live suite), outside the
+    # required gate: continue-on-error and no place in any job's needs keep
+    # its result out of every required check, so it reports and never
+    # gates. Master pushes, the nightly and manual CI run it; a pull
+    # request or merge group never does, so it holds no PR check open. A
+    # failure here is a Windows-only live divergence to triage against the
+    # Linux cli-live shard, which stays required.
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
+    name: Parity live (non-gating) / ${{ matrix.os }} / ${{ matrix.suite }}
+    needs: [candidate, rust]
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        suite: [cli-live]
+    runs-on: ${{ matrix.os }}
+    # The cli-live budget in parity-checks' include list.
+    timeout-minutes: 55
+    env:
+      PARITY_ARTIFACT_PREFIX: ''
+    steps: *parity_steps
 
   parity-selfhosted:
     # A comparison lane, not a gate (docs/specs/2026-10-19-self-hosted-parity-lane.md):

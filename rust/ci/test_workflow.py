@@ -38,7 +38,8 @@ PARITY_CHECKS = {
     "Offline embedding golden and mutant row": "eval",
     "Offline W2-D search harness regressions": "eval",
     "CLI differential harness": "cli",
-    "Prepare disposable PostgreSQL for CLI lease row": "cli",
+    "CLI differential harness live arms": "cli-live",
+    "Prepare disposable PostgreSQL for CLI lease row": "cli*",
     "CLI lease differential harness": "cli",
     "CLI W1-C differential harness": "w1c",
     "Prepare disposable PostgreSQL for W1-C rows": "w1c",
@@ -51,9 +52,9 @@ PARITY_CHECKS = {
 
     "Daemon schema startup parity": "cli",
     "Graph store differential and recorded oracle": "cli",
-    "Daemon body admission parity": "cli",
-    "Daemon security admission parity": "cli",
-    "Daemon MCP live parity and controls": "cli",
+    "Daemon body admission parity": "cli-live",
+    "Daemon security admission parity": "cli-live",
+    "Daemon MCP live parity and controls": "cli-live",
     "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
@@ -105,6 +106,14 @@ def row_commands(invocations, required_rows, golden):
 
 W1C_SUITES = ("w1c-doctor", "w1c-pairing", "w1c-connection")
 H5_SUITES = ("h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants")
+PARITY_SUITES = ["eval", "cli", "cli-live", "judges", *W1C_SUITES, *H5_SUITES]
+# The live Python-versus-Rust comparisons hosted Windows cannot run
+# deterministically (docs/specs/2026-10-19-merge-queue.md, "The required
+# Parity gate"): required on Linux, reported by parity-live on Windows.
+LIVE_SUITE = "cli-live"
+LIVE_CHECKS = ("CLI differential harness live arms", "Daemon body admission parity",
+               "Daemon security admission parity", "Daemon MCP live parity and controls")
+WINDOWS_LIVE_EXCLUDE = [{"os": "windows-latest", "suite": LIVE_SUITE}]
 
 
 # The W1-C step passes its rows through PowerShell arrays (@live, @golden), so
@@ -140,8 +149,8 @@ def check_w1c_shards(jobs):
     job = jobs["parity-checks"]
     matrix = job["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS
-    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES, *H5_SUITES]
-    assert "exclude" not in matrix
+    assert matrix["suite"] == PARITY_SUITES
+    assert matrix["exclude"] == WINDOWS_LIVE_EXCLUDE
     shards = [shard for shard in matrix["include"] if shard["suite"] in W1C_SUITES]
     assert len(shards) == len(W1C_SUITES)
     assert Counter(shard["suite"] for shard in shards) == Counter(W1C_SUITES)
@@ -183,7 +192,7 @@ def check_w1c_shards(jobs):
         "rust/cli_harness/goldens/test_login.linux.json",
         "${{ runner.temp }}/test-login-linux-record.json"]
     summaries = steps["Retain CLI harness summaries"]
-    assert summaries["if"] == ("always() && (matrix.suite == 'cli' || "
+    assert summaries["if"] == ("always() && (startsWith(matrix.suite, 'cli') || "
                                "startsWith(matrix.suite, 'w1c-'))")
     assert summaries["with"]["name"] == ARTIFACT_PREFIX + "cli-harness-${{ runner.os }}-${{ matrix.suite }}"
     assert summaries["with"]["path"] == "${{ runner.temp }}/cli-harness*.json"
@@ -246,11 +255,13 @@ def check_executable_coverage(jobs):
                      "rust/daemon/harness/test_w2d_namespace.py",
                      "rust/daemon/harness/test_w2d_recent.py"), PYTEST_FILTERS)
     assert search["timeout-minutes"] == 1
-    for name, rows in (("CLI differential harness", ("mail", "hook", "episode")),
-                       ("CLI lease differential harness", ("lease",))):
-        invocations = commands(parity[name]["run"])
-        for golden in (False, True):
-            row_commands(invocations, rows, golden)
+    # The mail, hook and episode rows replay their goldens in the required
+    # cli shard; their live arms run beside the other live comparisons.
+    row_commands(commands(parity["CLI differential harness"]["run"]), ("mail", "hook", "episode"), True)
+    row_commands(commands(parity["CLI differential harness live arms"]["run"]),
+                 ("mail", "hook", "episode"), False)
+    for golden in (False, True):
+        row_commands(commands(parity["CLI lease differential harness"]["run"]), ("lease",), golden)
     require_command(commands(parity["CLI differential harness"]["run"]),
                     ("python", "-m", "pytest"),
                     ("rust/cli_harness/test_cli_harness.py", "rust/cli_harness/test_lease.py",
@@ -440,9 +451,9 @@ def test_shards_cover_both_systems_and_build_once():
     assert produced["with"]["name"] == consumed["with"]["name"] == "daemon-bind-fixture-${{ runner.os }}"
     assert produced["with"]["if-no-files-found"] == "error"
     assert "rust/target/debug/pseudolife-daemon" in produced["with"]["path"].splitlines()
-    assert consumed["if"] == "matrix.suite == 'cli' || matrix.suite == 'h5-w1a'"
+    assert consumed["if"] == "matrix.suite == 'cli-live' || matrix.suite == 'h5-w1a'"
     assert consumed["with"]["path"] == "rust/target/debug"
-    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "judges", *W1C_SUITES, *H5_SUITES]
+    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == PARITY_SUITES
     builds = [step for name in ("rust", "candidate", "parity-checks")
               for step in jobs[name]["steps"]
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
@@ -463,8 +474,9 @@ def test_original_checks_remain_gated_on_the_expected_shards():
             actual = matches[0]
             assert actual.get("run", "").strip(), name
             assert not actual.get("continue-on-error", False)
-            expected = "startsWith(matrix.suite, 'w1c-')" if suite == "w1c" else (
-                f"matrix.suite == '{suite}'" if suite else None)
+            expected = ("startsWith(matrix.suite, 'w1c-')" if suite == "w1c" else
+                        "startsWith(matrix.suite, 'cli')" if suite == "cli*" else
+                        f"matrix.suite == '{suite}'" if suite else None)
             assert actual.get("if") == expected
     check_executable_coverage(jobs)
 
@@ -1051,7 +1063,7 @@ def test_parity_rejects_a_rebuild_in_a_separate_step(monkeypatch, script):
 def test_w1c_rows_run_once_on_parallel_suites():
     jobs = workflow()["jobs"]
     matrix = jobs["parity-checks"]["strategy"]["matrix"]
-    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES, *H5_SUITES]
+    assert matrix["suite"] == PARITY_SUITES
     assert matrix["os"] == SYSTEMS
     step = next(s for s in jobs["parity-checks"]["steps"]
                 if s.get("name") == "CLI W1-C differential harness")
@@ -1140,8 +1152,12 @@ function python {
 
 def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():
     job = workflow()["jobs"]["parity-checks"]
-    assert job["timeout-minutes"] == (
-        "${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}")
+    assert job["timeout-minutes"] == "${{ matrix.job_timeout || 210 }}"
+    budgets = {shard["suite"]: shard.get("job_timeout")
+               for shard in job["strategy"]["matrix"]["include"]}
+    # Only eval and judges keep the old 210-minute fallback.
+    assert set(PARITY_SUITES) - set(budgets) == {"eval", "judges"}
+    assert budgets["cli"] == 100 and 0 < budgets[LIVE_SUITE] <= 60
 
 
 @pytest.mark.parametrize("name", [
@@ -1186,8 +1202,10 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     text = WORKFLOW.read_text(encoding="utf-8")
     # Anchors, not a copy: a step or shard added to the hosted matrix reaches
     # the self-hosted lane in the same edit.
-    for alias in ("steps: *parity_steps", "suite: *parity_suites", "include: *parity_shards"):
+    for alias in ("suite: *parity_suites", "include: *parity_shards"):
         assert text.count(alias) == 1, alias
+    # parity-selfhosted and parity-live both reuse the hosted steps.
+    assert text.count("steps: *parity_steps") == 2
     jobs = workflow()["jobs"]
     hosted, lane = jobs["parity-checks"], jobs["parity-selfhosted"]
     assert lane["steps"] == hosted["steps"]
@@ -1225,6 +1243,9 @@ def test_selfhosted_lane_never_touches_a_required_check():
 def test_both_lanes_upload_under_distinct_names():
     jobs = workflow()["jobs"]
     assert jobs["parity-checks"]["env"]["PARITY_ARTIFACT_PREFIX"] == ""
+    # Hosted Windows runs cli-live only in parity-live, so its uploads
+    # cannot collide with a parity-checks shard's.
+    assert jobs["parity-live"]["env"]["PARITY_ARTIFACT_PREFIX"] == ""
     assert jobs["parity-selfhosted"]["env"]["PARITY_ARTIFACT_PREFIX"] == "self-hosted-"
     uploads = [step for step in jobs["parity-checks"]["steps"]
                if step.get("uses") == "actions/upload-artifact@v4"]
@@ -1305,3 +1326,55 @@ def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, ove
         assert line == f"call lease check --json full-suite@fixture | full-suite@fixture | {tmp_path / 'locks'}"
     yielded = summary.exists() and "Yielded" in summary.read_text(encoding="utf-8")
     assert yielded == (case == "yields")
+
+
+# --- the required gate holds only deterministic Windows work ---
+
+LIVE_EVENTS = ("${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || "
+               "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
+               "&& needs.candidate.result == 'success' && needs.rust.result == 'success' }}")
+
+
+def test_live_comparisons_run_in_their_own_suite():
+    steps = {step.get("name"): step for step in workflow()["jobs"]["parity-checks"]["steps"]}
+    for name in LIVE_CHECKS:
+        assert steps[name]["if"] == f"matrix.suite == '{LIVE_SUITE}'", name
+    # No other check routes to the live suite: everything else Windows runs
+    # under the required gate is a build, a self-test, a golden or a replay.
+    routed = {name for name, step in steps.items()
+              if LIVE_SUITE in step.get("if", "") and step.get("run")}
+    assert routed == set(LIVE_CHECKS)
+    # The golden arm of the same rows stays in the required cli shard.
+    golden = commands(steps["CLI differential harness"]["run"])
+    assert not [words for words in golden if words[:2] == ["python", "rust/cli_harness"]
+                and "--golden" not in words]
+
+
+def test_linux_requires_the_live_comparisons_and_windows_reports_them():
+    jobs = workflow()["jobs"]
+    matrix = jobs["parity-checks"]["strategy"]["matrix"]
+    assert LIVE_SUITE in matrix["suite"] and "ubuntu-latest" in matrix["os"]
+    assert matrix["exclude"] == WINDOWS_LIVE_EXCLUDE
+    live = jobs["parity-live"]
+    assert live["strategy"]["matrix"] == {"os": ["windows-latest"], "suite": [LIVE_SUITE]}
+    assert live["strategy"]["fail-fast"] is False
+    assert live["steps"] == jobs["parity-checks"]["steps"]
+    assert live["needs"] == ["candidate", "rust"]
+    assert live["runs-on"] == "${{ matrix.os }}"
+    assert 0 < live["timeout-minutes"] <= 60
+
+
+def test_windows_live_job_reports_but_never_gates():
+    jobs = workflow()["jobs"]
+    live = jobs["parity-live"]
+    assert live["continue-on-error"] is True
+    for name, job in jobs.items():
+        needs = job.get("needs", [])
+        assert "parity-live" not in ([needs] if isinstance(needs, str) else needs), name
+    assert "parity-live" not in jobs["parity"]["steps"][0]["run"]
+    # Master pushes, the nightly and manual CI: never a pull request or a
+    # merge group, whose required checks it would otherwise hold open.
+    assert live["if"] == LIVE_EVENTS
+    assert "pull_request" not in live["if"] and "merge_group" not in live["if"]
+    assert live["name"] == "Parity live (non-gating) / ${{ matrix.os }} / ${{ matrix.suite }}"
+    assert not live["name"].startswith("Parity /")

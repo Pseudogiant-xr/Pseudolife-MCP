@@ -53,6 +53,23 @@ pins the names.)
   concurrency group with a pull request or a master push. No PR push can
   cancel a queue run, and a queue run cancels nothing.
 
+### The required Parity gate
+
+`Parity / ubuntu-latest` and `Parity / windows-latest` both need every
+`parity-checks` shard on both systems, so they gate only on work whose
+verdict a hosted runner decides deterministically. That means builds,
+nextest, harness self-tests, goldens and replays, and on Linux the live
+comparisons too. The `cli-live` suite holds the live Python-versus-Rust
+comparisons whose verdict also depends on sub-second timing and Windows
+socket resets on a cold shared runner. These are the CLI differential
+harness's live arms (the hook row's 250 ms health probe), and daemon body
+admission, security admission and MCP live parity (early refusals that
+Windows can turn into a reset). Linux runs `cli-live` under the gate. Hosted
+Windows runs it in `Parity live (non-gating) / windows-latest / cli-live`, on
+master pushes, the nightly and manual CI only. That job has
+`continue-on-error` and no job needs it, so it reports a Windows-only live
+divergence without blocking a merge or holding a pull request's checks open.
+
 The scope jobs diff from master's tip rather than `merge_group.base_sha`
 because GitHub does not formally define `base_sha`. It is either master's tip
 or the head of the queue entry ahead of this one. If it were the entry ahead,
