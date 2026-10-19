@@ -188,7 +188,7 @@ binding"). What it cannot or does not reproduce:
 | Item | Python | Rust | Why / owner |
 |---|---|---|---|
 | Reference pool (Chroma documents from `document_ingest`, `ref_top_k` 3) | queried on every search once `<data_dir>/chromadb` holds a store | never queried: no reference hits, no `reference` components | the store is a private chromadb 1.5.9 on-disk format (HNSW segments); delegate ruling 2026-10-09: declared, harness banks hold no documents. `document_search` is declared with it. |
-| **Cutover blocker:** reference store | Chroma on-disk format | none | needs v56 document table (Python change in flight; maintainer decision 2026-10-09: documents move to a pgvector table with exact cosine search); W2-D then ports the reference pool and `document_search` against it |
+| **Cutover blocker:** reference store | Chroma on-disk format | none | needs a Python document table at a future schema version (maintainer decision 2026-10-09: documents move to a pgvector table with exact cosine search; schema v56 shipped judge votes instead (#807), and no Python document-table PR is open as of 2026-10-19); W2-D then ports the reference pool and `document_search` against it |
 | Cross-encoder model | `memory.reranker.model_name` from the Hugging Face cache, lazily | the ONNX export in `PSEUDOLIFE_DAEMON_RERANK_DIR` (same checkpoint; `model_name` is only logged) | model packaging is cutover work (W3-J); parity of the export is proven by `harness/w2d_rerank_check.py` |
 | Retrieval-event session and episode | resolved from the resident active-session pointer and episode tree | read from `meta.active_session_pointer` and `episodes` per search (same values) | W2-E owns the resident resolver; the call sites switch when it lands |
 | `entries.access_count` persistence | resident counts written on the save cadence | resident counts only | W2-E (autosave) |
@@ -230,8 +230,8 @@ existing gates. The route inventory is `harness/goldens/routes.json`.
 | `w2d-model-provisioning` | Default automatic embedding and reranker artifact provisioning | Existing local ONNX graphs are required. The embedding override must contain the configured Qwen/MiniLM layout; the reranker override must be the configured cross-encoder checkpoint. W3-J owns installation/provisioning. No claim is made for arbitrary exported checkpoints. |
 | `w2d-query-cache-lifetime` | Multiple configured embedders in one process | The inherited outer query cache is process-global and keys raw query text; it is valid only for the daemon's single immutable service/model configuration. Per-embedder caching also remains. Hot model replacement or multiple service instances require cache ownership changes before support. |
 
-`no reference hits` remains the separate v56 dependency above: the Python
-Postgres document migration has not landed and no schema change is included.
+`no reference hits` remains the separate document-table dependency above: the
+Python Postgres document migration has not landed and no schema change is included.
 The typed cortex loader uses the live embedder dimension, while the shared
 startup and PostgreSQL schema guards still refuse incompatible banks; this
 is not authorization to migrate vectors or change the schema dimension.
