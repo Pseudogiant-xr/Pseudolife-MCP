@@ -6,6 +6,19 @@ pub const REGISTERED: &str = "Coordination: board registration completed after a
 pub const STOPPED: &str = "Coordination: board registration stopped retrying (the daemon refused it; check bearer access and the private adapter state). Board writes here are refused until the session restarts; memory tools work.";
 pub const SHARED_REFUSAL: &str = "This Pseudolife server is one process shared by every conversation in the host, and this shared shim has no authenticated per-conversation board binding: posting, status updates and mail here would act as every conversation at once, and are refused. Use a per-session Pseudolife server with a supported host session binding; in Claude Desktop its entry needs a separate name. memory_agents list here shows open sessions only, not the board.";
 pub const SHARED_NOTE: &str = "Agent board: this server is shared by every conversation in its host and this shared shim has no authenticated per-conversation binding, so skip memory_agents update and memory_message here; memory tools work as usual.";
+/// The refusal for a board call whose identity check still failed after its
+/// retry: the cause, that nothing ran, and that the identity is not lost.
+/// A proxy in front of the daemon can be the one answering, so the status is
+/// the check's, not necessarily the daemon's.
+pub fn identity_check_failed(status: Option<u16>) -> String {
+    let cause = match status {
+        Some(status) => format!("the check was answered with HTTP {status}"),
+        None => "the check got no answer".to_owned(),
+    };
+    format!(
+        "This session's board identity could not be checked with the memory daemon ({cause}), so this board call did not run. A failed check does not by itself mean the identity is lost: retry this call in a few seconds. If it keeps failing, check the daemon with `pseudolife-mcp doctor`."
+    )
+}
 pub const RETRY_DELAYS: [u64; 6] = [1, 2, 5, 10, 30, 60];
 
 pub fn yes(value: &str) -> bool {

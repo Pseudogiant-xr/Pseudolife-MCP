@@ -35,6 +35,7 @@ pub struct Timing {
     pub retry_attempt: Duration,
     pub retry_delays: [Duration; 6],
     pub registry_retry: Duration,
+    pub identity_check_retry: Duration,
 }
 impl Default for Timing {
     fn default() -> Self {
@@ -44,6 +45,12 @@ impl Default for Timing {
             retry_attempt: Duration::from_secs(30),
             retry_delays: policy::RETRY_DELAYS.map(Duration::from_secs),
             registry_retry: Duration::from_secs(5),
+            // A board call re-checks its identity once after this pause before
+            // it is refused (Python `_BOARD_CHECK_RETRY_DELAYS`). On 2026-10-19
+            // a delegate's board update and receive were refused as "identity
+            // unavailable" when that one read-only check had failed; the same
+            // call seconds later worked.
+            identity_check_retry: Duration::from_millis(500),
         }
     }
 }
@@ -826,7 +833,16 @@ impl Board {
             adapter
         };
         if let Some(bound) = adapter.clone() {
-            match bound.validated_headers(&snapshot).await {
+            let mut checked = bound.validated_headers(&snapshot).await;
+            // A board call checks once more before a transient failure (no
+            // answer, 5xx, 429) refuses it; ordinary memory calls never wait.
+            // A credential rotated meanwhile is not retried: the check
+            // refuses a stale snapshot before its request.
+            if required && checked.as_ref().is_err_and(adapter::Failure::transient) {
+                tokio::time::sleep(self.options.timing.identity_check_retry).await;
+                checked = bound.validated_headers(&snapshot).await;
+            }
+            match checked {
                 Ok(identity) => {
                     for (name, value) in identity {
                         if let Some(name) = name
@@ -837,6 +853,12 @@ impl Board {
                     }
                     bound.note_turn().await;
                     self.status.lock().await.validated = true;
+                }
+                Err(failure) if required && failure.transient() => {
+                    return Err(coordination_error(
+                        Some(&policy::identity_check_failed(failure.status)),
+                        None,
+                    ));
                 }
                 Err(_) if required => {
                     return Err(coordination_error(None, bound.deliver_hint().await));

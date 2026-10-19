@@ -616,3 +616,142 @@ async fn board_retry_close_wins_late_transport_failure_without_another_attempt()
     assert_eq!(fixture.count("context"), 2);
     assert_eq!(fixture.count("/register"), 0);
 }
+
+// Port of Python #838: every board call first re-checks this session's
+// identity with a read-only context request. One failed check (a dropped
+// connection, a cold daemon's 5xx) refused the call as "identity unavailable;
+// reattach", though the identity was intact.
+fn checking(runtime: &pseudolife_stdio::lifecycle::Runtime, home: &Home) -> Options {
+    let mut options = fast(runtime, home, "1");
+    options.timing.identity_check_retry = Duration::from_millis(10);
+    options
+}
+fn blip(mode: &str) -> Answer {
+    match mode {
+        "dropped" => Answer::text(0, b""),
+        _ => Answer::json(500, json!({"error":"coordination_unavailable"})),
+    }
+}
+async fn board_call(board: &Board, name: &str) -> Result<Preparation, rmcp::ErrorData> {
+    board
+        .prepare_call(
+            name,
+            Some(
+                json!({"action":"update","query":"x"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+            &json!({}),
+        )
+        .await
+}
+
+#[tokio::test]
+async fn board_identity_check_rides_out_one_failure() {
+    for mode in ["dropped", "cold"] {
+        let fixture = Fixture::new(0);
+        let home = Home::new();
+        let runtime = runtime(&fixture, false);
+        let board = Board::attach_options(runtime.clone(), checking(&runtime, &home)).await;
+        registered(&board).await;
+        let before = fixture.count("/context");
+        fixture.answer("context", blip(mode));
+        let Ok(Preparation::Forward(call)) = board_call(&board, "memory_agents").await else {
+            panic!("{mode}: one failed identity check refused the board call");
+        };
+        assert_eq!(call.operation.headers["x-pl-agent"], "fixture-agent");
+        assert_eq!(fixture.count("/context") - before, 2, "{mode}");
+        board.close().await;
+    }
+}
+
+#[tokio::test]
+async fn board_identity_check_that_keeps_failing_names_its_cause() {
+    for (mode, cause) in [("dropped", "got no answer"), ("cold", "HTTP 500")] {
+        let fixture = Fixture::new(0);
+        let home = Home::new();
+        let runtime = runtime(&fixture, false);
+        let board = Board::attach_options(runtime.clone(), checking(&runtime, &home)).await;
+        registered(&board).await;
+        let before = fixture.count("/context");
+        fixture.answer("context", blip(mode));
+        fixture.answer("context", blip(mode));
+        let error = board_call(&board, "memory_agents").await.err().unwrap();
+        assert_eq!(fixture.count("/context") - before, 2, "{mode}");
+        assert_eq!(
+            error.message,
+            policy::identity_check_failed(if mode == "cold" { Some(500) } else { None })
+        );
+        assert!(error.message.contains(cause), "{}", error.message);
+        assert!(error.message.contains("did not run") && error.message.contains("retry"));
+        assert!(!error.message.contains("reattach"));
+        assert_eq!(
+            error.data.unwrap(),
+            json!({"classification":"coordination_unavailable","phase":"initialize","operation_outcome":"not_dispatched"})
+        );
+        board.close().await;
+    }
+}
+
+#[tokio::test]
+async fn board_identity_permanent_verdict_is_refused_without_retrying() {
+    // The near miss: another bank answering is a verdict about the saved
+    // address, not a blip; retrying cannot change it.
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let runtime = runtime(&fixture, false);
+    let board = Board::attach_options(runtime.clone(), checking(&runtime, &home)).await;
+    registered(&board).await;
+    let before = fixture.count("/context");
+    *fixture.bank.lock().unwrap() = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".into();
+    let error = board_call(&board, "memory_agents").await.err().unwrap();
+    assert_eq!(fixture.count("/context") - before, 1);
+    assert_eq!(
+        error.message,
+        "Coordination identity is unavailable; reattach coordination and retry."
+    );
+    assert_eq!(
+        error.data.unwrap()["classification"],
+        "coordination_unavailable"
+    );
+    board.close().await;
+}
+
+#[tokio::test]
+async fn board_identity_ordinary_call_does_not_wait_for_the_check() {
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let runtime = runtime(&fixture, false);
+    let board = Board::attach_options(runtime.clone(), checking(&runtime, &home)).await;
+    registered(&board).await;
+    let before = fixture.count("/context");
+    fixture.answer("context", blip("dropped"));
+    fixture.answer("context", blip("dropped"));
+    let Ok(Preparation::Forward(call)) = board_call(&board, "memory_search").await else {
+        panic!("an ordinary memory call was refused");
+    };
+    assert!(!call.operation.headers.contains_key("x-pl-agent"));
+    assert_eq!(fixture.count("/context") - before, 1);
+    board.close().await;
+}
+
+#[tokio::test]
+async fn board_identity_pending_registration_is_not_retried_as_a_blip() {
+    // The near miss for a session that legitimately has no identity yet: a
+    // pending registration refuses a board write at once with its own text.
+    let fixture = Fixture::new(0);
+    for _ in 0..20 {
+        fixture.answer("context", outage("refused"));
+    }
+    let home = Home::new();
+    let runtime = runtime(&fixture, false);
+    let mut options = fast(&runtime, &home, "1");
+    options.timing.identity_check_retry = Duration::from_secs(5);
+    let board = Board::attach_options(runtime.clone(), options).await;
+    let started = std::time::Instant::now();
+    let error = board_call(&board, "memory_agents").await.err().unwrap();
+    assert_eq!(error.message, policy::PENDING);
+    assert!(started.elapsed() < Duration::from_secs(2));
+    board.close().await;
+}

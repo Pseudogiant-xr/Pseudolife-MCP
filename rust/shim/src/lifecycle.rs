@@ -26,6 +26,12 @@ pub const SPAWN_WAIT_ALIVE: Duration = Duration::from_secs(180);
 pub const EXTERNAL_WAIT: Duration = Duration::from_secs(5);
 pub const REMOTE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 pub const RETRY_DELAYS: [u64; 6] = [1, 2, 5, 10, 30, 60];
+// Each call opens a fresh connection; on 2026-10-19 one board update was
+// refused as unreachable while /health answered in 10 ms, so a call whose
+// connection failed before reaching the daemon is sent once more after this
+// pause (only while the daemon was answering until then). Python
+// `_UNREACHED_RETRY_SECONDS`.
+pub const UNREACHED_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
 pub const DAEMON_UNREACHABLE_MESSAGE: &str = "The memory daemon is unreachable, so this call did not run. The shim keeps retrying it in the background and has the client re-list tools when it answers; retry this call then.";
 pub const DAEMON_LOST_NOTE: &str = "pseudolife-mcp: the memory daemon stopped answering; serving the cached tool list and retrying it in the background.";
 pub const DAEMON_RECOVERED_NOTE: &str =
