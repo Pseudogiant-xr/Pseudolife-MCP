@@ -11,6 +11,7 @@
     "docs/atlas/atlas.json": "04cca5c434c8c641499ab38d3fa52a0abc55c26d11d844a3ba5ebd3613f9900e",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
     "docs/dev/dev-machines.md": "62823e872c77397c73b4529173e39f4c0ac3a55629722a2449a8fc8e11130391",
+    "docs/dev/merge-batches.md": "7c4c87e509dc301fa676b0801087f5e65eb1c46493b0123584d57ec60ba6bd5e",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "465b0c24a386ae3a92bf1a3d46e01114db061dc6ddd4a68836512fd191ff23f4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
@@ -235,6 +236,7 @@
     "ops/install-shim-autostart.sh": "6f32b1c2ebd688546fdfd1837a3b6445d3195db99e9668c0360d13582c248888",
     "ops/install.ps1": "88264a10cb50a0f2b6348201e8befc46b271d06c2cdb8ea559a2a2591eaac565",
     "ops/install.sh": "e27b4bf7fceaefa644bf26de89ff83ad5da7d5c25ab72005cd1107cfd8b60f58",
+    "ops/integrate.py": "02de981155ef0f4c302fe86d9f83fcc11c243bd52c85de563de9fd59c44295c7",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -248,7 +250,7 @@
     "ops/prune-rollbacks.ps1": "d4652ccdfda2dad5f57c526f75f58a0d88c1de6407b442e369d18d9ccfab6e69",
     "ops/prune-rollbacks.sh": "8c126a14674839c891048cab020d9bf637c09387e516f08e9614067eddbe78e5",
     "ops/register_claude_desktop.py": "a653438874cb1af0ec859083239ba35adc5e74747d3aceae055640f80ee37534",
-    "ops/remote-suite.ps1": "b2a021445b3b5afed30f19a7cc3b92eb3c1b406160ca42949d61c020411759f1",
+    "ops/remote-suite.ps1": "07d5a4456b8080164f5629f12dfaf64694f29e53f83b27c0905ff6273e8ef586",
     "ops/requirements.lock.txt": "77cbf1c0fe415226bb94fd6d2d3ce1e6cb341c0150a6f5a1dd5de36c2a3023d1",
     "ops/restore.ps1": "96cd7f5920736c975fa0cf415d4674b9ca0e2a99f1eb0a3e26e9ab857b6703f5",
     "ops/restore.sh": "56286c9a5b191821f670fdcd497e2472dd95cec4094521f03587e2d20c0bac2f",
@@ -29385,7 +29387,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:140",
+          "location": "ops/remote-suite.ps1:141",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -33688,7 +33690,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:139",
+          "location": "ops/remote-suite.ps1:140",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38783,7 +38785,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:167",
+          "location": "ops/remote-suite.ps1:168",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38820,7 +38822,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:153",
+          "location": "ops/remote-suite.ps1:154",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38873,7 +38875,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:160",
+          "location": "ops/remote-suite.ps1:161",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39034,7 +39036,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:167",
+          "location": "ops/remote-suite.ps1:168",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39321,7 +39323,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:167",
+          "location": "ops/remote-suite.ps1:168",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39418,7 +39420,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:71",
+          "location": "ops/remote-suite.ps1:72",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39507,7 +39509,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:74",
+          "location": "ops/remote-suite.ps1:75",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39520,7 +39522,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:75",
+          "location": "ops/remote-suite.ps1:76",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39547,6 +39549,36 @@
         },
         {
           "evidence": "documented",
+          "location": "docs/dev/merge-batches.md:39",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "local"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/dev/merge-batches.md:95",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "local"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "documented",
           "location": "ops/remote-suite.ps1:6",
           "shape": {
             "channel": "environment",
@@ -39559,6 +39591,21 @@
             }
           },
           "usage": "assignment-example"
+        },
+        {
+          "evidence": "static",
+          "location": "ops/integrate.py:420",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "local"
+              }
+            }
+          },
+          "usage": "assignment"
         }
       ]
     },
@@ -39854,7 +39901,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:158",
+          "location": "ops/remote-suite.ps1:159",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39867,7 +39914,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:159",
+          "location": "ops/remote-suite.ps1:160",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41131,7 +41178,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:92",
+          "location": "ops/remote-suite.ps1:93",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58640,7 +58687,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:162",
+      "location": "ops/remote-suite.ps1:163",
       "name": "PSEUDOLIFE_SUITE_KEEP",
       "shape": {
         "channel": "environment",
@@ -58654,7 +58701,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:162",
+      "location": "ops/remote-suite.ps1:163",
       "name": "PSEUDOLIFE_SUITE_PRUNE",
       "shape": {
         "channel": "environment",
@@ -58668,7 +58715,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:162",
+      "location": "ops/remote-suite.ps1:163",
       "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
       "shape": {
         "channel": "environment",
@@ -58682,7 +58729,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:163",
+      "location": "ops/remote-suite.ps1:164",
       "name": "PSEUDOLIFE_SUITE_WORKERS",
       "shape": {
         "channel": "environment",
@@ -64829,6 +64876,11 @@
       "location": "docs/dev/dev-machines.md:94",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/merge-batches.md:114",
+      "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
@@ -80604,21 +80656,15 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:139",
+      "location": "ops/remote-suite.ps1:140",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:153",
+      "location": "ops/remote-suite.ps1:154",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_DISPATCHED"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:158",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
@@ -80628,25 +80674,31 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:162",
+      "location": "ops/remote-suite.ps1:160",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/remote-suite.ps1:163",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:162",
+      "location": "ops/remote-suite.ps1:163",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:162",
+      "location": "ops/remote-suite.ps1:163",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:163",
+      "location": "ops/remote-suite.ps1:164",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
     },
@@ -80694,15 +80746,9 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:71",
+      "location": "ops/remote-suite.ps1:72",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_REMOTE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:74",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_WHERE"
     },
     {
       "dynamic": "unresolved",
@@ -80712,7 +80758,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:92",
+      "location": "ops/remote-suite.ps1:76",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_WHERE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/remote-suite.ps1:93",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WSL_DISTRO"
     },
