@@ -801,15 +801,20 @@ def _expected_workers() -> int:
         mem_kb = next(int(line.split()[1]) for line in f
                       if line.startswith("MemTotal:"))
     with open("/proc/self/cgroup", encoding="ascii") as f:
-        group = next((line.strip()[3:] for line in f if line.startswith("0::")),
-                     None)
-    if group is not None:
+        lines = [line.rstrip("\n").split(":", 2) for line in f]
+    v2 = next((path for _, ctl, path in lines if ctl == ""), "")
+    v1 = next((path for _, ctl, path in lines if "memory" in ctl.split(",")), "")
+    # cgroup v2's memory.max, else v1's memory controller (Codex review,
+    # 2026-10-19: the launcher reads both, so the oracle must too).
+    for limit_file in (Path(f"/sys/fs/cgroup{v2}/memory.max"),
+                       Path(f"/sys/fs/cgroup/memory{v1}/memory.limit_in_bytes")):
         try:
-            limit = Path(f"/sys/fs/cgroup{group}/memory.max").read_text().strip()
+            limit = limit_file.read_text().strip()
         except OSError:
-            limit = "max"
+            continue
         if limit.isdigit():
             mem_kb = min(mem_kb, int(limit) // 1024)
+        break
     cpus = len(os.sched_getaffinity(0))
     return min(4, cpus // 2, mem_kb // (6 * 1024 * 1024))
 
