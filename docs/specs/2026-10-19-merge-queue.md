@@ -170,7 +170,7 @@ still ejects that PR and rebuilds everything behind it. It would also merge
 an earlier entry whose own run genuinely failed, provided the head passes.
 Start with `ALLGREEN`. Consider `HEADGREEN` only once Windows Parity flakes
 are rare, and only after the census and image ranges also move to master's
-tip (see "What CI does for a merge group"). The rule "Windows CI failures go
+tip (see "What CI does for a merge group"). The rule "Windows-only CI failures go
 to the Windows VM before a rerun" (CLAUDE.md, "Dev machines") matters more
 once the queue is on. Clear the open Windows Parity deflake issues before you
 turn the queue on.
@@ -183,15 +183,15 @@ queue as on, not before:
 
 - **"Every PR requires passing CI for its current head integrated with
   current master … update the branch and wait for fresh CI"** (shipping
-  checklist item 3). The queue's group run is the integrated check, provided
+  checklist, "CI before merge"). The queue's group run is the integrated check, provided
   every lane is a required check (see "Required checks" above). Without
   that, this rule must stay for the lanes the ruleset does not require. A PR
   needs green CI on its own head before it is queued. It no longer needs to
   be updated and rerun each time master moves.
-- **Disjoint merge-forward** ("Running tests"). It exists to skip a fresh CI
+- **Disjoint merge-forward** (the `merge-forward` skill, section A). It exists to skip a fresh CI
   run after a master forward-merge. With the queue, nothing waits on that
   run, and the admin-merge bypass it requires is no longer needed.
-- **Tree-identical stack forward** ("Running tests"). A stacked child still
+- **Tree-identical stack forward** (the `merge-forward` skill, section B). A stacked child still
   conflicts with master after its parent squash-merges, so it is still
   forwarded with that rule's checks. The forwarded PR is then queued, with no
   admin merge and no "fresh CI skipped" comment.

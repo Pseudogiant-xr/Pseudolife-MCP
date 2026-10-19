@@ -10,6 +10,7 @@
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
     "docs/atlas/atlas.json": "04cca5c434c8c641499ab38d3fa52a0abc55c26d11d844a3ba5ebd3613f9900e",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
+    "docs/dev/dev-machines.md": "104574dacce05386548ca8020fe59c30507d5ff1d6c11e0009e436805e580191",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "465b0c24a386ae3a92bf1a3d46e01114db061dc6ddd4a68836512fd191ff23f4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
@@ -36,7 +37,7 @@
     "docs/runbooks/docker-disk-retention.md": "af85e60e1e9614bcea9339c5589c5cff3985e4fc0578a8b47ae57e89e67aa09e",
     "docs/runbooks/embedding-v25-migration.md": "b89bebab2c3603a4afe91e318a3644d606828edfd0adf20aab411408935cdeff",
     "docs/runbooks/incremental-builds.md": "fc979134d68e40823930bc4981502d6b9746c2fd2d93098622a38d57318d0bab",
-    "docs/runbooks/overnight-band-wabl-and-lme-v2-slice2.md": "6e58166872d557695b185ee1e5b8246eca618c9a4236d6086d38242fd841e3bc",
+    "docs/runbooks/overnight-band-wabl-and-lme-v2-slice2.md": "84ccd4477d7986c9ab9e00a1847accb24aa14b228cd1dd4ae285b7ce42191362",
     "docs/runbooks/postgres-18-migration.md": "cce6dad544c7d4cde0d30563277940946171244616d21ed1023bbff868926764",
     "docs/runbooks/raglite-runs-20260904.md": "4f9e5c3243a7b18fe9ba30045ec3a4e43c82f84f8a635f2c9f5b9213cdf9d84f",
     "docs/specs/2026-05-27-tier-c-episodic-memory-design.md": "65ca696a984c342bc3927ef5a7910f8da063ed1cafb769a8fcdf71c5ce8ea112",
@@ -99,7 +100,7 @@
     "docs/specs/2026-09-11-agent-coordination-plan.md": "eee81d94951271ef0d7a94c87f52291b917ef893f325aafc4bb1466cbfa1dad6",
     "docs/specs/2026-09-12-codex-coordination.md": "bc53ec0d2cc117c9e1140227c377d9e9010d9fad5e0c217715ea40d63bf351be",
     "docs/specs/2026-10-14-delegate-mode-design.md": "fe5bf5edf1e4b96fc7684b8aca4716fe450bc52b2aa9fdcb83dc461d3af50071",
-    "docs/specs/2026-10-19-merge-queue.md": "4bd15cc322651fa0440d64fa9510beb0915114342f8b7e58edcf1c711c92f9b4",
+    "docs/specs/2026-10-19-merge-queue.md": "d63a8220d5d62f0fb143ad1f6fe93f484c1baafef858f505ca6f223315671fdc",
     "docs/superpowers/plans/2026-06-25-cortex-console-v2-phase0.md": "131e2b6577abedcfb73428ba2d2e53686a73334c1a2cf6b789ebb05b5ce0a7f9",
     "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase1.md": "93274a9c8d11f869bc844967510a8e13870df5f55425f739b2545ef08ca7308b",
     "docs/superpowers/plans/2026-06-26-cortex-console-v2-phase2.md": "ecc0779882b6b317132236df74386baf01cec72346a9a50e09d03a1d9f907235",
@@ -38796,6 +38797,19 @@
       "producers": [
         {
           "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/dev/dev-machines.md:54",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
           "evidence": "static",
           "location": "ops/remote-suite.ps1:153",
           "shape": {
@@ -39032,6 +39046,19 @@
       "name": "PSEUDOLIFE_SUITE_LEASE",
       "optional_parameters": null,
       "producers": [
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/dev/dev-machines.md:91",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
         {
           "dynamic": "unresolved",
           "evidence": "documented",
@@ -39329,6 +39356,19 @@
       "producers": [
         {
           "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/dev/dev-machines.md:22",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
           "evidence": "static",
           "location": "ops/remote-suite.ps1:25",
           "shape": {
@@ -39457,6 +39497,21 @@
         },
         {
           "evidence": "documented",
+          "location": "docs/dev/dev-machines.md:73",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "local|remote"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "documented",
           "location": "ops/remote-suite.ps1:6",
           "shape": {
             "channel": "environment",
@@ -39520,6 +39575,19 @@
       "name": "PSEUDOLIFE_TEST_DATABASE_URL",
       "optional_parameters": null,
       "producers": [
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/dev/dev-machines.md:51",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
         {
           "dynamic": "unresolved",
           "evidence": "documented",
@@ -39825,6 +39893,21 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "evidence": "documented",
+          "location": "docs/dev/dev-machines.md:48",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "127.0.0.1:5434"
+              }
+            }
+          },
+          "usage": "assignment"
         }
       ]
     },
@@ -39834,6 +39917,19 @@
       "name": "PSEUDOLIFE_TEST_PG_PASSWORD",
       "optional_parameters": null,
       "producers": [
+        {
+          "dynamic": "unresolved",
+          "evidence": "documented",
+          "location": "docs/dev/dev-machines.md:49",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
         {
           "dynamic": "unresolved",
           "evidence": "documented",
@@ -56688,6 +56784,34 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
+      "location": "docs/dev/dev-machines.md:82",
+      "name": "PSEUDOLIFE_SUITE_KEEP",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "environment",
+      "location": "docs/dev/dev-machines.md:82",
+      "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "environment",
       "location": "docs/guide/agent-isolation.md:100",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
@@ -62798,6 +62922,22 @@
     {
       "evidence": "documented",
       "kind": "environment",
+      "location": "docs/dev/dev-machines.md:83",
+      "name": "PSEUDOLIFE_SUITE_PRUNE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "off"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "documented",
+      "kind": "environment",
       "location": "docs/guide/configuration.md:872",
       "name": "PSEUDOLIFE_BOARD_HARNESS_NAMES",
       "shape": {
@@ -64417,6 +64557,53 @@
       "dynamic": "unresolved",
       "location": "docs/cortex-mcp-spec.md:94",
       "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/dev-machines.md:22",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_REMOTE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/dev-machines.md:49",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_TEST_PG_PASSWORD"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/dev-machines.md:51",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/dev-machines.md:54",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_DISPATCHED"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/dev-machines.md:64",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/dev-machines.md:82",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/dev-machines.md:82",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/dev-machines.md:91",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_LEASE"
     },
     {
       "dynamic": "unresolved",
