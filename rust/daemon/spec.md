@@ -986,7 +986,7 @@ in `config.rs`; registered in `mcp::dispatch::registry`. Python:
 | FG13 | The lesson store holds every `lessons` column it rewrites (the vector, the HLC stamps, writer, session, version) and is shared like the cortex: readers take snapshots, writers mutate under the service lock. | `sync.py:474-505` |
 | FG14 | `sync_lesson_slots`: the dirty slots' records in record order, rewritten in one transaction (DELETE the slots, one INSERT each: support and provenance sorted, an empty origin as NULL, `version` at least 1), each row's subject and `about` linked to their entities (`find_entity(norm_name(...))`, looked up before the transaction); the slots are cleared after. A failure counts a persistence error and is an internal error. | `sync.py:211-222, 409-450`; `postgres.py:1846-1875` |
 | FG15 | The cortex, world and lesson saves are the existing per-slot paths, so a forget's dirty state persists exactly as Python's does: at its own save (fact, world, lesson scopes), or the next one (the cascade's cortex retirements). | `service.py:3746-3785` |
-| FG16 | Not reachable: the restore path (`memory_graph_review(action="restore_slot")`, W3-H) and file mode. | `divergences.md` |
+| FG16 | Not reachable: file mode. The restore path (`memory_graph_review(action="restore_slot")`) is served since task O1c (RV15-RV19). | `divergences.md` |
 
 `harness/w2e.py live --only forget-memory forget-slots forget-unbounded` compares every
 answer and the full bank after each call, on templates whose entries,
@@ -1262,7 +1262,11 @@ tiebreak and the filers run from the background sweep and are task O2.
 | RV12 | `accept_merge`: a pending merge proposal (else `not_pending`), folded in the RV2 direction: the merge audit (with the votes), then `merge_entity`, then the status, three commits, the audit written even when the fold finds its ends gone. `{accepted, from, into}`. | `service.py:8965-8999` |
 | RV13 | `accept_junk`: a pending junk proposal; the audit (`junk: <reason>`), then `delete_entity`, then the status. `{accepted, entity}`. | `service.py:9006-9032` |
 | RV14 | `reject_entity`: the automatic decision retired first, then in one transaction the status, the audit and the dismissal (a merge's pair as stored; a junk node as `junk:<canonical>` twice). `{rejected, id}`; a stale id answers `not_pending`. | `service.py:9039-9083` |
-| RV15 | `dismiss_slot_pair` and `restore_slot` answer the `not_implemented` refusal (task O1c). | — |
+| RV15 | `dismiss_slot_pair`: `store`, `src` and `dst` required, each key `entity|attribute` with exactly one bare `|` (`%7C` a literal pipe), else `store_src_dst_required` with its detail; an unknown store `bad_store`; keys normalized with the cortex `_norm_key`, a blank or identical slot `bad_pair`; in one transaction `<store>:<key>` pairs dismissed and `curation_auto_dismissals_v1` rewritten (always, `{}` included). `{dismissed, new, store, a_key, b_key}`. | `mcp_server.py:2376-2385`; `service.py:477-483,7944-7967`; `curation_safety.py:531-545` |
+| RV16 | `restore_slot`: `store` `lesson` or `world` and `src` required (`store_src_required`); a `|` key restores that slot, a bare name every retired aspect of it; `decided_by` "agent". | `mcp_server.py:2386-2399` |
+| RV17 | A slot a curated duplicate retired (its retire row carrying `_curation_duplicate`) restores through `restore_curated_duplicate`: the target and evidence checks (`curation_restore_requires_attribute`, `curation_target_mismatch`, `curation_evidence_changed`), the loser staged on a copy (rebuilt from its evidence when compaction purged it), then one transaction re-validating under `FOR UPDATE`, rewriting the slots with entity links and adding the restore audit; the copy published after commit. A failed commit reloads the store and classifies it: committed answers `source: "reconciled"`, rolled back raises `curation restore rolled back: …` (`internal_error`). | `curation_safety.py:1140-1231`; `service.py:4898-4943` |
+| RV18 | Otherwise the resident store restores the newest retired record of each slot without a current one (`superseded_at` cleared), each with a `store_decisions` restore row and, for lessons, its graph link, then the store is saved; slots whose retired rows compaction purged come back from their `retired_slots` audit snapshots, world facts through `world_write` (an unsafe source URL skipped, `source_doc_id` kept) with a restore row `from audit snapshot`. | `service.py:5231-5266,5390-5440,5476-5604`; `memory/lessons.py:283-314` |
+| RV19 | The answer: `{restored, source: retired_record|audit_snapshot|mixed|reconciled, task+aspect or entity+attribute, entries}`, or `{restored: 0, label, reason: slot_live|nothing_retired}` with its note. | `service.py:5522-5537` |
 
 `harness/w2e.py live --only review-list review-list-gated
 review-list-no-analyzer review-actions` compares every answer and the full
@@ -1282,7 +1286,16 @@ filed relate proposal decided. The `mcp-review-dup-threshold`, `-no-merge-veto`,
 `-terminal-as-pending`, `-accept-no-fold`, `-accept-no-floor`,
 `-dismiss-aliases`, `-reject-no-dismiss`, `-propose-keep-violations` and
 `-pair-index-noop`, `-analyzer-no-dismiss` and `-relate-state-miss`
-mutants must be caught.
+mutants must be caught. `review-slots` seeds lessons and world facts (the
+lessons as SQL, since only the dream writes them; world facts through
+`memory_world_set` and `memory_forget`; curated retire rows with
+fingerprints computed as Python does, some with vectors) and runs both slot
+actions through every branch: the refusals, both stores, curated restores
+(a rebuilt purged loser, evidence edited behind the daemons' backs), legacy
+restores, the world audit-snapshot fallback; its `mcp-review-slot-meta-noop`,
+`-restore-oldest`, `-restore-over-live` and `-no-decision` mutants must be
+caught. The lesson-fallback prediction and the reconciliation classifier
+are unit-tested against Python's own functions.
 
 ### Board tools over MCP (2026-10-16)
 

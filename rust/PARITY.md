@@ -542,7 +542,7 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_lesson_search | minimal | 3 | ported |
 | memory_forget | full | 4 | ported |
 | memory_dream | full | 4 | deferred |
-| memory_graph_review | full | 4 | deferred |
+| memory_graph_review | full | 4 | ported |
 | memory_episode_start | core | 4 | ported |
 | memory_episode_end | core | 4 | ported |
 | memory_session_title | minimal | 4 | ported |

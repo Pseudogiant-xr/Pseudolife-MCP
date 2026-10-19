@@ -331,7 +331,7 @@ this increment does not claim the complete write boundary or cutover readiness.
 | A lesson read racing a forget | waits on the service lock and the refresh barrier | reads its snapshot without the lock: between the cascade's commit and the mirror it can still serve a lesson retiring | the read slices' lock-free snapshots (as for the cortex) |
 | A malformed `meta.session_digest_cursor` (a `ts` that is not a number or numeric string, a `retry` that is not an object, a non-iterable or non-string `regenerate`) | `float()` / `dict()` / `sorted()` raise their own `TypeError` / `ValueError` text | the same refusal kind (`invalid_argument`) with Rust's own wording | corrupt persisted data only; the dream writes the cursor |
 | `memory.delete_confirm_threshold` of the wrong type | `int(value or 0)` per call (a float truncates) | refused at config load, like every other typed key | the existing config-type substitution |
-| The restore path (`memory_graph_review(action="restore_slot")`) and file mode | served | not reachable: `restore_slot` is task O1c, the daemon PostgreSQL-only | W3-H |
+| File mode | served | not reachable: the daemon is PostgreSQL-only | W3-H |
 
 ### memory_consolidation_candidates (2026-10-19)
 
@@ -373,7 +373,8 @@ this increment does not claim the complete write boundary or cutover readiness.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| `dismiss_slot_pair` and `restore_slot` | served | the `not_implemented` refusal | task O1c |
+| A lesson `restore_slot` that needs the audit-snapshot fallback (a slot whose retired row compaction purged, alone or mixed with retired records) | rewrites it through `lesson_write` | the `not_implemented` refusal, predicted exactly and before any write; a restore Python would also fail in its legacy writes answers the refusal instead of the persistence error | a Rust `lesson_write` (the lesson write path); world facts restore their snapshots |
+| A curated restore whose commit outcome is unknown and whose reload cannot be classified | raises, and every later call retries the recovery until it resolves | raises the same internal error; later calls are not gated | the daemon runs no per-call recovery passes (the `_ensure_init` row above) |
 | A batch (`proposal_ids`) | takes the service lock per call, so another request can run between items | holds the writer lock for the whole batch | strictly more serialized; a single client sees the same results |
 | `list`'s analysis | between two locked blocks, so writes can land while it runs and `recent_merges` can follow a later state than the findings | under the writer lock throughout | writes wait for the analysis (quadratic in the entities); the answer is one consistent state |
 | A `proposals` entry whose `rationale` is a list | stored as its array text | refused (`internal_error`, after the entities are minted) | the binder's `list[dict]` admits it; no producer sends one. An object errors on both |
