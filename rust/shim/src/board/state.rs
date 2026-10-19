@@ -1,13 +1,52 @@
 //! Private state reservations are bound to opened file identity.
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::{Arc, LazyLock, Mutex as StdMutex, Weak},
     time::{Duration, SystemTime},
 };
 
 type Result<T> = std::result::Result<T, &'static str>;
+type Queue = Arc<tokio::sync::Mutex<()>>;
+
+fn queue(path: &Path) -> Queue {
+    static QUEUES: LazyLock<StdMutex<HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>>> =
+        LazyLock::new(Default::default);
+    let mut queues = QUEUES.lock().unwrap_or_else(|poison| poison.into_inner());
+    queues.retain(|_, queue| queue.strong_count() > 0);
+    if let Some(queue) = queues.get(path).and_then(Weak::upgrade) {
+        return queue;
+    }
+    let queue = Queue::default();
+    queues.insert(path.to_owned(), Arc::downgrade(&queue));
+    queue
+}
+/// Run blocking state-file work for `path` off the async runtime.
+///
+/// The shim runs a current-thread runtime, so a durable write there stalls
+/// every tool call: on the Windows dev VM on 2026-10-19 one `sync_all` took
+/// up to 3.1 s beside other tests. Jobs for one path run in submission order,
+/// and each holds that path's queue until it returns, so a caller dropped
+/// mid-write cannot let a later read of the same file overtake the write.
+pub async fn offload<T: Send + 'static>(
+    path: &Path,
+    job: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let turn = queue(path).lock_owned().await;
+    match tokio::task::spawn_blocking(move || {
+        let _turn = turn;
+        job()
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(_) => Err("state_unavailable"),
+    }
+}
 pub struct PrivateFile {
     pub file: File,
     pub identity: Vec<u128>,
@@ -127,6 +166,13 @@ fn atomic_replace(
     let temp = parent.join(format!(".agent-state-{}", uuid::Uuid::new_v4().simple()));
     let result = (|| {
         let mut opened = create(&temp)?;
+        #[cfg(test)]
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("slow-write"))
+        {
+            std::thread::sleep(tests::WRITE_DELAY);
+        }
         opened
             .file
             .write_all(bytes)
@@ -303,5 +349,94 @@ impl Drop for Reservation {
         if let Some(lock) = &self._lock {
             let _ = lock.unlock();
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Writes to files named `slow-write*` take this long under test.
+    pub(super) const WRITE_DELAY: Duration = Duration::from_millis(300);
+
+    struct Dir(PathBuf);
+    impl Dir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "pseudolife-state-{}",
+                uuid::Uuid::new_v4().simple()
+            ));
+            private_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn offloaded_write_leaves_the_runtime_responsive() {
+        let dir = Dir::new();
+        let path = dir.0.join("slow-write-state");
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let ticker = tokio::spawn({
+            let ticks = ticks.clone();
+            async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    ticks.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        });
+        tokio::task::yield_now().await;
+        let target = path.clone();
+        offload(&path, move || atomic_write(&target, b"{}", None))
+            .await
+            .unwrap();
+        ticker.abort();
+        // A write that blocked this current-thread runtime would leave the
+        // ticker unpolled for the whole delay.
+        assert!(
+            ticks.load(Ordering::Relaxed) >= 5,
+            "runtime stalled during the write: {} ticks",
+            ticks.load(Ordering::Relaxed)
+        );
+        assert_eq!(read(&path, 16).unwrap(), b"{}");
+    }
+
+    #[tokio::test]
+    async fn a_dropped_write_finishes_before_the_next_job_on_its_path() {
+        let dir = Dir::new();
+        let path = dir.0.join("slow-write-state");
+        let (target, key) = (path.clone(), path.clone());
+        let writer = tokio::spawn(async move {
+            offload(&key, move || atomic_write(&target, b"saved", None)).await
+        });
+        // Let the write start, then drop its caller as a retry timeout would.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        writer.abort();
+        let target = path.clone();
+        assert_eq!(
+            offload(&path, move || read(&target, 16)).await.unwrap(),
+            b"saved"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_panicking_job_reaches_its_caller_and_frees_the_path() {
+        let dir = Dir::new();
+        let path = dir.0.join("state");
+        let key = path.clone();
+        let panicked =
+            tokio::spawn(async move { offload::<()>(&key, || panic!("job failed")).await })
+                .await
+                .unwrap_err();
+        assert!(panicked.is_panic());
+        let target = path.clone();
+        offload(&path, move || atomic_write(&target, b"{}", None))
+            .await
+            .unwrap();
     }
 }

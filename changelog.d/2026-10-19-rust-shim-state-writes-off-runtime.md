@@ -1,0 +1,4 @@
+### Fixed (2026-10-19 — a slow disk no longer freezes the Rust shim while it saves board state)
+
+- The Rust shim runs on one thread, and it wrote its board state files there: the saved coordination address, the mail digest and its `.seen`, `.agent` and `.ring` markers, and the Codex doorbell's pending notice. Each write waits for the disk to confirm it (`sync_all`). On a slow disk every tool call stalled behind that wait; on the Windows dev VM on 2026-10-19 one save took up to 3.1 s. These writes now run on a background thread, so tool calls keep flowing while the disk catches up.
+- Writes to one file still happen in order, and a write that has started always finishes before the next step on that file, even when the step that started it was abandoned (a startup or retry timeout, or a cancelled call). The next registration attempt therefore still finds the saved address instead of a half-finished reservation.

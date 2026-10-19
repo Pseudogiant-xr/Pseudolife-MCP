@@ -121,6 +121,17 @@ fn now() -> f64 {
         .unwrap_or_default()
         .as_secs_f64()
 }
+/// Run one pending-notice file step off the runtime, in order with the
+/// others on that notice (`state::offload`). `None` if the job could not run.
+async fn offload<T: Send + 'static>(
+    pending: &PendingNotice,
+    job: impl FnOnce(&PendingNotice) -> T + Send + 'static,
+) -> Option<T> {
+    let owned = pending.clone();
+    state::offload(&pending.path, move || Ok(job(&owned)))
+        .await
+        .ok()
+}
 impl Doorbell {
     pub fn new(command: PathBuf, directory: PathBuf) -> Arc<Self> {
         Self::with_timing(
@@ -264,7 +275,9 @@ impl Doorbell {
             return;
         };
         if bell.outstanding
-            && let Some(resolution) = bell.pending.resolution(now())
+            && let Some(resolution) = offload(&bell.pending, |pending| pending.resolution(now()))
+                .await
+                .flatten()
         {
             bell.outstanding = false;
             if resolution == "unresolved_expired"
@@ -357,19 +370,15 @@ impl Doorbell {
             .get("message_expires_at")
             .filter(|value| !value.is_null())
             .map(|value| value.as_f64().unwrap_or(f64::NAN));
-        let previous_expiry = state::read(
-            &bell.pending.path.with_extension("bell-unresolved-expired"),
-            8192,
-        )
-        .ok();
-        let notice = bell
-            .pending
-            .reserve(count, expiry, now(), decision == "attention");
-        let current_expiry = state::read(
-            &bell.pending.path.with_extension("bell-unresolved-expired"),
-            8192,
-        )
-        .ok();
+        let unknown = decision == "attention";
+        let (previous_expiry, notice, current_expiry) = offload(&bell.pending, move |pending| {
+            let expired = pending.path.with_extension("bell-unresolved-expired");
+            let previous = state::read(&expired, 8192).ok();
+            let notice = pending.reserve(count, expiry, now(), unknown);
+            (previous, notice, state::read(&expired, 8192).ok())
+        })
+        .await
+        .unwrap_or((None, None, None));
         if current_expiry != previous_expiry
             && let Some(basis) = expired_basis(&bell.pending)
         {
@@ -490,11 +499,16 @@ impl Doorbell {
         let mut child = match spawned {
             Ok(child) => child,
             Err((_error, unstarted)) => {
-                if unstarted
-                    && let Some(bell) = self.bells.lock().await.get_mut(thread)
-                    && bell.pending.rollback_unstarted(notice, now())
-                {
-                    bell.outstanding = false;
+                if unstarted && let Some(bell) = self.bells.lock().await.get_mut(thread) {
+                    let record = notice.clone();
+                    if offload(&bell.pending, move |pending| {
+                        pending.rollback_unstarted(&record, now())
+                    })
+                    .await
+                    .unwrap_or(false)
+                    {
+                        bell.outstanding = false;
+                    }
                 }
                 self.disable("could not start the Codex CLI: OSError");
                 return;
@@ -507,12 +521,17 @@ impl Doorbell {
         let result = tokio::select! {_=self.cancel.cancelled()=>None,result=tokio::time::timeout(self.timeout,child.wait())=>Some(result)};
         match result {
             Some(Ok(Ok(status))) if status.success() => {
-                let prompt_seen = self
-                    .bells
-                    .lock()
-                    .await
-                    .get(thread)
-                    .is_some_and(|bell| bell.pending.accept(notice, now()));
+                let bells = self.bells.lock().await;
+                let prompt_seen = match bells.get(thread) {
+                    Some(bell) => {
+                        let record = notice.clone();
+                        offload(&bell.pending, move |pending| pending.accept(&record, now()))
+                            .await
+                            .unwrap_or(false)
+                    }
+                    None => false,
+                };
+                drop(bells);
                 self.note_delivery(
                     adapter,
                     thread,

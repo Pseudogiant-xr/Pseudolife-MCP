@@ -184,6 +184,21 @@ async fn request(
     }
     Ok(value)
 }
+/// Save a reservation off the runtime. The job owns the reservation, so a
+/// caller dropped mid-write still finishes the save before releasing it.
+async fn save(
+    path: &std::path::Path,
+    mut reservation: Reservation,
+    saved: &Value,
+) -> Result<Reservation, Failure> {
+    let saved = saved.clone();
+    state::offload(path, move || {
+        reservation.save(&saved)?;
+        Ok(reservation)
+    })
+    .await
+    .map_err(Failure::local)
+}
 async fn fetch_context(
     client: &Client,
     config: &Config,
@@ -278,28 +293,42 @@ impl Adapter {
             .map_err(|_| Failure::local("credential_unavailable"))?;
         let mut context = fetch_context(&client, &config, &snapshot, None).await?;
         current(&config.provider, &snapshot)?;
-        let loaded_identity = config
-            .state
-            .as_ref()
-            .and_then(|path| state::open(path).ok())
-            .map(|opened| opened.identity);
-        let (mut saved, mut reservation) = match &config.state {
+        // State-file steps go through `state::offload`: off the runtime, and
+        // ordered behind any save an earlier, abandoned attempt still runs.
+        let (loaded_identity, mut saved, mut reservation) = match &config.state {
             Some(path) => {
-                Reservation::load_or_reserve(path, &config.url).map_err(Failure::local)?
+                let (target, url) = (path.clone(), config.url.clone());
+                state::offload(path, move || {
+                    let loaded = state::open(&target).ok().map(|opened| opened.identity);
+                    let (saved, reservation) = Reservation::load_or_reserve(&target, &url)?;
+                    Ok((loaded, saved, reservation))
+                })
+                .await
+                .map_err(Failure::local)?
             }
-            None => (None, None),
+            None => (None, None, None),
         };
         if saved.is_none()
             && let Some(path) = &config.legacy_state
-            && state::exists(path)
         {
-            let value: Value =
-                serde_json::from_slice(&state::read(path, 16384).map_err(Failure::local)?)
-                    .map_err(|_| Failure::local("invalid_state"))?;
-            if value["bank_url"].as_str() != Some(&config.url) {
-                return Err(Failure::local("invalid_state"));
+            let legacy = path.clone();
+            let bytes = state::offload(path, move || {
+                if state::exists(&legacy) {
+                    state::read(&legacy, 16384).map(Some)
+                } else {
+                    Ok(None)
+                }
+            })
+            .await
+            .map_err(Failure::local)?;
+            if let Some(bytes) = bytes {
+                let value: Value =
+                    serde_json::from_slice(&bytes).map_err(|_| Failure::local("invalid_state"))?;
+                if value["bank_url"].as_str() != Some(&config.url) {
+                    return Err(Failure::local("invalid_state"));
+                }
+                saved = Some(value);
             }
-            saved = Some(value);
         }
         let was_saved = saved.is_some();
         let mut identity = if let Some(mut saved) = saved {
@@ -314,18 +343,19 @@ impl Adapter {
                     saved["bank_id"] = json!(context.bank_id);
                     saved["principal"] = json!(context.principal);
                     if let Some(path) = &config.state {
-                        if let Some(reservation) = &mut reservation {
-                            reservation.save(&saved).map_err(Failure::local)?;
+                        if let Some(held) = reservation.take() {
+                            reservation = Some(save(path, held, &saved).await?);
                         } else {
                             let original = loaded_identity
-                                .as_ref()
+                                .clone()
                                 .ok_or(Failure::local("reservation_changed"))?;
-                            state::atomic_write(
-                                path,
-                                &serde_json::to_vec(&saved)
-                                    .map_err(|_| Failure::local("invalid_state"))?,
-                                Some(original),
-                            )
+                            let bytes = serde_json::to_vec(&saved)
+                                .map_err(|_| Failure::local("invalid_state"))?;
+                            let target = path.clone();
+                            state::offload(path, move || {
+                                state::atomic_write(&target, &bytes, Some(&original))
+                            })
+                            .await
                             .map_err(Failure::local)?;
                         }
                     }
@@ -388,8 +418,8 @@ impl Adapter {
                 return Err(Failure::local("invalid_response"));
             }
             let saved = json!({"bank_url":config.url,"agent_id":registered["agent_id"],"credential":registered["credential"],"version":2,"bank_id":context.bank_id,"principal":context.principal});
-            if let Some(reservation) = &mut reservation {
-                reservation.save(&saved).map_err(Failure::local)?;
+            if let (Some(path), Some(held)) = (&config.state, reservation.take()) {
+                reservation = Some(save(path, held, &saved).await?);
             }
             saved
         };
@@ -443,14 +473,19 @@ impl Adapter {
             && was_saved
             && let Some(path) = &config.state
         {
-            state::open(path).map_err(Failure::local)?;
             let stale = path.with_file_name(format!(
                 "{}.stale",
                 path.file_name()
                     .ok_or(Failure::local("invalid_state"))?
                     .to_string_lossy()
             ));
-            std::fs::rename(path, stale).map_err(|_| Failure::local("state_unavailable"))?;
+            let current = path.clone();
+            state::offload(path, move || {
+                state::open(&current)?;
+                std::fs::rename(&current, stale).map_err(|_| "state_unavailable")
+            })
+            .await
+            .map_err(Failure::local)?;
             crate::stderrln!(
                 "pseudolife-mcp: the saved coordination address is no longer valid on this bank; registering a new one (old state kept with a .stale suffix)."
             );
@@ -934,26 +969,22 @@ impl Adapter {
                         .is_none_or(|time| time.elapsed() >= Duration::from_secs(3600))
                     || !path.exists())
             {
-                if let Some(parent) = path.parent() {
-                    let _ = state::private_dir(parent);
-                }
-                let written = state::atomic_write(
-                    path,
-                    format!(
-                        "{}\n{}{}",
-                        mailbox.watermark,
-                        mailbox.digest,
-                        if mailbox.digest.is_empty() { "" } else { "\n" }
-                    )
-                    .as_bytes(),
-                    None,
+                let body = format!(
+                    "{}\n{}{}",
+                    mailbox.watermark,
+                    mailbox.digest,
+                    if mailbox.digest.is_empty() { "" } else { "\n" }
                 );
-                if written.is_ok() {
-                    mailbox.digest_written = Some(tokio::time::Instant::now());
+                let target = path.clone();
+                let written = state::offload(path, move || {
+                    if let Some(parent) = target.parent() {
+                        let _ = state::private_dir(parent);
+                    }
+                    state::atomic_write(&target, body.as_bytes(), None)?;
                     for marker in [
-                        path.with_extension("seen"),
-                        path.with_extension("agent"),
-                        path.with_extension("reprint"),
+                        target.with_extension("seen"),
+                        target.with_extension("agent"),
+                        target.with_extension("reprint"),
                     ] {
                         if let Ok(opened) = state::open_with_write(&marker, true) {
                             let _ = opened.file.set_times(
@@ -962,6 +993,11 @@ impl Adapter {
                             );
                         }
                     }
+                    Ok(())
+                })
+                .await;
+                if written.is_ok() {
+                    mailbox.digest_written = Some(tokio::time::Instant::now());
                 }
             }
         }
@@ -973,14 +1009,16 @@ impl Adapter {
                 .map(str::to_owned)
             && (mailbox.agent_written.as_deref() != Some(agent.as_str())
                 || !path.with_extension("agent").exists())
-            && state::atomic_write(
-                &path.with_extension("agent"),
-                format!("{agent}\n").as_bytes(),
-                None,
-            )
-            .is_ok()
         {
-            mailbox.agent_written = Some(agent);
+            let (marker, body) = (path.with_extension("agent"), format!("{agent}\n"));
+            if state::offload(&marker.clone(), move || {
+                state::atomic_write(&marker, body.as_bytes(), None)
+            })
+            .await
+            .is_ok()
+            {
+                mailbox.agent_written = Some(agent);
+            }
         }
         let wake = value.get("wake");
         let signature = wake.and_then(|wake| {
@@ -1029,21 +1067,25 @@ impl Adapter {
                 .and_then(|path| state::read(&path.with_extension("seen"), 128).ok())
                 .and_then(|bytes| String::from_utf8_lossy(&bytes).trim().parse::<u64>().ok())
                 .unwrap_or(0);
-            if seen >= watermark || self.write_ring(&decision, &reason, watermark) {
+            if seen >= watermark || self.write_ring(&decision, &reason, watermark).await {
                 mailbox.ring_unwritten = None;
             }
         }
         self.changes.send_modify(|revision| *revision += 1);
     }
-    fn write_ring(&self, decision: &str, reason: &str, watermark: u64) -> bool {
-        self.config.digest.as_ref().is_none_or(|path| {
-            state::atomic_write(
-                &path.with_extension("ring"),
-                format!("{watermark}\n{decision} {reason}\n").as_bytes(),
-                None,
-            )
-            .is_ok()
+    async fn write_ring(&self, decision: &str, reason: &str, watermark: u64) -> bool {
+        let Some(path) = &self.config.digest else {
+            return true;
+        };
+        let (ring, body) = (
+            path.with_extension("ring"),
+            format!("{watermark}\n{decision} {reason}\n"),
+        );
+        state::offload(&ring.clone(), move || {
+            state::atomic_write(&ring, body.as_bytes(), None)
         })
+        .await
+        .is_ok()
     }
     async fn ring_worker(self: Arc<Self>) {
         let mut changed = self.subscribe();
@@ -1058,7 +1100,7 @@ impl Adapter {
                 mailbox.ring_due = None;
                 if let Some((decision, reason, _)) = mailbox.last_wake.clone() {
                     let watermark = mailbox.watermark;
-                    if !self.write_ring(&decision, &reason, watermark) {
+                    if !self.write_ring(&decision, &reason, watermark).await {
                         mailbox.ring_unwritten = Some((decision, reason, watermark));
                     }
                 }
@@ -1114,11 +1156,14 @@ impl Adapter {
             mailbox.delivered = mailbox.watermark;
             mailbox.calls_since = 0;
             if let Some(path) = &self.config.digest {
-                let _ = state::atomic_write(
-                    &path.with_extension("seen"),
-                    format!("{}\n", mailbox.delivered).as_bytes(),
-                    None,
+                let (seen, body) = (
+                    path.with_extension("seen"),
+                    format!("{}\n", mailbox.delivered),
                 );
+                let _ = state::offload(&seen.clone(), move || {
+                    state::atomic_write(&seen, body.as_bytes(), None)
+                })
+                .await;
             }
             return Some(mailbox.digest.clone());
         }
