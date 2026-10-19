@@ -945,12 +945,19 @@ impl Adapter {
         let _notify = Notify(&self.changes);
         // File writes are queued while the mailbox is locked, which fixes
         // their order, and awaited after it is released, so tool calls that
-        // need the mailbox do not wait for the disk.
+        // need the mailbox do not wait for the disk. The digest and its
+        // markers share the digest's queue, so hooks reading them never see
+        // a newer digest before an older marker has landed.
         let mut digest_write = None;
         let mut agent_write = None;
         let mut ring_write = None;
         let mut ring_removal = None;
         let mut mailbox = self.mailbox.lock().await;
+        // `close` may have run while this waited for the lock; its cleanup
+        // must not be followed by fresh digest files.
+        if self.closing.load(Ordering::Acquire) {
+            return;
+        }
         mailbox.count = value.get("pending_count").and_then(Value::as_u64);
         mailbox.preview = value
             .get("pending_preview")
@@ -1025,7 +1032,7 @@ impl Adapter {
             let (marker, body) = (path.with_extension("agent"), format!("{agent}\n"));
             agent_write = Some((
                 agent,
-                state::offload(&marker.clone(), move || {
+                state::offload(path, move || {
                     state::atomic_write(&marker, body.as_bytes(), None)
                 }),
             ));
@@ -1054,7 +1061,7 @@ impl Adapter {
             if let Some(path) = &self.config.digest {
                 // Behind any ring write still queued, so none lands after it.
                 let ring = path.with_extension("ring");
-                ring_removal = Some(state::offload(&ring.clone(), move || {
+                ring_removal = Some(state::offload(path, move || {
                     let _ = std::fs::remove_file(&ring);
                     Ok(())
                 }));
@@ -1128,7 +1135,7 @@ impl Adapter {
                 path.with_extension("ring"),
                 format!("{watermark}\n{decision} {reason}\n"),
             );
-            state::offload(&ring.clone(), move || {
+            state::offload(path, move || {
                 state::atomic_write(&ring, body.as_bytes(), None)
             })
         });
@@ -1217,15 +1224,20 @@ impl Adapter {
             mailbox.delivered = mailbox.watermark;
             mailbox.calls_since = 0;
             if let Some(path) = &self.config.digest {
-                let (seen, body) = (
-                    path.with_extension("seen"),
-                    format!("{}\n", mailbox.delivered),
-                );
-                // Queued, not awaited: a caller cancelled here would lose the
-                // hint it has already counted as delivered. `close` removes
-                // the marker through the same queue, after this write.
-                drop(state::offload(&seen.clone(), move || {
-                    state::atomic_write(&seen, body.as_bytes(), None)
+                let (seen, delivered) = (path.with_extension("seen"), mailbox.delivered);
+                // Queued on the digest's queue, not awaited: a caller
+                // cancelled here would lose the hint it has already counted
+                // as delivered. `close` removes the marker after this write.
+                // Like `wait-mail`'s mark_seen, never lower a mark a hook
+                // has already raised.
+                drop(state::offload(path, move || {
+                    let marked = state::read(&seen, 128).ok().and_then(|bytes| {
+                        String::from_utf8_lossy(&bytes).trim().parse::<u64>().ok()
+                    });
+                    if marked.is_some_and(|marked| marked >= delivered) {
+                        return Ok(());
+                    }
+                    state::atomic_write(&seen, format!("{delivered}\n").as_bytes(), None)
                 }));
             }
             return Some(mailbox.digest.clone());
@@ -1285,21 +1297,21 @@ impl Adapter {
                     let _ = std::fs::remove_file(marker.path());
                 }
             }
-            for path in [
+            let targets = [
                 path.clone(),
                 path.with_extension("seen"),
                 path.with_extension("ring"),
                 path.with_extension("agent"),
                 path.with_extension("turn"),
-            ] {
-                // Through the file's queue, behind any write a cancelled task left running.
-                let target = path.clone();
-                let _ = state::offload(&path, move || {
-                    let _ = std::fs::remove_file(&target);
-                    Ok(())
-                })
-                .await;
-            }
+            ];
+            // On the digest's queue, behind any write a cancelled task left running.
+            let _ = state::offload(path, move || {
+                for target in targets {
+                    let _ = std::fs::remove_file(target);
+                }
+                Ok(())
+            })
+            .await;
         }
     }
     #[cfg(feature = "codex-delivery")]

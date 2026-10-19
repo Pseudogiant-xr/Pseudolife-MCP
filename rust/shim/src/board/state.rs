@@ -45,8 +45,10 @@ fn enqueue(path: &Path, job: Job) {
 /// up to 3.1 s beside other tests. The job is queued when this is called,
 /// not when the future is first polled, and jobs for one path run in that
 /// order. Dropping the future does not cancel the job: a caller abandoned
-/// mid-write cannot let a later step on the same file overtake the write,
-/// and a result nobody is waiting for is dropped before the next job starts.
+/// mid-write cannot let a later step on the same file overtake the write.
+/// A result whose caller was already gone when the job finished is dropped
+/// before the next job starts; one whose caller leaves after that is dropped
+/// with the caller's future.
 pub fn offload<T, J>(path: &Path, job: J) -> impl Future<Output = Result<T>> + use<T, J>
 where
     T: Send + 'static,

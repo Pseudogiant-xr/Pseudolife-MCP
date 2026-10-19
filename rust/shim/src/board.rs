@@ -959,14 +959,8 @@ impl Board {
         if let Some(adapter) = adapter {
             adapter.close().await;
         }
-        let entries = self
-            .threads
-            .lock()
-            .await
-            .drain()
-            .map(|(_, entry)| entry)
-            .collect::<Vec<_>>();
-        for entry in entries.into_iter().rev() {
+        let entries = self.threads.lock().await.drain().collect::<Vec<_>>();
+        for (thread, entry) in entries.into_iter().rev() {
             let mut entry = entry.lock().await;
             #[cfg(feature = "codex-delivery")]
             if let Some(delivery) = entry.delivery.take() {
@@ -974,6 +968,10 @@ impl Board {
             }
             if let Some(adapter) = entry.adapter.take() {
                 adapter.close().await;
+            }
+            // Likewise for a thread's registration cancelled mid-save.
+            if let Some(path) = self.config(Some(&thread), None).state {
+                state::drain(&path).await;
             }
         }
     }

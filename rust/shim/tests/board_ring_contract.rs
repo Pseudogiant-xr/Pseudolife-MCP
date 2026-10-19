@@ -259,3 +259,42 @@ async fn board_ring_local_listener_lease_and_attention_never_write_idle_marker()
     assert_eq!(adapter.view().await.wake.unwrap()["decision"], "attention");
     adapter.close().await;
 }
+#[tokio::test]
+async fn board_ring_late_hint_write_never_lowers_a_hook_seen_mark() {
+    // Reported by the Codex review of the state-write offload (2026-10-19):
+    // a slow `.seen` write from a delivered hint landed after a hook had
+    // shown the newer digest and marked it, lowering the mark again.
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let adapter = Adapter::enter(adapter_config(&fixture, &home))
+        .await
+        .unwrap();
+    let seen = home.0.join("digest.seen");
+    // Hold every queued step on the `.seen` path until the hook has run.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let gate = state::offload(&seen, move || {
+        let _ = started.send(());
+        let _ = held.recv();
+        Ok(())
+    });
+    ready.await.unwrap();
+    let first = adapter.view().await.watermark;
+    assert!(adapter.deliver_hint().await.is_some());
+    adapter.update_mailbox(&json!({"pending_count": 2})).await;
+    let second = adapter.view().await.watermark;
+    assert!(second > first);
+    // The prompt or Stop hook shows the newer digest and marks it seen.
+    write(&home, "digest.seen", &format!("{second}\n"));
+    release.send(()).unwrap();
+    gate.await.unwrap();
+    state::drain(&seen).await;
+    state::drain(&home.0.join("digest.txt")).await;
+    let marked = String::from_utf8(state::read(&seen, 128).unwrap()).unwrap();
+    adapter.close().await;
+    assert_eq!(
+        marked.trim(),
+        second.to_string(),
+        "a late hint write lowered .seen"
+    );
+}
