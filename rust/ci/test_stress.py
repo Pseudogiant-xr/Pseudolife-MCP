@@ -53,31 +53,56 @@ def test_iterations_are_bounded(value, ok):
 
 def test_each_kind_runs_the_existing_harness(tmp_path):
     candidates = tmp_path / "bin"
-    row = stress.command("row", ["episode", "bank-start-git"], candidates, tmp_path)
-    assert row[1:4] == ["rust/cli_harness", "--row", "episode"] and row[4:6] == ["--case", "bank-start-git"]
-    assert "--golden" not in row and "--skip-bank" not in row and "--out" in row
-    # A fresh runner has no model cache: bank-backed cases need the offline
-    # embedder fixture (Codex review of e56fe0f6).
-    assert "--fixture" in row
     tests = stress.command("pytest", ["tests/test_a.py"], candidates, tmp_path)
     assert tests[1:4] == ["-m", "pytest", "tests/test_a.py"] and "-ra" in tests and "--junitxml" in tests
 
 
-@pytest.mark.parametrize("scenario, binary, fixture", [
-    # cli-live's steps: the default static build, no embedder fixture.
-    ("security-open", "pseudolife-daemon-static", False),
-    ("body-limits", "pseudolife-daemon-static", False),
-    ("static-build", "pseudolife-daemon-static", False),
-    # The H5 shards (rust/ci/run_coverage.py): the mutants build with --fixture.
-    ("tokenless", "pseudolife-daemon", True),
-    ("session-reap", "pseudolife-daemon", True),
+@pytest.mark.parametrize("row, skip_bank", [
+    # cli-live's "CLI differential harness live arms" step: bank cases skipped.
+    ("mail", True), ("hook", True), ("episode", True),
+    # The cli lease steps, W1-C and H5 live arms run the bank cases.
+    ("lease", False), ("lease_operator", False), ("doctor", False), ("transfer", False),
+    ("test_login", False), ("audit", False), ("backup", False),
 ])
-def test_a_scenario_runs_on_its_required_lanes_binary(tmp_path, scenario, binary, fixture):
+def test_a_row_runs_as_its_required_live_arm_does(tmp_path, row, skip_bank):
+    # No required live arm passes --fixture; a stress loop that did would
+    # measure another configuration (reviewer, 2026-10-20).
+    argv = stress.command("row", [row, "some-case"], tmp_path / "bin", tmp_path)
+    assert argv[1:4] == ["rust/cli_harness", "--row", row] and argv[4:6] == ["--case", "some-case"]
+    assert ("--skip-bank" in argv) == skip_bank
+    assert "--fixture" not in argv and "--golden" not in argv and "--out" in argv
+
+
+@pytest.mark.parametrize("scenario, binary, fixture, http", [
+    # cli-live's steps: the default static build, http slice, no fixture.
+    ("security-open", "pseudolife-daemon-static", False, True),
+    ("body-limits", "pseudolife-daemon-static", False, True),
+    ("static-build", "pseudolife-daemon-static", False, True),
+    # The H5 shards (rust/ci/run_coverage.py): the mutants build with --fixture.
+    ("tokenless", "pseudolife-daemon", True, False),
+    ("session-reap", "pseudolife-daemon", True, False),
+])
+def test_a_scenario_runs_on_its_required_lanes_binary(tmp_path, scenario, binary, fixture, http):
     argv = stress.command("scenario", [scenario], tmp_path / "bin", tmp_path)
     assert argv[1:3] == ["rust/daemon/harness/run.py", "live"]
     assert argv[argv.index("--only") + 1] == scenario
     assert Path(argv[argv.index("--rust-bin") + 1]).stem == binary
     assert ("--fixture" in argv) == fixture
+    env = stress.environment("scenario", [scenario], tmp_path / "bin", tmp_path)
+    assert (env.get("PL_HARNESS_SLICE") == "http") == http
+    assert env["PL_HARNESS_SCRATCH"].startswith(str(tmp_path))
+
+
+def test_pytest_selections_get_the_parity_steps_candidates(tmp_path):
+    env = stress.environment("pytest", ["rust/daemon/harness/test_static.py"], tmp_path / "bin", tmp_path)
+    for name, binary in (("PL_STATIC_DEFAULT_BIN", "pseudolife-daemon-static"),
+                         ("PL_SECURITY_DEFAULT_BIN", "pseudolife-daemon-static"),
+                         ("PL_SECURITY_RELEASE_MUTANTS_BIN", "pseudolife-daemon"),
+                         ("PL_DREAM_CONTRACT_BINARY", "dream-contract"),
+                         ("PSEUDOLIFE_SENT_YAML_BIN", "pseudolife-stdio"),
+                         ("PSEUDOLIFE_RUST_BINARY", "pseudolife-stdio")):
+        assert Path(env[name]).stem == binary and Path(env[name]).parent == tmp_path / "bin", name
+    assert env["PSEUDOLIFE_BACKUP_NATIVE_REQUIRED"] == "1"
 
 
 @pytest.mark.parametrize("scenario", sorted(stress.REMOTE_BIND))
@@ -90,12 +115,45 @@ def test_remote_bind_scenarios_are_refused_before_anything_starts(scenario):
 JUNIT = '<?xml version="1.0"?><testsuites><testsuite name="pytest" errors="0" failures="0" skipped="{skipped}" tests="{tests}"></testsuite></testsuites>'
 
 
-@pytest.mark.parametrize("tests, skipped, ran", [(2, 0, True), (2, 1, True), (2, 2, False), (0, 0, False)])
-def test_a_report_counts_only_tests_that_ran(tmp_path, tests, skipped, ran):
-    report = tmp_path / "junit.xml"
-    report.write_text(JUNIT.format(tests=tests, skipped=skipped), encoding="utf-8")
-    assert stress.tests_ran(report) == ran
-    assert not stress.tests_ran(tmp_path / "missing.xml")
+@pytest.mark.parametrize("tests, skipped, note", [
+    (2, 0, ""),
+    # Any skip, not only all of them: a skipped live test beside passing unit
+    # tests would pass 20 of 20 without its timing-sensitive part (reviewer).
+    (2, 1, "1 of 2 selected tests skipped"),
+    (2, 2, "2 of 2 selected tests skipped"),
+    (0, 0, "no selected test was collected"),
+])
+def test_a_pytest_iteration_needs_every_selected_test_to_run(tmp_path, tests, skipped, note):
+    (tmp_path / "junit.xml").write_text(JUNIT.format(tests=tests, skipped=skipped), encoding="utf-8")
+    assert stress.evidence("pytest", ["tests/test_a.py"], tmp_path).startswith(note)
+    assert bool(stress.evidence("pytest", ["tests/test_a.py"], tmp_path)) == bool(note)
+
+
+def test_a_missing_junit_report_is_no_evidence(tmp_path):
+    assert stress.evidence("pytest", ["tests/test_a.py"], tmp_path) == "no selected test was collected"
+
+
+@pytest.mark.parametrize("summary, ok", [
+    ({"complete": True, "rows": {"hook": {"cases": 3}}}, True),
+    # Every case filtered out on this platform: the runner prints 0/0 and exits 0.
+    ({"complete": True, "rows": {"hook": {"cases": 0}}}, False),
+    ({"complete": False, "rows": {"hook": {"cases": 3}}}, False),
+    (None, False),
+])
+def test_a_row_iteration_needs_a_compared_case(tmp_path, summary, ok):
+    if summary is not None:
+        (tmp_path / "harness.json").write_text(json.dumps(summary), encoding="utf-8")
+    assert (stress.evidence("row", ["hook"], tmp_path) == "") == ok
+
+
+@pytest.mark.parametrize("summary, ok", [
+    ({"scenarios": [{"cases": [{}, {}]}], "refusals": []}, True),
+    ({"scenarios": [{"cases": []}], "refusals": [{}]}, True),
+    ({"scenarios": [{"cases": []}], "refusals": []}, False),
+])
+def test_a_scenario_iteration_needs_a_compared_case(tmp_path, summary, ok):
+    (tmp_path / "harness.json").write_text(json.dumps(summary), encoding="utf-8")
+    assert (stress.evidence("scenario", ["tokenless"], tmp_path) == "") == ok
 
 
 def test_an_all_skipped_pytest_iteration_fails(tmp_path, monkeypatch):
@@ -110,7 +168,7 @@ def test_an_all_skipped_pytest_iteration_fails(tmp_path, monkeypatch):
     assert stress.main(["run", "--selection", "rust/cli_harness/test_fork.py", "--iteration", "1",
                         "--candidates", str(tmp_path), "--out", str(out)]) == 1
     row = json.loads(out.read_text(encoding="utf-8"))
-    assert row["outcome"] == "fail" and "no selected test ran" in row["note"]
+    assert row["outcome"] == "fail" and "skipped" in row["note"]
 
 
 def test_plan_lists_the_iterations(tmp_path):
@@ -131,15 +189,22 @@ def test_plan_refuses_before_starting_anything(tmp_path, capsys, selection, coun
 @pytest.mark.parametrize("code, outcome", [(0, "pass"), (1, "fail"), (5, "fail")])
 def test_run_writes_its_row_whatever_the_outcome(tmp_path, monkeypatch, code, outcome):
     calls = []
-    monkeypatch.setattr(stress.subprocess, "run",
-                        lambda argv, env: calls.append((argv, env)) or SimpleNamespace(returncode=code))
+
+    def fake(argv, env):
+        calls.append((argv, env))
+        Path(argv[argv.index("--out") + 1]).write_text(
+            json.dumps({"complete": True, "rows": {"hook": {"cases": 2}}}), encoding="utf-8")
+        return SimpleNamespace(returncode=code)
+    monkeypatch.setattr(stress.subprocess, "run", fake)
     monkeypatch.setenv("ImageOS", "win25")
     monkeypatch.setenv("ImageVersion", "20261012.1.0")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     out = tmp_path / "stress" / "stress-row-4.json"
     assert stress.main(["run", "--selection", "row:hook", "--iteration", "4",
                         "--candidates", str(tmp_path / "bin"), "--out", str(out)]) == code
     row = json.loads(out.read_text(encoding="utf-8"))
     assert row["iteration"] == 4 and row["outcome"] == outcome and row["exit_code"] == code
+    assert row["attempt"] == 2
     assert row["runner"]["image"] == "win25 20261012.1.0" and row["seconds"] >= 0
     assert calls[0][1]["PSEUDOLIFE_RUST_BINARY"].startswith(str(tmp_path / "bin"))
 
@@ -155,33 +220,42 @@ def test_run_writes_a_failed_row_when_the_command_cannot_start(tmp_path, monkeyp
     assert json.loads(out.read_text(encoding="utf-8"))["outcome"] == "fail"
 
 
-def write_row(directory, iteration, outcome):
+def write_row(directory, iteration, outcome, attempt=1):
     path = directory / f"stress-row-{iteration}" / f"stress-row-{iteration}.json"
     path.parent.mkdir(parents=True)
-    path.write_text(json.dumps({"iteration": iteration, "outcome": outcome, "exit_code": 0 if outcome == "pass" else 1,
+    path.write_text(json.dumps({"iteration": iteration, "attempt": attempt, "outcome": outcome,
+                                "exit_code": 0 if outcome == "pass" else 1,
                                 "seconds": 12.5, "runner": {"image": "win25 1", "cpus": 4}}), encoding="utf-8")
 
 
-@pytest.mark.parametrize("outcomes, accepted", [
-    (["pass", "pass", "pass"], True),
-    (["pass", "fail", "pass"], False),
-    (["pass", None, "pass"], False),  # an iteration that never wrote its row
+@pytest.mark.parametrize("outcomes, attempts, accepted", [
+    (["pass", "pass", "pass"], [1, 1, 1], True),
+    (["pass", "fail", "pass"], [1, 1, 1], False),
+    (["pass", None, "pass"], [1, 1, 1], False),  # an iteration that never wrote its row
+    # "Re-run all jobs": one fresh attempt throughout, still evidence.
+    (["pass", "pass", "pass"], [2, 2, 2], True),
+    # "Re-run failed jobs": a retry replaced iteration 2's failure (reviewer).
+    (["pass", "pass", "pass"], [1, 2, 1], False),
 ])
-def test_the_report_has_one_row_per_iteration_and_passes_only_when_all_pass(tmp_path, outcomes, accepted):
+def test_the_report_has_one_row_per_iteration_and_passes_only_when_all_pass_at_once(
+        tmp_path, outcomes, attempts, accepted):
     rows = tmp_path / "rows"
     rows.mkdir()
-    for index, outcome in enumerate(outcomes, 1):
+    for index, (outcome, attempt) in enumerate(zip(outcomes, attempts), 1):
         if outcome:
-            write_row(rows, index, outcome)
+            write_row(rows, index, outcome, attempt)
     out, summary = tmp_path / "stress-report.json", tmp_path / "summary.md"
     code = stress.main(["report", "--selection", "row:hook", "--iterations", "3", "--os", "windows-latest",
                         "--rows", str(rows), "--out", str(out), "--summary", str(summary)])
     assert (code == 0) == accepted
     report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["clean"] == accepted
     assert [row["iteration"] for row in report["rows"]] == [1, 2, 3]
     assert [row["outcome"] for row in report["rows"]] == [o or "no result" for o in outcomes]
     assert report["passed"] == outcomes.count("pass")
-    assert f"{outcomes.count('pass')} of 3 iterations passed." in summary.read_text(encoding="utf-8")
+    text = summary.read_text(encoding="utf-8")
+    assert f"{outcomes.count('pass')} of 3 iterations passed." in text
+    assert ("Not clean" in text) == (len(set(attempts)) > 1)
 
 
 def test_dispatch_inputs():

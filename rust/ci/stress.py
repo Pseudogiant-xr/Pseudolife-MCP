@@ -9,15 +9,18 @@ job on a fresh runner, so first-hit cold-start stalls count.
 
 A selection is one of:
   row:<row>[/<case>]     one live arm of a CLI harness row against this
-                         checkout's Python, with the offline embedder fixture
+                         checkout's Python, run as its required lane runs it
   scenario:<name>        one live daemon comparison (run.py live --only), on
-                         the binary the scenario's required lane uses
-  <node id> [<node id>]  pytest node ids, run with -ra and a junit report; an
-                         iteration where no selected test ran is a failure
+                         the binary and settings the scenario's lane uses
+  <node id> [<node id>]  pytest node ids, run with -ra and a junit report, with
+                         the parity shards' candidate binaries in the env
 
-Subcommands: ``plan`` checks the inputs and lists the iterations, ``run`` runs
-one iteration and writes its row, ``report`` joins the rows into
-stress-report.json and fails unless every iteration passed.
+An iteration passes only with evidence: a pytest run where every selected
+test ran (a skip is not evidence), or a row or scenario that compared at
+least one case. Subcommands: ``plan`` checks the inputs and lists the
+iterations, ``run`` runs one iteration and writes its row, ``report`` joins
+the rows into stress-report.json and fails unless every iteration passed in
+the same run attempt.
 """
 
 from __future__ import annotations
@@ -35,6 +38,19 @@ MAX_ITERATIONS = 50
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 # A pytest node id: a test path under the tree, optionally ::test[param].
 NODE = re.compile(r"[A-Za-z0-9_./-]+\.py(::[A-Za-z0-9_\[\]=.,:/-]+)?")
+# The rows whose required live arm is cli-live's "CLI differential harness
+# live arms" step, which skips the bank cases; every other row's live arm
+# (the cli lease steps, W1-C, H5 audit and backup) runs them, without the
+# embedder fixture.
+SKIP_BANK_ROWS = {"mail", "hook", "episode"}
+# Scenarios the cli-live steps run on the default (static) build, under the
+# http slice, without the embedder fixture; every other scenario runs as
+# the H5 shards run it (rust/ci/run_coverage.py), on the mutants-feature
+# build with --fixture.
+STATIC_PREFIXES = ("body-", "security-", "static-")
+# These need the debug build's loopback-bind override, which only the rust
+# job builds, and a stress loop runs no rust job.
+REMOTE_BIND = {"trust-bind", "security-remote-open", "security-remote-auth"}
 
 
 def parse(selection: str) -> tuple[str, list[str]]:
@@ -67,59 +83,101 @@ def iterations(value: str) -> int:
     return count
 
 
-# Scenarios the cli-live steps run on the default (static) build without the
-# embedder fixture; every other scenario runs as the H5 shards run it
-# (rust/ci/run_coverage.py), on the mutants-feature build with --fixture.
-STATIC_PREFIXES = ("body-", "security-", "static-")
-# These need the debug build's loopback-bind override, which only the rust
-# job builds, and a stress loop runs no rust job.
-REMOTE_BIND = {"trust-bind", "security-remote-open", "security-remote-auth"}
+def binary(candidates: Path, name: str) -> Path:
+    return candidates / (name + (".exe" if os.name == "nt" else ""))
 
 
 def daemon(name: str, candidates: Path) -> tuple[Path, bool]:
     """The daemon binary a scenario's required lane uses, and whether it
     passes the offline embedder fixture."""
-    suffix = ".exe" if os.name == "nt" else ""
     if name.startswith(STATIC_PREFIXES):
-        return candidates / f"pseudolife-daemon-static{suffix}", False
-    return candidates / f"pseudolife-daemon{suffix}", True
+        return binary(candidates, "pseudolife-daemon-static"), False
+    return binary(candidates, "pseudolife-daemon"), True
 
 
 def command(kind: str, names: list[str], candidates: Path, scratch: Path) -> list[str]:
     """The argv one iteration runs, from the repository root."""
-    suffix = ".exe" if os.name == "nt" else ""
     if kind == "row":
         argv = [sys.executable, "rust/cli_harness", "--row", names[0]]
         if len(names) > 1:
             argv += ["--case", names[1]]
-        return argv + ["--candidate", str(candidates / f"pseudolife-stdio{suffix}"), "--fixture", "-v",
+        if names[0] in SKIP_BANK_ROWS:
+            argv += ["--skip-bank"]
+        return argv + ["--candidate", str(binary(candidates, "pseudolife-stdio")), "-v",
                        "--out", str(scratch / "harness.json")]
     if kind == "scenario":
-        binary, fixture = daemon(names[0], candidates)
-        return [sys.executable, "rust/daemon/harness/run.py", "live", "--rust-bin", str(binary),
+        path, fixture = daemon(names[0], candidates)
+        return [sys.executable, "rust/daemon/harness/run.py", "live", "--rust-bin", str(path),
                 *(["--fixture"] if fixture else []), "--only", names[0],
                 "--out", str(scratch / "harness.json")]
     return [sys.executable, "-m", "pytest", *names, "-ra", "--durations=30",
             "--junitxml", str(scratch / "junit.xml")]
 
 
-def runner() -> dict:
-    return {"os": os.environ.get("RUNNER_OS", ""), "image": " ".join(
-        filter(None, (os.environ.get("ImageOS"), os.environ.get("ImageVersion")))) or "unknown",
-            "cpus": os.cpu_count()}
+def environment(kind: str, names: list[str], candidates: Path, scratch: Path) -> dict:
+    """The env the selection's lane step sets, on top of the job's."""
+    env = {"PSEUDOLIFE_RUST_BINARY": str(binary(candidates, "pseudolife-stdio"))}
+    if kind == "scenario":
+        env["PL_HARNESS_SCRATCH"] = str(scratch / "harness-scratch")
+        if names[0].startswith(STATIC_PREFIXES):
+            env["PL_HARNESS_SLICE"] = "http"
+    if kind == "pytest":
+        # The variables the parity steps give the harness self-tests, so a
+        # test that needs a candidate runs instead of skipping.
+        env.update({
+            "PSEUDOLIFE_BACKUP_NATIVE_REQUIRED": "1",
+            "PSEUDOLIFE_SENT_YAML_BIN": str(binary(candidates, "pseudolife-stdio")),
+            "PL_STATIC_DEFAULT_BIN": str(binary(candidates, "pseudolife-daemon-static")),
+            "PL_SECURITY_DEFAULT_BIN": str(binary(candidates, "pseudolife-daemon-static")),
+            "PL_SECURITY_RELEASE_MUTANTS_BIN": str(binary(candidates, "pseudolife-daemon")),
+            "PL_DREAM_CONTRACT_BINARY": str(binary(candidates, "dream-contract")),
+        })
+    return env
 
 
-def tests_ran(report: Path) -> bool:
-    """Whether pytest's junit report shows at least one selected test that ran."""
+def junit_counts(report: Path) -> tuple[int, int]:
+    """The (tests, skipped) totals of pytest's junit report; (0, 0) if absent."""
     try:
         text = report.read_text(encoding="utf-8")
     except OSError:
-        return False
+        return 0, 0
     total = skipped = 0
     for tag in re.findall(r"<testsuite\b[^>]*>", text):
         total += int((re.search(r'\btests="(\d+)"', tag) or [0, 0])[1])
         skipped += int((re.search(r'\bskipped="(\d+)"', tag) or [0, 0])[1])
-    return total > skipped
+    return total, skipped
+
+
+def compared(kind: str, names: list[str], scratch: Path) -> int:
+    """How many cases a row or scenario run compared, from its summary."""
+    try:
+        summary = json.loads((scratch / "harness.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if kind == "row":
+        return int(summary.get("rows", {}).get(names[0], {}).get("cases", 0)) if summary.get("complete") else 0
+    return sum(len(item.get("cases", [])) for item in summary.get("scenarios", [])) \
+        + len(summary.get("refusals", []))
+
+
+def evidence(kind: str, names: list[str], scratch: Path) -> str:
+    """Why a run that exited 0 is still no evidence, or "" when it is."""
+    if kind == "pytest":
+        total, skipped = junit_counts(scratch / "junit.xml")
+        if total == 0:
+            return "no selected test was collected"
+        if skipped:
+            return f"{skipped} of {total} selected tests skipped; a skip is not evidence"
+        return ""
+    if compared(kind, names, scratch) == 0:
+        return "no case was compared (all filtered out on this platform, or no summary)"
+    return ""
+
+
+def runner() -> dict:
+    return {"os": os.environ.get("RUNNER_OS", ""), "image": " ".join(
+        filter(None, (os.environ.get("ImageOS"), os.environ.get("ImageVersion")))) or "unknown",
+            "cpus": os.cpu_count()}
 
 
 def plan(options) -> int:
@@ -139,22 +197,21 @@ def run(options) -> int:
     kind, names = parse(options.selection)
     scratch = Path(options.out).parent
     scratch.mkdir(parents=True, exist_ok=True)
-    argv = command(kind, names, Path(options.candidates), scratch)
-    # The harness self-tests' stdio candidate, as the parity shards set it.
-    stdio = Path(options.candidates) / ("pseudolife-stdio.exe" if os.name == "nt" else "pseudolife-stdio")
-    env = dict(os.environ, PSEUDOLIFE_RUST_BINARY=str(stdio))
-    started, code = time.monotonic(), None
-    note = ""
+    candidates = Path(options.candidates)
+    argv = command(kind, names, candidates, scratch)
+    env = dict(os.environ, **environment(kind, names, candidates, scratch))
+    started, code, note = time.monotonic(), None, ""
     try:
         print("stress: " + " ".join(argv), flush=True)
         code = subprocess.run(argv, env=env).returncode
-        # pytest exits 0 when every selected test skipped: no evidence.
-        if code == 0 and kind == "pytest" and not tests_ran(scratch / "junit.xml"):
-            code, note = 1, "no selected test ran (all skipped or none collected)"
-            print(f"stress: {note}", flush=True)
+        if code == 0:
+            note = evidence(kind, names, scratch)
+            if note:
+                code = 1
+                print(f"stress: {note}", flush=True)
     finally:
-        row = {"iteration": options.iteration, "selection": options.selection.strip(),
-               "runner": runner(), "exit_code": code,
+        row = {"iteration": options.iteration, "attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT") or 1),
+               "selection": options.selection.strip(), "runner": runner(), "exit_code": code,
                "outcome": "pass" if code == 0 else "fail",
                "seconds": round(time.monotonic() - started, 1),
                **({"note": note} if note else {})}
@@ -171,21 +228,32 @@ def report(options) -> int:
     table = [rows.get(i, {"iteration": i, "outcome": "no result", "exit_code": None, "seconds": None,
                           "runner": {}}) for i in range(1, count + 1)]
     passed = sum(row["outcome"] == "pass" for row in table)
+    # "Re-run failed jobs" replaces a failed iteration's row with the retry's:
+    # rows from different attempts hide a failure, so they never count.
+    attempts = sorted({row["attempt"] for row in table if "attempt" in row})
+    mixed = len(attempts) > 1
     summary = {"selection": options.selection.strip(), "os": options.os, "iterations": count,
                "passed": passed, "failed": sum(row["outcome"] == "fail" for row in table),
-               "no_result": sum(row["outcome"] == "no result" for row in table), "rows": table}
+               "no_result": sum(row["outcome"] == "no result" for row in table),
+               "attempts": attempts, "clean": passed == count and not mixed, "rows": table}
     Path(options.out).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     lines = [f"### Stress: {summary['selection']} on {options.os}",
-             f"{passed} of {count} iterations passed.", "",
-             "| Iteration | Outcome | Seconds | Image | CPUs |", "| --- | --- | --- | --- | --- |"]
-    lines += [f"| {row['iteration']} | {row['outcome']} | {row['seconds'] if row['seconds'] is not None else ''} "
-              f"| {row['runner'].get('image', '')} | {row['runner'].get('cpus', '')} |" for row in table]
+             f"{passed} of {count} iterations passed."]
+    if mixed:
+        lines.append(f"Not clean: rows come from run attempts {attempts}; a re-run of failed jobs "
+                     "replaced at least one failure. Dispatch a new loop.")
+    lines += ["", "| Iteration | Attempt | Outcome | Seconds | Image | CPUs | Note |",
+              "| --- | --- | --- | --- | --- | --- | --- |"]
+    lines += [f"| {row['iteration']} | {row.get('attempt', '')} | {row['outcome']} "
+              f"| {row['seconds'] if row['seconds'] is not None else ''} "
+              f"| {row['runner'].get('image', '')} | {row['runner'].get('cpus', '')} | {row.get('note', '')} |"
+              for row in table]
     text = "\n".join(lines) + "\n"
     print(text)
     if options.summary:
         with open(options.summary, "a", encoding="utf-8") as handle:
             handle.write(text)
-    return 0 if passed == count else 1
+    return 0 if summary["clean"] else 1
 
 
 def main(argv: list[str] | None = None) -> int:
