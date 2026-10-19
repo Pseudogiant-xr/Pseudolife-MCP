@@ -2137,8 +2137,15 @@ def eid(canonical: str) -> str:
 REVIEW_SEED = [
     # duplicates: a Jaccard 2/3 pair, a 0.6 pair a numeric substitution
     # vetoes, a 0.5 pair below the threshold, a pair dismissed by hand
-    relate("payments db", "related-to", "Warehouse"),
-    relate("payments db prod", "related-to", "Warehouse"),
+    relate("payments ledger", "related-to", "Warehouse"),
+    relate("payments ledger prod", "related-to", "Warehouse"),
+    # an unfiled pair, a pair whose merge was decided, a file and its stem
+    relate("orbit station alpha", "related-to", "Ocean"),
+    relate("orbit station alpha two", "related-to", "Ocean"),
+    relate("harbor crane main", "related-to", "Ocean"),
+    relate("harbor crane main backup", "related-to", "Ocean"),
+    relate("tidecalc.py", "related-to", "Ocean"),
+    relate("tidecalc", "related-to", "Ocean"),
     relate("alpha beta gamma ct200", "related-to", "Warehouse"),
     relate("alpha beta gamma ct400", "related-to", "Warehouse"),
     relate("red green blue", "related-to", "Warehouse"),
@@ -2148,14 +2155,18 @@ REVIEW_SEED = [
     review("dismiss_pair", src="blue whale song", dst="blue whale songs"),
     # test artifacts, a dubious edge, an orphan
     relate("deploy-smoke run", "uses", "Warehouse"),
-    relate("noise agent", "uses", "Ocean", confidence=0.3),
+    relate("noise agent", "uses", "Ocean", confidence=0.3, origin="agent"),
+    relate("Warehouse", "uses", "Ocean", confidence=0.0, origin="agent"),
     alias("Lonely Node", "lonely-node-alias"),
     # a lesson-minted pair (never unattributed)
     outcome("ship the release", "success", about="release checklist"),
     # source attribution for some nodes (only the dream writes it)
     sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
         "SELECT id, 'claude-code', 1, 'derived', 0 FROM entities "
-        "WHERE canonical IN ('warehouse', 'payments-db', 'ocean')", after_stop=True),
+        "WHERE canonical IN ('warehouse', 'payments-ledger', 'ocean')", after_stop=True),
+    sql("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, status, "
+        f"created_at) VALUES ('merge', {eid('harbor-crane-main')}, {eid('harbor-crane-main-backup')}, "
+        "0.75, 'write-dedup: d', 'rejected', 1)", after_stop=True),
     # proposed links through the oracle's own tool (an unknown relation
     # falls back to related-to; a self-pair and an empty side are skipped)
     review("propose", proposals=[
@@ -2179,7 +2190,7 @@ REVIEW_SEED = [
         "judge_verdict, judge_confidence, judge_note, judge_model, judged_at, "
         "judge2_verdict, judge2_confidence, judge2_model, judged2_at, "
         "judge3_verdict, judge3_confidence, judge3_model, judged3_at) VALUES "
-        f"('merge', {eid('payments-db')}, {eid('payments-db-prod')}, 0.6667, 'analyzer-duplicate', 1, "
+        f"('merge', {eid('payments-ledger')}, {eid('payments-ledger-prod')}, 0.6667, 'analyzer-duplicate', 1, "
         "'accept', 0.7, 'looks same | 2nd (judge-b): reject 0.6 [shadow] | 3rd (judge-c): accept 0.9',"
         " 'judge-a', 2, 'reject', 0.6, 'judge-b', 3, 'accept', 0.9, 'judge-c', 4)",
         after_stop=True),
@@ -2214,7 +2225,7 @@ SCENARIOS.update({
             review("list", scope="nobody"),
             # the answer follows writes: a new dubious edge and alias, then a
             # proposal the dream files behind the daemons' backs
-            relate("Ocean", "related-to", "Lonely Node", confidence=0.2),
+            relate("Ocean", "related-to", "Lonely Node", confidence=0.2, origin="agent"),
             alias("Ocean", "sea"),
             external("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, "
                      "created_at) SELECT 'merge', a.id, b.id, 0.61, 'write-dedup: c', 7 FROM "
