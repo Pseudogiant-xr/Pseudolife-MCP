@@ -440,7 +440,7 @@ async fn supersede(
     apply_correction(ready, cfg, &mut ws, caller, targets, new_text, correction).await
 }
 
-/// `service.consolidate` (`service.py:7462-7516`): a list of targets, by ids
+/// `service.consolidate` (`service.py:7462-7519`): a list of targets, by ids
 /// or exact texts, source `consolidation` unless the caller's is truthy, the
 /// caller's tags, no derived-slot report.
 async fn consolidate(

@@ -1097,8 +1097,11 @@ empty lists, ids not positive, a blank text and a blank replacement; every
 error reported over lists that mix good, missing, retired, ambiguous and
 out-of-range targets; rows deleted behind the daemons' backs; one target
 retired behind their backs (`supersede_entries` refuses the whole list); a
-full band whose cheapest entry is a target only when every target counts as
-retired; and a replacement the meta filter refuses. The
+two targets retired behind them, listed against id order (the refusal's
+sorted ids); a blank replacement with no selector; a full band whose cheapest
+entry is a target only when every target counts as retired; and a
+replacement the meta filter refuses under the default source and stores
+under the caller's `user` source. The
 `mcp-consolidate-no-dedupe`, `-first-error-only`, `-labels-first-only`,
 `-victim-first-only`, `-derived-keys` and `-default-source` mutants must be
 caught, and the `supersede-*` scenarios still agree after the

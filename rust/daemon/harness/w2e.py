@@ -1798,6 +1798,8 @@ SCENARIOS.update({
             store("Epsilon twin to vanish."),
             store("Zeta row retired behind the daemon's back."),
             store("Zeta partner note."),
+            store("Eta first note retired behind the daemons' backs."),
+            store("Eta second note retired behind the daemons' backs."),
             dict(sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, "
                      "source, episode_id, episode_title, tags, slots, authority, "
                      "distortion_tolerance, dream_state) SELECT band, text, embedding, surprise, "
@@ -1829,6 +1831,7 @@ SCENARIOS.update({
             consolidate("x", entry_ids=[-4, "@id:Zeta partner note."]),
             consolidate("x", replaces=["Zeta partner note.", "  "]),
             consolidate("   ", replaces=["Zeta partner note."]),
+            consolidate("   "),
             # every target's error, the first one's reason; a good target in
             # the list changes nothing
             consolidate("x", replaces=["no such note", "Zeta partner note.", "Gamma retired note.",
@@ -1848,6 +1851,11 @@ SCENARIOS.update({
                      "WHERE text = 'Zeta row retired behind the daemon''s back.'"),
             consolidate("x", replaces=["Zeta partner note.",
                                        "Zeta row retired behind the daemon's back."]),
+            # two retired, listed against id order: already_retired is sorted
+            external("UPDATE entries SET superseded_at = 1700000001.5, "
+                     "superseded_by_text = 'elsewhere' WHERE text LIKE 'Eta % note retired%'"),
+            consolidate("x", replaces=["Eta second note retired behind the daemons' backs.",
+                                       "Eta first note retired behind the daemons' backs."]),
         ],
     },
     # Capacity: the victim is chosen with every target retired. The first
@@ -1876,6 +1884,8 @@ SCENARIOS.update({
         "seed": [
             store("The on-call rotation changes on Mondays."),
             store("On-call rotation switches every Monday."),
+            store("The pager escalates after ten minutes."),
+            store("Pager escalation happens after 10 minutes."),
             trace_sql("The on-call rotation changes on Mondays.", "on-call", "rotation"),
             trace_sql("On-call rotation switches every Monday.", "on-call", "rotation"),
         ],
@@ -1886,6 +1896,11 @@ SCENARIOS.update({
             consolidate("The on-call rotation changes every Monday.",
                         replaces=["The on-call rotation changes on Mondays.",
                                   "On-call rotation switches every Monday."]),
+            # the filter judges with the caller's source as the role: the same
+            # kind of text is stored with source "user"
+            consolidate("No relevant memories about the pager.", source="user",
+                        replaces=["The pager escalates after ten minutes.",
+                                  "Pager escalation happens after 10 minutes."]),
         ],
     },
 })
