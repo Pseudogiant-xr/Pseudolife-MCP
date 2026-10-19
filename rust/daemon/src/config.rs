@@ -69,6 +69,9 @@ pub struct MemoryConfig {
     /// (`memory.lessons.top_k` is never read over MCP: the binder always
     /// passes a width.)
     pub lessons_min_confidence: f64,
+    /// `memory.delete_confirm_threshold` (20): a memory-scope forget matching
+    /// more entries is refused unless confirmed; zero or less disables it.
+    pub delete_confirm_threshold: i64,
     pub compaction_enabled: bool,
     pub compaction_keep_per_slot: i64,
     pub compaction_min_age_days: f64,
@@ -467,6 +470,7 @@ impl Default for MemoryConfig {
             retrieval_retention_days: 365.0,
             lessons_enabled: true,
             lessons_min_confidence: 0.0,
+            delete_confirm_threshold: 20,
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
             compaction_min_age_days: 30.0,
@@ -1322,6 +1326,12 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     if let Some(m) = section(entries, "memory", "")? {
         let p = "memory";
         memory.top_k = want_int(m, "top_k", p, memory.top_k)?;
+        memory.delete_confirm_threshold = want_int(
+            m,
+            "delete_confirm_threshold",
+            p,
+            memory.delete_confirm_threshold,
+        )?;
         memory.hide_superseded = want_bool(m, "hide_superseded", p, memory.hide_superseded)?;
         memory.search_confidence_floor = want_float(
             m,

@@ -19,6 +19,7 @@ mod episode_tools;
 mod episodes;
 mod fact_resolve;
 mod fact_set;
+mod forget_tools;
 mod freshness;
 mod graph_read;
 #[cfg(feature = "harness")]

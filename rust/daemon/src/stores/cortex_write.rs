@@ -590,6 +590,103 @@ impl CortexStore {
     }
 }
 
+impl CortexStore {
+    /// `forget` (`cortex.py:1610-1636`): hard-delete every record (current
+    /// and superseded) at an entity, or at one exact slot, marking each
+    /// slot dirty so the sync deletes its rows. The indexes are rebuilt
+    /// from the kept records without the load-time healing. Returns the
+    /// number removed.
+    pub fn forget(&mut self, entity: &str, attribute: Option<&str>) -> usize {
+        let ne = norm_key(entity);
+        let na = attribute.map(norm_key);
+        let before = self.records.len();
+        let mut dirty = Vec::new();
+        self.records.retain(|r| {
+            let hit = r.key.0 == ne && na.as_ref().is_none_or(|a| r.key.1 == *a);
+            if hit {
+                dirty.push(r.key.clone());
+            }
+            !hit
+        });
+        let removed = before - self.records.len();
+        self.dirty_slots.extend(dirty);
+        if removed > 0 {
+            self.current.clear();
+            self.members.clear();
+            self.contested.clear();
+            for (i, r) in self.records.iter().enumerate() {
+                match r.status.as_str() {
+                    "current" if r.kind == "member" => {
+                        self.members.entry(r.key.clone()).or_default().push(i)
+                    }
+                    "current" => {
+                        self.current.insert(r.key.clone(), i);
+                    }
+                    "contested" => self.contested.entry(r.key.clone()).or_default().push(i),
+                    _ => {}
+                }
+            }
+        }
+        removed
+    }
+
+    /// `retire_unsupported` (`cortex.py:1162-1181`): every current value at
+    /// a slot whose last source was forgotten becomes `retired` at `now`
+    /// (`superseded_by_value` names the source), each with an audit row;
+    /// the slot leaves both indexes and is marked dirty.
+    pub fn retire_unsupported(
+        &mut self,
+        entity: &str,
+        attribute: &str,
+        source_entry_id: i64,
+        now: f64,
+    ) -> usize {
+        let key = (norm_key(entity), norm_key(attribute));
+        let reason = format!("forgotten source entry {source_entry_id}");
+        let mut count = 0;
+        for i in 0..self.records.len() {
+            if self.records[i].key != key || self.records[i].status != "current" {
+                continue;
+            }
+            let r = &mut self.records[i];
+            r.status = "retired".into();
+            r.superseded_at = Some(now);
+            r.superseded_by_value = Some(reason.clone());
+            let anchor = LogAnchor::of(&self.records[i]);
+            self.log_retired(&anchor, now, &reason);
+            count += 1;
+        }
+        if count > 0 {
+            self.current.remove(&key);
+            self.members.remove(&key);
+            self.dirty_slots.insert(key);
+        }
+        count
+    }
+
+    /// `_log(rec, None, rec.confidence, t, "retired", reason)`: no new value,
+    /// a zero confidence delta, no writer.
+    fn log_retired(&mut self, anchor: &LogAnchor, t: f64, reason: &str) {
+        self.meta_dirty = true;
+        let mut row = Map::new();
+        row.insert("entity".into(), json!(anchor.entity));
+        row.insert("attribute".into(), json!(anchor.attribute));
+        row.insert("old_value".into(), json!(anchor.value));
+        row.insert("new_value".into(), Value::Null);
+        row.insert("decision".into(), json!("retired"));
+        row.insert("reason".into(), json!(reason));
+        row.insert("confidence_delta".into(), json!(0.0));
+        row.insert("timestamp".into(), json!(t));
+        row.insert("writer_id".into(), Value::Null);
+        row.insert("session_id".into(), Value::Null);
+        self.supersession_log.push(Value::Object(row));
+        if self.supersession_log.len() > SUPERSESSION_LOG_CAP {
+            let excess = self.supersession_log.len() - SUPERSESSION_LOG_CAP;
+            self.supersession_log.drain(..excess);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
