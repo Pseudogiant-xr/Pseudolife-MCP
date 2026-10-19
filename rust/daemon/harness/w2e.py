@@ -2221,7 +2221,7 @@ REVIEW_SEED = [
     # sequence to the oracle's own proposals
     sql("INSERT INTO edge_proposals (id, src_id, relation, dst_id, confidence, source, "
         f"created_at) VALUES (500, {eid('red-green-blue')}, 'uses', {eid('harbor-crane-main')}, "
-        f"0.5, 'analyzer', 1), (501, {eid('tidecalc.py')}, 'implements', {eid('tidecalc')}, "
+        f"0.5, 'analyzer', 1), (501, {eid('tidecalc-py')}, 'implements', {eid('tidecalc')}, "
         "0.7, 'deep-dream', 1)", after_stop=True),
     # an earlier human decision in the merge audit
     sql("INSERT INTO merge_decisions (proposal_id, entity_display, into_display, status, score, "
