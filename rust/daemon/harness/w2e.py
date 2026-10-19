@@ -222,7 +222,11 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-graph-facts-no-alias", "mcp-graph-no-labels",
            # memory_recall (spec RC1-RC16): caught by the recall-* scenarios.
            "mcp-recall-seed-any", "mcp-recall-no-hub-gate", "mcp-recall-no-requery",
-           "mcp-recall-no-pin", "mcp-recall-no-annotate", "mcp-recall-flat-caps"]
+           "mcp-recall-no-pin", "mcp-recall-no-annotate", "mcp-recall-flat-caps",
+           # memory_graph_review's list (spec RV1-RV12): caught by the
+           # review-list scenarios.
+           "mcp-review-dup-threshold", "mcp-review-no-merge-veto", "mcp-review-no-fold-swap",
+           "mcp-review-terminal-as-pending"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1233,7 +1237,8 @@ def supersede(new_text, headers=(), **kw) -> dict:
 
 
 # Scenarios whose operations may include ``external`` writes.
-EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates"}
+EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates",
+                   "review-list"}
 
 
 def external(statement: str) -> dict:
@@ -2117,6 +2122,116 @@ SCENARIOS.update({
             recall("postgres settings", verbose=True),
             recall("host-1 vendor", verbose=True),
         ],
+    },
+})
+
+
+def review(action="list", **kw) -> dict:
+    return tool("memory_graph_review", action=action, **kw)
+
+
+def eid(canonical: str) -> str:
+    return f"(SELECT id FROM entities WHERE canonical = '{canonical}')"
+
+
+REVIEW_SEED = [
+    # duplicates: a Jaccard 2/3 pair, a 0.6 pair a numeric substitution
+    # vetoes, a 0.5 pair below the threshold, a pair dismissed by hand
+    relate("payments db", "related-to", "Warehouse"),
+    relate("payments db prod", "related-to", "Warehouse"),
+    relate("alpha beta gamma ct200", "related-to", "Warehouse"),
+    relate("alpha beta gamma ct400", "related-to", "Warehouse"),
+    relate("red green blue", "related-to", "Warehouse"),
+    relate("red green yellow", "related-to", "Warehouse"),
+    relate("blue whale song", "related-to", "Ocean"),
+    relate("blue whale songs", "related-to", "Ocean"),
+    review("dismiss_pair", src="blue whale song", dst="blue whale songs"),
+    # test artifacts, a dubious edge, an orphan
+    relate("deploy-smoke run", "uses", "Warehouse"),
+    relate("noise agent", "uses", "Ocean", confidence=0.3),
+    alias("Lonely Node", "lonely-node-alias"),
+    # a lesson-minted pair (never unattributed)
+    outcome("ship the release", "success", about="release checklist"),
+    # source attribution for some nodes (only the dream writes it)
+    sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+        "SELECT id, 'claude-code', 1, 'derived', 0 FROM entities "
+        "WHERE canonical IN ('warehouse', 'payments-db', 'ocean')", after_stop=True),
+    # proposed links through the oracle's own tool (an unknown relation
+    # falls back to related-to; a self-pair and an empty side are skipped)
+    review("propose", proposals=[
+        {"src": "Warehouse", "relation": "depends-on", "dst": "Ocean", "similarity": 0.8,
+         "rationale": "shared tide tables"},
+        {"src": "red green blue", "relation": "colour-of", "dst": "Ocean"},
+        {"src": "Warehouse", "relation": "uses", "dst": "warehouse"},
+        {"src": "", "relation": "uses", "dst": "Ocean"},
+    ]),
+    # merge and junk proposals with judge votes (only the dream files them):
+    # one whose stored direction folds the busier node away, a relate
+    # verdict, a three-vote row, a second row on a shared node, a junk row
+    sql("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at, "
+        "judge_verdict, judge_confidence, judge_note, judge_model, judged_at) VALUES "
+        f"('merge', {eid('warehouse')}, {eid('red-green-yellow')}, 0.7, 'write-dedup: a', 1, "
+        "'accept', 0.9, 'same thing', 'judge-a', 2), "
+        f"('merge', {eid('red-green-blue')}, {eid('red-green-yellow')}, 0.5, 'write-dedup: b', 1, "
+        "'relate', 0.8, 'relate:related-to distinct colours', 'judge-a', 2)",
+        after_stop=True),
+    sql("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at, "
+        "judge_verdict, judge_confidence, judge_note, judge_model, judged_at, "
+        "judge2_verdict, judge2_confidence, judge2_model, judged2_at, "
+        "judge3_verdict, judge3_confidence, judge3_model, judged3_at) VALUES "
+        f"('merge', {eid('payments-db')}, {eid('payments-db-prod')}, 0.6667, 'analyzer-duplicate', 1, "
+        "'accept', 0.7, 'looks same | 2nd (judge-b): reject 0.6 [shadow] | 3rd (judge-c): accept 0.9',"
+        " 'judge-a', 2, 'reject', 0.6, 'judge-b', 3, 'accept', 0.9, 'judge-c', 4)",
+        after_stop=True),
+    sql("INSERT INTO entity_proposals (kind, entity_id, score, reason, created_at) VALUES "
+        f"('junk', {eid('noise-agent')}, 0.9, 'smoke-test residue', 1)", after_stop=True),
+    # a recent automatic decision in the audit index (the judges write it)
+    sql("INSERT INTO meta (key, value) VALUES ('automatic_review_decision_v1:d1', "
+        "'{\"version\": 1, \"decision_id\": \"d1\", \"queue\": \"merge\", \"action\": \"reject\", "
+        "\"state\": \"applied\", \"proposal_id\": 7, \"pair\": [\"a\", \"b\"], \"recorded_at\": 10.5, "
+        "\"ended_at\": null, \"end_reason\": null, \"secret\": \"not projected\"}') "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", after_stop=True),
+    sql("UPDATE meta SET value = jsonb_set(value, '{recent_ids}', '[\"gone\", \"d1\"]') "
+        "WHERE key = 'automatic_review_decisions_v1'", after_stop=True),
+    # an earlier human decision in the merge audit
+    sql("INSERT INTO merge_decisions (proposal_id, entity_display, into_display, status, score, "
+        "reason, decided_by, decided_at) VALUES (99, 'Old A', 'Old B', 'accepted', 0.8, 'x', "
+        "'agent', 5), (98, 'Old C', NULL, 'rejected', NULL, 'junk keep: y', 'dream-judge', 6)",
+        after_stop=True),
+]
+
+SCENARIOS.update({
+    "review-list": {
+        "config": None,
+        "seed": REVIEW_SEED,
+        "ops": [
+            # every finding type, the automation states, the audits
+            review(),
+            review("list"),
+            # a scope narrows entities and edges; queued proposals stay
+            review("list", scope="claude-code"),
+            review("list", scope="all"),
+            review("list", scope="nobody"),
+            # the answer follows writes: a new dubious edge and alias, then a
+            # proposal the dream files behind the daemons' backs
+            relate("Ocean", "related-to", "Lonely Node", confidence=0.2),
+            alias("Ocean", "sea"),
+            external("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, "
+                     "created_at) SELECT 'merge', a.id, b.id, 0.61, 'write-dedup: c', 7 FROM "
+                     "entities a, entities b WHERE a.canonical = 'alpha-beta-gamma-ct200' AND "
+                     "b.canonical = 'alpha-beta-gamma-ct400'"),
+            review(),
+        ],
+    },
+    "review-list-gated": {
+        "config": "memory:\n  deep_dream:\n    judges_enabled: false\n",
+        "seed": REVIEW_SEED,
+        "ops": [review()],
+    },
+    "review-list-no-analyzer": {
+        "config": "memory:\n  deep_dream:\n    analyzer_file_duplicates: false\n",
+        "seed": REVIEW_SEED,
+        "ops": [review()],
     },
 })
 
