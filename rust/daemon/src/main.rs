@@ -48,6 +48,7 @@ mod pyjson;
 mod read;
 mod recall;
 mod recall_mentions;
+mod recall_unicode14;
 mod release_check;
 mod routes;
 mod search;
