@@ -237,7 +237,8 @@ current merge ref, except as the `merge-forward` skill allows):
 - **On the maintainer's Windows host, full suites run in WSL**, because
   native ones stall the desktop: `pwsh ops/wsl-suite.ps1`, or `pwsh
   ops/remote-suite.ps1` for the first free of WSL and the Linux box,
-  backgrounded and redirected. Both test the committed HEAD (commit first;
+  backgrounded and redirected; with no arguments they run up to 4 xdist
+  workers sized to the machine. Both test the committed HEAD (commit first;
   a box run needs it pushed); cite machine and commit from
   `~/.pseudolife-mcp/suite-results`. The host refuses native Windows full
   runs (`full-suite.windows`: `refuse`); `PSEUDOLIFE_SUITE_WINDOWS=allow`
