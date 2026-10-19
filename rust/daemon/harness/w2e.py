@@ -2562,22 +2562,41 @@ def _float_pair_free(x, y) -> None:
             _float_pair_free(a, b)
 
 
-def events_float_free(a: dict, b: dict) -> None:
-    """The retrieval events both daemons log for a search: row by row, the
-    served entries' scores and fusion inputs compare within w2d_search.py's
-    tolerance; everything else stays exact."""
+def events_diff(a: dict, b: dict) -> list[str]:
+    """The retrieval events both daemons log for a search, compared row by
+    row and field by field (as w2d_search.py does): the served entries'
+    scores and fusion inputs within its tolerance, everything else exact.
+    """
     ea = a.get("rows", {}).get("public.retrieval_events")
     eb = b.get("rows", {}).get("public.retrieval_events")
-    if not (isinstance(ea, dict) and isinstance(eb, dict)):
-        return
-    if ea.get("columns") != eb.get("columns") or "served" not in (ea.get("columns") or []):
-        return
-    i = ea["columns"].index("served")
+    cols = ea.get("columns") or []
+    out = []
     by_id = {r[0]: r for r in eb.get("rows", [])}
+    ids_a = {r[0] for r in ea.get("rows", [])}
     for ra in ea.get("rows", []):
         rb = by_id.get(ra[0])
-        if rb is not None:
-            _float_pair_free(ra[i], rb[i])
+        if rb is None:
+            out.append(f"retrieval_events[{ra[0]}]: row only in python")
+            continue
+        for c, x, y in zip(cols, ra, rb):
+            x, y = json.loads(json.dumps(x)), json.loads(json.dumps(y))
+            if c == "served":
+                _float_pair_free(x, y)
+            out += [f"retrieval_events[{ra[0]}].{c}{d}" for d in w1a.diff_values(x, y)]
+    out += [f"retrieval_events[{i}]: row only in rust" for i in sorted(set(by_id) - ids_a)]
+    return out
+
+
+def state_and_events_diff(a: dict, b: dict) -> list[str]:
+    """``state_diff`` with the retrieval events compared by ``events_diff``
+    when both sides hold them (the inputs are left as they are)."""
+    ea = a.get("rows", {}).get("public.retrieval_events")
+    eb = b.get("rows", {}).get("public.retrieval_events")
+    if not (isinstance(ea, dict) and isinstance(eb, dict)) or ea.get("columns") != eb.get("columns"):
+        return state_diff(a, b)
+    rest = lambda s: {**s, "rows": {k: v for k, v in s["rows"].items()  # noqa: E731
+                                    if k != "public.retrieval_events"}}
+    return events_diff(a, b) + state_diff(rest(a), rest(b))
 
 
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
@@ -2736,7 +2755,7 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
                 row["rust"] = rename_prefixes(row["rust"], er)
                 row["diffs"] += compare_response(row["python"], row["rust"], tol, stats)
             row["diffs"] += compare_numeric(np_, nr, tol, stats)
-            row["diffs"] += [f"db {d}" for d in (events_float_free(sp, sr) or state_diff(sp, sr))]
+            row["diffs"] += [f"db {d}" for d in state_and_events_diff(sp, sr)]
             steps.append(row)
             if record:
                 row["_python_state"], row["_python_numeric"] = sp, np_
@@ -2841,7 +2860,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
             if i:
                 # Recordings that predate a write table are compared on theirs.
                 got["rows"] = {k: v for k, v in got["rows"].items() if k in rec["state"]["rows"]}
-            row["diffs"] += [f"db {x}" for x in (events_float_free(rec["state"], got) or state_diff(rec["state"], got))]
+            row["diffs"] += [f"db {x}" for x in state_and_events_diff(rec["state"], got)]
             steps.append(row)
     finally:
         d.stop()
