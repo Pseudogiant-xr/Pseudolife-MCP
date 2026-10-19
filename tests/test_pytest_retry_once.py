@@ -89,3 +89,42 @@ def test_a_run_that_is_not_a_test_failure_is_returned_without_a_retry(tmp_path):
     assert result.returncode == 2
     assert record["first_attempt"]["exit"] == 2
     assert record["retry"] is None and not (res / "retry.xml").exists()
+
+
+SKIPS_ON_RETRY = '''
+import os, pathlib, pytest
+MARK = pathlib.Path(os.environ["TOY_MARK"])
+
+def test_gone_on_retry():
+    if MARK.exists():
+        pytest.skip("its environment went away")
+    MARK.write_text("seen")
+    assert False, "first attempt fails"
+'''
+
+FAILS_TWICE_IN_ONE_RUN = '''
+import pytest
+
+@pytest.fixture
+def broken_teardown():
+    yield
+    raise RuntimeError("teardown fails too")
+
+def test_call_and_teardown_fail(broken_teardown):
+    assert False, "call fails"
+'''
+
+
+def test_a_failure_the_retry_only_skipped_still_fails_the_job(tmp_path):
+    # A skip on the retry is not a pass: the retry's own exit is 0 here.
+    result, record, _, _ = run(tmp_path, source=SKIPS_ON_RETRY)
+    assert record["retry"]["exit"] == 0
+    assert record["still_failing"] == ["test_toy::test_gone_on_retry"]
+    assert result.returncode == 1
+
+
+def test_a_test_with_two_failing_records_is_counted_once(tmp_path):
+    _, record, _, _ = run(tmp_path, source=FAILS_TWICE_IN_ONE_RUN)
+    assert record["first_attempt"]["tests"] == 1
+    assert record["first_attempt"]["failed"] == ["test_toy::test_call_and_teardown_fail"]
+    assert record["still_failing"] == ["test_toy::test_call_and_teardown_fail"]

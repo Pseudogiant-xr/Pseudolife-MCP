@@ -20,7 +20,9 @@ Writes, under the results directory:
 
 A markdown summary goes to ``$GITHUB_STEP_SUMMARY`` when it is set, and
 each flaky test gets a warning annotation. Exit status: 0 when the first
-attempt passed; otherwise the retry's. A first attempt that ended any other
+attempt passed; otherwise the retry's, and 1 whenever a first-attempt failure
+did not pass on the retry (a skip, or not running at all, is not a pass). A
+first attempt that ended any other
 way than "some tests failed" (exit 1), such as a collection error, an
 interrupt or no tests collected, is returned unchanged with no retry: only a
 test result is retried.
@@ -43,18 +45,24 @@ def _pytest(args: list[str]) -> int:
 
 
 def _results(junit: Path) -> dict[str, list[str]]:
-    """Test ids (junit ``classname::name``) by outcome."""
+    """Test ids (junit ``classname::name``) by outcome, each id once. A test
+    that fails in its call and errors in teardown has two records; any
+    failing record makes it failed."""
+    outcome: dict[str, str] = {}
+    if junit.exists():
+        for case in ET.parse(junit).getroot().iter("testcase"):
+            test_id = f"{case.get('classname', '')}::{case.get('name', '')}"
+            if case.find("failure") is not None or case.find("error") is not None:
+                kind = "failed"
+            elif case.find("skipped") is not None:
+                kind = "skipped"
+            else:
+                kind = "passed"
+            if outcome.get(test_id) != "failed":
+                outcome[test_id] = kind
     out: dict[str, list[str]] = {"passed": [], "failed": [], "skipped": []}
-    if not junit.exists():
-        return out
-    for case in ET.parse(junit).getroot().iter("testcase"):
-        test_id = f"{case.get('classname', '')}::{case.get('name', '')}"
-        if case.find("failure") is not None or case.find("error") is not None:
-            out["failed"].append(test_id)
-        elif case.find("skipped") is not None:
-            out["skipped"].append(test_id)
-        else:
-            out["passed"].append(test_id)
+    for test_id, kind in outcome.items():
+        out[kind].append(test_id)
     return out
 
 
@@ -97,8 +105,14 @@ def main(argv: list[str]) -> int:
         retried = _results(retry_xml)
         record["retry"] = {"exit": status, "passed": retried["passed"],
                            "failed": retried["failed"]}
-        record["flaky"] = [t for t in first["failed"] if t in set(retried["passed"])]
-        record["still_failing"] = [t for t in first["failed"] if t not in set(record["flaky"])]
+        passed = set(retried["passed"])
+        record["flaky"] = [t for t in first["failed"] if t in passed]
+        record["still_failing"] = [t for t in first["failed"] if t not in passed]
+        # Only a pass on the retry clears a failure. A retry that skipped
+        # it, or that ran a different id (a parametrize id that changed
+        # between runs makes --last-failed run the whole file), can exit 0.
+        if record["still_failing"] and status == 0:
+            status = TESTS_FAILED
         for test_id in record["flaky"]:
             print(f"::warning title=Flaky on its first attempt::{test_id}", flush=True)
     (results / "attempts.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")

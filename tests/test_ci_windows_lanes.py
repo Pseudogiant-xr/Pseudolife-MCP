@@ -43,9 +43,12 @@ LANE_ON_2026_10_20 = {
     "test_tunnel_bridge", "test_tunnel_cli", "test_tunnel_profiles", "test_tunnel_runtime",
     "test_tunnel_service",
 }
-# A test that skips itself everywhere but Windows.
+# A test that skips itself everywhere but Windows, by marker or in its body.
+_NOT_WINDOWS = (r"(?:os\.name\s*!=\s*[\"']nt[\"']|sys\.platform\s*!=\s*[\"']win32[\"']"
+                r"|not\s+sys\.platform\.startswith\(\s*[\"']win[\"']\s*\)"
+                r"|platform\.system\(\)\s*!=\s*[\"']Windows[\"'])")
 WINDOWS_ONLY = re.compile(
-    r"skipif\(\s*(?:os\.name\s*!=\s*[\"']nt[\"']|sys\.platform\s*!=\s*[\"']win32[\"'])")
+    rf"skipif\(\s*{_NOT_WINDOWS}|^\s*if\s+{_NOT_WINDOWS}\s*:\s*\n\s*pytest\.skip\(", re.M)
 
 
 def jobs():
@@ -190,3 +193,17 @@ def test_both_lanes_run_their_postgres_tests_instead_of_skipping_them():
         assert start < tests, job_id
         assert "PSEUDOLIFE_TEST_DATABASE_URL=" in steps[start]["run"], job_id
         assert steps[tests]["env"]["PSEUDOLIFE_REQUIRE_TEST_POSTGRES"] == "1", job_id
+
+
+def test_no_option_drops_tests_or_retries_them_unseen():
+    # The guards above read only file arguments and --deselect: a -k, -m or
+    # --ignore would drop tests they cannot see, and PYTEST_ADDOPTS could
+    # add --reruns to the merge gate.
+    for job_id in (REQUIRED, NIGHTLY):
+        argv = lane_argv(job_id)
+        args = argv[3:] if argv[:3] == ["python", "-m", "pytest"] else argv[2:]
+        hidden = [t for t in args if t in ("-k", "-m") or t.startswith(("--ignore", "--deselect="))]
+        assert not hidden, (job_id, hidden)
+        job = jobs()[job_id]
+        envs = [job.get("env") or {}] + [s.get("env") or {} for s in job["steps"]]
+        assert not any("PYTEST_ADDOPTS" in env for env in envs), job_id

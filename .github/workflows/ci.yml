@@ -396,10 +396,12 @@ jobs:
     runs-on: windows-latest
     # Needs no embedding model (torch installs as a core dep but never loads
     # weights here). Measured 2026-10-20 on the maintainer's Windows host,
-    # serially, against embedded PG: this selection's 336 cases took 187 s
-    # (216 s wall); the 30-file, 1,865-case lane it replaced took 1,383 s
-    # there and 862 s on windows-latest (18 of its 25 minutes).
-    timeout-minutes: 15
+    # serially, against embedded PG: this selection's 377 cases took 75 s
+    # (85 s wall; 187 s while another session saturated loopback sockets); the 30-file, 1,865-case lane it replaced took 1,383 s
+    # there and 862 s on windows-latest (18 of its 25 minutes). 20, not 15:
+    # setup and the PG start take ~3.5 min, and a hung test must still reach
+    # pyproject's 600 s faulthandler dump before the job timeout.
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -457,6 +459,8 @@ jobs:
         #   handshake.
         # - test_credentials, test_coordination_credentials: the token files'
         #   Windows owner and explicit-ACL checks.
+        # - test_repository_claims: file claims refuse Windows junctions and
+        #   reserved names (CON, trailing dots and spaces).
         # - test_tunnel_*: the tunnel's DPAPI key storage, owner-only ACLs and
         #   Windows process handling, which no other lane reaches; the three
         #   cancellation tests that reap real children run nightly.
@@ -481,6 +485,7 @@ jobs:
           tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints
           tests/test_credentials.py
           tests/test_coordination_credentials.py
+          tests/test_repository_claims.py
           tests/test_tunnel_profiles.py
           tests/test_tunnel_service.py
           tests/test_tunnel_cli.py
