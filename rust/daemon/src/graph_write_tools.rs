@@ -115,20 +115,24 @@ fn names(registry: &[Value]) -> Vec<String> {
 /// current fact whose slot key equals `key`. Python's query has no ORDER BY;
 /// several owners of one key are declared free.
 async fn find_fact_slot_entity(client: &Client, key: &str) -> Result<Option<String>, ToolError> {
-    let key = key.to_string();
     crate::txn::with_client(client, |c| async move {
-        Ok::<_, anyhow::Error>(
-            c.query_opt(
-                "SELECT entity FROM facts WHERE status = 'current' \
-             AND entity_norm || '-' || attribute_norm = $1 LIMIT 1",
-                &[&key],
-            )
-            .await?
-            .map(|r| r.get::<_, String>(0)),
-        )
+        find_fact_slot_entity_body(c, key).await
     })
     .await
     .map_err(internal)
+}
+
+/// The statement of [`find_fact_slot_entity`], on a client the caller holds.
+async fn find_fact_slot_entity_body(
+    c: &Client,
+    key: &str,
+) -> Result<Option<String>, tokio_postgres::Error> {
+    Ok(c.query_opt(
+        "SELECT entity FROM facts WHERE status = 'current' AND entity_norm || '-' || attribute_norm = $1 LIMIT 1",
+        &[&key],
+    )
+    .await?
+    .map(|r| r.get::<_, String>(0)))
 }
 
 /// `_resolve_or_create_entity` (`service.py:7570-7599`) without the dream's
@@ -152,11 +156,39 @@ pub(crate) async fn resolve_or_create_folded(
     name: &str,
     etype: Option<&str>,
 ) -> Result<(Value, bool), ToolError> {
+    resolve_or_create_with(client, name, etype, false).await
+}
+
+/// `resolve_or_create` inside a transaction the caller holds (lesson
+/// synthesis' `lesson_synthesis_transaction`, where Python's own
+/// `_txn` blocks nest as savepoints): the same statements on the borrowed
+/// client.
+pub(crate) async fn resolve_or_create_in(
+    c: &Client,
+    name: &str,
+    etype: Option<&str>,
+) -> Result<Value, ToolError> {
+    resolve_or_create_with(c, name, etype, true)
+        .await
+        .map(|(v, _)| v)
+}
+
+async fn resolve_or_create_with(
+    client: &Client,
+    name: &str,
+    etype: Option<&str>,
+    in_txn: bool,
+) -> Result<(Value, bool), ToolError> {
     let mut name = name.to_string();
     let mut folded = false;
     loop {
         let n = norm_name(&name);
-        let mut found = graph::find_entity(client, &n).await.map_err(internal)?;
+        let mut found = if in_txn {
+            graph::find_entity_body(client, &n).await
+        } else {
+            graph::find_entity(client, &n).await
+        }
+        .map_err(internal)?;
         if !found.is_null() {
             // `if etype and not found.get("etype")`: the stored type is
             // backfilled (COALESCE keeps an empty string), and the answer
@@ -170,9 +202,12 @@ pub(crate) async fn resolve_or_create_folded(
                 && !crate::mutants::active("mcp-graph-no-etype-backfill")
             {
                 let canonical = found["canonical"].as_str().unwrap_or("").to_string();
-                graph::ensure_entity(client, &canonical, None, Some(t))
-                    .await
-                    .map_err(internal)?;
+                if in_txn {
+                    graph::ensure_entity_body(client, &canonical, None, Some(t)).await
+                } else {
+                    graph::ensure_entity(client, &canonical, None, Some(t)).await
+                }
+                .map_err(internal)?;
                 found["etype"] = json!(t);
             }
             found["created"] = json!(false);
@@ -180,8 +215,16 @@ pub(crate) async fn resolve_or_create_folded(
         }
         // The slot-key fold: a name that is a current fact's slot key
         // resolves to that slot's owner.
-        if !crate::mutants::active("mcp-graph-no-slot-fold")
-            && let Some(owner) = find_fact_slot_entity(client, &n).await?
+        let owner = if crate::mutants::active("mcp-graph-no-slot-fold") {
+            None
+        } else if in_txn {
+            find_fact_slot_entity_body(client, &n)
+                .await
+                .map_err(internal)?
+        } else {
+            find_fact_slot_entity(client, &n).await?
+        };
+        if let Some(owner) = owner
             && norm_name(&owner) != n
         {
             name = owner;
@@ -189,9 +232,12 @@ pub(crate) async fn resolve_or_create_folded(
             continue;
         }
         let display = py_strip(&name).to_string();
-        let id = graph::ensure_entity(client, &n, Some(&display), etype)
-            .await
-            .map_err(internal)?;
+        let id = if in_txn {
+            graph::ensure_entity_body(client, &n, Some(&display), etype).await
+        } else {
+            graph::ensure_entity(client, &n, Some(&display), etype).await
+        }
+        .map_err(internal)?;
         return Ok((
             json!({"id": id, "canonical": n, "display": display,
             "etype": etype, "aliases": [], "created": true}),

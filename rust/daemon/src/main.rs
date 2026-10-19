@@ -36,6 +36,7 @@ mod http;
 mod junk_names;
 mod labels;
 mod lesson_tools;
+mod lesson_write;
 mod maintenance;
 mod mcp;
 mod meta_filter;
@@ -46,6 +47,7 @@ mod outcome_tools;
 #[cfg(feature = "principal-harness")]
 mod principal_probe;
 mod principals;
+mod py_repr_unicode14;
 mod pyjson;
 mod read;
 mod recall;

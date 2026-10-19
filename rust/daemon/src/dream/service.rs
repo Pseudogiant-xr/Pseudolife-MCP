@@ -382,7 +382,7 @@ pub async fn runs(ready: &Ready, limit: i64) -> Result<Value, ToolError> {
 // status
 // ---------------------------------------------------------------------------
 
-async fn get_meta(client: &Client, key: &str) -> Result<Option<Value>, ToolError> {
+pub(super) async fn get_meta(client: &Client, key: &str) -> Result<Option<Value>, ToolError> {
     let key = key.to_string();
     crate::txn::with_client(client, |c| async move {
         c.query_opt("SELECT value FROM meta WHERE key = $1", &[&key])
@@ -394,7 +394,7 @@ async fn get_meta(client: &Client, key: &str) -> Result<Option<Value>, ToolError
 }
 
 /// Python `float(x)` where a failure raises out of the status call.
-fn meta_float(v: Option<&Value>, default: f64) -> Result<f64, String> {
+pub(super) fn meta_float(v: Option<&Value>, default: f64) -> Result<f64, String> {
     match v {
         None => Ok(default),
         Some(Value::Bool(b)) => Ok(f64::from(u8::from(*b))),
@@ -444,7 +444,7 @@ async fn load_cursor(
 }
 
 /// `_episode_entry_counts` (`service.py:6782-6792`).
-fn episode_entry_counts(ready: &Ready) -> std::collections::HashMap<String, usize> {
+pub(super) fn episode_entry_counts(ready: &Ready) -> std::collections::HashMap<String, usize> {
     let mut counts = std::collections::HashMap::new();
     let bank = ready.bank.read().expect("bank lock");
     for e in &bank.entries {
@@ -458,7 +458,7 @@ fn episode_entry_counts(ready: &Ready) -> std::collections::HashMap<String, usiz
 }
 
 /// The subtree of a root: its id and every episode descending from it.
-fn subtree(log: &crate::episodes::EpisodeLog, root: &str) -> Vec<String> {
+pub(super) fn subtree(log: &crate::episodes::EpisodeLog, root: &str) -> Vec<String> {
     let mut ids = vec![root.to_string()];
     for (i, e) in log.episodes.iter().enumerate() {
         if e.id != root && log.descends_from(i, root) {
@@ -469,7 +469,7 @@ fn subtree(log: &crate::episodes::EpisodeLog, root: &str) -> Vec<String> {
 }
 
 /// Closed session roots, sorted by `key` (a stable sort, as Python's).
-fn closed_roots(
+pub(super) fn closed_roots(
     log: &crate::episodes::EpisodeLog,
     keep: impl Fn(&crate::episodes::Episode) -> bool,
 ) -> Vec<&crate::episodes::Episode> {
@@ -484,7 +484,7 @@ fn closed_roots(
         .collect()
 }
 
-fn by_float(a: f64, b: f64) -> std::cmp::Ordering {
+pub(super) fn by_float(a: f64, b: f64) -> std::cmp::Ordering {
     a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
 }
 

@@ -14,8 +14,8 @@
 //! exception. [`ExtractFailure::Uncaught`] carries those.
 //!
 //! The outcome-inference, lesson and digest calls (`infer_outcomes`,
-//! `extract_lessons` / `extract_rules`, `summarize_session`) land with the
-//! dream run: each is one more `Compat` method over [`Compat::completion`].
+//! `extract_lessons` / `extract_rules`, `summarize_session`) are the
+//! `Compat` methods in `stage_calls.rs`, over the same request.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -194,7 +194,7 @@ pub fn py_str(v: &Value) -> String {
 }
 
 /// Python truthiness of a JSON value.
-fn truthy(v: &Value) -> bool {
+pub(super) fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -361,7 +361,7 @@ fn clamp01(x: f64) -> f64 {
 
 /// `max(0.0, min(1.0, float(v.get(key, default))))`, the default on a
 /// TypeError/ValueError.
-fn confidence(obj: &Map<String, Value>, default: f64) -> Result<f64, Uncaught> {
+pub(super) fn confidence(obj: &Map<String, Value>, default: f64) -> Result<f64, Uncaught> {
     let x = match obj.get("confidence") {
         None => Some(default),
         Some(v) => py_float(v)?,
@@ -380,7 +380,7 @@ fn source_index(obj: &Map<String, Value>, n: usize) -> Result<Option<usize>, Unc
 }
 
 /// `str(obj.get(key, "")).strip()`.
-fn field(obj: &Map<String, Value>, key: &str) -> String {
+pub(super) fn field(obj: &Map<String, Value>, key: &str) -> String {
     match obj.get(key) {
         None => String::new(),
         Some(v) => crate::storage::py_strip(&py_str(v)).to_string(),
@@ -847,12 +847,12 @@ impl From<Uncaught> for ExtractFailure {
 }
 
 /// A failure inside the request's `try`, before it is labelled.
-struct Raised {
-    text: String,
+pub(super) struct Raised {
+    pub(super) text: String,
     auth: bool,
     /// Auth words in text Python's message has and `text` redacts.
     redacted_auth_words: bool,
-    cause: Cause,
+    pub(super) cause: Cause,
 }
 
 impl Raised {
@@ -865,11 +865,11 @@ impl Raised {
         }
     }
 
-    fn other(type_name: &str, text: impl Into<String>) -> Self {
+    pub(super) fn other(type_name: &str, text: impl Into<String>) -> Self {
         Raised::new(Cause::Other(type_name.into()), text)
     }
 
-    fn label(self, label: &str, keep_auth: bool) -> ExtractorError {
+    pub(super) fn label(self, label: &str, keep_auth: bool) -> ExtractorError {
         ExtractorError {
             message: format!("{label} failed: {}", self.text),
             // Only `extract` copies the HTTP auth hint onto its error.
@@ -883,7 +883,7 @@ impl Raised {
 /// `json.loads(text)` of a reply (lone surrogates kept, as
 /// [`crate::mcp::py_loads::loads_reply`] documents), with the exception
 /// class Python's chain ends in.
-fn loads(text: &str) -> Result<Value, Raised> {
+pub(super) fn loads(text: &str) -> Result<Value, Raised> {
     let parsed = if crate::mutants::active("mcp-dream-extractor-strict-surrogates") {
         crate::mcp::py_loads::loads(text)
     } else {
@@ -1474,7 +1474,7 @@ impl Compat {
     /// POST the body, then `data["choices"][0]["message"]["content"] or ""`,
     /// cut from the first `{` to the last `}`, then `json.loads`. Every step
     /// sits inside the method's `try`.
-    async fn completion(&self, body: String) -> Result<Value, Raised> {
+    pub(super) async fn completion(&self, body: String) -> Result<Value, Raised> {
         let content = self.content(body).await?;
         let content = match (content.find('{'), content.rfind('}')) {
             (Some(s), Some(e)) if e > s => &content[s..=e],
@@ -1484,7 +1484,7 @@ impl Compat {
     }
 
     /// The reply's message content, as `completion` reads it.
-    async fn content(&self, body: String) -> Result<String, Raised> {
+    pub(super) async fn content(&self, body: String) -> Result<String, Raised> {
         let timeout = Duration::try_from_secs_f64(self.timeout)
             .map_err(|_| Raised::other("ValueError", "Timeout value must be positive"))?;
         let url = format!("{}/chat/completions", self.base_url);
