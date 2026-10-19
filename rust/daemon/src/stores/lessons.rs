@@ -677,16 +677,32 @@ async fn write_slot_rows(
     Ok(())
 }
 
+/// `norm_name(name)` as `find_entity` sends it. psycopg refuses a
+/// parameter holding a reply's lone surrogate (a lesson whose `about` skipped
+/// the graph link as junk or a compound still reaches this lookup):
+/// `str(exc)` of its `UnicodeEncodeError`, the position counted within the
+/// normalized name, fails the sync.
+fn lookup_name(name: &str) -> Result<String> {
+    let n = crate::storage::graph::norm_name(name);
+    if crate::mutants::active("mcp-dream-stage-lessons-about-unchecked") {
+        return Ok(n);
+    }
+    match crate::dream::extractor::encode_error(&[&n]) {
+        Some(e) => Err(anyhow::anyhow!(e)),
+        None => Ok(n),
+    }
+}
+
 /// `storage.find_entity(norm_name(name))["id"]`, or none.
 async fn entity_id(db: &Client, name: &str) -> Result<Option<i64>> {
-    let n = crate::storage::graph::norm_name(name);
+    let n = lookup_name(name)?;
     let found = crate::storage::graph::find_entity(db, &n).await?;
     Ok(found.get("id").and_then(Value::as_i64))
 }
 
 /// `entity_id` on a client inside a transaction the caller holds.
 async fn entity_id_in(c: &Client, name: &str) -> Result<Option<i64>> {
-    let n = crate::storage::graph::norm_name(name);
+    let n = lookup_name(name)?;
     let found = crate::storage::graph::find_entity_body(c, &n).await?;
     Ok(found.get("id").and_then(Value::as_i64))
 }
@@ -724,6 +740,18 @@ mod tests {
             key: slot_key(task, aspect),
             unit: None,
         }
+    }
+
+    #[test]
+    fn lookups_refuse_a_lone_surrogate_at_its_normalized_position() {
+        let lone = char::from_u32(crate::mcp::py_loads::LONE_SURROGATE_BASE + 0x3d).unwrap();
+        let e = lookup_name(&format!("redis  +  kafka{lone}")).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "'utf-8' codec can't encode character '\\ud83d' in position 13: \
+             surrogates not allowed"
+        );
+        assert_eq!(lookup_name(" Redis Cache ").unwrap(), "redis-cache");
     }
 
     #[test]

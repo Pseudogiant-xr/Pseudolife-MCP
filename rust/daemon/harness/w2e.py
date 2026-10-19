@@ -55,8 +55,7 @@ Normalizers (declared, spec "Free for W1 and W2"):
 * the canonical-fact clocks: ``facts`` ``asserted_at``, ``last_confirmed``,
   ``superseded_at``, ``tx_time``, ``valid_time`` and ``hlc_phys`` (the HLC's
   wall-clock milliseconds; ``hlc_logical`` stays exact),
-  ``outcome_signals.created_at``, ``retrieval_uses.created_at``,
-  ``entities.created_at`` and each
+  ``retrieval_uses.created_at``, ``entities.created_at`` and each
   ``cortex_supersession_log`` row's ``timestamp`` keep only null-or-not;
 * the correction clocks: ``memory_trace_invalidations.invalidated_at``
   (the correction's own clock, like ``entries.superseded_at``) and
@@ -66,13 +65,20 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``store_decisions.decided_at`` keep only null-or-not, and so does the
   ``superseded_at`` inside a ``store_decisions.record`` snapshot;
 * the lesson write clocks (the dream's synthesis, a snapshot restore):
-  ``lessons`` ``asserted_at``, ``last_confirmed``, ``tx_time``,
-  ``valid_time`` and ``hlc_phys`` (milliseconds), and a lineage audit's
-  ``asserted_at``, keep only null-or-not when written from the clock (an
-  explicit seeded stamp compares exactly); ``outcome_signals.consumed_at``
-  keeps only null-or-not; ``lessons.embedding`` compares like
-  ``facts.embedding``; an ``episode:<id>`` provenance token is renamed like
-  an episode id;
+  ``lessons`` ``asserted_at``, ``last_confirmed``, ``tx_time`` and
+  ``valid_time``, a lineage audit's ``asserted_at`` and
+  ``outcome_signals.created_at`` keep their equality and order when written
+  from the clock: each value within a day of now becomes ``<clock#N>``, its
+  rank among the distinct such values in that side's dump, so a lesson's
+  valid_time must name its oldest source signal's created_at, a confirm
+  must keep asserted_at and move last_confirmed, and an audit must name its
+  lesson's asserted_at; an explicit seeded stamp compares exactly (an older
+  ``created_at`` keeps only null-or-not); ``lessons.hlc_phys``
+  (milliseconds) keeps only null-or-not when written from the clock;
+  ``outcome_signals.consumed_at`` keeps only null-or-not;
+  ``lessons.embedding`` compares like ``facts.embedding``; an
+  ``episode:<id>`` provenance token is renamed like an episode id, and a
+  sorted token list is sorted again on the renamed tokens;
 * the board columns a session title writes: ``coordination_agents.name_set_at``
   and ``coordination_events.created_at`` keep only null-or-not, and so do the
   audit chain's ``hash`` and ``prev_hash`` (they cover ``created_at``; the
@@ -214,11 +220,20 @@ DREAM_CLOCK_KEYS = ("since", "last_success_at", "recovered_at", "at", "finished_
 DREAM_TS_KEYS = ("timestamp", "cursor", "dream_cursor", "cursor_before", "cursor_after")
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
-RECENT_CLOCK = {("world_facts", "retrieved_at"),
-                # a lesson the dream or a snapshot restore writes takes the
-                # clock; seeded lessons carry explicit 2023 stamps
-                ("lessons", "asserted_at"), ("lessons", "last_confirmed"),
-                ("lessons", "tx_time"), ("lessons", "valid_time")}
+RECENT_CLOCK = {("world_facts", "retrieved_at")}
+# Columns whose clock-written values keep their equality and order: a value
+# within RECENT_S of now becomes ``<clock#N>``, N its rank among the distinct
+# such values in one dump (per side), so the two sides' wall clocks may
+# differ while which values are equal, and which is older, must agree. A
+# lesson the dream or a snapshot restore writes takes the clock (seeded
+# lessons carry explicit 2023 stamps, compared exactly): its valid_time is
+# its oldest source signal's created_at, a confirm moves last_confirmed and
+# tx_time but not asserted_at, and its lineage audit names its asserted_at
+# (``store_decisions.record``). An older value in a CLOCK column keeps only
+# null-or-not; in any other, it compares exactly.
+ORDERED_CLOCK = {("lessons", "asserted_at"), ("lessons", "last_confirmed"),
+                 ("lessons", "tx_time"), ("lessons", "valid_time"),
+                 ("outcome_signals", "created_at")}
 # The same in wall-clock milliseconds (the HLC's physical part).
 RECENT_CLOCK_MS = {("lessons", "hlc_phys")}
 RECENT_S = 86400.0
@@ -333,7 +348,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # audit-snapshot restore (review-slots).
            "mcp-dream-stage-infer-retry-forever", "mcp-dream-stage-digest-echo-unchecked",
            "mcp-dream-stage-rule-no-retry", "mcp-dream-stage-lessons-no-lineage",
-           "mcp-dream-stage-lessons-ack-unlanded", "mcp-dream-stage-snapshot-restore-skipped"]
+           "mcp-dream-stage-lessons-ack-unlanded", "mcp-dream-stage-snapshot-restore-skipped",
+           # a compound about's lone surrogate fails the slot sync
+           # (dream-stages-lessons).
+           "mcp-dream-stage-lessons-about-unchecked"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -3463,6 +3481,14 @@ LESSON_SIGNALS_2 = [
                    detail="broke again", polarity="-"),
 ]
 LESSON_SIGNALS_3 = [outcome_signal("cache warmup", "failure", detail="cold start")]
+# Batch failures: a claim whose compound about (no graph link) holds a lone
+# surrogate writes, then fails the slot sync's entity lookup (psycopg's
+# UnicodeEncodeError, its position within norm_name(about)); a claim whose
+# lesson holds one is refused by the embedder's tokenizer (a TypeError).
+# Both fail the whole batch: every signal stays pending.
+LESSON_SIGNALS_4 = [outcome_signal("queue backlog", "success", about="redis + kafka",
+                                   detail="drained")]
+LESSON_SIGNALS_5 = [outcome_signal("ship hotfix", "success", detail="patched")]
 APPROACH = {"task": "deploy engine to host", "aspect": "approach",
             "lesson": "Deploy through the blue-green pipeline.", "about": "blue-green pipeline",
             "polarity": "+", "outcome": "success", "confidence": 0.8}
@@ -3477,6 +3503,12 @@ LESSONS_EXTRACTOR = {"model": "stub-model", "replies": [
     stage_reply("lessons", fmt_signals(LESSON_SIGNALS_3), {"lessons": [
         {"task": "cache warmup", "lesson": "Warm the cache first.",
          "about": "cache \ud83d"}]}),
+    stage_reply("lessons", fmt_signals(LESSON_SIGNALS_3 + LESSON_SIGNALS_4), {"lessons": [
+        {"task": "queue backlog", "aspect": "approach",
+         "lesson": "Drain the backlog before scaling.", "about": "redis  +  kafka\ud83d"}]}),
+    stage_reply("lessons", fmt_signals(LESSON_SIGNALS_3 + LESSON_SIGNALS_4 + LESSON_SIGNALS_5),
+                {"lessons": [{"task": "ship hotfix", "aspect": "approach",
+                              "lesson": "Patch \ud83d first.", "about": "hotfix"}]}),
 ]}
 
 # Rule mode by the about prefix: one rule retried for a missing required
@@ -3594,6 +3626,12 @@ SCENARIOS.update({
             dream("run"),
             outcome("cache warmup", "failure", [sess("les-a")], detail="cold start"),
             dream("run"),
+            dream("run"),
+            dream("status"),
+            outcome("queue backlog", "success", [sess("les-a")], about="redis + kafka",
+                    detail="drained"),
+            dream("run"),
+            outcome("ship hotfix", "success", [sess("les-a")], detail="patched"),
             dream("run"),
             dream("status"),
         ],
@@ -3856,7 +3894,15 @@ def _rename(v, emap):
             return "session - <minute>"
         return v
     if isinstance(v, list):
-        return [_rename(x, emap) for x in v]
+        out = [_rename(x, emap) for x in v]
+        # A sorted token list (a lesson's provenance) was sorted on the raw
+        # episode ids, whose order differs per side: sort it again on the
+        # renamed tokens. An unsorted list keeps its order, so a side that
+        # did not sort still differs.
+        if (out != v and all(isinstance(x, str) for x in v) and v == sorted(v)
+                and any(x.startswith("episode:") for x in v)):
+            out.sort()
+        return out
     if isinstance(v, dict):
         return {_rename(k, emap): _rename(x, emap) for k, x in v.items()}
     return v
@@ -3878,9 +3924,48 @@ def _recent_clock_ms(v):
 
 def _recent_clock(v):
     """A clock-written value keeps null-or-not; an explicit past one stays."""
-    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)             and abs(v - time.time()) < RECENT_S:
+    if _recent(v):
         return "<clock>"
     return v
+
+
+def _recent(v) -> bool:
+    """A number within ``RECENT_S`` of now: written from the clock."""
+    return _number(v) and abs(v - time.time()) < RECENT_S
+
+
+def _audit_asserted_at(t: dict):
+    """The ``store_decisions.record`` dicts naming a lesson's asserted_at."""
+    if "record" not in t["columns"]:
+        return
+    ri = t["columns"].index("record")
+    for row in t["rows"]:
+        if isinstance(row[ri], dict) and "asserted_at" in row[ri]:
+            yield row, ri
+
+
+def clock_ranks(state: dict) -> dict[float, str]:
+    """Each recent value in an ``ORDERED_CLOCK`` column (or a lineage
+    audit's asserted_at) -> ``<clock#N>``, N its rank among the distinct
+    ones in this dump."""
+    values = set()
+    for qualified, t in state["rows"].items():
+        name = qualified.split(".", 1)[1]
+        for idx, col in enumerate(t["columns"]):
+            if (name, col) in ORDERED_CLOCK:
+                values.update(float(r[idx]) for r in t["rows"] if _recent(r[idx]))
+        if name == "store_decisions":
+            values.update(float(row[ri]["asserted_at"]) for row, ri in _audit_asserted_at(t)
+                          if _recent(row[ri]["asserted_at"]))
+    return {v: f"<clock#{i}>" for i, v in enumerate(sorted(values))}
+
+
+def _ordered_clock(v, ranks: dict[float, str], clock_column: bool):
+    """A recent value as its rank token; an older one as ``_clock`` in a
+    CLOCK column, else exact."""
+    if _number(v) and float(v) in ranks:
+        return ranks[float(v)]
+    return _clock(v) if clock_column else v
 
 
 HEX_RUN = re.compile(r"[0-9a-f]{8,32}")
@@ -4035,10 +4120,14 @@ def normalize_state(state: dict, before: dict,
     numeric["lessons"] = extract_fact_numeric(state, "lessons")
     numeric["lesson_scores"] = extract_lesson_scores(state)
     emap = episode_map(state)
+    ranks = clock_ranks(state)
     for qualified, t in state["rows"].items():
         name = qualified.split(".", 1)[1]
         for idx, col in enumerate(t["columns"]):
-            if (name, col) in CLOCK:
+            if (name, col) in ORDERED_CLOCK:
+                for row in t["rows"]:
+                    row[idx] = _ordered_clock(row[idx], ranks, (name, col) in CLOCK)
+            elif (name, col) in CLOCK:
                 for row in t["rows"]:
                     row[idx] = _clock(row[idx])
             elif (name, col) in RECENT_CLOCK:
@@ -4080,7 +4169,8 @@ def normalize_state(state: dict, before: dict,
                     row[ri] = {**row[ri], "superseded_at": _clock(row[ri]["superseded_at"])}
                 # a synthesis lineage audit names its lesson by asserted_at
                 if isinstance(row[ri], dict) and "asserted_at" in row[ri]:
-                    row[ri] = {**row[ri], "asserted_at": _recent_clock(row[ri]["asserted_at"])}
+                    row[ri] = {**row[ri], "asserted_at": _ordered_clock(
+                        row[ri]["asserted_at"], ranks, False)}
         t["rows"] = [_rename(r, emap) for r in t["rows"]]
         if name != "entries":
             t["rows"].sort(key=lambda r: json.dumps(r, sort_keys=True))

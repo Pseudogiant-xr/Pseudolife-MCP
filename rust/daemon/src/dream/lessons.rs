@@ -504,12 +504,14 @@ pub async fn synthesize_lessons(
         let mut embeddings = Vec::with_capacity(claims.len());
         for c in &claims {
             let text = crate::lesson_write::embed_text(&c.task, &c.aspect, &c.lesson);
-            if let Some(e) = super::extractor::unencodable(&[&text]) {
+            // The tokenizer refuses a reply's lone surrogate (a TypeError),
+            // failing the batch before its transaction opens.
+            if let Some(e) = super::extractor::embed_refused(&[&text]) {
                 return Err(internal(e));
             }
             embeddings.push(crate::fact_set::embed(ready, text).await?);
         }
-        let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
+        let ws_ref = &*ws;
         let mut staged: LessonStore = (*ready.lessons.snapshot()).clone();
         let handled_status: Vec<i64> = plain_handled.iter().chain(&rule_handled).copied().collect();
         let client = ready.storage.client();
@@ -604,28 +606,36 @@ pub async fn synthesize_lessons(
                     c.batch_execute("SAVEPOINT lesson_claim")
                         .await
                         .map_err(internal)?;
-                    let wrote = write_claim(
-                        c,
-                        staged_ref,
-                        claim,
-                        emb,
-                        LessonWrite {
-                            about: claim.about.as_deref(),
-                            outcome: &claim.outcome,
-                            polarity: &claim.polarity,
-                            confidence: if all_inferred { 0.4 } else { claim.confidence },
-                            origin: Some("agent"),
-                            provenance: &provenance,
-                            support: &[],
-                            now: crate::episodes::now(),
-                            hlc: Some(ready.tick_hlc()),
-                            valid_time,
-                            writer_id: Some(writer),
-                            session_id: session.as_deref(),
-                        },
-                        now,
-                    )
-                    .await;
+                    // `_write_lesson_locked` resolves the writer per claim,
+                    // inside its savepoint and before the HLC tick: a
+                    // failure is this claim's write error.
+                    let wrote = match ws_ref.resolve_session(caller) {
+                        Err(e) => Err(ToolError::Invalid(e)),
+                        Ok(session) => {
+                            write_claim(
+                                c,
+                                staged_ref,
+                                claim,
+                                emb,
+                                LessonWrite {
+                                    about: claim.about.as_deref(),
+                                    outcome: &claim.outcome,
+                                    polarity: &claim.polarity,
+                                    confidence: if all_inferred { 0.4 } else { claim.confidence },
+                                    origin: Some("agent"),
+                                    provenance: &provenance,
+                                    support: &[],
+                                    now: crate::episodes::now(),
+                                    hlc: Some(ready.tick_hlc()),
+                                    valid_time,
+                                    writer_id: Some(writer),
+                                    session_id: session.as_deref(),
+                                },
+                                now,
+                            )
+                            .await
+                        }
+                    };
                     match wrote {
                         Ok(()) => {
                             c.batch_execute("RELEASE SAVEPOINT lesson_claim")
@@ -705,6 +715,10 @@ pub async fn synthesize_lessons(
         Err(e) => {
             svc.persist_errors
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if batch.skipped {
+                // Set before the COMMIT that failed.
+                out.insert("skipped".into(), json!("signals-changed"));
+            }
             errors.push(error_text(&e));
             out.insert("error".into(), json!(errors.join("; ")));
             if batch.write_errors > 0 {

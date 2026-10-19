@@ -531,8 +531,9 @@ async fn store_digest(
     episode_id: &str,
     title: &str,
 ) -> Result<(), ToolError> {
-    // The embedder (or psycopg) refuses a reply's lone surrogate.
-    if let Some(e) = super::extractor::unencodable(&[text]) {
+    // The embedder's tokenizer refuses a reply's lone surrogate (a
+    // TypeError) before psycopg sees the text.
+    if let Some(e) = super::extractor::embed_refused(&[text]) {
         return Err(internal(e));
     }
     let row = crate::fact_set::embed(ready, text.to_string())

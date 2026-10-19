@@ -104,17 +104,39 @@ pub fn lone_surrogate(c: char) -> Option<u32> {
 /// field encodes. Python reaches it on the database write (or the embedder
 /// refuses the string first); the dream pass fails that write the same way.
 pub fn unencodable(fields: &[&str]) -> Option<String> {
+    encode_error(fields).map(|e| format!("UnicodeEncodeError: {e}"))
+}
+
+/// `str(exc)` of that `UnicodeEncodeError`, without the type prefix: what
+/// a caller reporting `str(exc)` says. The position counts within the
+/// field as psycopg received it.
+pub fn encode_error(fields: &[&str]) -> Option<String> {
     for f in fields {
         for (pos, c) in f.chars().enumerate() {
             if let Some(s) = lone_surrogate(c) {
                 return Some(format!(
-                    "UnicodeEncodeError: 'utf-8' codec can't encode character '\\u{s:04x}' \
+                    "'utf-8' codec can't encode character '\\u{s:04x}' \
                      in position {pos}: surrogates not allowed"
                 ));
             }
         }
     }
     None
+}
+
+/// `str(exc)` of the `TypeError` the embedder's tokenizer raises
+/// (tokenizers 0.22 `encode_batch`, CPython 3.11) on a string holding a
+/// lone surrogate.
+pub const EMBED_REFUSED: &str =
+    "TextEncodeInput must be Union[TextInputSequence, Tuple[InputSequence, InputSequence]]";
+
+/// [`EMBED_REFUSED`] when a text the embedder would encode holds a reply's
+/// lone surrogate, or None.
+pub fn embed_refused(texts: &[&str]) -> Option<&'static str> {
+    texts
+        .iter()
+        .any(|t| t.chars().any(|c| lone_surrogate(c).is_some()))
+        .then_some(EMBED_REFUSED)
 }
 
 /// `repr(s)`: as `crate::storage::py_repr`, except that a lone-surrogate
