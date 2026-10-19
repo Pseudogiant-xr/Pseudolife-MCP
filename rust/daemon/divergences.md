@@ -38,7 +38,6 @@ tool's answers by value.
 |---|---|---|
 | `document_search` | W2-D | No reference-pool search service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
-| `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
 | `memory_consolidate` | W3-H | No consolidation service. |
 
 The integration batch retains W2-G's refusal stubs for every tool except
@@ -52,7 +51,7 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
 `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
 `memory_relation_define`, `memory_graph`, `memory_recall`,
-`memory_graph_review` (all but two actions, below), `memory_agents` and `memory_message`. The two board tools
+`memory_graph_review`, `memory_dream` (all but `deep` and `rollback`, below), `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -384,6 +383,28 @@ this increment does not claim the complete write boundary or cutover readiness.
 | A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
 | The judges (merge two- and three-vote, link, junk, curation, candidates), their freshness and the sweep tick that runs them | served by the background sweep | not run | task O2, with the dream (task P), behind a stub extractor |
 | Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution |
+
+### memory_dream: status, pull, commit, runs and the consolidation pass (2026-10-20)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `run` while lesson synthesis or outcome inference (`memory.lessons.enabled` with `synthesize_in_dream` or `infer_outcomes`), digests (`memory.dream.digest_enabled`) or graph insight (`memory.graph_insight.enabled`) is on, which is the default | runs those stages | refused (`not_implemented`, naming the stage) | tasks P1b (lessons, outcomes, digests) and P2b (graph insight); with them off the pass is served |
+| `deep` and `rollback` | served | refused | tasks P2a (deep dream) and the rollback increment |
+| When dream tracking initializes (rows with no dream state classified) | at hydration | at the first `memory_dream` call | a Rust boot must not change the bank (the W1 boot comparison); every answer is the same once the call runs |
+| A pending entry whose row is missing at a write failure | re-flushed (`cms.reflush_entries`) | detected, not re-inserted | the store slice's persistence follow-up; the answer (a write hold) is the same |
+| The stall record's board notice and the overdue rule | posted by the sweep | logged; the overdue rule is never armed | the sweep (task P4) |
+| The date mask, `isdigit` and NFC/NFKC in the gates | Python's `re` and `unicodedata` (Unicode 14) | the regex crate's Unicode `\b`/`\d`/`\s` and case folding, an approximated `isdigit`, the normalization crate's tables | rare characters only; `\w` and category M use CPython's exact tables |
+| Cosine ranking of slots, facts, slot matches and alias candidates | torch float32 matmul | f32 dot products | a near-tie can reorder the vocabulary hint and so the request bytes; the embeddings themselves differ within the measured tolerance |
+| A reply character in U+10F800–U+10FFFF | written | taken as a lone-surrogate stand-in: the write fails | the reply parser keeps lone surrogates as private code points so a write fails where Python's encoding fails |
+| A lone surrogate in a claim's `stance` | the resident record is written and the entity minted, then the write holds | the write holds before them | failure path only |
+| A lone surrogate in a `/models` reply | the served id is returned | none | status display only |
+| Reply nesting between about 900 and the interpreter's depth limit | parsed | `RecursionError` | Python's limit depends on the stack; Rust's is a fixed 900 |
+| TLS failures, a partial status line, headers hyper rejects | Python's class names (`SSLCertVerificationError`, `BadStatusLine`) or success | `OSError`, `RemoteDisconnected`, `BadStatusLine` | transport edge cases |
+| The extractor timeout | per socket operation | for the whole request | a slow, steady reply can time out only in Rust |
+| Errno values with no Rust `ErrorKind` (ESHUTDOWN) | Python's class (`BrokenPipeError`) | `OSError` | transport edge case |
+| URL credentials in a base URL | percent-decoded before the host split; shown in its log | not decoded; redacted in logs | credentials in an extractor URL are refused on both sides before connecting |
+| A redirect target's text | `quote()` / `urljoin()` | the `url` crate's join | only auth-word matching on unusual `Location` values |
+| An environment integer past i64 (`PSEUDOLIFE_DREAM_MAX_TOKENS`) | kept | the configured default | no producer sets one |
 
 ## Coordination board completion (W2-F)
 

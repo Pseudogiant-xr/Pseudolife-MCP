@@ -1299,6 +1299,56 @@ restores, the world audit-snapshot fallback; its `mcp-review-slot-meta-noop`,
 caught. The lesson-fallback prediction and the reconciliation classifier
 are unit-tested against Python's own functions.
 
+### memory_dream over MCP: status, pull, commit, runs and the consolidation pass (2026-10-20)
+
+`dream/extractor.rs` (endpoint resolution, probing, the OpenAI-compatible
+client, reply parsing and error classification), `dream/prompts.rs`,
+`dream/service.rs` (the tool, status and the cursor engine over the live
+bank), `dream/run.rs` (the pass, the run journal, the stall record),
+`dream/relations.rs` (the post-commit graph work), `dream/gates.rs` (the
+literal, span and citation gates, the constraint carrier) and
+`dream/judge_agreement.rs` (the review-queue block of status), over the
+cortex write paths' dream inputs (`stores/cortex_write.rs`,
+`cortex_members.rs`, `cortex_resolve.rs`) and the graph store. Python:
+`mcp_server.py` `memory_dream` (2171-2287); `service_dream.py`
+`dream_status` (3035-3118), `dream_pull` / `dream_commit` (1045-1302),
+`dream_runs` (1033-1043), `dream_run_auto` (2922-2951), `dream_run` and
+`_dream_run_locked` (1491-2394), the relation linking (367-466), the alias
+screen (1349-1489), the constraint carrier (2411-2475), the quarantine route
+(2494-2568) and the citation helpers (264-303); `memory/dream.py` (prompts
+147-371, parsing 619-880, the extractor 1189-1630, endpoint resolution and
+building 1999-2395); `memory/cortex.py` (the dream inputs of `write`,
+`add_member`, `remove_member` and `resolve`).
+
+| # | Exact item | Source |
+|---|---|---|
+| DR1 | Bound arguments: `memory_dream(action, limit=None, commit_token=None, cursor=None, apply=False, snippets=True, run_id=None)`; an unknown action answers `unknown_action` with the seven actions. `deep` and `rollback` answer the `not_implemented` refusal (tasks P2a and P1-rollback). | `mcp_server.py:2171-2238` |
+| DR2 | `status`: backlog, idle seconds, the display cursor, `would_fire`, the outcome-inference and digest counters, the deep-dream need block, the review queue with judge agreement, the stall record, then the extractor fields (with the alias served-model lookup and the primary probe when a fallback is set). | `service_dream.py:3035-3118,3677-3787`; `dream.py:2250-2275` |
+| DR3 | `pull`: the pending entries of the resident bank (not excluded sources, ordered by timestamp, row id and dream id, at most `limit or 40`, capped at 4096), with an HMAC commit token over them; `commit` acknowledges a token's entries (a legacy cursor or no token refused); `runs` lists recent run rows. Dream tracking covers entries stored after start. | `service_dream.py:1033-1302` |
+| DR4 | Endpoints: config or environment (`PSEUDOLIFE_DREAM_*`), the model override, the mode; `auto` with a fallback probes the primary's `/health` (a 404 retrying `/models`) twice, two seconds apart; the primary carries its key and `cache_prompt`/`reasoning_effort`, the fallback only its own key. No URL and model: a no-op extractor. | `dream.py:1999-2247,2366-2395` |
+| DR5 | Requests: `POST {base}/chat/completions` with Python's `json.dumps` bytes (default separators, `ensure_ascii`), the system prompt with the vocabulary hint (the top 60 of 120 slots ranked by cosine to the batch embedding) and the known-facts hint, the numbered notes; redirects refused; 240-second timeout. Replies: the outermost object of the content parsed as Python's `json.loads` would (lone surrogates and non-finite numbers included), each field coerced as `dream.py` does; failures classified (`login_expired`, `extractor_unreachable`, `extractor_error`) with Python's error class names. | `dream.py:619-880,1189-1630,2278-2308` |
+| DR6 | `run`: refused (`not_implemented`, naming the stage) while lesson synthesis, outcome inference, digests or graph insight is enabled; otherwise a single-flight guard (`dream_in_progress`), then the extraction of the pending batch (hold twice on a failure, isolate per entry on the third, quarantine what fails alone). | `service_dream.py:1491-1735` |
+| DR7 | Each claim: the write tier from the source entry, raised only when the claim's citation backs it; the assistant-speaker policy; the slot resolver; the literal gate (digit-bearing tokens must occur in the batch or source, Unicode digits folded as `float()` folds them) and the span gate; the trace skip; the constraint carrier; then the cortex write, set add or remove, or the quarantine route, each with `dream` set; a journal row and a trace with reinforcement for each, except the listed actions. Events go to the chronicle; a separate events pass follows. | `service_dream.py:264-303,1892-2270,2411-2568` |
+| DR8 | A write failure fails the run and holds (phase write); otherwise the batch is committed and the run stamped. After commit, unlocked and best effort: relations (the gates in order: generic hubs, junk names, the confidence floor, the cross-project and low-confidence proposals; write-dedup merge proposals for minted endpoints), alias candidates, the source backfill and the retype pass. The answer is Python's, key for key, with `extractor` last. | `service_dream.py:367-466,1349-1489,2270-2394,2922-2951` |
+
+`harness/w2e.py live --only dream-*` compares every answer, the full bank
+and, through `harness/stub_extractor.py`, the two daemons' model requests:
+each daemon talks to its own stub, which answers from the scenario's reply
+table (keyed by the request body's digest or by prompt kind and user
+content) and records method, path, body and a digest of the authorization
+header; the request sequences must be identical after every step, and a
+request with no table entry is itself a difference. **What this claims:**
+given identical model replies, both daemons send byte-identical requests and
+write identical banks. It claims nothing about model behaviour. The
+scenarios cover the basics (status, pull, commit, runs, refusals), a full
+run of every claim kind and relation gate, holds and isolation, the
+quarantine and span gates, an empty bank, the fallback endpoint and its
+stall, the hint knobs, the literal gate's modes, outages, refused redirects
+and login failures, and lone surrogates; the unported stages are switched
+off. The `mcp-dream-*` mutants must be caught. Request bodies and reply
+parsing are also unit-tested against Python's own extractor
+(`harness/goldens/dream-extractor.json`).
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
