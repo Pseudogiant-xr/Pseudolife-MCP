@@ -6,6 +6,27 @@ use std::time::Duration;
 fn write(home: &Home, name: &str, text: &str) {
     state::atomic_write(&home.0.join(name), text.as_bytes(), None).unwrap();
 }
+/// The ring marker is written off the runtime, on the digest's queue behind
+/// any digest sync, so it can land after its due time on a slow disk.
+async fn ring_written(home: &Home) -> String {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(bytes) = state::read(&home.0.join("digest.ring"), 256) {
+                return String::from_utf8(bytes).unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("ring marker not written")
+}
+/// Let the ring worker finish what it has queued, so a check for the absence
+/// of a marker, or for a recorded failed write, is not just early.
+async fn ring_settled(home: &Home) {
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    state::drain(&home.0.join("digest.txt")).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
+}
 #[test]
 fn board_ring_reason_uses_python_unicode14_predicates() {
     assert!(liveness::whitespace('\u{1c}'));
@@ -183,22 +204,22 @@ async fn board_ring_marker_staggers_sanitizes_deduplicates_and_withdraws() {
         .await
         .unwrap();
     assert_eq!(adapter.view().await.watermark, 10);
-    let at = liveness::now() + 0.08;
+    // Far enough out that a slow digest write inside update_mailbox cannot
+    // reach it, so the marker's absence right after the update means "not yet
+    // due", not "not yet written".
+    let at = liveness::now() + 1.0;
     let wake = json!({"generation":1,"pending_count":2,"pending_preview":[],"wake":{"decision":"rung","reason":"  peer\n sent<> mail! ","ring_at":at}});
     adapter.update_mailbox(&wake).await;
     assert!(!home.0.join("digest.ring").exists());
-    tokio::time::sleep(Duration::from_millis(110)).await;
-    assert_eq!(
-        String::from_utf8(state::read(&home.0.join("digest.ring"), 256).unwrap()).unwrap(),
-        "11\nrung peer sent mail\n"
-    );
+    assert_eq!(ring_written(&home).await, "11\nrung peer sent mail\n");
     std::fs::remove_file(home.0.join("digest.ring")).unwrap();
     adapter.update_mailbox(&wake).await;
-    tokio::time::sleep(Duration::from_millis(15)).await;
+    ring_settled(&home).await;
     assert!(!home.0.join("digest.ring").exists());
     adapter.update_mailbox(&json!({"pending_count":3,"wake":{"decision":"rung","reason":"new","ring_at":liveness::now()+0.1}})).await;
     adapter.update_mailbox(&json!({"pending_count":0})).await;
     tokio::time::sleep(Duration::from_millis(130)).await;
+    ring_settled(&home).await;
     assert!(!home.0.join("digest.ring").exists());
     assert!(adapter.view().await.wake.is_none());
     adapter.close().await;
@@ -214,7 +235,8 @@ async fn board_ring_failed_replace_retries_original_watermark_unless_seen() {
     state::private_dir(&home.0.join("digest.ring")).unwrap();
     let wake = json!({"pending_count":1,"wake":{"decision":"rung","reason":"peer","ring_at":liveness::now()}});
     adapter.update_mailbox(&wake).await;
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    // The failed write must have been recorded for retry before the next update.
+    ring_settled(&home).await;
     std::fs::remove_dir(home.0.join("digest.ring")).unwrap();
     adapter
         .update_mailbox(&json!({"pending_count":2,"wake":wake["wake"]}))
@@ -228,7 +250,7 @@ async fn board_ring_failed_replace_retries_original_watermark_unless_seen() {
     state::private_dir(&home.0.join("digest.ring")).unwrap();
     let wake = json!({"pending_count":2,"wake":{"decision":"rung","reason":"later","ring_at":liveness::now()}});
     adapter.update_mailbox(&wake).await;
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    ring_settled(&home).await;
     write(&home, "digest.seen", "2\n");
     std::fs::remove_dir(home.0.join("digest.ring")).unwrap();
     adapter.update_mailbox(&wake).await;
@@ -258,4 +280,76 @@ async fn board_ring_local_listener_lease_and_attention_never_write_idle_marker()
     assert!(!home.0.join("digest.ring").exists());
     assert_eq!(adapter.view().await.wake.unwrap()["decision"], "attention");
     adapter.close().await;
+}
+#[tokio::test]
+async fn board_ring_late_hint_write_never_lowers_a_hook_seen_mark() {
+    // Reported by the Codex review of the state-write offload (2026-10-19):
+    // a slow `.seen` write from a delivered hint landed after a hook had
+    // shown the newer digest and marked it, lowering the mark again.
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let adapter = Adapter::enter(adapter_config(&fixture, &home))
+        .await
+        .unwrap();
+    let seen = home.0.join("digest.seen");
+    // Hold every queued step on the `.seen` path until the hook has run.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let gate = state::offload(&seen, move || {
+        let _ = started.send(());
+        let _ = held.recv();
+        Ok(())
+    });
+    ready.await.unwrap();
+    let first = adapter.view().await.watermark;
+    assert!(adapter.deliver_hint().await.is_some());
+    adapter.update_mailbox(&json!({"pending_count": 2})).await;
+    let second = adapter.view().await.watermark;
+    assert!(second > first);
+    // The prompt or Stop hook shows the newer digest and marks it seen.
+    write(&home, "digest.seen", &format!("{second}\n"));
+    release.send(()).unwrap();
+    gate.await.unwrap();
+    state::drain(&seen).await;
+    state::drain(&home.0.join("digest.txt")).await;
+    let marked = String::from_utf8(state::read(&seen, 128).unwrap()).unwrap();
+    adapter.close().await;
+    assert_eq!(
+        marked.trim(),
+        second.to_string(),
+        "a late hint write lowered .seen"
+    );
+}
+#[tokio::test]
+async fn board_ring_queued_hint_write_keeps_a_higher_seen_mark() {
+    // The hint's `.seen` write is queued behind the digest; a hook that
+    // raised the mark meanwhile keeps it.
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let adapter = Adapter::enter(adapter_config(&fixture, &home))
+        .await
+        .unwrap();
+    let digest = home.0.join("digest.txt");
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let gate = state::offload(&digest, move || {
+        let _ = started.send(());
+        let _ = held.recv();
+        Ok(())
+    });
+    ready.await.unwrap();
+    let watermark = adapter.view().await.watermark;
+    assert!(adapter.deliver_hint().await.is_some());
+    let raised = watermark + 5;
+    write(&home, "digest.seen", &format!("{raised}\n"));
+    release.send(()).unwrap();
+    gate.await.unwrap();
+    state::drain(&digest).await;
+    let marked = String::from_utf8(state::read(&home.0.join("digest.seen"), 128).unwrap()).unwrap();
+    adapter.close().await;
+    assert_eq!(
+        marked.trim(),
+        raised.to_string(),
+        "the hint write lowered .seen"
+    );
 }
