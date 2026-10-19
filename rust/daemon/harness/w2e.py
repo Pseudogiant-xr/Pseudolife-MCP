@@ -1629,7 +1629,7 @@ SCENARIOS.update({
             fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9),
             fact("Payments DB", "host", "10.0.0.6", origin="user", confidence=0.9),
             fact("Payments DB", "port", "5432", origin="user", confidence=0.9),
-            fact("Old Router", "ip", "192.168.0.1", origin="user", confidence=0.9),
+            fact("Old Router", "ip", "192.168.1.1", origin="user", confidence=0.9),
             fact_get("Payments DB", "host"),
             fact_get("Payments DB", "port"),
             world_set("Rust", "latest stable version", "1.90.0",
