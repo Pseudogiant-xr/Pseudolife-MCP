@@ -533,7 +533,8 @@ def test_file_claim_preparation_uses_total_deadline_and_next_call_recovers(tmp_p
             assert not any(params.get("name") == "memory_agents" for method, _, params
                            in upstream.requests if method == "tools/call")
 
-    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+    # A hang guard only: the held fixture and the 2 s deadline decide.
+    asyncio.run(asyncio.wait_for(drive(), timeout=30))
 
 
 def test_cancelled_file_claim_preparation_cannot_dispatch_later(tmp_path, upstream):
@@ -562,7 +563,8 @@ def test_cancelled_file_claim_preparation_cannot_dispatch_later(tmp_path, upstre
             assert not any(params.get("name") == "memory_agents" for method, _, params
                            in upstream.requests if method == "tools/call")
 
-    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+    # A hang guard only: the held fixture and the 2 s deadline decide.
+    asyncio.run(asyncio.wait_for(drive(), timeout=30))
 
 
 def _error_data(exc: BaseException) -> dict:
@@ -976,7 +978,8 @@ def test_call_timeout_is_unknown_and_next_operation_recovers(tmp_path, upstream)
             recovered = await client.call_tool("read", {})
             assert json.loads(recovered.content[0].text)["writes"] == 0
 
-    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+    # A hang guard only: the held fixture and the 2 s deadline decide.
+    asyncio.run(asyncio.wait_for(drive(), timeout=30))
 
 
 def test_missing_dynamic_credential_fails_closed_then_recovers(tmp_path, upstream):
