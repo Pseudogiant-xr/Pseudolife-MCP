@@ -940,6 +940,10 @@ impl Board {
         self.cancel.cancel();
         self.tasks.close();
         self.tasks.wait().await;
+        // A retry cancelled mid-save leaves its state write running; let it finish.
+        if let Some(path) = self.config(None, None).state {
+            state::drain(&path).await;
+        }
         if let Some(doorbell) = self.doorbell.lock().await.take() {
             doorbell.close().await;
         }

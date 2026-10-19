@@ -586,7 +586,12 @@ impl Doorbell {
         self.cancel.cancel();
         self.tasks.close();
         self.tasks.wait().await;
-        self.bells.lock().await.clear();
+        let mut bells = self.bells.lock().await;
+        // A cancelled task's notice step may still be running; let it finish.
+        for bell in bells.values() {
+            state::drain(&bell.pending.path).await;
+        }
+        bells.clear();
     }
 }
 

@@ -3,49 +3,75 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     fs::{self, File, OpenOptions},
+    future::Future,
     io::{Read, Write},
+    panic::AssertUnwindSafe,
     path::{Path, PathBuf},
-    sync::{Arc, LazyLock, Mutex as StdMutex, Weak},
+    sync::{LazyLock, Mutex as StdMutex},
     time::{Duration, SystemTime},
 };
+use tokio::sync::{mpsc, oneshot};
 
 type Result<T> = std::result::Result<T, &'static str>;
-type Queue = Arc<tokio::sync::Mutex<()>>;
+type Job = Box<dyn FnOnce() + Send>;
 
-fn queue(path: &Path) -> Queue {
-    static QUEUES: LazyLock<StdMutex<HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>>> =
+/// Queue `job` behind every job already queued for `path`. Each path has one
+/// worker task that runs its jobs one at a time on the blocking pool; a new
+/// worker replaces one whose runtime has shut down.
+fn enqueue(path: &Path, job: Job) {
+    static WORKERS: LazyLock<StdMutex<HashMap<PathBuf, mpsc::UnboundedSender<Job>>>> =
         LazyLock::new(Default::default);
-    let mut queues = QUEUES.lock().unwrap_or_else(|poison| poison.into_inner());
-    queues.retain(|_, queue| queue.strong_count() > 0);
-    if let Some(queue) = queues.get(path).and_then(Weak::upgrade) {
-        return queue;
-    }
-    let queue = Queue::default();
-    queues.insert(path.to_owned(), Arc::downgrade(&queue));
-    queue
+    let mut workers = WORKERS.lock().unwrap_or_else(|poison| poison.into_inner());
+    let job = match workers.get(path) {
+        Some(jobs) => match jobs.send(job) {
+            Ok(()) => return,
+            Err(mpsc::error::SendError(job)) => job,
+        },
+        None => job,
+    };
+    let (jobs, mut queued) = mpsc::unbounded_channel::<Job>();
+    tokio::spawn(async move {
+        while let Some(job) = queued.recv().await {
+            let _ = tokio::task::spawn_blocking(job).await;
+        }
+    });
+    let _ = jobs.send(job);
+    workers.insert(path.to_owned(), jobs);
 }
 /// Run blocking state-file work for `path` off the async runtime.
 ///
 /// The shim runs a current-thread runtime, so a durable write there stalls
 /// every tool call: on the Windows dev VM on 2026-10-19 one `sync_all` took
-/// up to 3.1 s beside other tests. Jobs for one path run in submission order,
-/// and each holds that path's queue until it returns, so a caller dropped
-/// mid-write cannot let a later read of the same file overtake the write.
-pub async fn offload<T: Send + 'static>(
-    path: &Path,
-    job: impl FnOnce() -> Result<T> + Send + 'static,
-) -> Result<T> {
-    let turn = queue(path).lock_owned().await;
-    match tokio::task::spawn_blocking(move || {
-        let _turn = turn;
-        job()
-    })
-    .await
-    {
-        Ok(result) => result,
-        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-        Err(_) => Err("state_unavailable"),
+/// up to 3.1 s beside other tests. The job is queued when this is called,
+/// not when the future is first polled, and jobs for one path run in that
+/// order. Dropping the future does not cancel the job: a caller abandoned
+/// mid-write cannot let a later step on the same file overtake the write,
+/// and a result nobody is waiting for is dropped before the next job starts.
+pub fn offload<T, J>(path: &Path, job: J) -> impl Future<Output = Result<T>> + use<T, J>
+where
+    T: Send + 'static,
+    J: FnOnce() -> Result<T> + Send + 'static,
+{
+    let (reply, answer) = oneshot::channel();
+    enqueue(
+        path,
+        Box::new(move || {
+            // A refused send hands the result back; it is dropped here, on
+            // the blocking thread, before the next job for this path starts.
+            let _ = reply.send(std::panic::catch_unwind(AssertUnwindSafe(job)));
+        }),
+    );
+    async move {
+        match answer.await {
+            Ok(Ok(result)) => result,
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            Err(_) => Err("state_unavailable"),
+        }
     }
+}
+/// Wait until every job already queued for `path` has finished.
+pub async fn drain(path: &Path) {
+    let _ = offload(path, || Ok(())).await;
 }
 pub struct PrivateFile {
     pub file: File,
@@ -354,7 +380,10 @@ impl Drop for Reservation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     /// Writes to files named `slow-write*` take this long under test.
     pub(super) const WRITE_DELAY: Duration = Duration::from_millis(300);
@@ -425,12 +454,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_write_is_queued_when_offload_is_called_not_when_polled() {
+        let dir = Dir::new();
+        let path = dir.0.join("state");
+        let target = path.clone();
+        // A caller may queue a write under a lock and never await it.
+        drop(offload(&path, move || {
+            atomic_write(&target, b"queued", None)
+        }));
+        let target = path.clone();
+        assert_eq!(
+            offload(&path, move || read(&target, 16)).await.unwrap(),
+            b"queued"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_waits_for_a_dropped_write() {
+        let dir = Dir::new();
+        let path = dir.0.join("slow-write-state");
+        let (target, key) = (path.clone(), path.clone());
+        let writer = tokio::spawn(async move {
+            offload(&key, move || atomic_write(&target, b"saved", None)).await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        writer.abort();
+        // Close paths drain before cleaning up, so no write lands after them.
+        drain(&path).await;
+        assert_eq!(fs::read(&path).unwrap(), b"saved");
+    }
+
+    #[tokio::test]
     async fn a_panicking_job_reaches_its_caller_and_frees_the_path() {
         let dir = Dir::new();
         let path = dir.0.join("state");
         let key = path.clone();
         let panicked =
-            tokio::spawn(async move { offload::<()>(&key, || panic!("job failed")).await })
+            tokio::spawn(async move { offload::<(), _>(&key, || panic!("job failed")).await })
                 .await
                 .unwrap_err();
         assert!(panicked.is_panic());
