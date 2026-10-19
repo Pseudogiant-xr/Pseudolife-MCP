@@ -339,7 +339,11 @@ async fn link_relations(
         if conf < floor {
             continue;
         }
+        // A reply's lone surrogate fails the endpoint's first statement in
+        // Python (psycopg cannot encode it); the pass then keeps no count.
+        super::run::encodable(&[raw_src])?;
         let src_e = resolve_or_create_dream(svc, client, raw_src).await?;
+        super::run::encodable(&[raw_dst])?;
         let dst_e = resolve_or_create_dream(svc, client, raw_dst).await?;
         for ent in [&src_e, &dst_e] {
             if ent["created"] == json!(true) && !stamp.is_empty() {
@@ -521,6 +525,10 @@ async fn alias_candidates(
         .cloned()
         .collect();
     if !missing.is_empty() {
+        // The tokenizer refuses a lone surrogate (a TypeError in Python):
+        // the screen ends there, its memo untouched.
+        let refs: Vec<&str> = missing.iter().map(String::as_str).collect();
+        super::run::encodable(&refs)?;
         let embedder = ready.embedder.clone();
         let batch = missing.clone();
         let fresh = tokio::task::spawn_blocking(move || embedder.encode(&batch, true))

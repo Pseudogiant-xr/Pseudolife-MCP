@@ -309,7 +309,9 @@ def test_after_stop_sql_runs_once_the_seeding_daemon_has_stopped(harness, monkey
 
 def test_dream_run_scenarios_switch_off_unported_stages_and_answer_every_request(harness):
     names = [n for n in harness.SCENARIOS if n.startswith("dream-run")]
-    assert set(names) == {"dream-run", "dream-run-hold", "dream-run-empty", "dream-run-gates"}
+    assert set(names) == {"dream-run", "dream-run-hold", "dream-run-empty", "dream-run-gates",
+                          "dream-run-fallback", "dream-run-hints", "dream-run-literal",
+                          "dream-run-outage", "dream-run-redirect", "dream-run-surrogate"}
     for n in names:
         scn = harness.SCENARIOS[n]
         config = scn["config"]
@@ -317,16 +319,67 @@ def test_dream_run_scenarios_switch_off_unported_stages_and_answer_every_request
         for switch in ("lessons:\n    enabled: false", "graph_insight:\n    enabled: false",
                        "stall_notice: false"):
             assert switch in config, (n, switch)
-        assert "extractor_fallback" not in scn
+        # Only the fallback scenario configures a fallback endpoint (and so
+        # probes the primary on every run).
+        assert ("extractor_fallback" in scn) == (n == "dream-run-fallback")
         for reply in scn["extractor"]["replies"]:
             assert "sha256" not in reply, "vocab hints depend on embeddings: key by kind/user"
             assert reply["kind"] in ("claims", "events", "relations")
     run_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-run-")]
-    assert len(run_mutants) == 6
+    assert len(run_mutants) == 7
     src = Path(__file__).resolve().parents[1] / "src" / "dream"
     text = (src / "run.rs").read_text(encoding="utf-8") + (src / "relations.rs").read_text(
         encoding="utf-8")
     assert all(f'"{m}"' in text for m in run_mutants)
+    extractor_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-extractor-")]
+    assert len(extractor_mutants) == 4
+    text = (src / "extractor.rs").read_text(encoding="utf-8")
+    assert all(f'"{m}"' in text for m in extractor_mutants)
+
+
+def test_idle_seconds_compare_within_the_longest_step(harness):
+    py = {"isError": False, "value": {"backlog": 1, "idle_seconds": 12.5}}
+    assert harness.idle_diffs(py, {"value": {"idle_seconds": 13.4}}, 1.0) == []
+    assert harness.idle_diffs(py, {"value": {"idle_seconds": 14.0}}, 1.0) == [
+        "idle_seconds: python 12.500 vs rust 14.000 (apart by more than 1.000 s)"]
+    assert harness.idle_diffs(py, {"value": {"idle_seconds": -0.1}}, 5.0)[0].endswith(
+        "(not both >= 0)")
+    assert harness.idle_diffs(py, {"value": {"idle_seconds": None}}, 5.0)
+    assert harness.idle_diffs(py, {"value": {}}, 5.0)
+    assert harness.idle_diffs({"value": {"idle_seconds": 0.0}},
+                              {"value": {"idle_seconds": 0.0}}, 0.0) == []
+
+
+def test_run_clocks_never_finish_before_they_start(harness):
+    raw = {"rows": {"public.dream_runs": {"columns": ["id", "started_at", "finished_at"],
+                                          "rows": [[1, 10.0, 12.0], [2, 20.0, None],
+                                                   [3, 30.0, 29.5]]}}}
+    assert harness.run_clock_diffs("rust", raw) == [
+        "dream run clock (rust bank): finished_at 29.5 before started_at 30.0"]
+    answer = {"value": {"runs": [{"id": 1, "started_at": 5.0, "finished_at": 4.0}]}}
+    assert harness.run_clock_diffs("python", {"rows": {}}, answer) == [
+        "dream run clock (python answer): finished_at 4.0 before started_at 5.0"]
+
+
+def test_extractor_keys_reach_only_their_own_endpoint(harness):
+    from stub_extractor import auth_digest
+    scn = {"extractor_keys": {"primary": "kp", "fallback": "kf"}}
+    ok = [{"method": "GET", "path": "/health", "authorization": None},
+          {"method": "POST", "path": "/fallback/v1/chat/completions",
+           "authorization": auth_digest("Bearer kf")},
+          {"method": "POST", "path": "/v1/chat/completions",
+           "authorization": auth_digest("Bearer kp")}]
+    assert harness.extractor_key_diffs("rust", scn, ok) == []
+    bad = [{**ok[1], "authorization": auth_digest("Bearer kp")},
+           {**ok[0], "authorization": auth_digest("Bearer kp")}]
+    diffs = harness.extractor_key_diffs("rust", scn, bad)
+    assert len(diffs) == 2 and "expected the fallback key" in diffs[0]
+    assert "expected no key" in diffs[1]
+    assert harness.extractor_key_diffs("rust", {}, bad) == []
+    env = harness.extractor_env({**scn, "extractor": {}}, type("S", (), {
+        "base_url": "b", "fallback_base_url": "f"})())
+    assert env["PSEUDOLIFE_DREAM_API_KEY"] == "kp"
+    assert env["PSEUDOLIFE_DREAM_FALLBACK_API_KEY"] == "kf"
 
 
 def test_dream_answers_normalize_stall_clocks_and_run_cursors(harness):

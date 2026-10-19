@@ -87,6 +87,80 @@ fn float_str(x: f64) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Lone surrogates in a reply
+// ---------------------------------------------------------------------------
+
+/// The lone surrogate a reply string's character stands in for
+/// ([`crate::mcp::py_loads::loads_reply`]), or None for a real character.
+pub fn lone_surrogate(c: char) -> Option<u32> {
+    let n = c as u32;
+    (n >= crate::mcp::py_loads::LONE_SURROGATE_BASE)
+        .then(|| 0xD800 + (n - crate::mcp::py_loads::LONE_SURROGATE_BASE))
+}
+
+/// The `UnicodeEncodeError` psycopg raises when a parameter holds a lone
+/// surrogate (its first one, in the first such field), or None when every
+/// field encodes. Python reaches it on the database write (or the embedder
+/// refuses the string first); the dream pass fails that write the same way.
+pub fn unencodable(fields: &[&str]) -> Option<String> {
+    for f in fields {
+        for (pos, c) in f.chars().enumerate() {
+            if let Some(s) = lone_surrogate(c) {
+                return Some(format!(
+                    "UnicodeEncodeError: 'utf-8' codec can't encode character '\\u{s:04x}' \
+                     in position {pos}: surrogates not allowed"
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// `repr(s)`: as `crate::storage::py_repr`, except that a lone-surrogate
+/// stand-in prints as Python prints the surrogate (`'\ud83d'`), so the
+/// `str()` of a coerced list or dict value is the ASCII text Python builds.
+fn str_repr(s: &str) -> String {
+    if !s.chars().any(|c| lone_surrogate(c).is_some()) {
+        return crate::storage::py_repr(s);
+    }
+    let quote = if s.contains('\'') && !s.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push(quote);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c if c == quote => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if lone_surrogate(c).is_some() => {
+                out.push_str(&format!("\\u{:04x}", lone_surrogate(c).unwrap_or(0)));
+            }
+            c if crate::storage::py_printable(c) => out.push(c),
+            c => {
+                let n = c as u32;
+                if n <= 0xff {
+                    out.push_str(&format!("\\x{n:02x}"));
+                } else if n <= 0xffff {
+                    out.push_str(&format!("\\u{n:04x}"));
+                } else {
+                    out.push_str(&format!("\\U{n:08x}"));
+                }
+            }
+        }
+    }
+    out.push(quote);
+    out
+}
+
 fn py_repr(v: &Value) -> String {
     match v {
         Value::Null => "None".into(),
@@ -96,7 +170,7 @@ fn py_repr(v: &Value) -> String {
             PyNum::Int(text) => text,
             PyNum::Float(x) => float_str(x),
         },
-        Value::String(s) => crate::storage::py_repr(s),
+        Value::String(s) => str_repr(s),
         Value::Array(items) => {
             let inner: Vec<String> = items.iter().map(py_repr).collect();
             format!("[{}]", inner.join(", "))
@@ -104,7 +178,7 @@ fn py_repr(v: &Value) -> String {
         Value::Object(map) => {
             let inner: Vec<String> = map
                 .iter()
-                .map(|(k, v)| format!("{}: {}", crate::storage::py_repr(k), py_repr(v)))
+                .map(|(k, v)| format!("{}: {}", str_repr(k), py_repr(v)))
                 .collect();
             format!("{{{}}}", inner.join(", "))
         }
@@ -134,58 +208,102 @@ fn truthy(v: &Value) -> bool {
     }
 }
 
-/// The digits of a Python numeric literal with PEP 515 underscores (one
-/// between two digits) removed, or None when an underscore is misplaced.
+/// CPython's `_PyUnicode_TransformDecimalAndSpaceToASCII`, the first step
+/// of `float(str)` and `int(str)`: a character below U+007F stays, any
+/// other Unicode whitespace becomes a space, any Unicode decimal digit
+/// (`Nd`, Unicode 14) its ASCII digit, and anything else `?`, which no
+/// numeric grammar accepts.
+fn py_numeric_ascii(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if (c as u32) < 0x7f {
+                c
+            } else if crate::board::text::py_space(c) {
+                ' '
+            } else if let Some(d) = crate::graph_review::decimal_value(c)
+                && !crate::mutants::active("mcp-dream-extractor-ascii-digits")
+            {
+                char::from_digit(d, 10).unwrap_or('?')
+            } else {
+                '?'
+            }
+        })
+        .collect()
+}
+
+/// `Py_ISSPACE`: the ASCII whitespace `float()` and `int()` strip after
+/// the transform (not U+001C-U+001F, which `str.strip()` would take).
+fn py_isspace_ascii(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')
+}
+
+/// `_Py_string_to_number_with_underscores`: an underscore only between
+/// two ASCII digits, then removed; None where it is misplaced.
 fn drop_underscores(s: &str) -> Option<String> {
     if !s.contains('_') {
         return Some(s.to_string());
     }
-    let chars: Vec<char> = s.chars().collect();
-    for (i, c) in chars.iter().enumerate() {
-        if *c == '_' {
-            let before = i.checked_sub(1).and_then(|j| chars.get(j));
-            let after = chars.get(i + 1);
-            if !before.is_some_and(char::is_ascii_digit) || !after.is_some_and(char::is_ascii_digit)
-            {
+    let mut out = String::with_capacity(s.len());
+    let mut prev = '\0';
+    for c in s.chars() {
+        if c == '_' {
+            if !prev.is_ascii_digit() {
                 return None;
             }
+        } else {
+            if prev == '_' && !c.is_ascii_digit() {
+                return None;
+            }
+            out.push(c);
         }
+        prev = c;
     }
-    Some(s.replace('_', ""))
+    (prev != '_').then_some(out)
 }
 
-/// Python `float(text)` for a string: None where it raises ValueError.
+/// Python `float(text)` for a `str`: None where it raises ValueError.
+/// Unicode digits and whitespace fold first (`float("١٧") == 17.0`), so
+/// every caller (the literal gate, the judge confidences, the env and
+/// meta floats) reads a number exactly as Python does.
 pub fn py_float_str(text: &str) -> Option<f64> {
-    let s = drop_underscores(crate::storage::py_strip(text))?;
-    let body = s.trim_start_matches(['+', '-']);
-    if s.len() - body.len() > 1 {
+    let s = drop_underscores(&py_numeric_ascii(text))?;
+    let t = s.trim_matches(py_isspace_ascii);
+    let body = t.strip_prefix(['+', '-']).unwrap_or(t);
+    let special = ["inf", "infinity", "nan"]
+        .iter()
+        .any(|w| body.eq_ignore_ascii_case(w));
+    // Past the sign, Python's grammar starts with a digit or a point;
+    // Rust's parser then accepts exactly the rest of it.
+    if !special && !body.starts_with(|c: char| c.is_ascii_digit() || c == '.') {
         return None;
     }
-    let lower = body.to_ascii_lowercase();
-    if matches!(lower.as_str(), "inf" | "infinity" | "nan") {
-        return s.parse().ok();
-    }
-    // Rust accepts exactly the decimal grammar Python does, minus the
-    // special words handled above; refuse anything else Rust might take.
-    if body.is_empty()
-        || !body
+    if !special
+        && !body
             .chars()
             .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
     {
         return None;
     }
-    s.parse().ok()
+    t.parse().ok()
 }
 
-/// Python `int(text)` for a string (base 10): None where it raises.
-/// Saturates at the `i128` range, far past any batch index.
+/// CPython's `int()` digit limit (`sys.int_info.default_max_str_digits`).
+const MAX_INT_DIGITS: usize = 4300;
+
+/// Python `int(text)` for a `str` (base 10): None where it raises,
+/// Unicode digits and whitespace folded as for `float`. Saturates at the
+/// `i128` range, far past any batch index or token count.
 pub fn py_int_str(text: &str) -> Option<i128> {
-    let s = drop_underscores(crate::storage::py_strip(text))?;
-    let (neg, digits) = match s.strip_prefix('-') {
+    let s = drop_underscores(&py_numeric_ascii(text))?;
+    let t = s.trim_matches(py_isspace_ascii);
+    let (neg, digits) = match t.strip_prefix('-') {
         Some(d) => (true, d),
-        None => (false, s.strip_prefix('+').unwrap_or(&s)),
+        None => (false, t.strip_prefix('+').unwrap_or(t)),
     };
     if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if digits.len() > MAX_INT_DIGITS {
         return None;
     }
     let value = digits.parse::<i128>().unwrap_or(i128::MAX);
@@ -381,21 +499,53 @@ impl RelationClaim {
 }
 
 /// `datetime.strptime(date, "%Y-%m-%d")` succeeds. `_strptime` matches
-/// `\d` as any Unicode digit; a non-ASCII digit refuses here (declared).
+/// `(?P<Y>\d\d\d\d)-(?P<m>1[0-2]|0[1-9]|[1-9])-(?P<d>3[01]|[12]\d|0[1-9]|[1-9]| [1-9])`
+/// with `re.match`, then refuses unconverted data: `\d` is any Unicode
+/// decimal digit, so the year and the second digit of a `[12]\d` day may
+/// be non-ASCII (`int()` folds them); every other position is ASCII.
 fn strptime_ymd(s: &str) -> bool {
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        regex::Regex::new(
-            r"^([0-9]{4})-(1[0-2]|0[1-9]|[1-9])-(3[01]|[12][0-9]|0[1-9]|[1-9]| [1-9])$",
-        )
-        .expect("date pattern")
-    });
-    let Some(c) = re.captures(s) else {
+    use crate::graph_review::decimal_value;
+    let c: Vec<char> = s.chars().collect();
+    let at = |i: usize| c.get(i).copied().unwrap_or('\0');
+    let in_ = |ch: char, lo: char, hi: char| (lo..=hi).contains(&ch);
+    let Some(y) = c.get(..4).and_then(|ys| {
+        ys.iter()
+            .try_fold(0u32, |acc, &ch| Some(acc * 10 + decimal_value(ch)?))
+    }) else {
         return false;
     };
-    let num = |i: usize| c[i].trim().parse::<u32>().unwrap_or(0);
-    let (y, m, d) = (num(1), num(2), num(3));
-    if y == 0 {
+    if at(4) != '-' {
+        return false;
+    }
+    // The month alternatives in order; the pattern's `-` after the month
+    // makes the engine backtrack to the next alternative.
+    let (m, i) = if at(5) == '1' && in_(at(6), '0', '2') && at(7) == '-' {
+        (10 + at(6).to_digit(10).unwrap_or(0), 8)
+    } else if at(5) == '0' && in_(at(6), '1', '9') && at(7) == '-' {
+        (at(6).to_digit(10).unwrap_or(0), 8)
+    } else if in_(at(5), '1', '9') && at(6) == '-' {
+        (at(5).to_digit(10).unwrap_or(0), 7)
+    } else {
+        return false;
+    };
+    // The day: the first alternative that matches wins (nothing follows
+    // it in the pattern), then the whole string must be consumed.
+    let (d, len) = if at(i) == '3' && in_(at(i + 1), '0', '1') {
+        (30 + at(i + 1).to_digit(10).unwrap_or(0), 2)
+    } else if in_(at(i), '1', '2')
+        && let Some(v) = decimal_value(at(i + 1))
+    {
+        (at(i).to_digit(10).unwrap_or(0) * 10 + v, 2)
+    } else if at(i) == '0' && in_(at(i + 1), '1', '9') {
+        (at(i + 1).to_digit(10).unwrap_or(0), 2)
+    } else if in_(at(i), '1', '9') {
+        (at(i).to_digit(10).unwrap_or(0), 1)
+    } else if at(i) == ' ' && in_(at(i + 1), '1', '9') {
+        (at(i + 1).to_digit(10).unwrap_or(0), 2)
+    } else {
+        return false;
+    };
+    if i + len != c.len() || y == 0 {
         return false;
     }
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
@@ -609,10 +759,14 @@ pub enum Cause {
 /// `ExtractorError` (`memory/dream.py:1189-1199`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtractorError {
-    /// `str(exc)`: `"<label> failed: <cause>"`. Best effort on the cause
-    /// text; it never decides anything.
+    /// `str(exc)`: `"<label> failed: <cause>"`, which the auth words are
+    /// read from as Python reads them. Credentials a Python message would
+    /// carry (an extractor URL's userinfo) are redacted out of it.
     pub message: String,
     pub auth_failure: bool,
+    /// Whether the auth words appeared in a part of Python's message that
+    /// `message` redacts.
+    pub redacted_auth_words: bool,
     pub cause: Cause,
 }
 
@@ -636,7 +790,8 @@ impl ExtractorError {
     /// `classify_extractor_error` (`memory/dream.py:2278-2308`):
     /// `(reason, error)` for the dream-stall record.
     pub fn classify(&self) -> (&'static str, String) {
-        let auth = self.auth_failure || auth_words().is_match(&self.message);
+        let auth =
+            self.auth_failure || self.redacted_auth_words || auth_words().is_match(&self.message);
         let failed = if auth {
             "login_expired"
         } else {
@@ -695,16 +850,23 @@ impl From<Uncaught> for ExtractFailure {
 struct Raised {
     text: String,
     auth: bool,
+    /// Auth words in text Python's message has and `text` redacts.
+    redacted_auth_words: bool,
     cause: Cause,
 }
 
 impl Raised {
-    fn other(type_name: &str, text: impl Into<String>) -> Self {
+    fn new(cause: Cause, text: impl Into<String>) -> Self {
         Raised {
             text: text.into(),
             auth: false,
-            cause: Cause::Other(type_name.into()),
+            redacted_auth_words: false,
+            cause,
         }
+    }
+
+    fn other(type_name: &str, text: impl Into<String>) -> Self {
+        Raised::new(Cause::Other(type_name.into()), text)
     }
 
     fn label(self, label: &str, keep_auth: bool) -> ExtractorError {
@@ -712,34 +874,57 @@ impl Raised {
             message: format!("{label} failed: {}", self.text),
             // Only `extract` copies the HTTP auth hint onto its error.
             auth_failure: keep_auth && self.auth,
+            redacted_auth_words: self.redacted_auth_words,
             cause: self.cause,
         }
     }
 }
 
-/// `json.loads(text)` with the exception class Python's chain ends in:
-/// the C scanner's "Expecting value" leaves a `StopIteration` context.
+/// `json.loads(text)` of a reply (lone surrogates kept, as
+/// [`crate::mcp::py_loads::loads_reply`] documents), with the exception
+/// class Python's chain ends in.
 fn loads(text: &str) -> Result<Value, Raised> {
-    if let Some(v) = crate::mcp::py_loads::loads(text) {
+    let parsed = if crate::mutants::active("mcp-dream-extractor-strict-surrogates") {
+        crate::mcp::py_loads::loads(text)
+    } else {
+        crate::mcp::py_loads::loads_reply(text)
+    };
+    if let Some(v) = parsed {
         return Ok(v);
     }
-    Err(if json_error_expects_value(text) {
-        Raised::other("StopIteration", "Expecting value")
-    } else {
-        Raised::other("JSONDecodeError", "invalid JSON")
+    Err(match json_error_kind(text) {
+        JsonFail::ExpectingValue => Raised::other("StopIteration", "Expecting value"),
+        JsonFail::Decode => Raised::other("JSONDecodeError", "invalid JSON"),
+        JsonFail::Recursion => Raised::other(
+            "RecursionError",
+            "maximum recursion depth exceeded while decoding a JSON document",
+        ),
     })
 }
 
-/// Whether CPython's C scanner fails `text` with "Expecting value" (a
-/// value position, top-level or nested, that starts no value: its
-/// `StopIteration` reaches `raw_decode`, which leaves it as the context)
-/// rather than another `JSONDecodeError` (a delimiter, a property name, a
-/// string, extra data or a BOM). Only called once the parse has failed.
-fn json_error_expects_value(text: &str) -> bool {
+/// How CPython's C scanner fails a reply.
+#[derive(Debug, PartialEq)]
+enum JsonFail {
+    /// "Expecting value": a value position, top-level or nested, that
+    /// starts no value. Its `StopIteration` reaches `raw_decode`, which
+    /// leaves it as the `JSONDecodeError`'s context.
+    ExpectingValue,
+    /// Any other `JSONDecodeError` (a delimiter, a property name, a
+    /// string, extra data or a BOM).
+    Decode,
+    /// Nesting past the scanner's recursion limit: a bare `RecursionError`
+    /// (`raw_decode` catches only `StopIteration`).
+    Recursion,
+}
+
+/// The [`JsonFail`] of a reply the parse refused, the first failure left
+/// to right deciding. Only called once the parse has failed.
+fn json_error_kind(text: &str) -> JsonFail {
     #[derive(PartialEq)]
     enum Fail {
         Value,
         Other,
+        Depth,
     }
     /// `py_loads`' nesting cap (`mcp/py_loads.rs` `MAX_DEPTH`).
     const MAX_NESTING: usize = 900;
@@ -815,11 +1000,11 @@ fn json_error_expects_value(text: &str) -> bool {
         Some(k)
     }
     // Nesting past the depth `py_loads` caps (its `MAX_DEPTH`) stops here,
-    // as CPython's scanner stops with a RecursionError: never "Expecting
-    // value", and never an unbounded recursion on untrusted model output.
+    // as CPython's scanner stops with a RecursionError, and never recurses
+    // unbounded on untrusted model output.
     fn value(s: &[char], i: usize, depth: usize) -> Result<usize, Fail> {
         if depth > MAX_NESTING {
-            return Err(Fail::Other);
+            return Err(Fail::Depth);
         }
         let Some(&c) = s.get(i) else {
             return Err(Fail::Value);
@@ -873,61 +1058,292 @@ fn json_error_expects_value(text: &str) -> bool {
     }
     let s: Vec<char> = text.chars().collect();
     if s.first() == Some(&'\u{feff}') {
-        return false;
+        return JsonFail::Decode;
     }
     match value(&s, ws(&s, 0), 0) {
-        Err(f) => f == Fail::Value,
-        Ok(_) => false,
+        Err(Fail::Value) => JsonFail::ExpectingValue,
+        Err(Fail::Depth) => JsonFail::Recursion,
+        Err(Fail::Other) | Ok(_) => JsonFail::Decode,
     }
 }
 
-fn reqwest_failure(e: &reqwest::Error) -> Raised {
-    let text = e.to_string();
-    if e.is_timeout() {
-        return Raised {
-            text: "timed out".into(),
-            auth: false,
-            cause: Cause::Timeout,
-        };
+// ---------------------------------------------------------------------------
+// Transport: urllib's failures, by type
+// ---------------------------------------------------------------------------
+
+/// A name resolution failure, typed so the error chain can name it: urllib
+/// raises `URLError(socket.gaierror)`.
+#[derive(Debug)]
+struct DnsFailure(std::io::Error);
+
+impl std::fmt::Display for DnsFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
-    if e.is_connect() {
-        let mut source: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
-        while let Some(s) = source {
-            if let Some(io) = s.downcast_ref::<std::io::Error>() {
-                if io.kind() == std::io::ErrorKind::ConnectionRefused {
-                    return Raised {
-                        text: format!("<urlopen error {io}>"),
-                        auth: false,
-                        cause: Cause::Refused,
-                    };
+}
+
+impl std::error::Error for DnsFailure {}
+
+/// getaddrinfo, as `socket.create_connection` resolves, with its failure
+/// typed ([`DnsFailure`]).
+struct GaiResolver;
+
+impl reqwest::dns::Resolve for GaiResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            match tokio::net::lookup_host((host.as_str(), 0)).await {
+                Ok(addrs) => {
+                    let addrs: Vec<std::net::SocketAddr> = addrs.collect();
+                    Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
                 }
-                if io.kind() == std::io::ErrorKind::TimedOut {
-                    return Raised {
-                        text: "<urlopen error timed out>".into(),
-                        auth: false,
-                        cause: Cause::Timeout,
-                    };
-                }
+                Err(e) => Err(Box::new(DnsFailure(e)) as Box<dyn std::error::Error + Send + Sync>),
             }
-            source = s.source();
-        }
-        // A name that does not resolve is `socket.gaierror` in Python.
-        let name = if text.contains("dns") || text.contains("resolve") {
-            "gaierror"
+        })
+    }
+}
+
+/// The client every extractor call uses: `no_redirect.urlopen` for the
+/// credentialed chat calls (`follow` false), plain `urlopen` for probes.
+fn http_client(timeout: Duration, follow: bool) -> Result<reqwest::Client, Raised> {
+    let policy = if follow {
+        reqwest::redirect::Policy::limited(10)
+    } else {
+        reqwest::redirect::Policy::none()
+    };
+    reqwest::Client::builder()
+        .redirect(policy)
+        .timeout(timeout)
+        .dns_resolver(GaiResolver)
+        .build()
+        .map_err(|_| Raised::other("OSError", "could not build the HTTP client"))
+}
+
+/// `str(OSError)`'s class for an I/O error, as CPython maps errno (and
+/// Windows' WSA codes) onto `OSError` subclasses; the two classes
+/// `classify_extractor_error` names on their own become their causes.
+fn io_failure(io: &std::io::Error, wrapped: bool) -> Raised {
+    use std::io::ErrorKind as K;
+    let shown = |t: String| {
+        if wrapped {
+            format!("<urlopen error {t}>")
         } else {
-            "OSError"
-        };
-        return Raised {
-            text: format!("<urlopen error {text}>"),
-            auth: false,
-            cause: Cause::Unreachable(name.into()),
+            t
+        }
+    };
+    let name = match io.kind() {
+        K::ConnectionRefused => return Raised::new(Cause::Refused, shown(io.to_string())),
+        K::TimedOut => return Raised::new(Cause::Timeout, shown("timed out".into())),
+        K::ConnectionReset => "ConnectionResetError",
+        K::ConnectionAborted => "ConnectionAbortedError",
+        K::BrokenPipe => "BrokenPipeError",
+        K::PermissionDenied => "PermissionError",
+        K::Interrupted => "InterruptedError",
+        K::WouldBlock => "BlockingIOError",
+        K::NotFound => "FileNotFoundError",
+        _ => "OSError",
+    };
+    Raised::new(Cause::Unreachable(name.into()), shown(io.to_string()))
+}
+
+/// Where a reqwest failure struck: sending the request and reading the
+/// head (`h.request`, wrapped in `URLError`, then `getresponse`), or
+/// reading the body (`resp.read()`).
+#[derive(Clone, Copy, PartialEq)]
+enum Phase {
+    Send,
+    Body,
+}
+
+/// The exception urllib raises for a reqwest failure, found by type along
+/// the error's source chain. The text never comes from reqwest's own
+/// `Display`, which names the URL (and so any userinfo in it).
+fn transport_failure(e: &reqwest::Error, phase: Phase) -> Raised {
+    if e.is_timeout() {
+        return Raised::new(Cause::Timeout, "timed out");
+    }
+    let mut incomplete = false;
+    let mut parse = false;
+    let mut source: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
+    while let Some(s) = source {
+        if let Some(d) = s.downcast_ref::<DnsFailure>() {
+            return Raised::new(
+                Cause::Unreachable("gaierror".into()),
+                format!("<urlopen error {d}>"),
+            );
+        }
+        if let Some(io) = s.downcast_ref::<std::io::Error>() {
+            // An end of stream is no OSError in Python: the body's is
+            // IncompleteRead, the head's RemoteDisconnected (below).
+            if io.kind() == std::io::ErrorKind::UnexpectedEof {
+                incomplete = true;
+                break;
+            }
+            // Connecting is inside `h.request`, which wraps in URLError.
+            return io_failure(io, e.is_connect());
+        }
+        if let Some(h) = s.downcast_ref::<hyper::Error>() {
+            incomplete |= h.is_incomplete_message();
+            parse |= h.is_parse();
+        }
+        source = s.source();
+    }
+    if incomplete {
+        return match phase {
+            // The connection closed before a status line arrived.
+            Phase::Send => Raised::new(
+                Cause::Unreachable("RemoteDisconnected".into()),
+                "Remote end closed connection without response",
+            ),
+            Phase::Body => Raised::other("IncompleteRead", "IncompleteRead"),
         };
     }
-    Raised {
-        text,
-        auth: false,
-        cause: Cause::Unreachable("OSError".into()),
+    if parse {
+        return Raised::other("BadStatusLine", "BadStatusLine");
     }
+    if e.is_builder() {
+        return Raised::other("ValueError", "invalid URL");
+    }
+    if phase == Phase::Body {
+        return Raised::other("IncompleteRead", "IncompleteRead");
+    }
+    Raised::new(
+        Cause::Unreachable("OSError".into()),
+        "<urlopen error connection failed>",
+    )
+}
+
+/// What urllib makes of a URL whose authority carries userinfo
+/// (`user:pass@host`): `http.client` takes the whole netloc as
+/// `host[:port]`, so it never connects. A colon in the userinfo with no
+/// numeric port after the last colon is `InvalidURL("nonnumeric port:
+/// ...")` raised from `int()`'s ValueError (the chain ends in ValueError);
+/// otherwise the host `user:pass@host` fails getaddrinfo (`gaierror`).
+/// None for a URL without userinfo. The returned text redacts the
+/// userinfo, which Python's message would carry.
+fn userinfo_refusal(url: &str) -> Option<Raised> {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let rest = rest.strip_prefix("//").unwrap_or(rest);
+    let netloc = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    let at = netloc.rfind('@')?;
+    let colon = netloc.rfind(':');
+    let bracket = netloc.rfind(']');
+    if let Some(i) = colon
+        && bracket.is_none_or(|j| i > j)
+    {
+        let port = &netloc[i + 1..];
+        if !port.is_empty() && py_int_str(port).is_none() {
+            let words = auth_words().is_match(port);
+            let shown = if i < at {
+                format!("<redacted>{}", &netloc[at..])
+            } else {
+                port.to_string()
+            };
+            let mut r = Raised::other("ValueError", format!("nonnumeric port: '{shown}'"));
+            r.redacted_auth_words = words && !auth_words().is_match(&shown);
+            return Some(r);
+        }
+    }
+    Some(Raised::new(
+        Cause::Unreachable("gaierror".into()),
+        "<urlopen error getaddrinfo failed>",
+    ))
+}
+
+/// A URL with any userinfo replaced, for a log line.
+fn redact_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    match rest[..end].rfind('@') {
+        Some(at) => format!("{scheme}://<redacted>{}", &rest[at..]),
+        None => url.to_string(),
+    }
+}
+
+/// The reason phrase urllib's `HTTPError` carries: the server's own
+/// (`str(line, "iso-8859-1")`, stripped), which hyper keeps as a
+/// `ReasonPhrase` whenever it is not the canonical one.
+fn reason_phrase(resp: &reqwest::Response) -> String {
+    let custom = resp
+        .extensions()
+        .get::<hyper::ext::ReasonPhrase>()
+        .filter(|_| !crate::mutants::active("mcp-dream-extractor-canonical-reason"));
+    match custom {
+        Some(r) => {
+            let latin: String = r.as_bytes().iter().map(|&b| char::from(b)).collect();
+            crate::storage::py_strip(&latin).to_string()
+        }
+        None => resp.status().canonical_reason().unwrap_or("").to_string(),
+    }
+}
+
+/// `str(HTTPError)` for a refused answer. A redirect `HTTPRedirectHandler`
+/// handles (301, 302, 303, 307, 308 with a `Location` or `URI`) reaches
+/// `NoRedirectHandler.redirect_request`, whose message names the target;
+/// any other status keeps the plain reason. The auth words are read from
+/// this text, so a target such as `.../oauth/...` reads as a failed login,
+/// as it does in Python.
+fn http_error_text(
+    code: u16,
+    reason: &str,
+    full_url: &str,
+    headers: &reqwest::header::HeaderMap,
+) -> String {
+    let plain = format!("HTTP Error {code}: {reason}");
+    if !matches!(code, 301 | 302 | 303 | 307 | 308) {
+        return plain;
+    }
+    let target = headers
+        .get(reqwest::header::LOCATION)
+        .or_else(|| headers.get("uri"))
+        .map(|v| {
+            v.as_bytes()
+                .iter()
+                .map(|&b| char::from(b))
+                .collect::<String>()
+        });
+    let Some(target) = target else {
+        return plain;
+    };
+    let scheme = target
+        .split_once(':')
+        .filter(|(s, _)| {
+            !s.is_empty()
+                && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        })
+        .map_or(String::new(), |(s, _)| s.to_ascii_lowercase());
+    if !matches!(scheme.as_str(), "http" | "https" | "ftp" | "") {
+        return format!(
+            "HTTP Error {code}: {reason} - Redirection to url '{target}' is not allowed"
+        );
+    }
+    let joined = reqwest::Url::parse(full_url)
+        .and_then(|base| base.join(&target))
+        .map_or(target.clone(), |u| u.to_string());
+    format!(
+        "HTTP Error {code}: {reason}; redirect to {joined} refused -- configure the final URL \
+         directly"
+    )
+}
+
+/// Up to `AUTH_BODY_PEEK` bytes of an error answer's body, as
+/// `exc.read(_AUTH_BODY_PEEK)` reads them; the rest is never read. A read
+/// failure is no hint (`_http_auth_failure` returns False).
+async fn peek_body(mut resp: reqwest::Response) -> Vec<u8> {
+    let mut out = Vec::new();
+    while out.len() < AUTH_BODY_PEEK {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => out.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(_) => return Vec::new(),
+        }
+    }
+    out.truncate(AUTH_BODY_PEEK);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -935,8 +1351,9 @@ fn reqwest_failure(e: &reqwest::Error) -> Raised {
 // ---------------------------------------------------------------------------
 
 /// `OpenAICompatExtractor` (`memory/dream.py:1231-1284`) as the daemon
-/// builds it (no prompt overrides, no judge-thinking knob).
-#[derive(Debug, Clone, PartialEq)]
+/// builds it (no prompt overrides, no judge-thinking knob). Its `Debug`
+/// redacts the API key and the base URL's userinfo.
+#[derive(Clone, PartialEq)]
 pub struct Compat {
     pub base_url: String,
     pub model: String,
@@ -946,6 +1363,19 @@ pub struct Compat {
     pub extra_body: Map<String, Value>,
     pub system_prompt: String,
     pub events_prompt: String,
+}
+
+impl std::fmt::Debug for Compat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Compat")
+            .field("base_url", &redact_url(&self.base_url))
+            .field("model", &self.model)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("max_tokens", &self.max_tokens)
+            .field("timeout", &self.timeout)
+            .field("extra_body", &self.extra_body)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Compat {
@@ -1057,34 +1487,39 @@ impl Compat {
     async fn content(&self, body: String) -> Result<String, Raised> {
         let timeout = Duration::try_from_secs_f64(self.timeout)
             .map_err(|_| Raised::other("ValueError", "Timeout value must be positive"))?;
+        let url = format!("{}/chat/completions", self.base_url);
+        if let Some(refused) = userinfo_refusal(&url) {
+            return Err(refused);
+        }
         // `no_redirect.urlopen`: a redirect is an HTTPError with its own code.
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(timeout)
-            .build()
-            .map_err(|e| Raised::other("OSError", e.to_string()))?;
+        let client = http_client(timeout, false)?;
         let mut req = client
-            .post(format!("{}/chat/completions", self.base_url))
+            .post(&url)
             .header("content-type", "application/json")
             .body(body);
         if let Some(key) = &self.api_key {
             req = req.header("authorization", format!("Bearer {key}"));
         }
-        let resp = req.send().await.map_err(|e| reqwest_failure(&e))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| transport_failure(&e, Phase::Send))?;
         let status = resp.status();
-        let bytes = resp.bytes().await.map_err(|e| reqwest_failure(&e))?;
         if !status.is_success() {
             let code = status.as_u16();
-            let peek = String::from_utf8_lossy(&bytes[..bytes.len().min(AUTH_BODY_PEEK)]);
-            return Err(Raised {
-                text: format!(
-                    "HTTP Error {code}: {}",
-                    status.canonical_reason().unwrap_or("")
-                ),
-                auth: code == 401 || code == 403 || auth_words().is_match(&peek),
-                cause: Cause::Http(code),
-            });
+            let text = http_error_text(code, &reason_phrase(&resp), &url, resp.headers());
+            // Only the first bytes are read, and only for the auth hint.
+            let peek = peek_body(resp).await;
+            let mut raised = Raised::new(Cause::Http(code), text);
+            raised.auth = code == 401
+                || code == 403
+                || auth_words().is_match(&String::from_utf8_lossy(&peek));
+            return Err(raised);
         }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| transport_failure(&e, Phase::Body))?;
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| Raised::other("UnicodeDecodeError", "'utf-8' codec can't decode"))?;
         let data = loads(text)?;
@@ -1424,9 +1859,15 @@ pub async fn build_extractor_with_fallback_using(
     retry_delay: f64,
 ) -> Result<(Extractor, &'static str), String> {
     let r = resolve_endpoints_with(cfg, env);
-    let fallback_key = env("PSEUDOLIFE_DREAM_FALLBACK_API_KEY")
-        .filter(|v| !v.is_empty())
-        .or_else(|| cfg.fallback_api_key.clone());
+    let fallback_key = if crate::mutants::active("mcp-dream-extractor-shared-key") {
+        env("PSEUDOLIFE_DREAM_API_KEY")
+            .filter(|v| !v.is_empty())
+            .or_else(|| cfg.extractor_api_key.clone())
+    } else {
+        env("PSEUDOLIFE_DREAM_FALLBACK_API_KEY")
+            .filter(|v| !v.is_empty())
+            .or_else(|| cfg.fallback_api_key.clone())
+    };
     if r.mode == "fallback" {
         if !r.has_fallback() {
             return Err(
@@ -1447,8 +1888,8 @@ pub async fn build_extractor_with_fallback_using(
     }
     eprintln!(
         "dream primary extractor {} unreachable — using fallback {}",
-        r.primary_url.as_deref().unwrap_or("None"),
-        r.fallback_url.as_deref().unwrap_or("None")
+        redact_url(r.primary_url.as_deref().unwrap_or("None")),
+        redact_url(r.fallback_url.as_deref().unwrap_or("None"))
     );
     Ok((fallback_extractor(cfg, &r, fallback_key), "fallback"))
 }
@@ -1463,13 +1904,14 @@ pub async fn build_extractor_with_fallback(
 // Probes
 // ---------------------------------------------------------------------------
 
-/// A plain `urllib.request.urlopen` GET: redirects followed.
+/// A plain `urllib.request.urlopen` GET: redirects followed. A URL with
+/// userinfo fails as urllib fails it, without connecting.
 async fn get(url: &str, timeout: f64) -> Result<(u16, Vec<u8>), ()> {
     let timeout = Duration::try_from_secs_f64(timeout).map_err(|_| ())?;
-    let client = reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(|_| ())?;
+    if userinfo_refusal(url).is_some() {
+        return Err(());
+    }
+    let client = http_client(timeout, true).map_err(|_| ())?;
     let resp = client.get(url).send().await.map_err(|_| ())?;
     let status = resp.status().as_u16();
     let body = resp.bytes().await.map_err(|_| ())?;
@@ -1615,11 +2057,22 @@ mod tests {
         // A hostile or broken model reply nested far past the cap must not
         // overflow the stack; CPython stops it with a RecursionError, which
         // is not "Expecting value".
-        for open in ["[", "{\"k\":"] {
+        // CPython 3.11: json.loads of each raises a bare RecursionError
+        // (no context), so classify_extractor_error names RecursionError.
+        for open in ["[", "{\"k\":", "[1, ["] {
             let text = open.repeat(100_000);
-            assert!(!json_error_expects_value(&text));
+            assert_eq!(json_error_kind(&text), JsonFail::Recursion);
+            assert_eq!(
+                loads(&text).err().map(|r| r.cause),
+                Some(Cause::Other("RecursionError".into()))
+            );
         }
-        assert!(json_error_expects_value(&"[".repeat(10)));
+        assert_eq!(json_error_kind(&"[".repeat(10)), JsonFail::ExpectingValue);
+        // A syntax error before the nesting gets deep is found first.
+        assert_eq!(
+            json_error_kind(&format!("[1 2, {}", "[".repeat(5000))),
+            JsonFail::Decode
+        );
     }
 
     #[test]
@@ -1657,10 +2110,10 @@ mod tests {
             "1.",
         ];
         for s in value {
-            assert!(json_error_expects_value(s), "{s:?}");
+            assert_eq!(json_error_kind(s), JsonFail::ExpectingValue, "{s:?}");
         }
         for s in other {
-            assert!(!json_error_expects_value(s), "{s:?}");
+            assert_eq!(json_error_kind(s), JsonFail::Decode, "{s:?}");
         }
     }
 
@@ -1821,6 +2274,303 @@ mod tests {
         }
     }
 
+    /// A raw HTTP answer (`HTTP/1.1 {status_line}`), its Content-Length
+    /// declared as `length` (default: the body's).
+    fn raw_response(
+        status_line: &str,
+        body: &[u8],
+        headers: &[(&str, &str)],
+        length: Option<usize>,
+    ) -> Vec<u8> {
+        let mut head = format!(
+            "HTTP/1.1 {status_line}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            length.unwrap_or(body.len())
+        );
+        for (k, v) in headers {
+            head.push_str(&format!("{k}: {v}\r\n"));
+        }
+        head.push_str("\r\n");
+        let mut out = head.into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// Reads each request whole, then writes `raw` and closes, or (for an
+    /// empty `raw`) closes without answering.
+    fn serve_raw(raw: Vec<u8>) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { return };
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 65536];
+                loop {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
+                        let len = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .map_or(0, |v| v.trim().parse().unwrap_or(0));
+                        if buf.len() >= end + 4 + len {
+                            break;
+                        }
+                    }
+                }
+                if !raw.is_empty() {
+                    let _ = s.write_all(&raw);
+                }
+            }
+        });
+        format!("http://127.0.0.1:{port}/v1")
+    }
+
+    fn envelope(content: &str) -> Vec<u8> {
+        pyjson::dumps(&json!({"choices": [{"message": {"content": content}}]})).into_bytes()
+    }
+
+    async fn classify_at(base: &str) -> Result<Vec<Extracted>, (String, String)> {
+        let notes: Vec<String> = ["n1", "n2", "n3"].map(String::from).to_vec();
+        ctor("primary", base)
+            .extract(&notes, &[], None)
+            .await
+            .map_err(|e| {
+                let (r, e) = classify_failure(&e);
+                (r.to_string(), e)
+            })
+    }
+
+    #[tokio::test]
+    async fn transport_failures_classify_as_python() {
+        // Expected: CPython 3.11, OpenAICompatExtractor.extract against the
+        // same raw answers, then classify_extractor_error.
+        let mut far = vec![b'x'; 5000];
+        far.extend_from_slice(b" please log in again");
+        let mut near = b"please log in again".to_vec();
+        near.extend(vec![b'x'; 9000]);
+        let cases: Vec<(&str, Vec<u8>, (&str, &str))> = vec![
+            (
+                "reason_login",
+                raw_response("500 Login Required", b"{}", &[], None),
+                ("login_expired", "HTTP 500"),
+            ),
+            (
+                "reason_plain",
+                raw_response("500 Internal Server Error", b"{}", &[], None),
+                ("extractor_error", "HTTP 500"),
+            ),
+            (
+                "reason_empty",
+                raw_response("500 ", b"{}", &[], None),
+                ("extractor_error", "HTTP 500"),
+            ),
+            (
+                "redirect_oauth",
+                raw_response(
+                    "302 Found",
+                    b"",
+                    &[("Location", "http://elsewhere.example/oauth/authorize")],
+                    None,
+                ),
+                ("login_expired", "HTTP 302"),
+            ),
+            (
+                "redirect_relative",
+                raw_response("302 Found", b"", &[("Location", "/v1/next")], None),
+                ("extractor_error", "HTTP 302"),
+            ),
+            (
+                "redirect_nolocation",
+                raw_response("302 Found", b"", &[], None),
+                ("extractor_error", "HTTP 302"),
+            ),
+            (
+                "redirect_scheme",
+                raw_response(
+                    "307 Temporary Redirect",
+                    b"",
+                    &[("Location", "javascript:login()")],
+                    None,
+                ),
+                ("login_expired", "HTTP 307"),
+            ),
+            (
+                "redirect_300",
+                raw_response(
+                    "300 Multiple Choices",
+                    b"",
+                    &[("Location", "/oauth/x")],
+                    None,
+                ),
+                ("extractor_error", "HTTP 300"),
+            ),
+            // Only the first 4,096 bytes of an error body are read.
+            (
+                "body_auth_far",
+                raw_response("500 Internal Server Error", &far, &[], None),
+                ("extractor_error", "HTTP 500"),
+            ),
+            (
+                "body_auth_near",
+                raw_response("500 Internal Server Error", &near, &[], None),
+                ("login_expired", "HTTP 500"),
+            ),
+            (
+                "close_no_response",
+                Vec::new(),
+                ("extractor_unreachable", "unreachable (RemoteDisconnected)"),
+            ),
+            (
+                "incomplete_body",
+                raw_response("200 OK", b"{\"choices\": [", &[], Some(200)),
+                ("extractor_error", "IncompleteRead"),
+            ),
+            (
+                "deep",
+                raw_response(
+                    "200 OK",
+                    &envelope(&format!("{{\"claims\": {}", "[".repeat(100_000))),
+                    &[],
+                    None,
+                ),
+                ("extractor_error", "RecursionError"),
+            ),
+        ];
+        for (name, raw, (reason, error)) in cases {
+            let base = serve_raw(raw);
+            let got = classify_at(&base).await;
+            assert_eq!(
+                got.err(),
+                Some((reason.to_string(), error.to_string())),
+                "{name}"
+            );
+        }
+        // A port nothing listens on, a name that does not resolve, and URLs
+        // with userinfo, which urllib never connects with.
+        let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = dead.local_addr().unwrap().port();
+        drop(dead);
+        let urls = [
+            (
+                format!("http://127.0.0.1:{port}/v1"),
+                ("extractor_unreachable", "connection refused"),
+            ),
+            (
+                "http://dns-box.invalid/v1".to_string(),
+                ("extractor_unreachable", "unreachable (gaierror)"),
+            ),
+            (
+                format!("http://user:pass@127.0.0.1:{port}/v1"),
+                ("extractor_unreachable", "unreachable (gaierror)"),
+            ),
+            (
+                "http://user:pass@127.0.0.1/v1".to_string(),
+                ("extractor_error", "ValueError"),
+            ),
+            (
+                "http://user:login@127.0.0.1/v1".to_string(),
+                ("login_expired", "ValueError"),
+            ),
+            (
+                format!("http://user@127.0.0.1:{port}/v1"),
+                ("extractor_unreachable", "unreachable (gaierror)"),
+            ),
+        ];
+        for (url, (reason, error)) in urls {
+            let got = classify_at(&url).await;
+            assert_eq!(
+                got.err(),
+                Some((reason.to_string(), error.to_string())),
+                "{url}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn userinfo_never_reaches_a_message_or_debug() {
+        let ex = Compat::new(
+            "http://user:s3cret@127.0.0.1/v1",
+            "m",
+            Some("sk-live".into()),
+            7,
+            5.0,
+            None,
+        );
+        let debug = format!("{ex:?}");
+        assert!(
+            !debug.contains("s3cret") && !debug.contains("sk-live"),
+            "{debug}"
+        );
+        let notes = vec!["n1".to_string()];
+        let err = ex.extract(&notes, &[], None).await.unwrap_err();
+        let shown = format!(
+            "{err:?} {}",
+            match &err {
+                ExtractFailure::Extractor(e) => e.to_string(),
+                ExtractFailure::Uncaught(u) => u.message.clone(),
+            }
+        );
+        assert!(!shown.contains("s3cret"), "{shown}");
+        assert_eq!(
+            redact_url("https://a:b@h:1/v1?x"),
+            "https://<redacted>@h:1/v1?x"
+        );
+        assert_eq!(redact_url("http://h/v1"), "http://h/v1");
+    }
+
+    #[test]
+    fn io_errors_take_python_class_names() {
+        use std::io::{Error, ErrorKind as K};
+        let named = |k: K| io_failure(&Error::from(k), false).cause;
+        assert_eq!(named(K::ConnectionRefused), Cause::Refused);
+        assert_eq!(named(K::TimedOut), Cause::Timeout);
+        for (k, name) in [
+            (K::ConnectionReset, "ConnectionResetError"),
+            (K::ConnectionAborted, "ConnectionAbortedError"),
+            (K::BrokenPipe, "BrokenPipeError"),
+            (K::PermissionDenied, "PermissionError"),
+            (K::AddrNotAvailable, "OSError"),
+        ] {
+            assert_eq!(named(k), Cause::Unreachable(name.into()), "{k:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn lone_surrogates_in_replies_parse_as_python() {
+        // CPython 3.11: a lone surrogate in an unwritten field consolidates;
+        // in a coerced list value, str() escapes it.
+        let lone = |s: u32| {
+            char::from_u32(crate::mcp::py_loads::LONE_SURROGATE_BASE + s - 0xD800).unwrap()
+        };
+        let reply = |claims: &str| raw_response("200 OK", &envelope(claims), &[], None);
+        let base = serve_raw(reply(
+            r#"{"claims": [{"entity": "E", "attribute": "a", "value": "v", "quote": "q\ud83d", "source": 1}]}"#,
+        ));
+        let got = classify_at(&base).await.unwrap();
+        let Extracted::Claim(c) = &got[0] else {
+            panic!("{got:?}")
+        };
+        assert_eq!(
+            c.quote.as_deref(),
+            Some(format!("q{}", lone(0xd83d)).as_str())
+        );
+        assert_eq!(unencodable(&[&c.value, &c.entity]), None);
+        assert!(unencodable(&[c.quote.as_deref().unwrap()]).is_some());
+        let base = serve_raw(reply(
+            r#"{"claims": [{"entity": "E", "attribute": "a", "value": ["\ud83d", "a'"], "source": 1}]}"#,
+        ));
+        let got = classify_at(&base).await.unwrap();
+        assert_eq!(
+            pyjson::dumps(&Value::Array(got.iter().map(Extracted::to_json).collect())),
+            r#"[{"entity": "E", "attribute": "a", "value": "['\\ud83d', \"a'\"]", "confidence": 0.7, "origin": "agent", "value_coerced": true, "source": 0}]"#
+        );
+    }
+
     fn config_from(v: &Value) -> DreamConfig {
         let mut c = DreamConfig::default();
         let s = |k: &str| v.get(k).and_then(Value::as_str).map(String::from);
@@ -1915,10 +2665,114 @@ mod tests {
     }
 
     #[test]
+    fn unicode_digits_fold_as_python() {
+        // CPython 3.11 `float(s)`, `int(s)` and `datetime.strptime(s, "%Y-%m-%d")`.
+        let nan = f64::NAN;
+        let inf = f64::INFINITY;
+        let floats: [(&str, Option<f64>); 35] = [
+            ("\u{661}\u{667}", Some(17.0_f64)),
+            ("\u{661}\u{667}.\u{665}", Some(17.5_f64)),
+            ("\u{1c}1", None),
+            ("1\u{1c}", None),
+            ("\u{a0}1\u{a0}", Some(1.0_f64)),
+            ("\u{2002}1", Some(1.0_f64)),
+            ("1_\u{661}", Some(11.0_f64)),
+            ("\u{661}_1", Some(11.0_f64)),
+            ("+\u{661}", Some(1.0_f64)),
+            ("\u{ff11}\u{ff17}", Some(17.0_f64)),
+            ("\u{1d7cf}\u{1d7d5}", Some(17.0_f64)),
+            ("\u{b2}", None),
+            ("1e\u{661}", Some(10.0_f64)),
+            ("\u{e51}e5", Some(100000.0_f64)),
+            ("inf\u{661}", None),
+            (" 1_0 ", Some(10.0_f64)),
+            ("1__0", None),
+            ("_1", None),
+            ("1_", None),
+            ("-inf", Some(-inf)),
+            ("1e", None),
+            ("--1", None),
+            ("+-1", None),
+            (".5", Some(0.5_f64)),
+            ("5.", Some(5.0_f64)),
+            ("5.e3", Some(5000.0_f64)),
+            ("\u{b}7\u{c}", Some(7.0_f64)),
+            ("7\u{7f}", None),
+            ("1\u{0}", None),
+            (" -nan ", Some(nan)),
+            ("InFiNiTy", Some(inf)),
+            ("1.5E+3", Some(1500.0_f64)),
+            ("0x10", None),
+            ("", None),
+            (" ", None),
+        ];
+        for (s, want) in floats {
+            let got = py_float_str(s);
+            assert_eq!(got.map(f64::is_nan), want.map(f64::is_nan), "{s:?}");
+            if let (Some(g), Some(w)) = (got, want)
+                && !w.is_nan()
+            {
+                assert_eq!(g, w, "{s:?}");
+            }
+        }
+        let ints: [(&str, Option<i128>); 15] = [
+            ("\u{661}\u{667}", Some(17)),
+            (" +7 ", Some(7)),
+            ("1.0", None),
+            ("_1", None),
+            ("1_000", Some(1000)),
+            ("1__0", None),
+            ("-_1", None),
+            ("\u{968}\u{966}", Some(20)),
+            ("\u{ff18}\u{ff10}", Some(80)),
+            ("\u{1c}5", None),
+            ("5\u{85}", Some(5)),
+            ("00", Some(0)),
+            ("-0", Some(0)),
+            ("+", None),
+            ("1 _0", None),
+        ];
+        for (s, want) in ints {
+            assert_eq!(py_int_str(s), want, "{s:?}");
+        }
+        assert!(py_int_str(&"1".repeat(4300)).is_some());
+        assert_eq!(py_int_str(&"1".repeat(4301)), None);
+        let dates: [(&str, bool); 18] = [
+            ("2024-02-29", true),
+            ("2023-02-29", false),
+            ("2023-1- 9", true),
+            ("2023-13-01", false),
+            ("\u{662}\u{660}\u{662}\u{664}-01-05", true),
+            ("2024-\u{660}\u{661}-05", false),
+            ("2024-01-1\u{665}", true),
+            ("2024-01-\u{663}1", false),
+            ("2024-01-0\u{665}", false),
+            ("2024-1-5", true),
+            ("2024-10-5", true),
+            ("2024-01-35", false),
+            ("2024-01-31x", false),
+            ("0000-01-01", false),
+            ("2024-1\u{660}-05", false),
+            ("\u{1d7d0}\u{1d7ce}\u{1d7d0}\u{1d7d2}-12-2\u{1d7d7}", true),
+            ("2024-02-2\u{669}", true),
+            ("2024-02-30", false),
+        ];
+        for (s, want) in dates {
+            assert_eq!(strptime_ymd(s), want, "{s:?}");
+        }
+        // The literal gate's numeric backing: Arabic-Indic 17 backs "17".
+        assert!(
+            super::super::gates::literal_violations("PostgreSQL \u{661}\u{667}", "PostgreSQL 17")
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn auth_words_are_whole_words() {
         let e = |m: &str| ExtractorError {
             message: m.into(),
             auth_failure: false,
+            redacted_auth_words: false,
             cause: Cause::Other("KeyError".into()),
         };
         assert_eq!(

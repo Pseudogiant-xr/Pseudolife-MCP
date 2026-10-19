@@ -6,7 +6,8 @@
 //! Anything Python would refuse yields None, and the argument stays the
 //! string. A string holding an unpaired surrogate escape has no Rust
 //! `String`, so it yields None too (declared, `divergences.md`
-//! MCP-BIND-PRE-PARSE). An infinity becomes an overflowing number literal
+//! MCP-BIND-PRE-PARSE); [`loads_reply`], for the dream extractor's model
+//! replies, keeps it as a stand-in instead. An infinity becomes an overflowing number literal
 //! and NaN `binding::nan_number`, both read back by `binding::float_arg`.
 //! Nesting deeper than `MAX_DEPTH` yields None where Python's limit depends
 //! on its stack.
@@ -16,16 +17,41 @@ use serde_json::{Map, Number, Value};
 const MAX_DEPTH: usize = 900;
 const MAX_INT_DIGITS: usize = 4300;
 
+/// Where [`loads_reply`] puts the stand-in for a lone surrogate: U+D800 to
+/// U+DFFF map onto U+10F800 to U+10FFFF, the last 2,048 code points of
+/// plane 16's private use area.
+pub const LONE_SURROGATE_BASE: u32 = 0x10F800;
+
 pub fn loads(text: &str) -> Option<Value> {
+    parse(text, false)
+}
+
+/// `json.loads` of an extractor's model reply. It differs from [`loads`]
+/// in one way only: an escape of an unpaired surrogate parses, as CPython's
+/// scanner keeps it in the `str`, and becomes the code point
+/// [`LONE_SURROGATE_BASE`] + (surrogate - U+D800). A Rust `String` cannot
+/// hold the surrogate itself; the stand-in lets the dream pass find, at
+/// each database write, the strings psycopg would refuse to encode. MCP
+/// tool arguments keep [`loads`] (MCP-BIND-PRE-PARSE).
+pub fn loads_reply(text: &str) -> Option<Value> {
+    parse(text, true)
+}
+
+fn parse(text: &str, lone_surrogates: bool) -> Option<Value> {
     let mut p = Parser {
         text,
         s: text.as_bytes(),
         i: 0,
+        lone_surrogates,
     };
     p.ws();
     let v = p.value(0)?;
     p.ws();
     (p.i == p.s.len()).then_some(v)
+}
+
+fn stand_in(surrogate: u32) -> Option<char> {
+    char::from_u32(LONE_SURROGATE_BASE + (surrogate - 0xD800))
 }
 
 struct Parser<'a> {
@@ -34,6 +60,8 @@ struct Parser<'a> {
     /// Always on a character boundary of `text`: it only steps over ASCII
     /// bytes or whole characters.
     i: usize,
+    /// Keep unpaired surrogate escapes as stand-ins ([`loads_reply`]).
+    lone_surrogates: bool,
 }
 
 impl Parser<'_> {
@@ -212,14 +240,25 @@ impl Parser<'_> {
                             if (0xD800..0xDC00).contains(&hi)
                                 && self.s[self.i + 1..].starts_with(b"\\u")
                             {
+                                let first = self.i;
                                 self.i += 2;
+                                // CPython reads the second escape's digits
+                                // (bad hex is an error either way) ...
                                 let lo = self.hex4()?;
                                 if (0xDC00..0xE000).contains(&lo) {
                                     char::from_u32(0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00))?
+                                } else if self.lone_surrogates {
+                                    // ... and when it is no low surrogate,
+                                    // keeps the high one alone and reads the
+                                    // second escape on its own.
+                                    self.i = first;
+                                    stand_in(hi)?
                                 } else {
                                     // Python keeps the lone high surrogate.
                                     return None;
                                 }
+                            } else if self.lone_surrogates && (0xD800..0xE000).contains(&hi) {
+                                stand_in(hi)?
                             } else {
                                 char::from_u32(hi)?
                             }
@@ -287,6 +326,35 @@ mod tests {
         assert_eq!(loads("\u{feff}[]"), None);
         assert_eq!(loads("\"\\ud83d\\ude00\""), Some(json!("\u{1f600}")));
         assert_eq!(loads("\"\\ud83d\""), None);
+        assert_eq!(loads("\"\\ud83d\\u0041\""), None);
+    }
+
+    #[test]
+    fn replies_keep_lone_surrogates_as_python_does() {
+        // CPython 3.11 json.loads: `"\ud800\ud83d\ude00"` is '\ud800' + U+1F600,
+        // `"\ud83dx\ude00"` keeps both halves alone, `"\ud83d\u0041"` is
+        // '\ud83d' + 'A', and `"\ud83d\u00zz"` raises (bad hex).
+        let lone = |s: u32| char::from_u32(LONE_SURROGATE_BASE + s - 0xD800).unwrap();
+        assert_eq!(
+            loads_reply("\"\\ud800\\ud83d\\ude00\""),
+            Some(json!(format!("{}\u{1f600}", lone(0xd800))))
+        );
+        assert_eq!(
+            loads_reply("\"\\ud83dx\\ude00\""),
+            Some(json!(format!("{}x{}", lone(0xd83d), lone(0xde00))))
+        );
+        assert_eq!(
+            loads_reply("\"\\ud83d\\u0041\""),
+            Some(json!(format!("{}A", lone(0xd83d))))
+        );
+        assert_eq!(loads_reply("\"\\ud83d\\u00zz\""), None);
+        assert_eq!(loads_reply("\"\\ud83d\\ude00\""), Some(json!("\u{1f600}")));
+        let mut keyed = Map::new();
+        keyed.insert(lone(0xdfff).to_string(), json!([lone(0xdbff).to_string()]));
+        assert_eq!(
+            loads_reply("{\"\\udfff\": [\"\\udbff\"]}"),
+            Some(Value::Object(keyed))
+        );
         assert_eq!(loads("[1.]"), None);
         assert_eq!(loads(&format!("[{}]", "1".repeat(4301))), None);
         assert!(loads(&format!("[{}]", "1".repeat(4300))).is_some());

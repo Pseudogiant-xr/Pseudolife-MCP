@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value, json};
 use tokio_postgres::Client;
 
-use crate::graph_review::{decimal_value, is_decimal, merge_veto, round3};
+use crate::graph_review::{is_decimal, merge_veto, round3};
 
 /// Decisions the judges took themselves: votes applied, not votes judged.
 const JUDGE_DECIDERS: [&str; 2] = ["dream-judge", "dream-auto"];
@@ -122,49 +122,6 @@ fn is_str(v: &Value, s: &str) -> bool {
     v.as_str() == Some(s)
 }
 
-/// Python `float()` of a `str`: non-ASCII whitespace and decimal digits
-/// folded to ASCII, ASCII whitespace stripped, single underscores between
-/// digits allowed, `inf` / `infinity` / `nan` in any case.
-fn py_float_str(s: &str) -> Option<f64> {
-    let mapped: String = s
-        .chars()
-        .map(|c| {
-            if c.is_ascii() {
-                c
-            } else if crate::board::text::py_space(c) {
-                ' '
-            } else if let Some(d) = decimal_value(c) {
-                char::from_digit(d, 10).unwrap_or('?')
-            } else {
-                '?'
-            }
-        })
-        .collect();
-    let chars: Vec<char> = mapped.chars().collect();
-    for (i, c) in chars.iter().enumerate() {
-        if *c == '_'
-            && !(i > 0
-                && i + 1 < chars.len()
-                && chars[i - 1].is_ascii_digit()
-                && chars[i + 1].is_ascii_digit())
-        {
-            return None;
-        }
-    }
-    let joined: String = chars.into_iter().filter(|c| *c != '_').collect();
-    let t = joined.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'));
-    let body = t.strip_prefix(['+', '-']).unwrap_or(t);
-    // Rust also reads these forms; anything else must start with a digit or
-    // a point, as Python's grammar does.
-    let special = ["inf", "infinity", "nan"]
-        .iter()
-        .any(|w| body.eq_ignore_ascii_case(w));
-    if !special && !body.starts_with(|c: char| c.is_ascii_digit() || c == '.') {
-        return None;
-    }
-    t.parse::<f64>().ok()
-}
-
 /// `_conf`: `float(value or 0.0)`, a `TypeError` / `ValueError` as 0.0.
 fn conf(v: &Value) -> f64 {
     if !truthy(v) {
@@ -172,7 +129,7 @@ fn conf(v: &Value) -> f64 {
     }
     match v {
         Value::Bool(_) | Value::Number(_) => py_num(v).map_or(0.0, |(x, _)| x),
-        Value::String(s) => py_float_str(s).unwrap_or(0.0),
+        Value::String(s) => super::extractor::py_float_str(s).unwrap_or(0.0),
         _ => 0.0,
     }
 }

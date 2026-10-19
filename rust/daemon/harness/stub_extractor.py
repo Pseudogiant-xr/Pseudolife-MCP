@@ -10,15 +10,21 @@ Routes (primary and fallback):
 
 * ``GET /health``, ``GET /fallback/health``: 200 ``{"status": "ok"}``, or
   the int status in ``spec["health"]`` (``spec["fallback_health"]`` for the
-  fallback), so a scenario can make an endpoint unhealthy;
+  fallback), so a scenario can make an endpoint unhealthy; a list of ints
+  answers successive probes in turn, its last entry repeating, so an
+  endpoint can go down and come back;
 * ``GET /v1/models``, ``GET /fallback/v1/models``: the served model id;
 * ``POST /v1/chat/completions``, ``POST /fallback/v1/chat/completions``:
   a table lookup, by the SHA-256 of the exact body bytes first, then by
-  ``(kind, user message content)``;
+  ``(kind, user message content)``. An entry may answer ``status`` with a
+  raw ``body`` instead of a reply, a ``reason`` phrase for the status line
+  and extra response ``headers`` (a redirect's ``Location``);
 * anything else: 404.
 
 A request no table entry answers gets HTTP 500 and is flagged unanswered.
-Standard library only.
+Each record keeps the request's ``Authorization`` header as a digest
+(``auth_digest``), so a run can check which key reached which endpoint
+without the key appearing in any record. Standard library only.
 """
 from __future__ import annotations
 
@@ -35,6 +41,14 @@ KIND_PREFIXES = (
 CHAT_PATHS = {"/v1/chat/completions": "primary", "/fallback/v1/chat/completions": "fallback"}
 MODEL_PATHS = {"/v1/models": "primary", "/fallback/v1/models": "fallback"}
 HEALTH_PATHS = {"/health": "primary", "/fallback/health": "fallback"}
+
+
+def auth_digest(value: str | None) -> str | None:
+    """A recorded ``Authorization`` header: the first 16 hex digits of its
+    SHA-256, never the key itself (records reach logs and evidence files)."""
+    if value is None:
+        return None
+    return "sha256:" + hashlib.sha256(value.encode("latin-1", "replace")).hexdigest()[:16]
 
 
 def request_kind(system: str | None) -> str:
@@ -73,6 +87,7 @@ class StubExtractor:
         self.name = name
         self.replies = list(self.spec.get("replies", []))
         self._records: list[dict] = []
+        self._health_served: dict[str, int] = {}
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -160,45 +175,62 @@ class StubExtractor:
         body = b"" if method in ("GET", "HEAD") else self._read_body(handler)
         path = handler.path
         route = path.split("?", 1)[0]
-        status, payload, answered = self._route(method, route, body)
+        status, payload, answered, extra = self._route(method, route, body)
         with self._lock:
             self._records.append({
                 "method": method, "path": path,
                 "body": None if method == "GET" else body.decode("latin-1"),
                 "sha256": None if method == "GET" else hashlib.sha256(body).hexdigest(),
+                "authorization": auth_digest(handler.headers.get("Authorization")),
                 "answered": answered,
             })
         raw = payload.encode("utf-8") if isinstance(payload, str) else payload
-        handler.send_response(status)
+        handler.send_response(status, extra.get("reason"))
         handler.send_header("Content-Type", "application/json")
         handler.send_header("Content-Length", str(len(raw)))
+        for name, value in (extra.get("headers") or {}).items():
+            handler.send_header(name, value)
         handler.end_headers()
         if method != "HEAD":
             handler.wfile.write(raw)
 
-    def _route(self, method: str, route: str, body: bytes) -> tuple[int, str, bool]:
+    def _health(self, key: str) -> int | None:
+        """The status a health probe gets: ``spec[key]`` as an int, or the
+        next of a list of ints (the last one repeating), else None (200)."""
+        override = self.spec.get(key)
+        if isinstance(override, list) and override:
+            with self._lock:
+                served = self._health_served.get(key, 0)
+                self._health_served[key] = served + 1
+            override = override[min(served, len(override) - 1)]
+        if isinstance(override, int) and not isinstance(override, bool):
+            return override
+        return None
+
+    def _route(self, method: str, route: str, body: bytes) -> tuple[int, str, bool, dict]:
         if method == "GET" and route in HEALTH_PATHS:
             key = "health" if HEALTH_PATHS[route] == "primary" else "fallback_health"
-            override = self.spec.get(key)
-            if isinstance(override, int) and not isinstance(override, bool):
-                return override, json.dumps({"status": "unhealthy"}), True
-            return 200, json.dumps({"status": "ok"}), True
+            override = self._health(key)
+            if override is not None and override != 200:
+                return override, json.dumps({"status": "unhealthy"}), True, {}
+            return 200, json.dumps({"status": "ok"}), True, {}
         if method == "GET" and route in MODEL_PATHS:
             served = self.spec.get("served_model", "stub-served-model")
             if MODEL_PATHS[route] == "fallback":
                 served = self.spec.get("fallback_served_model", served)
-            return 200, json.dumps({"object": "list", "data": [{"id": served}]}), True
+            return 200, json.dumps({"object": "list", "data": [{"id": served}]}), True, {}
         if method == "POST" and route in CHAT_PATHS:
             entry = self.lookup(body)
             if entry is None:
-                return 500, json.dumps({"error": "stub_extractor: no table entry"}), False
+                return 500, json.dumps({"error": "stub_extractor: no table entry"}), False, {}
+            extra = {"reason": entry.get("reason"), "headers": entry.get("headers")}
             if "status" in entry:
-                return int(entry["status"]), entry.get("body", ""), True
+                return int(entry["status"]), entry.get("body", ""), True, extra
             return 200, json.dumps({
                 "choices": [{"message": {"content": entry["content"]}}],
                 "model": entry.get("model", self.spec.get("reply_model", "stub-model")),
-            }), True
-        return 404, json.dumps({"error": f"stub_extractor: no route {method} {route}"}), True
+            }), True, extra
+        return 404, json.dumps({"error": f"stub_extractor: no route {method} {route}"}), True, {}
 
     def lookup(self, body: bytes) -> dict | None:
         """The table entry for a chat body: by SHA-256, then by (kind, user)."""

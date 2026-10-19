@@ -51,6 +51,18 @@ pub(super) fn internal(e: impl std::fmt::Display) -> ToolError {
     ToolError::Internal(anyhow::anyhow!(e.to_string()))
 }
 
+/// Refuse a write whose parameters hold a reply's lone surrogate, as
+/// psycopg (or the embedder, for the text it embeds) refuses it in Python:
+/// the failure takes the write's own error path.
+#[allow(clippy::result_large_err)]
+pub(super) fn encodable(fields: &[&str]) -> Result<(), ToolError> {
+    match super::extractor::unencodable(fields) {
+        Some(_) if crate::mutants::active("mcp-dream-run-encode-unchecked") => Ok(()),
+        Some(e) => Err(internal(e)),
+        None => Ok(()),
+    }
+}
+
 fn now() -> f64 {
     crate::episodes::now()
 }
@@ -445,6 +457,12 @@ async fn resolve_dream_slot(
         return original;
     }
     let text = py_strip(&format!("{entity} {attribute}")).to_string();
+    // The embedder's tokenizer refuses a lone surrogate (a TypeError in
+    // Python), which this resolver swallows.
+    if let Some(e) = super::extractor::unencodable(&[&text]) {
+        eprintln!("dream slot resolve failed ({e}); using literal slot");
+        return original;
+    }
     match crate::fact_set::embed(ready, text).await {
         Ok(emb) => resolve_slot(&ready.cortex.snapshot(), &emb, threshold).unwrap_or(original),
         Err(e) => {
@@ -539,6 +557,12 @@ struct SlotRow {
 }
 
 async fn add_run_slot(ready: &Ready, run_id: i64, row: SlotRow) -> Result<(), ToolError> {
+    encodable(&[
+        &row.entity,
+        &row.attribute,
+        &row.new_value,
+        row.prev.as_ref().map_or("", |p| p.0.as_str()),
+    ])?;
     let _ws = ready.write.lock().await;
     let entity_norm = norm_key(&row.entity);
     let attribute_norm = row
@@ -598,6 +622,12 @@ async fn add_chronicle_event(
     episode: Option<&str>,
     src_entry_id: Option<i64>,
 ) -> Result<(i64, bool), ToolError> {
+    encodable(&[
+        actor,
+        description,
+        phrase.unwrap_or(""),
+        occurred_at.unwrap_or(""),
+    ])?;
     let _ws = ready.write.lock().await;
     let actor_norm = norm_key(actor);
     let description_norm = norm_value(description);
@@ -642,6 +672,7 @@ async fn add_chronicle_event(
 
 /// `has_trace` (`storage/postgres.py:3150-3160`).
 async fn has_trace(ready: &Ready, en: &str, an: &str, entry: i64) -> Result<bool, ToolError> {
+    encodable(&[en, an])?;
     let _ws = ready.write.lock().await;
     crate::txn::with_client(ready.storage.client(), |c| async move {
         c.query_opt(
@@ -659,6 +690,7 @@ async fn has_trace(ready: &Ready, en: &str, an: &str, entry: i64) -> Result<bool
 /// `add_trace` (3162-3196), then `bump_reinforcements(entry, 1)` and the
 /// resident `bump_entry_reinforcements` when the trace is new.
 async fn add_trace(ready: &Ready, en: &str, an: &str, entry: i64) -> Result<bool, ToolError> {
+    encodable(&[en, an])?;
     let _ws = ready.write.lock().await;
     let db = ready.storage.client();
     let t = now();
@@ -1137,6 +1169,16 @@ impl Pass<'_> {
     }
 
     async fn write(&self, a: CortexWriteArgs) -> Result<Value, ToolError> {
+        // `cortex_write` embeds the claim and slot texts first, so a lone
+        // surrogate there fails before anything is written. A stance is
+        // never embedded: Python writes the resident record, mints the
+        // subject entity and fails at the save (declared); this fails first.
+        encodable(&[
+            &a.entity,
+            &a.attribute,
+            &a.value,
+            a.stance.as_deref().unwrap_or(""),
+        ])?;
         crate::fact_set::cortex_write(
             self.svc,
             self.ready,
@@ -1361,6 +1403,8 @@ impl Pass<'_> {
         }
         let res: Value = match op.as_deref() {
             Some("add") => {
+                // `set_add` embeds "{entity} {attribute} {member}" first.
+                encodable(&[&ent, &attr, &claim.value])?;
                 let mut a = crate::set_members::SetAddArgs::new(&ent, &attr, &claim.value);
                 a.confidence = claim.confidence;
                 a.origin = Some(origin.clone());

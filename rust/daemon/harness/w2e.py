@@ -80,7 +80,10 @@ Normalizers (declared, spec "Free for W1 and W2"):
   each side compares by identity; a ``commit_token`` compares as its
   decoded payload (backend, generation, entry ids, timestamp token) without
   its signature, which covers the wall-clock timestamp; ``idle_seconds``
-  keeps only null-or-not, and so do a stall record's ``since``,
+  must be >= 0 on both sides and within the longest step's wall time (plus
+  ``IDLE_SLACK_S``) of each other (``idle_diffs``), then compares as
+  null-or-not; a run's ``finished_at`` may not precede its ``started_at``,
+  in the bank or an answer (``run_clock_diffs``); a stall record's ``since``,
   ``last_success_at`` and ``recovered_at``, the extractor record's ``at``
   and a run row's ``finished_at`` and ``rolled_back_at``; a run row's
   ``cursor_before`` and ``cursor_after`` map to ``<ts:ENTRY_ID>`` like a
@@ -123,8 +126,12 @@ gets its own stub through ``PSEUDOLIFE_DREAM_BASE_URL`` and
 ``PSEUDOLIFE_DREAM_MODEL`` (and the ``_FALLBACK_`` pair). After every
 operation the harness drains both stubs, reports any request no table entry
 answered, and compares the two request sequences element by element on
-method, path and body bytes; each side's stub origin in its responses
-becomes ``http://stub``. The claim: given identical model replies, both
+method, path, body bytes and the digest of the ``Authorization`` header;
+with ``"extractor_keys": {"primary": ..., "fallback": ...}`` (passed as
+``PSEUDOLIFE_DREAM_API_KEY`` and ``PSEUDOLIFE_DREAM_FALLBACK_API_KEY``)
+each side's chat requests must also carry their own endpoint's key and its
+GETs none (``extractor_key_diffs``); each side's stub origin in its
+responses becomes ``http://stub``. The claim: given identical model replies, both
 daemons send byte-identical requests and write identical banks; it claims
 nothing about model behaviour.
 
@@ -298,7 +305,13 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # memory_dream run, the consolidation pass: caught by dream-run.
            "mcp-dream-run-literal-gate-off", "mcp-dream-run-citation-unchecked",
            "mcp-dream-run-no-journal", "mcp-dream-run-trace-contested",
-           "mcp-dream-run-gate-order", "mcp-dream-run-stamp-before-commit"]
+           "mcp-dream-run-gate-order", "mcp-dream-run-stamp-before-commit",
+           # the P1 review fixes: Unicode digits (dream-run-literal), lone
+           # surrogates (dream-run-surrogate), the reason phrase
+           # (dream-run-redirect) and the fallback key (dream-run-fallback).
+           "mcp-dream-run-encode-unchecked", "mcp-dream-extractor-ascii-digits",
+           "mcp-dream-extractor-strict-surrogates", "mcp-dream-extractor-canonical-reason",
+           "mcp-dream-extractor-shared-key"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -3053,6 +3066,229 @@ SCENARIOS.update({
 })
 
 
+# The dream pass's remaining branches. Every scenario here switches the
+# alias screen off (its proposals turn on embedding cosines, covered by
+# dream-run) and writes at most one fact in-process: hydrated facts carry no
+# slot embedding, so the vocab hint and the known-facts window rank one
+# embedded record and then the rest alphabetically, and no near-tie can
+# reorder them.
+DREAM_RUN_QUIET = DREAM_RUN_CONFIG + "    alias_candidate_min_cosine: 0\n"
+
+
+def batch_replies(texts, claims=(), events=(), relations=()) -> list[dict]:
+    """The claims, events and relations replies for one committed batch."""
+    return [claims_reply(texts, claims), events_reply(texts, list(events)),
+            relations_reply(texts, list(relations))]
+
+
+def failing_claims(texts, status=503, **extra) -> dict:
+    return {"kind": "claims", "user": numbered(texts), "status": status,
+            "body": json.dumps({"error": "upstream failure"}), **extra}
+
+
+# The fallback: the primary's /health answers 503 to the first six probes
+# (the status call's one, then two per run: the probe and its retry), so the
+# first two runs go to the fallback endpoint with the fallback key and the
+# second opens a served_by_fallback stall; the seventh probe succeeds, the
+# third run goes to the primary with the primary key and the stall closes.
+FALLBACK_NOTES = ["The metrics exporter now listens on port 9100.",
+                  "Gina leads the observability guild.",
+                  "The log shipper moved to the vector agent."]
+FALLBACK_EXTRACTOR = {
+    "model": "stub-model", "fallback_model": "stub-fallback-model",
+    "health": [503] * 6 + [200],
+    "replies": [
+        *batch_replies(FALLBACK_NOTES[:1], [{"entity": "Metrics Exporter", "attribute": "port",
+                                             "value": "9100", "source": 1}]),
+        *batch_replies(FALLBACK_NOTES[1:2], [{"entity": "Gina", "attribute": "role",
+                                              "value": "observability guild lead",
+                                              "source": 1}]),
+        *batch_replies(FALLBACK_NOTES[2:], [{"entity": "Log Shipper", "attribute": "agent",
+                                             "value": "vector", "source": 1}]),
+    ]}
+
+# The hint knobs: a three-fact known-facts window, the dream slot resolver at
+# 0.99 (a claim keyed "Deploy" / "Target region" embeds the same text as the
+# in-process slot "Deploy Target" / "region", cosine 1, and lands on it; an
+# unrelated slot keeps its own key), and assistant-stated claims dropped.
+HINT_NOTES = ["The deploy target region is now prod-eu.",
+              "Ivan said the build farm runner is the arm64 pool."]
+HINT_CLAIMS = [
+    {"entity": "Deploy", "attribute": "Target region", "value": "prod-eu", "source": 1},
+    {"entity": "Zeta Probe", "attribute": "color", "value": "teal", "source": 2},
+    # dropped: assistant_claims is drop
+    {"entity": "Build Farm", "attribute": "runner", "value": "x86 pool",
+     "speaker": "assistant", "source": 2},
+]
+
+# The literal gate in log mode with source scope, assistant claims kept at
+# their note's tier (supersede), and a batch with no date in it, so an
+# extracted calendar date is dropped (the event stores undated, its phrase
+# kept). The first claim's Arabic-Indic 17 is backed by the note's "17"
+# (float() folds Unicode digits); the second's 15 is in no note; the
+# third's 6380 is in another note than the one it cites, which only the
+# batch scope would accept.
+LITERAL_NOTES = [("The staging database runs PostgreSQL 17.", "conversation"),
+                 ("The cache sidecar listens on port 6380.", "conversation"),
+                 ("Kim said the ops board owner is now Lee.", "conversation")]
+LITERAL_TEXTS = [t for t, _ in LITERAL_NOTES]
+LITERAL_CLAIMS = [
+    {"entity": "Staging Database", "attribute": "engine", "value": "PostgreSQL ١٧",
+     "source": 1},
+    {"entity": "Staging Database", "attribute": "engine version", "value": "PostgreSQL 15",
+     "source": 1},
+    {"entity": "Cache Sidecar", "attribute": "backup port", "value": "6380", "source": 1},
+    {"entity": "Ops Board", "attribute": "owner", "value": "Lee", "speaker": "assistant",
+     "source": 3},
+]
+LITERAL_EXTRACTOR = {"model": "stub-model", "replies": [
+    claims_reply(LITERAL_TEXTS, LITERAL_CLAIMS, [
+        {"description": "Staging database moved to PostgreSQL 17", "date": "2026-09-03",
+         "date_phrase": "last week", "source": 1}]),
+    events_reply(LITERAL_TEXTS, [{"description": "Cache sidecar port changed to 6380",
+                                  "date": "2026-10-01", "source": 2}]),
+    relations_reply(LITERAL_TEXTS, []),
+]}
+
+# Isolation: a two-entry batch the endpoint refuses three times, then refuses
+# each entry alone (an outage: hold), then a one-entry batch (limit 1) that
+# fails three times and alone: set aside with the extractor's error.
+OUTAGE_NOTES = ["The VPN gateway rotated its certificate.",
+                "Lena joined the security rotation."]
+OUTAGE_EXTRACTOR = {"model": "stub-model", "replies": [
+    failing_claims(OUTAGE_NOTES),
+    failing_claims(OUTAGE_NOTES[:1]),
+    failing_claims(OUTAGE_NOTES[1:]),
+    events_reply(OUTAGE_NOTES[:1], []),
+    relations_reply(OUTAGE_NOTES[:1], []),
+]}
+
+# A redirect refused (no_redirect.urlopen: the redirect's own HTTPError, its
+# message naming the target, here an OAuth page: a failed login) and a 500
+# whose reason phrase names a failed login.
+REDIRECT_NOTES = ["The artifact cache moved behind the SSO proxy.",
+                  "Omar rotated the deploy keys."]
+REDIRECT_EXTRACTOR = {"model": "stub-model", "replies": [
+    failing_claims(REDIRECT_NOTES[:1], 302,
+                   headers={"Location": "http://elsewhere.example/oauth/authorize"}),
+    failing_claims(REDIRECT_NOTES[1:], 500, reason="Login Required"),
+    events_reply(REDIRECT_NOTES[:1], []),
+    relations_reply(REDIRECT_NOTES[:1], []),
+]}
+
+# Lone surrogates in a reply: in a field nothing writes (the quote) the claim
+# consolidates; in a value, the write fails as psycopg fails to encode it
+# (a write-phase hold, the earlier claim's write kept and journaled).
+SURROGATE_NOTES = ["The report generator writes to the reports bucket.",
+                   "Pia owns the billing exports."]
+SURROGATE_EXTRACTOR = {"model": "stub-model", "replies": [
+    claims_reply(SURROGATE_NOTES, [
+        {"entity": "Report Generator", "attribute": "output", "value": "reports bucket",
+         "quote": "writes to the reports bucket \ud83d", "source": 1},
+        {"entity": "Pia", "attribute": "owns", "value": "billing exports \ud83d", "source": 2},
+    ]),
+]}
+
+SCENARIOS.update({
+    "dream-run-fallback": {
+        "config": DREAM_RUN_QUIET,
+        "extractor": FALLBACK_EXTRACTOR,
+        "extractor_fallback": True,
+        "extractor_keys": {"primary": "sk-w2e-primary-0001", "fallback": "sk-w2e-fallback-0002"},
+        "seed": [fact("Fallback Host", "OS", "Debian 12")],
+        "ops": [
+            store(FALLBACK_NOTES[0], source="conversation"),
+            dream("status"),
+            dream("run"),
+            store(FALLBACK_NOTES[1], source="conversation"),
+            dream("run"),
+            dream("status"),
+            store(FALLBACK_NOTES[2], source="conversation"),
+            dream("run"),
+            dream("status"),
+            dream("runs"),
+        ],
+    },
+    "dream-run-hints": {
+        "config": DREAM_RUN_QUIET + "    known_facts_window: 3\n    assistant_claims: drop\n"
+                  "  cortex:\n    dream_slot_match_threshold: 0.99\n",
+        "extractor": {"model": "stub-model",
+                      "replies": batch_replies(HINT_NOTES, HINT_CLAIMS)},
+        "seed": [fact("Hint Host", "OS", "Debian 12"),
+                 fact("Build Farm", "runner", "arm64 pool"),
+                 fact("Ticket Queue", "owner", "Hana")],
+        "ops": [
+            fact("Deploy Target", "region", "staging"),
+            *[store(t, source="conversation") for t in HINT_NOTES],
+            dream("run"),
+            dream("runs"),
+            fact_get("Deploy Target", "region"),
+            fact_get("Build Farm", "runner"),
+        ],
+    },
+    "dream-run-literal": {
+        "config": DREAM_RUN_QUIET + "    literal_gate: log\n    literal_gate_scope: source\n"
+                  "    assistant_claims: supersede\n",
+        "extractor": LITERAL_EXTRACTOR,
+        "seed": [fact("Literal Host", "OS", "Debian 12"),
+                 # agent tier: the assistant-stated claim at its user note's
+                 # tier supersedes it, where the contender policy would park
+                 fact("Ops Board", "owner", "Jun")],
+        "ops": [
+            *[store(t, source=src) for t, src in LITERAL_NOTES],
+            dream("run"),
+            dream("runs"),
+            fact_get("Ops Board", "owner"),
+            fact_get("Staging Database", "engine"),
+        ],
+    },
+    "dream-run-outage": {
+        "config": DREAM_RUN_QUIET,
+        "extractor": OUTAGE_EXTRACTOR,
+        "seed": [fact("Outage Host", "OS", "Debian 12")],
+        "ops": [
+            *[store(t, source="conversation") for t in OUTAGE_NOTES],
+            dream("run"),
+            dream("run"),
+            dream("run"),
+            dream("status"),
+            dream("run", limit=1),
+            dream("run", limit=1),
+            dream("run", limit=1),
+            dream("status"),
+            dream("pull"),
+        ],
+    },
+    "dream-run-redirect": {
+        "config": DREAM_RUN_QUIET,
+        "extractor": REDIRECT_EXTRACTOR,
+        "seed": [fact("Redirect Host", "OS", "Debian 12")],
+        "ops": [
+            *[store(t, source="conversation") for t in REDIRECT_NOTES],
+            dream("run", limit=1),
+            dream("run", limit=1),
+            dream("status"),
+            dream("run", limit=1),
+            dream("run", limit=1),
+            dream("status"),
+        ],
+    },
+    "dream-run-surrogate": {
+        "config": DREAM_RUN_QUIET,
+        "extractor": SURROGATE_EXTRACTOR,
+        "seed": [fact("Surrogate Host", "OS", "Debian 12")],
+        "ops": [
+            *[store(t, source="conversation") for t in SURROGATE_NOTES],
+            dream("run"),
+            dream("status"),
+            dream("runs"),
+            dream("run"),
+            fact_get("Report Generator", "output"),
+        ],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -3345,6 +3581,82 @@ def dream_tokens(value, ts_map: dict[float, str]):
             return _clock(v)
         return v
     return walk(value)
+
+
+def _values_at(v, key: str):
+    """Every value held under ``key`` anywhere in ``v``, in document order."""
+    if isinstance(v, dict):
+        for k, x in v.items():
+            if k == key:
+                yield x
+            else:
+                yield from _values_at(x, key)
+    elif isinstance(v, list):
+        for x in v:
+            yield from _values_at(x, key)
+
+
+def _number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def idle_diffs(py, rs, bound: float) -> list[str]:
+    """``idle_seconds`` within a bound, before ``dream_tokens`` drops it.
+
+    Each side answers ``now - (its newest entry's ts)``. The two sides run
+    every operation one after the other, so the Python call that wrote the
+    newest entry and the Python status call each start at most one step's
+    wall time before their Rust counterparts: the two answers differ by at
+    most the longest step so far. ``bound`` is that wall time plus slack."""
+    out = []
+    a, b = list(_values_at(py, "idle_seconds")), list(_values_at(rs, "idle_seconds"))
+    if len(a) != len(b):
+        return [f"idle_seconds: python {a} vs rust {b}"]
+    for x, y in zip(a, b):
+        if not (_number(x) and _number(y)) or x < 0 or y < 0:
+            out.append(f"idle_seconds: python {x!r} vs rust {y!r} (not both >= 0)")
+        elif abs(x - y) > bound:
+            out.append(f"idle_seconds: python {x:.3f} vs rust {y:.3f} "
+                       f"(apart by more than {bound:.3f} s)")
+    return out
+
+
+def _run_clock_pairs(v):
+    """(started_at, finished_at) of every run record in an answer."""
+    if isinstance(v, dict):
+        if "started_at" in v and "finished_at" in v:
+            yield v["started_at"], v["finished_at"]
+        for x in v.values():
+            yield from _run_clock_pairs(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from _run_clock_pairs(x)
+
+
+def run_clock_diffs(side: str, raw: dict, answer=None) -> list[str]:
+    """A dream run row finishes no earlier than it starts, in the bank and
+    in a ``runs`` answer, wherever both clocks are set (before the clock
+    normalizers reduce them to null-or-not)."""
+    out = []
+    t = raw["rows"].get("public.dream_runs")
+    pairs = []
+    if t:
+        cols = t["columns"]
+        if "started_at" in cols and "finished_at" in cols:
+            si, fi = cols.index("started_at"), cols.index("finished_at")
+            pairs += [("bank", row[si], row[fi]) for row in t["rows"]]
+    if answer is not None:
+        pairs += [("answer", s, f) for s, f in _run_clock_pairs(answer)]
+    for where, s, f in pairs:
+        if _number(s) and _number(f) and f < s:
+            out.append(f"dream run clock ({side} {where}): finished_at {f} before started_at {s}")
+    return out
+
+
+# Slack on top of the longest step's wall time for ``idle_seconds``: the
+# daemons read their clocks inside the call, so the bound needs no more
+# than scheduling noise.
+IDLE_SLACK_S = 1.0
 
 
 def normalize_state(state: dict, before: dict,
@@ -3700,7 +4012,36 @@ def extractor_env(scn: dict, stub: StubExtractor | None) -> dict:
     if scn.get("extractor_fallback"):
         env["PSEUDOLIFE_DREAM_FALLBACK_BASE_URL"] = stub.fallback_base_url
         env["PSEUDOLIFE_DREAM_FALLBACK_MODEL"] = spec.get("fallback_model", "stub-fallback-model")
+    keys = scn.get("extractor_keys") or {}
+    if keys.get("primary"):
+        env["PSEUDOLIFE_DREAM_API_KEY"] = keys["primary"]
+    if keys.get("fallback"):
+        env["PSEUDOLIFE_DREAM_FALLBACK_API_KEY"] = keys["fallback"]
     return env
+
+
+def extractor_key_diffs(side: str, scn: dict, requests: list[dict]) -> list[str]:
+    """With ``extractor_keys`` declared, each chat request must carry its own
+    endpoint's key (the fallback key on a ``/fallback/`` path, the primary
+    key elsewhere, no header where none is configured) and every probe and
+    models GET none: no key reaches the other endpoint."""
+    keys = scn.get("extractor_keys")
+    if not keys:
+        return []
+    from stub_extractor import auth_digest
+    out = []
+    for i, r in enumerate(requests):
+        if r["method"] == "POST":
+            key = keys.get("fallback") if r["path"].startswith("/fallback/") else keys.get("primary")
+            want = auth_digest(f"Bearer {key}") if key else None
+        else:
+            want = None
+        if r.get("authorization") != want:
+            which = "no key" if want is None else ("the fallback key" if key == keys.get("fallback")
+                                                    else "the primary key")
+            out.append(f"extractor {side} request {i} ({r['method']} {r['path']}): "
+                       f"authorization {r.get('authorization')}, expected {which}")
+    return out
 
 
 def _request_label(req: dict | None, short: bool = True) -> str:
@@ -3724,7 +4065,8 @@ def _body_diff(a: str, b: str) -> str:
 
 
 def extractor_summary(requests: list[dict]) -> list[dict]:
-    return [{"method": r["method"], "path": r["path"], "sha256": r["sha256"]} for r in requests]
+    return [{"method": r["method"], "path": r["path"], "sha256": r["sha256"],
+             "authorization": r.get("authorization")} for r in requests]
 
 
 def extractor_unanswered(side: str, requests: list[dict]) -> list[str]:
@@ -3734,7 +4076,8 @@ def extractor_unanswered(side: str, requests: list[dict]) -> list[str]:
 
 def extractor_diffs(py: list[dict], rs: list[dict]) -> list[str]:
     """Unanswered requests on either side, then the two request sequences
-    compared element by element on (method, path, body)."""
+    compared element by element on (method, path, body, authorization
+    digest)."""
     out = extractor_unanswered("python", py) + extractor_unanswered("rust", rs)
     if len(py) != len(rs):
         out.append(f"extractor requests: python sent {len(py)}, rust sent {len(rs)}")
@@ -3743,6 +4086,9 @@ def extractor_diffs(py: list[dict], rs: list[dict]) -> list[str]:
         b = rs[i] if i < len(rs) else None
         key = (lambda r: None if r is None else (r["method"], r["path"], r["body"]))
         if key(a) == key(b):
+            if a is not None and a.get("authorization") != b.get("authorization"):
+                out.append(f"extractor request {i}: authorization python "
+                           f"{a.get('authorization')} vs rust {b.get('authorization')}")
             continue
         line = f"extractor request {i}: python {_request_label(a)} vs rust {_request_label(b)}"
         if a and b and a["method"] == "POST" and b["method"] == "POST":
@@ -3889,13 +4235,17 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         for client in clients.values():
             client.init()
         tokens: dict[str, str | None] = {"python": None, "rust": None}
+        max_wall = 0.0
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
             row = {"step": i, "op": op, "diffs": []}
             if op["op"] != "init":
+                started = time.monotonic()
                 py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
                             clients["python"], dsns["python"])
                 rs = run_op(with_pull_token(op, tokens["rust"]), procs["rust"].port,
                             clients["rust"], dsns["rust"])
+                row["wall_s"] = time.monotonic() - started
+                max_wall = max(max_wall, row["wall_s"])
                 for side, r in (("python", py), ("rust", rs)):
                     v = r.get("value") if isinstance(r, dict) else None
                     if isinstance(v, dict) and isinstance(v.get("commit_token"), str):
@@ -3908,12 +4258,19 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 sent = {side: stubs[side].drain() for side in ("python", "rust")}
                 row["extractor"] = {side: extractor_summary(r) for side, r in sent.items()}
                 row["diffs"] += extractor_diffs(sent["python"], sent["rust"])
+                for side in ("python", "rust"):
+                    row["diffs"] += extractor_key_diffs(side, scn, sent[side])
             raw_py, raw_rs = dbstate.dump(dsns["python"]), dbstate.dump(dsns["rust"])
+            for side, raw in (("python", raw_py), ("rust", raw_rs)):
+                answer = row.get(side) if op.get("name") == "memory_dream" else None
+                row["diffs"] += run_clock_diffs(side, raw, answer)
             tsm_py, tsm_rs = ts_tokens(raw_py), ts_tokens(raw_rs)
             sp, np_, ep = normalize_state(raw_py, before["python"], tsm_py)
             sr, nr, er = normalize_state(raw_rs, before["rust"], tsm_rs)
             if op["op"] != "init":
                 if op.get("name") == "memory_dream":
+                    row["diffs"] += idle_diffs(row["python"], row["rust"],
+                                               max_wall + IDLE_SLACK_S)
                     row["python"] = dream_tokens(row["python"], tsm_py)
                     row["rust"] = dream_tokens(row["rust"], tsm_rs)
                 row["python"] = rename_prefixes(row["python"], ep)

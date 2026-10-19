@@ -141,7 +141,47 @@ def test_unanswered_request_is_flagged(stub_factory):
     (rec,) = s.drain()
     assert rec == {"method": "POST", "path": "/v1/chat/completions",
                    "body": body.decode("latin-1"),
-                   "sha256": hashlib.sha256(body).hexdigest(), "answered": False}
+                   "sha256": hashlib.sha256(body).hexdigest(), "authorization": None,
+                   "answered": False}
+
+
+def test_authorization_is_recorded_as_a_digest(stub_factory):
+    from stub_extractor import auth_digest
+    s = stub_factory({"replies": [{"kind": "claims", "user": "n", "content": "c"}]})
+    host, port = s.origin.removeprefix("http://").split(":")
+    c = http.client.HTTPConnection(host, int(port), timeout=10)
+    c.request("POST", "/fallback/v1/chat/completions", body=chat_body(CLAIMS_SYSTEM, "n"),
+              headers={"Content-Type": "application/json", "Authorization": "Bearer sk-secret"})
+    c.getresponse().read()
+    c.close()
+    (rec,) = s.drain()
+    digest = "sha256:" + hashlib.sha256(b"Bearer sk-secret").hexdigest()[:16]
+    assert rec["authorization"] == digest == auth_digest("Bearer sk-secret")
+    assert "sk-secret" not in json.dumps(rec)
+
+
+def test_reason_phrase_and_extra_headers(stub_factory):
+    s = stub_factory({"replies": [
+        {"kind": "claims", "user": "r", "status": 500, "reason": "Login Required", "body": "{}"},
+        {"kind": "claims", "user": "h", "status": 302, "body": "",
+         "headers": {"Location": "http://elsewhere.example/oauth/authorize"}},
+    ]})
+    host, port = s.origin.removeprefix("http://").split(":")
+    for user, want in (("r", (500, "Login Required", None)),
+                       ("h", (302, "Found", "http://elsewhere.example/oauth/authorize"))):
+        c = http.client.HTTPConnection(host, int(port), timeout=10)
+        c.request("POST", "/v1/chat/completions", body=chat_body(CLAIMS_SYSTEM, user),
+                  headers={"Content-Type": "application/json"})
+        r = c.getresponse()
+        r.read()
+        c.close()
+        assert (r.status, r.reason, r.getheader("Location")) == want
+
+
+def test_health_sequence(stub_factory):
+    s = stub_factory({"health": [503, 503, 200]})
+    assert [request(s, "GET", "/health")[0] for _ in range(5)] == [503, 503, 200, 200, 200]
+    assert request(s, "GET", "/fallback/health")[0] == 200
 
 
 def test_drain_records_and_clears(stub_factory):
