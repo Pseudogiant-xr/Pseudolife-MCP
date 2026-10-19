@@ -9,15 +9,19 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
 
     python ops/integrate.py status            # labelled PRs, CI, mergeability
     python ops/integrate.py build --dry-run   # what a build would do
-    python ops/integrate.py build             # push the batch, open its PR
+    python ops/integrate.py build             # merge the batch locally
+    python ops/integrate.py open --suite <result.json>   # push it, open its PR
 
 A pull request joins by carrying the `ready-to-batch` label. `build` runs
 in a clean checkout whose HEAD is origin/master, merges each labelled head
 with `git merge --no-ff` in the order the label was applied (pull request
-number when unknown), and drops a member that conflicts: it aborts that
-merge, comments on the pull request naming what it collided with, and
-removes its label. It never resolves a conflict and never force-pushes.
-Needs git 2.38+ (`git merge-tree --write-tree`) and an authenticated `gh`.
+number when unknown) onto a new local branch, and drops a member that
+conflicts, aborting that merge. It pushes nothing, so the local full suite
+runs on the batch head before any CI. `open` then checks the suite passed
+on that exact head, pushes the branch, opens the batch pull request, and
+comments on each dropped member naming what it collided with (removing its
+label). Nothing resolves a conflict and nothing force-pushes. Needs git
+2.38+ (`git merge-tree --write-tree`) and an authenticated `gh`.
 """
 
 from __future__ import annotations
@@ -28,7 +32,8 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 LABEL = "ready-to-batch"
 BASE = "master"
@@ -93,6 +98,8 @@ class Dropped:
 class Plan:
     branch: str
     base_sha: str
+    label: str = LABEL
+    head: str = ""
     merged: list[Member] = field(default_factory=list)
     dropped: list[Dropped] = field(default_factory=list)
     markers: list[str] = field(default_factory=list)
@@ -102,6 +109,28 @@ class Plan:
         date, n = BATCH_RE.match(self.branch).groups()
         numbers = ", ".join(f"#{m.number}" for m in self.merged)
         return f"integrate: {date} batch {n} ({numbers})"
+
+    @staticmethod
+    def path(branch: str) -> Path:
+        """Where `build` leaves the plan for `open`: inside this worktree's
+        git directory, so it is never tracked or shared between worktrees."""
+        name = branch.removeprefix(PREFIX) + ".json"
+        return Path(_out("rev-parse", "--git-path", f"integrate-plans/{name}"))
+
+    def save(self) -> None:
+        path = Plan.path(self.branch)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
+
+    @staticmethod
+    def load(branch: str) -> Plan | None:
+        path = Plan.path(branch)
+        if not path.is_file():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw["merged"] = [Member(**m) for m in raw["merged"]]
+        raw["dropped"] = [Dropped(Member(**d.pop("member")), **d) for d in raw["dropped"]]
+        return Plan(**raw)
 
 
 def _checks(rollup: list[dict] | None) -> str:
@@ -171,27 +200,32 @@ def _changed(sha: str, base: str) -> set[str]:
     return set(_out("diff", "--name-only", f"{base}...{sha}").splitlines())
 
 
-def _batches(date: str) -> tuple[list[tuple[int, str]], set[int]]:
-    """(open batch PRs, batch numbers already used on `date`)."""
+def _open_batches() -> list[tuple[int, str]]:
+    """Every open pull request from an `integrate/` branch, however named."""
+    rows = json.loads(gh("pr", "list", "--state", "open", "--limit", "500",
+                         "--json", "number,headRefName") or "[]")
+    return [(r["number"], r["headRefName"]) for r in rows
+            if r.get("headRefName", "").startswith(PREFIX)]
+
+
+def _used_numbers(date: str) -> set[int]:
+    """Batch numbers taken on `date`: by earlier batch pull requests (whose
+    branches GitHub deletes on merge), remote branches and local branches."""
     rows = json.loads(gh("pr", "list", "--state", "all", "--limit", "300",
                          "--search", "integrate in:title",
-                         "--json", "number,headRefName,state") or "[]")
-    open_prs, used = [], set()
-    names = [(r.get("headRefName", ""), r) for r in rows]
+                         "--json", "number,headRefName") or "[]")
+    names = [r.get("headRefName", "") for r in rows]
     remote = _out("ls-remote", "--heads", REMOTE, f"{PREFIX}*")
-    names += [(line.split("refs/heads/", 1)[1], None)
+    names += [line.split("refs/heads/", 1)[1]
               for line in remote.splitlines() if "refs/heads/" in line]
-    local = _out("for-each-ref", "--format=%(refname:short)", f"refs/heads/{PREFIX}")
-    names += [(name, None) for name in local.splitlines()]
-    for name, row in names:
+    names += _out("for-each-ref", "--format=%(refname:short)",
+                  f"refs/heads/{PREFIX}").splitlines()
+    used = set()
+    for name in names:
         match = BATCH_RE.match(name)
-        if not match:
-            continue
-        if row is not None and row.get("state") == "OPEN":
-            open_prs.append((row["number"], name))
-        if match.group(1) == date:
+        if match and match.group(1) == date:
             used.add(int(match.group(2)))
-    return open_prs, used
+    return used
 
 
 def _preflight() -> tuple[str, str]:
@@ -225,10 +259,21 @@ def _collision(member: Member, conflicted: list[str], merged: list[Member],
             f"merges, merge {BASE} forward, let CI pass, then re-apply the label")
 
 
+def _not_ready(m: Member) -> str | None:
+    """Why a labelled pull request sits this batch out, keeping its label."""
+    if m.draft:
+        return "is a draft"
+    if m.checks != "green":
+        return (f"CI on its head is {m.checks}; it joins a batch once that "
+                "head is green")
+    return None
+
+
 def _merge_members(plan: Plan, members: list[Member]) -> None:
     for m in members:
-        if m.draft:
-            plan.dropped.append(Dropped(m, "is a draft", comment=False))
+        reason = _not_ready(m)
+        if reason:
+            plan.dropped.append(Dropped(m, reason, comment=False))
             continue
         head = _fetch_head(m.number)
         if head != m.sha:
@@ -236,7 +281,9 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
                 m, f"head moved from {m.sha[:12]} to {head[:12]} after listing; "
                    "rebuild to include it", comment=False))
             continue
-        proc = git("merge", "--no-ff", "--no-edit", "-m",
+        # rerere off: a replayed resolution would be a conflict resolved
+        # inside the batch, and would hide the conflict from --diff-filter=U.
+        proc = git("-c", "rerere.enabled=false", "merge", "--no-ff", "--no-edit", "-m",
                    f"Merge #{m.number} into {plan.branch}: {m.title}", m.sha,
                    check=False)
         if proc.returncode == 0:
@@ -261,7 +308,12 @@ def _new_markers(base_sha: str) -> list[str]:
     return sorted(files("HEAD") - files(base_sha))
 
 
-def body(plan: Plan, label: str) -> str:
+def _cell(text: str) -> str:
+    """A pull request title made safe for one Markdown table cell."""
+    return " ".join(text.split()).replace("|", "\\|").replace("`", "'")
+
+
+def body(plan: Plan, suite: str | None = None) -> str:
     lines = [
         f"Integration batch of {len(plan.merged)} reviewed pull requests, built by "
         f"`python ops/integrate.py build` from `{BASE}` at `{plan.base_sha}`. "
@@ -274,7 +326,7 @@ def body(plan: Plan, label: str) -> str:
         "| --- | --- | --- | --- |",
     ]
     for m in plan.merged:
-        lines.append(f"| #{m.number} {m.title} | `{m.sha}` | {m.url} "
+        lines.append(f"| #{m.number} {_cell(m.title)} | `{m.sha}` | {m.url} "
                      f"({m.review.lower().replace('_', ' ')}) | {m.checks} |")
     if plan.dropped:
         lines += ["", "## Dropped", ""]
@@ -286,30 +338,39 @@ def body(plan: Plan, label: str) -> str:
                   + ", ".join(f"`{f}`" for f in plan.markers)]
     lines += [
         "", "## Validation", "",
-        "- Local full suite: <fill in: `pwsh ops/wsl-suite.ps1` on this head; "
-        "machine, commit and result>",
+        f"- Local full suite: {suite or '<filled in by `open`>'}",
         "- CI: this pull request's run is the combined check of its members.",
         "- A red batch is bisected locally (master plus half the members); the "
-        f"culprit is dropped with a comment and loses `{label}`, and nothing is "
-        "fixed inside the batch.",
+        f"culprit is dropped with a comment and loses `{plan.label}`, and nothing "
+        "is fixed inside the batch.",
     ]
     return "\n".join(lines) + "\n"
 
 
+def _switch_back(restore: str, base_sha: str) -> None:
+    git("switch", "-q", *([restore] if restore != base_sha else ["--detach", base_sha]))
+
+
 def build(args: argparse.Namespace) -> int:
     restore, base_sha = _preflight()
-    open_prs, used = _batches(args.date)
+    open_prs = _open_batches()
     if open_prs:
         raise Refusal("a batch is already open: " + ", ".join(
             f"#{n} ({name})" for n, name in open_prs)
             + "; merge or close it before building the next one")
     members = ready(args.label)
-    if len([m for m in members if not m.draft]) < MIN_MEMBERS:
-        print(f"{len(members)} pull request(s) carry `{args.label}`; a batch needs "
-              f"{MIN_MEMBERS}. Merge a lone ready pull request directly.")
+    waiting = [(m, _not_ready(m)) for m in members if _not_ready(m)]
+    if len(members) - len(waiting) < MIN_MEMBERS:
+        print(f"{len(members) - len(waiting)} of {len(members)} pull request(s) "
+              f"carrying `{args.label}` are ready (not a draft, CI green on the "
+              f"head); a batch needs {MIN_MEMBERS}. Merge a lone ready pull "
+              "request directly.")
+        for m, reason in waiting:
+            print(f"  #{m.number} {reason}")
         return 0
-    n = max(used, default=0) + 1
-    plan = Plan(branch=f"{PREFIX}{args.date}-batch-{n}", base_sha=base_sha)
+    n = max(_used_numbers(args.date), default=0) + 1
+    plan = Plan(branch=f"{PREFIX}{args.date}-batch-{n}", base_sha=base_sha,
+                label=args.label)
     print(f"{'[dry run] ' if args.dry_run else ''}building {plan.branch} "
           f"from {REMOTE}/{BASE} {base_sha[:12]}")
     if args.dry_run:
@@ -320,57 +381,130 @@ def build(args: argparse.Namespace) -> int:
     try:
         _merge_members(plan, members)
         plan.markers = _new_markers(base_sha)
+        plan.head = _out("rev-parse", "HEAD")
         done = True
     finally:
         if git("rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode == 0:
             git("merge", "--abort", check=False)
-        # Keep the checkout on the branch only when it will be pushed; it was
-        # created by this run and never pushed otherwise, so it goes.
+        # Stay on the branch only when `open` will publish it; otherwise it
+        # was created by this run, never pushed, and goes.
         if not (done and not args.dry_run and len(plan.merged) >= MIN_MEMBERS):
-            git("switch", "-q", *([restore] if restore != base_sha
-                                  else ["--detach", base_sha]))
+            _switch_back(restore, base_sha)
             if not args.dry_run:
                 git("branch", "-q", "-D", plan.branch)
 
     for d in plan.dropped:
         print(f"  left out #{d.member.number}: {d.reason}")
-    text = body(plan, args.label)
     if len(plan.merged) < MIN_MEMBERS:
         merged = ", ".join(f"#{m.number}" for m in plan.merged) or "none"
-        print(f"only {merged} merged cleanly; no batch opened. Merge a lone "
+        print(f"only {merged} merged cleanly; no batch built. Merge a lone "
               "ready pull request directly.")
-        url = None
-    elif args.dry_run:
-        print(f"\nwould push {plan.branch} and open:\n  {plan.title}\n\n{text}")
-        url = None
-    else:
-        git("push", "-q", "-u", REMOTE, plan.branch)
-        url = gh("pr", "create", "--base", BASE, "--head", plan.branch,
-                 "--title", plan.title, "--body-file", "-", input=text).strip()
-        print(f"opened {url}: {plan.title}\nthis checkout is on {plan.branch}; "
-              "run the local full suite on it next (`pwsh ops/wsl-suite.ps1`)")
-    _report_drops(plan, url, args)
+        # No `open` follows, so the collisions are reported now.
+        _report_drops(plan, None, args.dry_run)
+        return 0
+    if args.dry_run:
+        print(f"\nwould build {plan.branch}, then after the suite open:\n"
+              f"  {plan.title}\n\n{body(plan)}")
+        _report_drops(plan, None, True)
+        return 0
+    plan.save()
+    print(f"\nbuilt {plan.branch} at {plan.head[:12]}; nothing is pushed, so no CI "
+          "has started. Next, on this checkout:\n"
+          "  1. PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1   "
+          "(the local WSL full suite; writes ~/.pseudolife-mcp/suite-results/*.json)\n"
+          "  2. python ops/integrate.py open --suite <that .json>\n"
+          "A red suite: bisect locally, drop the culprit, switch back with "
+          f"`git switch --detach {REMOTE}/{BASE}`, remove the local branch and build "
+          "again.")
     return 0
 
 
-def _report_drops(plan: Plan, url: str | None, args: argparse.Namespace) -> None:
+def _suite_line(args: argparse.Namespace, head: str) -> str:
+    """The "Local full suite" line, from a passing result for exactly `head`."""
+    if args.suite_note:
+        return f"{args.suite_note} (stated by the operator, not checked)"
+    if not args.suite:
+        raise Refusal("give the local full suite's result for this head: "
+                      "`--suite <~/.pseudolife-mcp/suite-results/*.json>` from "
+                      "`ops/remote-suite.ps1`, or `--suite-note \"<machine role, "
+                      "commit, result>\"` for a run that wrote no JSON")
+    try:
+        # utf-8-sig: Windows PowerShell 5 writes the result with a BOM.
+        result = json.loads(Path(args.suite).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        raise Refusal(f"cannot read the suite result {args.suite}: {exc}") from None
+    if result.get("commit") != head:
+        raise Refusal(f"the suite result tested {str(result.get('commit'))[:12]}, "
+                      f"not this batch head {head[:12]}; run the suite on this "
+                      "checkout")
+    if result.get("exit_code") != 0:
+        raise Refusal(f"the suite failed on this head (exit {result.get('exit_code')}: "
+                      f"{result.get('summary')}); bisect locally and drop the culprit")
+    return (f"passed at `{head}` on {result.get('machine', 'an unnamed machine')}: "
+            f"{result.get('summary', '')}")
+
+
+def open_(args: argparse.Namespace) -> int:
+    if _out("status", "--porcelain", "--untracked-files=no"):
+        raise Refusal("the checkout has uncommitted changes to tracked files; "
+                      "nothing is fixed inside a batch")
+    branch = git("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
+    plan = Plan.load(branch) if BATCH_RE.match(branch) else None
+    if plan is None:
+        raise Refusal(f"this checkout is not on a batch `build` left here "
+                      f"({branch or 'detached HEAD'}); run `python ops/integrate.py "
+                      "build` first")
+    head = _out("rev-parse", "HEAD")
+    if head != plan.head:
+        raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
+                      "build; nothing is fixed inside a batch, so rebuild it")
+    git("fetch", "-q", REMOTE, BASE)
+    if _out("rev-parse", f"{REMOTE}/{BASE}") != plan.base_sha:
+        raise Refusal(f"{REMOTE}/{BASE} moved since {branch} was built; switch "
+                      f"back with `git switch --detach {REMOTE}/{BASE}`, remove the "
+                      "local branch and build again")
+    open_prs = _open_batches()
+    if open_prs:
+        raise Refusal("a batch is already open: " + ", ".join(
+            f"#{n} ({name})" for n, name in open_prs))
+    text = body(plan, _suite_line(args, head))
+    try:
+        git("push", "-q", "-u", REMOTE, plan.branch)
+    except Refusal as exc:
+        raise Refusal(f"{exc}\nNothing was pushed or commented on; fix the push "
+                      "and rerun `open`.") from None
+    try:
+        url = gh("pr", "create", "--base", BASE, "--head", plan.branch,
+                 "--title", plan.title, "--body-file", "-", input=text).strip()
+    except Refusal as exc:
+        raise Refusal(
+            f"{exc}\n{plan.branch} is pushed but has no pull request, and no "
+            "dropped member was commented on; rerun `open` with the same "
+            "arguments once gh works.") from None
+    print(f"opened {url}: {plan.title}")
+    _report_drops(plan, url, False)
+    Plan.path(plan.branch).unlink(missing_ok=True)
+    return 0
+
+
+def _report_drops(plan: Plan, url: str | None, dry_run: bool) -> None:
     for d in plan.dropped:
         if not d.comment:
             continue
-        if url or args.dry_run:
+        if url or dry_run:
             where = f"Left out of integration batch `{plan.branch}`" + (
                 f" ({url})" if url else "")
         else:
             where = "Could not join an integration batch"
         text = (f"{where}: merging this head (`{d.member.sha}`) "
-                f"{d.reason}. `ops/integrate.py` removed the `{args.label}` label; "
+                f"{d.reason}. `ops/integrate.py` removed the `{plan.label}` label; "
                 "nothing was changed on this branch.")
-        if args.dry_run:
-            print(f"would comment on #{d.member.number} and remove `{args.label}`:"
+        if dry_run:
+            print(f"would comment on #{d.member.number} and remove `{plan.label}`:"
                   f"\n  {text}")
             continue
         gh("pr", "comment", str(d.member.number), "--body-file", "-", input=text)
-        gh("pr", "edit", str(d.member.number), "--remove-label", args.label)
+        gh("pr", "edit", str(d.member.number), "--remove-label", plan.label)
 
 
 def status(args: argparse.Namespace) -> int:
@@ -398,18 +532,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     for name, helptext in (("status", "list labelled pull requests"),
-                           ("build", "build and open the next batch")):
+                           ("build", "merge the next batch onto a local branch")):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("--label", default=LABEL)
     b = sub.choices["build"]
     b.add_argument("--dry-run", action="store_true",
-                   help="merge locally on a detached HEAD, then print the plan; "
-                        "push, open and comment on nothing")
+                   help="merge on a detached HEAD, print the plan and switch back; "
+                        "creates, pushes and comments on nothing")
     b.add_argument("--date", default=dt.date.today().isoformat(),
                    help="batch date (default: today)")
+    o = sub.add_parser("open", help="push the built batch and open its pull request")
+    evidence = o.add_mutually_exclusive_group()
+    evidence.add_argument("--suite", help="the passing suite result JSON for this head")
+    evidence.add_argument("--suite-note",
+                          help="the suite result in words, for a run without a JSON")
     args = parser.parse_args(argv)
+    commands = {"status": status, "build": build, "open": open_}
     try:
-        return build(args) if args.command == "build" else status(args)
+        return commands[args.command](args)
     except Refusal as exc:
         print(f"integrate: {exc}", file=sys.stderr)
         return 2

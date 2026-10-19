@@ -54,6 +54,7 @@ class FakeGh:
         self.labeled_at: dict[int, str] = {}
         self.history: list[dict] = []   # earlier PRs, for numbering and open batches
         self.calls: list[tuple[list[str], str | None]] = []
+        self.fail_create = False
 
     def add(self, number: int, sha: str, *, title: str | None = None,
             labeled_at: str | None = None, **extra) -> None:
@@ -78,13 +79,19 @@ class FakeGh:
         self.calls.append((args, input))
         if args[:2] == ["pr", "list"] and "--label" in args:
             assert args[args.index("--label") + 1] == LABEL
+            assert args[args.index("--base") + 1] == "master"
+            assert args[args.index("--state") + 1] == "open"
             return json.dumps(self.ready)
         if args[:2] == ["pr", "list"]:
-            return json.dumps(self.history)
+            state = args[args.index("--state") + 1]
+            return json.dumps([r for r in self.history
+                               if state == "all" or r["state"].lower() == state])
         if args[0] == "api":
             number = int(next(a for a in args if "/issues/" in a).split("/")[-2])
             return self.labeled_at.get(number, "") + "\n"
         if args[:2] == ["pr", "create"]:
+            if self.fail_create:
+                raise integrate.Refusal("`gh pr create` failed (1): HTTP 502")
             return "https://github.example/pr/900\n"
         if args[:2] in (["pr", "comment"], ["pr", "edit"]):
             return ""
@@ -150,6 +157,25 @@ def _build(*extra: str) -> int:
     return integrate.main(["build", "--date", DATE, *extra])
 
 
+def _suite_result(world, *, commit: str | None = None, exit_code: int = 0) -> Path:
+    path = world.work.parent / "suite-result.json"
+    path.write_text(json.dumps({
+        "machine": "local-wsl", "exit_code": exit_code,
+        "commit": commit or _git(world.work, "rev-parse", "HEAD"),
+        "summary": "18868 passed, 81 skipped in 600s"}), encoding="utf-8-sig")
+    return path
+
+
+def _open(world, **result) -> int:
+    return integrate.main(["open", "--suite", str(_suite_result(world, **result))])
+
+
+def _publish(world) -> int:
+    """build, then open with a passing suite result for the built head."""
+    code = _build()
+    return code if code else _open(world)
+
+
 def _second_parents(origin: Path, branch: str) -> list[str]:
     """The heads merged into `branch`, in merge order (origin is bare)."""
     log = _git(origin, "log", "--first-parent", "--format=%P", f"master..{branch}")
@@ -162,7 +188,7 @@ def test_build_merges_members_in_label_order_and_opens_the_batch_pr(world, capsy
     world.gh.add(10, sha10, labeled_at="2026-10-19T09:00:00Z")
     world.gh.add(11, sha11, labeled_at="2026-10-19T08:00:00Z")
 
-    assert _build() == 0, capsys.readouterr()
+    assert _publish(world) == 0, capsys.readouterr()
 
     branch = f"integrate/{DATE}-batch-1"
     assert world.remote_branches() == [branch]
@@ -187,7 +213,7 @@ def test_unknown_label_times_fall_back_to_pr_number_order(world, capsys):
     world.gh.add(11, sha11)
     world.gh.add(10, sha10)
 
-    assert _build() == 0, capsys.readouterr()
+    assert _publish(world) == 0, capsys.readouterr()
 
     assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11, sha12]
 
@@ -199,7 +225,7 @@ def test_a_member_colliding_with_another_is_dropped_with_a_comment(world, capsys
     for n, sha in ((10, sha10), (11, sha11), (12, sha12)):
         world.gh.add(n, sha)
 
-    assert _build() == 0, capsys.readouterr()
+    assert _publish(world) == 0, capsys.readouterr()
 
     branch = f"integrate/{DATE}-batch-1"
     assert _second_parents(world.origin, branch) == [sha10, sha12]
@@ -226,7 +252,7 @@ def test_a_member_conflicting_with_master_itself_is_told_so(world, capsys):
     for n, sha in ((10, sha10), (11, sha11), (12, sha12)):
         world.gh.add(n, sha)
 
-    assert _build() == 0, capsys.readouterr()
+    assert _publish(world) == 0, capsys.readouterr()
 
     (args, body), = world.gh.bodies("comment")
     assert args[2] == "10"
@@ -309,7 +335,7 @@ def test_the_batch_number_skips_every_used_one(world, capsys):
                         {"number": 872, "headRefName": "integrate/2026-10-18-batch-7",
                          "state": "MERGED"}]
 
-    assert _build() == 0, capsys.readouterr()
+    assert _publish(world) == 0, capsys.readouterr()
 
     assert f"integrate/{DATE}-batch-3" in world.remote_branches()
 
@@ -323,7 +349,7 @@ def test_a_head_that_moved_after_listing_is_skipped_not_merged(world, capsys):
     world.gh.add(12, sha12)
     world.pr(11, {"c.txt": "c, revised\n"})  # pushed after the listing
 
-    assert _build() == 0
+    assert _publish(world) == 0
     out = capsys.readouterr().out
 
     assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha12]
@@ -356,7 +382,7 @@ def test_conflict_markers_a_member_committed_are_flagged_in_the_body(world, caps
     world.gh.add(10, sha10)
     world.gh.add(11, sha11)
 
-    assert _build() == 0, capsys.readouterr()
+    assert _publish(world) == 0, capsys.readouterr()
 
     (_, body), = world.gh.bodies("create")
     assert "conflict markers" in body and "b.txt" in body
@@ -370,7 +396,7 @@ def test_drafts_are_left_out(world, capsys):
     world.gh.add(11, sha11, isDraft=True)
     world.gh.add(12, sha12)
 
-    assert _build() == 0, capsys.readouterr()
+    assert _publish(world) == 0, capsys.readouterr()
 
     assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha12]
 
@@ -393,3 +419,179 @@ def test_status_lists_each_labelled_pr_and_its_mergeability(world, capsys):
     assert "failing" in lines["#11"] and "REVIEW_REQUIRED" in lines["#11"]
     assert "green" in lines["#10"]
     assert world.gh.mutations() == []
+
+
+def test_a_member_without_green_ci_on_its_head_sits_out_and_keeps_its_label(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    sha12 = world.pr(12, {"d.txt": "d\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[{"status": "IN_PROGRESS", "conclusion": None}])
+    world.gh.add(12, sha12)
+
+    assert _publish(world) == 0
+    out = capsys.readouterr().out
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha12]
+    assert "#11" in out and "pending" in out
+    assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
+
+
+def test_too_few_green_members_builds_nothing_and_says_why(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[])
+
+    assert _build() == 0
+    out = capsys.readouterr().out
+
+    assert "1 of 2" in out and "#11 CI on its head is none" in out
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+def test_any_open_integrate_branch_pr_blocks_a_build(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+    world.gh.history = [{"number": 860, "headRefName": "integrate/2026-10-07-rust-modes",
+                         "state": "OPEN"},
+                        {"number": 861, "headRefName": "claude/unrelated", "state": "OPEN"}]
+
+    assert _build() == 2
+    err = capsys.readouterr().err
+    assert "#860" in err and "#861" not in err
+    assert world.remote_branches() == []
+
+
+def test_titles_cannot_break_the_member_table(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10, title="fix | APPROVED | green |\n## Fake heading `x`")
+    world.gh.add(11, sha11)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    (_, body), = world.gh.bodies("create")
+    row = next(line for line in body.splitlines() if line.startswith("| #10 "))
+    assert row.count(" | ") == 3 and "\\|" in row and "`x`" not in row
+    assert "\n## Fake heading" not in body
+
+
+def _three_with_a_collision(world) -> None:
+    sha10 = world.pr(10, {"a.txt": "one\nTEN\nthree\n"})
+    sha11 = world.pr(11, {"a.txt": "one\nELEVEN\nthree\n"})
+    sha12 = world.pr(12, {"d.txt": "d\n"})
+    for n, sha in ((10, sha10), (11, sha11), (12, sha12)):
+        world.gh.add(n, sha)
+
+
+def test_a_failed_pr_create_can_be_finished_by_rerunning_open(world, capsys):
+    _three_with_a_collision(world)
+    world.gh.fail_create = True
+
+    assert _publish(world) == 2
+    err = capsys.readouterr().err
+
+    branch = f"integrate/{DATE}-batch-1"
+    assert "HTTP 502" in err and "rerun `open`" in err
+    assert world.remote_branches() == [branch]
+    assert world.gh.bodies("comment") == []  # nothing claims a batch that has no PR
+
+    world.gh.fail_create = False
+    assert _open(world) == 0, capsys.readouterr()
+    # The failed attempt and the one that opened it; the drop is reported once.
+    assert len(world.gh.bodies("create")) == 2 and len(world.gh.bodies("comment")) == 1
+
+
+def test_build_alone_publishes_nothing_so_the_suite_runs_before_ci(world, capsys):
+    _three_with_a_collision(world)
+
+    assert _build() == 0
+    out = capsys.readouterr().out
+
+    branch = f"integrate/{DATE}-batch-1"
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+    assert _git(world.work, "symbolic-ref", "--short", "HEAD") == branch
+    assert "remote-suite.ps1" in out and "open --suite" in out
+    plan = Path(_git(world.work, "rev-parse", "--git-path",
+                     f"integrate-plans/{DATE}-batch-1.json"))
+    assert (world.work / plan).is_file()
+
+    assert _open(world) == 0, capsys.readouterr()
+    (_, body), = world.gh.bodies("create")
+    head = _git(world.work, "rev-parse", "HEAD")
+    assert f"Local full suite: passed at `{head}` on local-wsl: 18868 passed" in body
+    assert not (world.work / plan).exists()
+
+
+@pytest.mark.parametrize("case", ["no-evidence", "other-commit", "failed",
+                                  "head-moved", "master-moved", "not-a-batch"])
+def test_open_refuses_without_a_passing_suite_on_the_unchanged_batch(world, capsys, case):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+    if case == "no-evidence":
+        code = integrate.main(["open"])
+        expect = "--suite"
+    elif case == "other-commit":
+        code = _open(world, commit="0" * 40)
+        expect = "not this batch head"
+    elif case == "failed":
+        code = _open(world, exit_code=1)
+        expect = "suite failed"
+    elif case == "head-moved":
+        (world.work / "fix.txt").write_text("a fix\n", encoding="utf-8")
+        _git(world.work, "add", "fix.txt")
+        _git(world.work, "commit", "-q", "-m", "fix inside the batch")
+        code = _open(world)
+        expect = "nothing is fixed inside a batch"
+    elif case == "master-moved":
+        _git(world.seed, "fetch", "-q", "origin")
+        _git(world.seed, "switch", "-q", "-C", "master", "origin/master")
+        (world.seed / "e.txt").write_text("e\n", encoding="utf-8")
+        _git(world.seed, "add", "e.txt")
+        _git(world.seed, "commit", "-q", "-m", "master moves")
+        _git(world.seed, "push", "-q", "origin", "master")
+        code = _open(world)
+        expect = "moved since"
+    else:
+        _git(world.work, "switch", "-q", "--detach", "origin/master")
+        code = _open(world)
+        expect = "build` first"
+
+    assert code == 2
+    assert expect in capsys.readouterr().err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+def test_open_takes_a_stated_suite_result_and_says_it_was_not_checked(world, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+
+    note = "passed on the Linux dev box, 18868 passed"
+    assert integrate.main(["open", "--suite-note", note]) == 0, capsys.readouterr()
+
+    (_, body), = world.gh.bodies("create")
+    assert f"Local full suite: {note} (stated by the operator, not checked)" in body
+
+
+@pytest.mark.parametrize("rollup, expected", [
+    (None, "none"),
+    ([], "none"),
+    ([{"status": "COMPLETED", "conclusion": "SUCCESS"},
+      {"status": "COMPLETED", "conclusion": "SKIPPED"},
+      {"status": "COMPLETED", "conclusion": "NEUTRAL"}], "green"),
+    ([{"state": "SUCCESS"}], "green"),                       # a StatusContext
+    ([{"state": "PENDING"}], "pending"),
+    ([{"state": "ERROR"}], "failing"),
+    ([{"status": "IN_PROGRESS", "conclusion": None}], "pending"),
+    ([{"status": "QUEUED", "conclusion": ""}], "pending"),
+    ([{"status": "IN_PROGRESS", "conclusion": None},
+      {"status": "COMPLETED", "conclusion": "FAILURE"}], "failing"),
+    ([{"status": "COMPLETED", "conclusion": "CANCELLED"}], "failing"),
+    ([{"status": "COMPLETED", "conclusion": "TIMED_OUT"}], "failing"),
+])
+def test_ci_rollup_summary(rollup, expected):
+    assert integrate._checks(rollup) == expected
