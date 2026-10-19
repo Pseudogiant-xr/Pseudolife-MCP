@@ -309,7 +309,8 @@ async fn board_retry_registered_note_once_after_validated_call() {
     // The retry attaches only after the state file's durable write. On the
     // Windows dev VM on 2026-10-19 that write took up to 3.1 s beside this
     // binary's other tests, and the old 2 s observer failed 4 of 40 loops.
-    // Allow one production retry attempt, as `registered()` does.
+    // Allow one production retry attempt; `startup` is slack for a second
+    // attempt, which reuses the saved state when a write outlasts the first.
     let timing = pseudolife_stdio::board::Timing::default();
     fixture
         .wait_within("/attach", 1, timing.retry_attempt + timing.startup)
