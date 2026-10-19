@@ -476,11 +476,6 @@ def open_(args: argparse.Namespace) -> int:
     if head != plan.head:
         raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
                       "build; nothing is fixed inside a batch, so rebuild it")
-    git("fetch", "-q", REMOTE, BASE)
-    if _out("rev-parse", f"{REMOTE}/{BASE}") != plan.base_sha:
-        raise Refusal(f"{REMOTE}/{BASE} moved since {branch} was built; switch "
-                      f"back with `git switch --detach {REMOTE}/{BASE}`, remove the "
-                      "local branch and build again")
     open_prs = _open_batches()
     others = [(n, name) for n, name, _, _ in open_prs if name != plan.branch]
     if others:
@@ -489,7 +484,8 @@ def open_(args: argparse.Namespace) -> int:
     text = body(plan, _suite_line(args, head))
     # A rerun after a failure past the push resumes: this branch's own pull
     # request is the one to finish, not a second batch, but only while it
-    # still points at the head the suite passed on.
+    # still points at the head the suite passed on. Once it is open, a moved
+    # master is its CI's concern, so the base check applies only before then.
     own = [(n, u, sha) for n, name, u, sha in open_prs if name == plan.branch]
     url = None
     if own:
@@ -497,6 +493,12 @@ def open_(args: argparse.Namespace) -> int:
         if sha != plan.head:
             raise Refusal(f"#{number} is open from {plan.branch} at {sha[:12]}, not "
                           f"the built head {plan.head[:12]}; check it by hand")
+    else:
+        git("fetch", "-q", REMOTE, BASE)
+        if _out("rev-parse", f"{REMOTE}/{BASE}") != plan.base_sha:
+            raise Refusal(f"{REMOTE}/{BASE} moved since {branch} was built; switch "
+                          f"back with `git switch --detach {REMOTE}/{BASE}`, remove "
+                          "the local branch and build again")
     if url is None:
         try:
             git("push", "-q", "-u", REMOTE, plan.branch)
@@ -543,6 +545,18 @@ def _report_drops(plan: Plan, url: str | None, dry_run: bool, *,
         if dry_run:
             print(f"would comment on #{d.member.number} and remove `{plan.label}`:"
                   f"\n  {text}")
+            continue
+        # An author may push a fix and relabel while the batch suite runs;
+        # the drop is about the head that collided, so a moved head keeps
+        # its label and gets no comment.
+        current = json.loads(gh("pr", "view", str(d.member.number), "--json",
+                                "headRefOid"))["headRefOid"]
+        if current != d.member.sha:
+            print(f"#{d.member.number} moved to {current[:12]} since the build; "
+                  f"left its `{plan.label}` label and posted nothing")
+            d.commented = d.unlabelled = True
+            if persist:
+                plan.save()
             continue
         if not d.commented:
             gh("pr", "comment", str(d.member.number), "--body-file", "-", input=text)

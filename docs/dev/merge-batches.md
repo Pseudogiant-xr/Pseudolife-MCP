@@ -64,8 +64,9 @@ python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json
   one from a launcher too old to record its pytest arguments, is refused.
   If any step after the push fails, rerunning `open` with the same
   arguments resumes on the batch's own pull request without repeating a
-  comment. It
-  refuses if the branch gained commits or master moved since `build`. It
+  comment, even if master has moved since. Before the batch pull request
+  exists, it refuses if the branch gained commits or master moved since
+  `build`. It
   then pushes the branch, opens the batch pull request titled `integrate:
   <date> batch N (#a, #b)`, whose body lists each member's merged head,
   review link and CI plus the suite result, and comments on each dropped
@@ -76,7 +77,8 @@ out without a comment. A member that conflicts is dropped: the script
 aborts that merge, and `open` comments on the pull request naming what it
 collided with (master itself, or the earlier members that touch the
 conflicted files) and removes its label, so the next batch does not pick
-it up again. Its author merges master forward once the collision has
+it up again; a dropped member whose head moved since `build` keeps its
+label and gets no comment. Its author merges master forward once the collision has
 landed, waits for CI, and re-applies the label. If fewer than two members
 merge cleanly, no batch is built, the collisions are reported at once and
 the local branch is deleted; merge a lone ready pull request directly.

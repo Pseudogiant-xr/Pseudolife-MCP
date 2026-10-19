@@ -88,6 +88,10 @@ class FakeGh:
             state = args[args.index("--state") + 1]
             return json.dumps([r for r in self.history
                                if state == "all" or r["state"].lower() == state])
+        if args[:2] == ["pr", "view"]:
+            assert args[3:] == ["--json", "headRefOid"]
+            pr = next(r for r in self.ready if r["number"] == int(args[2]))
+            return json.dumps({"headRefOid": pr["headRefOid"]})
         if args[0] == "api":
             number = int(next(a for a in args if "/issues/" in a).split("/")[-2])
             return self.labeled_at.get(number, "") + "\n"
@@ -596,19 +600,67 @@ def test_a_failed_label_removal_resumes_without_a_second_comment(world, capsys):
     assert [args[2] for args, _ in world.gh.bodies("edit")] == ["11", "11"]
 
 
-def test_a_fork_pr_named_like_a_batch_neither_blocks_nor_is_resumed(world, capsys):
+def test_a_fork_pr_named_like_a_batch_does_not_block_build(world, capsys):
     _three_with_a_collision(world)
-    branch = f"integrate/{DATE}-batch-1"
-    world.gh.history = [{"number": 870, "headRefName": branch, "state": "OPEN",
-                         "url": "https://github.example/pr/870",
+    world.gh.history = [{"number": 870, "headRefName": f"integrate/{DATE}-batch-1",
+                         "state": "OPEN", "url": "https://github.example/pr/870",
                          "isCrossRepository": True, "headRefOid": "f" * 40}]
 
     assert _publish(world) == 0, capsys.readouterr()
+
+
+def test_a_fork_pr_on_the_built_branch_name_is_not_resumed(world, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    branch = f"integrate/{DATE}-batch-1"
+    assert _git(world.work, "symbolic-ref", "--short", "HEAD") == branch
+    # The fork appears after build, under the exact branch name `open` publishes.
+    world.gh.history = [{"number": 870, "headRefName": branch, "state": "OPEN",
+                         "url": "https://github.example/pr/870",
+                         "isCrossRepository": True, "headRefOid": "f" * 40}]
+    capsys.readouterr()
+
+    assert _open(world) == 0, capsys.readouterr()
 
     assert "resuming" not in capsys.readouterr().out
     (args, _), = world.gh.bodies("create")
     (_, comment), = world.gh.bodies("comment")
     assert "pr/870" not in comment and "pr/900" in comment
+
+
+def test_a_dropped_member_that_moved_since_build_keeps_its_label(world, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    # #11's author pushes a fix and relabels while the batch suite runs.
+    next(r for r in world.gh.ready if r["number"] == 11)["headRefOid"] = "c" * 40
+    capsys.readouterr()
+
+    assert _open(world) == 0, capsys.readouterr()
+
+    assert "#11 moved to cccccccccccc" in capsys.readouterr().out
+    assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
+
+
+def test_a_resume_finishes_the_batch_after_master_moved(world, capsys):
+    _three_with_a_collision(world)
+    world.gh.fail_create = "after"
+    assert _publish(world) == 2
+    capsys.readouterr()
+    # Another PR lands on master before the rerun; the local batch stays put.
+    _git(world.seed, "fetch", "-q", "origin")
+    _git(world.seed, "switch", "-q", "-C", "master", "origin/master")
+    (world.seed / "m.txt").write_text("m\n", encoding="utf-8")
+    _git(world.seed, "add", "-A")
+    _git(world.seed, "commit", "-q", "-m", "master moves")
+    _git(world.seed, "push", "-q", "origin", "master")
+
+    world.gh.fail_create = None
+    assert _open(world) == 0, capsys.readouterr()
+
+    assert "resuming https://github.example/pr/900" in capsys.readouterr().out
+    assert len(world.gh.bodies("create")) == 1
+    (args, _), = world.gh.bodies("comment")
+    assert args[2] == "11"
 
 
 def test_open_will_not_resume_on_its_own_branch_pr_at_another_head(world, capsys):
