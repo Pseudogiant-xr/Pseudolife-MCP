@@ -42,7 +42,6 @@ tool's answers by value.
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
 | `memory_graph_review` | W3-H | No graph review/proposal service. |
-| `memory_consolidate` | W3-H | No consolidation service. |
 | `memory_graph_relate` | W3-H | Edge storage exists, but service-level validation, provenance and fact projection do not. |
 | `memory_graph_unrelate` | W3-H | Edge storage exists, but the public unrelate service does not. |
 | `memory_alias` | W3-H | Alias storage exists, but the public alias service and resident graph synchronization do not. |
@@ -57,7 +56,7 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_outcome`, `memory_reinforce`, `memory_history`, `memory_world_set`,
 `memory_world_search`, `memory_lesson_search`, `memory_supersede`,
 `memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
-`memory_agents` and `memory_message`. The two board tools
+`memory_consolidate`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -326,6 +325,11 @@ this increment does not claim the complete write boundary or cutover readiness.
 | `entry_mutation_lock` (session advisory locks per target id, held from before the transaction to after publication) | taken | not taken; the per-operation `pg_advisory_xact_lock` of `reinstate_entry` is | the leased single writer already serializes every entry mutation in one process; another writer cannot hold the bank |
 | The promotion walk after the replacement (`_consolidate_eligible`) | runs, as after any store | not run | the multi-band row above: the flat default never promotes |
 | File-mode corrections (unique exact text without row ids, `id_unavailable`, the file-signature recovery) | served | unreachable: the Rust daemon runs on PostgreSQL only | not ported |
+
+`memory_consolidate` (2026-10-19) runs the same correction body over a list
+of targets, so every row above applies to it as written (the
+`entry_mutation_lock` row over all of its target ids). It adds no divergence
+of its own.
 
 ### memory_forget (2026-10-19)
 
