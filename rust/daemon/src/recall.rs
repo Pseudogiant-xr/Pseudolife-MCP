@@ -369,7 +369,7 @@ fn hub_threshold(
     degrees: &HashMap<String, usize>,
     percentile: f64,
     floor: i64,
-) -> Result<i64, ToolError> {
+) -> Result<i64, String> {
     let mut vals: Vec<i64> = degrees.values().map(|&d| d as i64).collect();
     vals.sort_unstable();
     if vals.is_empty() {
@@ -378,12 +378,12 @@ fn hub_threshold(
     let len = vals.len() as i64;
     let raw = len as f64 * percentile / 100.0;
     if !raw.is_finite() {
-        return Err(internal(format!("cannot convert float {raw} to integer")));
+        return Err(format!("cannot convert float {raw} to integer"));
     }
     let idx = (len - 1).min(raw.trunc() as i64);
     let at = if idx < 0 { len + idx } else { idx };
     if at < 0 {
-        return Err(internal("list index out of range"));
+        return Err("list index out of range".into());
     }
     Ok(floor.max(vals[at as usize]))
 }
@@ -910,7 +910,7 @@ async fn recall(
         ));
     }
     let threshold = if rc.hub_gate {
-        Some(hub_threshold(&degrees, rc.hub_percentile, rc.hub_floor)?)
+        Some(hub_threshold(&degrees, rc.hub_percentile, rc.hub_floor).map_err(internal)?)
     } else {
         None
     };
