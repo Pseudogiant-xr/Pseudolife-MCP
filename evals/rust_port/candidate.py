@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import secrets
 import re
+import time
 import subprocess
 
 from .harness import HttpClient, _base_url, isolated_env
@@ -46,11 +47,8 @@ def launched_candidate(command, dsn, private, *, source_root, cache_overrides, s
     with (private / "candidate.log").open("wb") as log:
         with owned_process(command, cwd=source_root, env=env, stdin=subprocess.DEVNULL,
                            stdout=log, stderr=log) as process:
-            answers = []
-
             def verify(status, body):
                 # A listener that is not this owned candidate is refused at once.
-                answers.append(status)
                 if status != 200:
                     return
                 identity = body.get("baseline_instance", {}) if isinstance(body, dict) else {}
@@ -59,17 +57,17 @@ def launched_candidate(command, dsn, private, *, source_root, cache_overrides, s
                         or not process.owns_runtime_pid(identity.get("pid")) or body.get("status") != "ok"):
                     raise RuntimeError("owned candidate readiness identity mismatch")
 
-            from pseudolife_memory import readiness
+            from evals.rust_baseline.readiness_wait import StartupFailed, wait_started
             try:
-                # The one readiness contract: initialized, stored principals loaded.
-                readiness.wait_ready(url, startup_timeout, check=verify, poll=.1,
-                                     alive=lambda: process.poll() is None)
-            except readiness.NotReady as exc:
+                # The readiness contract: initialized, stored principals loaded.
+                _payload, evidence = wait_started(url, time.monotonic() + startup_timeout, check=verify,
+                                                  alive=lambda: process.poll() is None)
+            except StartupFailed as exc:
                 if exc.exited:
                     raise RuntimeError("owned candidate exited before readiness") from exc
                 raise RuntimeError(f"owned candidate readiness timed out ({exc})") from exc
             cleanup["readiness_identity_verified"] = True
-            cleanup["health_answers_before_ready"] = len(answers) - 1
+            cleanup.update(evidence)
             try:
                 yield url, cleanup
             finally:

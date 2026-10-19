@@ -169,12 +169,9 @@ def launched_daemon(dsn, private, *, env_extra=None, source_root=None, startup_t
                 command = _daemon_command(source_root)
             with owned_process(command, cwd=source_root, env=env,
                                stdin=subprocess.DEVNULL, stdout=log, stderr=log) as process:
-                answers = []
-
                 def verify(status, payload):
                     # Every answer before readiness is checked: a listener
                     # that is not this owned instance is refused at once.
-                    answers.append(status)
                     if status != 200:
                         return  # still starting (a degraded payload is 503)
                     identity = payload.get("baseline_instance") if isinstance(payload, dict) else None
@@ -186,21 +183,22 @@ def launched_daemon(dsn, private, *, env_extra=None, source_root=None, startup_t
                     if not verified:
                         raise RuntimeError("disposable daemon readiness identity mismatch")
 
-                from pseudolife_memory import readiness
+                from .readiness_wait import StartupFailed, wait_started
                 try:
-                    # One readiness contract (pseudolife_memory/readiness.py):
-                    # initialized and stored principals loaded, so the
-                    # corpus never meets a 503 principals_unavailable.
-                    payload = readiness.wait_ready(url, startup_timeout, check=verify, poll=0.1,
-                                                   alive=lambda: process.poll() is None)
-                except readiness.NotReady as exc:
+                    # The daemons' readiness contract (initialized, stored
+                    # principals loaded), so the corpus never meets a 503
+                    # principals_unavailable; an older oracle's own protocol
+                    # otherwise (readiness_wait.py).
+                    payload, evidence = wait_started(url, time.monotonic() + startup_timeout, check=verify,
+                                                     alive=lambda: process.poll() is None)
+                except StartupFailed as exc:
                     if exc.exited:
                         raise RuntimeError("disposable daemon exited during startup") from exc
                     raise RuntimeError(f"disposable daemon startup deadline exceeded ({exc})") from exc
                 identity = payload["baseline_instance"]
                 process.verified_runtime_pid = identity["pid"]
                 cleanup["readiness_identity_verified"] = True
-                cleanup["health_answers_before_ready"] = len(answers) - 1
+                cleanup.update(evidence)
                 if isinstance(identity.get("runtime"), dict):
                     cleanup["actual_child_runtime"] = identity["runtime"]
                 print(json.dumps({"daemon_health_observed": True, "readiness_identity_verified": True}), flush=True)
