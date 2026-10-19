@@ -728,3 +728,117 @@ def test_a_run_reopens_a_lock_file_removed_while_it_waited(tmp_path, which):
         if launcher is not None and launcher.poll() is None:
             launcher.kill()
             launcher.wait(timeout=10)
+
+
+# ── the default full run's xdist workers ──────────────────────────────────
+
+def _pytest_argv(tmp_path: Path, *args: str, **env: str | None):
+    """Run the launcher with pytest's stand-in recording the argv it got."""
+    venv_bin = tmp_path / "venv" / "bin"
+    stubs = tmp_path / "stubs"
+    venv_bin.mkdir(parents=True)
+    stubs.mkdir()
+    record = tmp_path / "argv"
+    (venv_bin / "python").write_text(
+        f"#!/bin/bash\nprintf '%s\n' \"$@\" > '{record}'\n", encoding="utf-8")
+    (stubs / "uv").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for stub in (venv_bin / "python", stubs / "uv"):
+        stub.chmod(0o755)
+    base = {"HOME": str(tmp_path / "home"),
+            "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            "PSEUDOLIFE_SUITE_VENV": str(tmp_path / "venv"),
+            "PSEUDOLIFE_SUITE_COMMIT": None, "PSEUDOLIFE_SUITE_DISPATCHED": None,
+            "PSEUDOLIFE_SUITE_WORKERS": None}
+    base.update(env)
+    proc = subprocess.run([BASH, str(SCRIPT), *args], capture_output=True,
+                          text=True, timeout=120, env=hermetic_env(**base))
+    argv = (record.read_text(encoding="utf-8").splitlines()
+            if record.exists() else None)
+    return proc, argv
+
+
+_FULL = ["-m", "pytest", "tests/", "-q", "-rs"]
+
+
+@_LINUX_ONLY
+def test_the_default_full_run_takes_the_workers_asked_for(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="3")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == [*_FULL, "-n", "3", "--dist", "loadfile", "--durations=30"]
+    assert "full suite, 3 xdist workers" in proc.stdout
+
+
+@pytest.mark.parametrize("workers", ["0", "1"])
+@_LINUX_ONLY
+def test_one_worker_or_none_runs_the_suite_in_one_process(tmp_path, workers):
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS=workers)
+    assert proc.returncode == 0, proc.stderr
+    assert argv == _FULL
+    assert "full suite, one process" in proc.stdout
+
+
+@_LINUX_ONLY
+def test_arguments_still_replace_the_default_untouched(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, "tests/test_bm25.py", "-x",
+                              PSEUDOLIFE_SUITE_WORKERS="4")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", "tests/test_bm25.py", "-x"]
+
+
+@_LINUX_ONLY
+def test_a_malformed_worker_count_is_refused_before_pytest(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="four")
+    assert proc.returncode == 2
+    assert argv is None
+    assert "PSEUDOLIFE_SUITE_WORKERS must be a whole number" in proc.stderr
+
+
+def _expected_workers() -> int:
+    """The launcher's rule, derived here from the same sources: at most 4,
+    one per two CPUs, one per 6 GB of the smaller of RAM and the cgroup's
+    memory.max (a dispatched run's systemd scope caps it at 16 GB)."""
+    with open("/proc/meminfo", encoding="ascii") as f:
+        mem_kb = next(int(line.split()[1]) for line in f
+                      if line.startswith("MemTotal:"))
+    with open("/proc/self/cgroup", encoding="ascii") as f:
+        lines = [line.rstrip("\n").split(":", 2) for line in f]
+    v2 = next((path for _, ctl, path in lines if ctl == ""), "")
+    v1 = next((path for _, ctl, path in lines if "memory" in ctl.split(",")), "")
+    # cgroup v2's memory.max, else v1's memory controller (Codex review,
+    # 2026-10-19: the launcher reads both, so the oracle must too).
+    for limit_file in (Path(f"/sys/fs/cgroup{v2}/memory.max"),
+                       Path(f"/sys/fs/cgroup/memory{v1}/memory.limit_in_bytes")):
+        try:
+            limit = limit_file.read_text().strip()
+        except OSError:
+            continue
+        if limit.isdigit():
+            mem_kb = min(mem_kb, int(limit) // 1024)
+        break
+    cpus = len(os.sched_getaffinity(0))
+    return min(4, cpus // 2, mem_kb // (6 * 1024 * 1024))
+
+
+@_LINUX_ONLY
+def test_the_default_worker_count_follows_cpus_and_memory(tmp_path):
+    """OMP_NUM_THREADS is set on purpose, as CI's Linux lanes set it: GNU
+    nproc reports that value instead of the CPUs (Codex review,
+    2026-10-19), and the launcher must count the CPUs."""
+    proc, argv = _pytest_argv(tmp_path, OMP_NUM_THREADS="1",
+                              OMP_THREAD_LIMIT="1")
+    assert proc.returncode == 0, proc.stderr
+    workers = _expected_workers()
+    if workers >= 2:
+        assert argv == [*_FULL, "-n", str(workers), "--dist", "loadfile",
+                        "--durations=30"]
+    else:
+        assert argv == _FULL
+
+
+@_LINUX_ONLY
+def test_a_zero_padded_worker_count_is_read_as_decimal(tmp_path):
+    """bash arithmetic reads "08" as bad octal and "010" as 8 (Claude
+    review, 2026-10-19); the launcher reads the count as decimal."""
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="08")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == [*_FULL, "-n", "8", "--dist", "loadfile", "--durations=30"]
