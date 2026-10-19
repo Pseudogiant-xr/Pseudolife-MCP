@@ -2084,7 +2084,7 @@ SCENARIOS.update({
     "recall-caps": {
         "config": ("memory:\n  recall:\n    hub_floor: 2\n    hub_percentile: 50\n"
                    "    expand_budget: 1\n    max_searches_per_hop: 1\n"
-                   "    max_total_searches: 3\n    skip_part_of_expansion: true\n"
+                   "    max_total_searches: 2\n    skip_part_of_expansion: true\n"
                    "    max_entities: 6\n"),
         "seed": RECALL_SEED,
         "ops": [
