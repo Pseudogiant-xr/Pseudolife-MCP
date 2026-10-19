@@ -40,7 +40,6 @@ tool's answers by value.
 | `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
-| `memory_forget` | W2-E | No forget/cascade service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
 | `memory_graph_review` | W3-H | No graph review/proposal service. |
@@ -58,7 +57,7 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_episode_end`, `memory_session_title`, `memory_episode_summary`,
 `memory_outcome`, `memory_reinforce`, `memory_history`, `memory_world_set`,
 `memory_world_search`, `memory_lesson_search`, `memory_supersede`,
-`memory_reinstate`, `memory_agents` and `memory_message`. The two board tools
+`memory_reinstate`, `memory_forget`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -278,11 +277,11 @@ The remaining write work is deliberately split into subsequent increments:
 
 | Item | Remaining behavior | Owner / reason |
 |---|---|---|
-| Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save), `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) and `memory_fact_resolve` (spec FR1-FR8: contender promotion and retirement) are served, and so are world facts (`memory_world_set`, spec WD1-WD12); slot extraction here is a pure text operation, not a canonical write | the world store's retire/restore/forget and console reads (no MCP tool reaches them) |
-| Lessons | `memory_outcome` (signals, attribution and the `used_ids` label; spec OC1-OC12), `memory_reinforce` and the resident lesson store's read side (`memory_lesson_search`, the `memory_history` chain; spec LS1-LS10, CH1-CH6) are served; lesson writes (the dream's synthesis, `memory_forget` scope lesson, restore) remain unimplemented, so the store is fixed after init | W3-H (dream), the lifecycle increment |
+| Canonical writes | `memory_fact_set` (spec FS1-FS12: HLC ticking, contenders, supersession, the per-slot save), `memory_set_add` / `memory_set_remove` (spec SA1-SA11: conversion, dedup, the aggregate guard, the cap, removal) and `memory_fact_resolve` (spec FR1-FR8: contender promotion and retirement) are served, and so are world facts (`memory_world_set`, spec WD1-WD12) and the forget of facts, world facts and lessons (`memory_forget`, spec FG1-FG16); slot extraction here is a pure text operation, not a canonical write | the world and lesson stores' restore and console reads (no served MCP tool reaches them) |
+| Lessons | `memory_outcome` (signals, attribution and the `used_ids` label; spec OC1-OC12), `memory_reinforce` and the resident lesson store's read side (`memory_lesson_search`, the `memory_history` chain; spec LS1-LS10, CH1-CH6) are served; `memory_forget` retires lessons (scope `lesson`, and the cascade of scope `memory`; spec FG8, FG12-FG14); the dream's synthesis and restore remain unimplemented | W3-H (dream), the lifecycle increment |
 | Episode titles on idle close | `memory_episode_start`, `memory_episode_end`, `memory_session_title` and `memory_episode_summary` are served (spec EP1-EP12) on the state store-driven open/resume and empty-root reaping share; automatic content titles on idle close remain unimplemented | W2-E reaper follow-up; content titles also rewrite entry stamps |
 | Autosave and clean-exit flush | Background scheduling exists, but changed-state saving and exit flush remain no-ops; store rows write through, while counters, surprise history and band weights do not survive restart via `weights.pt` | W2-E persistence increment; the Python tensor format and recovery contract need a separate proof |
-| Resident cortex refresh | `memory_fact_set`, `memory_set_add`, `memory_set_remove` and `memory_fact_resolve` update the resident cortex in place (readers take snapshots), and `memory_world_set` the resident world store; the lesson store has no write path, and auto-promotion stays disabled | W2-E lesson and auto-promotion increments |
+| Resident cortex refresh | `memory_fact_set`, `memory_set_add`, `memory_set_remove` and `memory_fact_resolve` update the resident cortex in place (readers take snapshots), `memory_world_set` and `memory_forget` the resident world store, and `memory_forget` the resident lesson store (readers take snapshots); auto-promotion stays disabled | W2-E auto-promotion increment |
 | Frozen store catalog snapshots | Original store recordings predate the catalog instrument's `column_types`, owner/comment and sequence-bound representations; replay retains and reports initialization differences | Historical recordings are retained unchanged; live Python comparison is the current-source proof, not a waiver of frozen replay differences |
 | New reaper recording's startup state | The live fixture inherits Python-seeded relation timestamps, curation metadata and dream acknowledgement state; a fresh Rust-only replay does not reproduce that seed state | W3-H startup/dream integration; the new recording is retained unchanged and its replay differences are reported separately from the matching live reaper behavior |
 | Unicode runtime | Label, meta-filter and slot regexes retain the existing Unicode-14 assigned-character contract; newer assigned characters may follow Rust's newer tables | Explicitly retained runtime substitution; no comparator or frozen expectation is weakened |
@@ -327,6 +326,17 @@ this increment does not claim the complete write boundary or cutover readiness.
 | `entry_mutation_lock` (session advisory locks per target id, held from before the transaction to after publication) | taken | not taken; the per-operation `pg_advisory_xact_lock` of `reinstate_entry` is | the leased single writer already serializes every entry mutation in one process; another writer cannot hold the bank |
 | The promotion walk after the replacement (`_consolidate_eligible`) | runs, as after any store | not run | the multi-band row above: the flat default never promotes |
 | File-mode corrections (unique exact text without row ids, `id_unavailable`, the file-signature recovery) | served | unreachable: the Rust daemon runs on PostgreSQL only | not ported |
+
+### memory_forget (2026-10-19)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A forget whose commit outcome is unknown | (reconciled by the read/save barriers) | the transaction rolls back, or a lost commit answer is an internal error with the resident bank unchanged | the lifecycle increment, with the corrections' commit-unknown row above; failure path only |
+| Where a pending lesson refresh (a failed mirror after a committed forget) is retried | in `_ensure_init`, before every service call, whose failure fails that call | before the next lesson read (`memory_lesson_search`, the history chain) or lesson save; other tools read no lessons | failure path only |
+| A lesson read racing a forget | waits on the service lock and the refresh barrier | reads its snapshot without the lock: between the cascade's commit and the mirror it can still serve a lesson retiring | the read slices' lock-free snapshots (as for the cortex) |
+| A malformed `meta.session_digest_cursor` (a `ts` that is not a number or numeric string, a `retry` that is not an object, a non-iterable or non-string `regenerate`) | `float()` / `dict()` / `sorted()` raise their own `TypeError` / `ValueError` text | the same refusal kind (`invalid_argument`) with Rust's own wording | corrupt persisted data only; the dream writes the cursor |
+| `memory.delete_confirm_threshold` of the wrong type | `int(value or 0)` per call (a float truncates) | refused at config load, like every other typed key | the existing config-type substitution |
+| The restore path (`memory_graph_review(action="restore_slot")`) and file mode | served | not reachable: the review tool is W3-H, the daemon PostgreSQL-only | W3-H |
 
 ## Coordination board completion (W2-F)
 

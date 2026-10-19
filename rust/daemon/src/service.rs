@@ -34,8 +34,9 @@ pub struct Ready {
     pub cortex: crate::stores::cortex::SharedCortex,
     /// The resident world cortex (`world_tools.rs` writes it under `write`).
     pub world: crate::stores::world::SharedWorld,
-    /// The resident lesson store (read-only: only the dream writes lessons).
-    pub lessons: Arc<crate::stores::lessons::LessonStore>,
+    /// The resident lesson store (`memory_forget` retires lessons under
+    /// `write`; the dream's synthesis is not ported).
+    pub lessons: crate::stores::lessons::SharedLessons,
     /// The service hybrid logical clock (`MemoryService._hlc`).
     pub hlc: std::sync::Mutex<crate::hlc::Clock>,
 }
@@ -299,7 +300,7 @@ impl Service {
                     startup: Arc::new(startup),
                     cortex: crate::stores::cortex::SharedCortex::new(cortex),
                     world: crate::stores::world::SharedWorld::new(world),
-                    lessons: Arc::new(lessons),
+                    lessons: crate::stores::lessons::SharedLessons::new(lessons),
                     hlc: std::sync::Mutex::new(crate::hlc::Clock::default()),
                 });
                 inner.ready = Some(ready.clone());

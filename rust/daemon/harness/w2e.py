@@ -13,8 +13,8 @@ Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
 ``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce``,
 ``memory_history``, ``memory_world_set``, ``memory_world_search``,
-``memory_lesson_search``, ``memory_supersede`` and ``memory_reinstate`` on
-``/mcp`` (``--features mutants`` adds the
+``memory_lesson_search``, ``memory_supersede``, ``memory_reinstate`` and
+``memory_forget`` on ``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -59,6 +59,9 @@ Normalizers (declared, spec "Free for W1 and W2"):
   (the correction's own clock, like ``entries.superseded_at``) and
   ``entry_reinstatement_decisions.decided_at`` keep only null-or-not; a
   correction's ``new_memory_surprise`` compares like a store's ``surprise``;
+* the forget clocks: ``lessons.superseded_at``, ``edges.superseded_at`` and
+  ``store_decisions.decided_at`` keep only null-or-not, and so does the
+  ``superseded_at`` inside a ``store_decisions.record`` snapshot;
 * the board columns a session title writes: ``coordination_agents.name_set_at``
   and ``coordination_events.created_at`` keep only null-or-not, and so do the
   audit chain's ``hash`` and ``prev_hash`` (they cover ``created_at``; the
@@ -134,7 +137,9 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("world_facts", "valid_time"), ("world_facts", "hlc_phys"),
          ("lesson_search_events", "created_at"),
          ("memory_trace_invalidations", "invalidated_at"),
-         ("entry_reinstatement_decisions", "decided_at")}
+         ("entry_reinstatement_decisions", "decided_at"),
+         ("lessons", "superseded_at"), ("edges", "superseded_at"),
+         ("store_decisions", "decided_at"), ("slot_reads", "last_read_at")}
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
 RECENT_CLOCK = {("world_facts", "retrieved_at")}
@@ -190,7 +195,12 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-supersede-surprise-gate", "mcp-supersede-no-trace-invalidation",
            "mcp-supersede-resident-stale", "mcp-reinstate-default-principal",
            "mcp-reinstate-ignore-invalidations", "mcp-reinstate-resident-stale",
-           "mcp-reinstate-no-mirror"]
+           "mcp-reinstate-no-mirror",
+           # memory_forget (spec FG1-FG16): caught by the forget-* scenarios.
+           "mcp-forget-no-bulk-guard", "mcp-forget-delete-digests", "mcp-forget-cortex-stale",
+           "mcp-forget-no-lesson-cascade", "mcp-forget-lessons-stale", "mcp-forget-facts-kept",
+           "mcp-forget-edges-kept", "mcp-forget-slot-reads-kept", "mcp-forget-no-world-audit",
+           "mcp-forget-no-lesson-audit"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1470,6 +1480,209 @@ SCENARIOS.update({
 })
 
 
+# memory_forget (spec FG1-FG16) over the four stores, on templates whose
+# entries, facts, world facts, graph edge and slot reads the Python daemon's
+# own tools wrote. The digest, the trace rows, the lineage lessons and their
+# audits, and the edge's agent origin and evidence are SQL seeds: only the
+# dream writes those.
+def forget(scope, headers=(), **kw) -> dict:
+    return {"op": "tool", "name": "memory_forget", "args": {"scope": scope, **kw},
+            "headers": list(headers)}
+
+
+def fact_get(entity, attribute) -> dict:
+    return tool("memory_fact_get", entity=entity, attribute=attribute)
+
+
+def lineage_lesson(task, aspect, task_norm, aspect_norm, lesson, about, source_texts,
+                   embedding_text) -> list[dict]:
+    """Seed-only: a current lesson whose provenance and synthesis lineage
+    audit name the entries with ``source_texts`` (by their ids), its
+    embedding copied from ``embedding_text``'s entry."""
+    def q(v):
+        return "NULL" if v is None else "'" + v.replace("'", "''") + "'"
+    texts = ", ".join(q(t) for t in source_texts)
+    return [
+        sql("INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, value, about, "
+            "polarity, outcome, status, confidence, origin, support, provenance, asserted_at, "
+            "last_confirmed, embedding) SELECT "
+            f"{q(task)}, {q(aspect)}, {q(task_norm)}, {q(aspect_norm)}, {q(lesson)}, {q(about)}, "
+            "'+', 'success', 'current', 0.7, 'agent', '[\"signal:1\"]', "
+            "(SELECT jsonb_agg('entry:' || id ORDER BY id) FROM entries "
+            f"WHERE text IN ({texts})), 1700000000, 1700000000, embedding "
+            f"FROM entries WHERE text = {q(embedding_text)}", after_stop=True),
+        sql("INSERT INTO store_decisions (store, entity_norm, attribute_norm, action, "
+            "decided_by, reason, record, decided_at) SELECT 'lesson', "
+            f"{q(task_norm)}, {q(aspect_norm)}, 'lineage', 'lesson_synthesis', "
+            "'verified_dependencies', jsonb_build_object('lesson', "
+            f"{q(lesson)}, 'asserted_at', 1700000000, 'source_entry_ids', "
+            f"(SELECT jsonb_agg(id ORDER BY id) FROM entries WHERE text IN ({texts}))), "
+            "1700000000.5", after_stop=True),
+    ]
+
+
+DIGEST_TEXT = "Digest of the deploy checklist session."
+FORGET_SEED = [
+    store("Probe entry alpha.", [sess("sess-f")], source="status"),
+    store("Probe entry beta.", [sess("sess-f")], source="status"),
+    store("Probe entry gamma.", source="status"),
+    store("Keep the deploy checklist current.", [sess("sess-f")]),
+    store("Scratch entry with a tag.", tags=["Scratch"]),
+    store("Payments DB moved to host 10.0.0.9 per the runbook.", [sess("sess-g")]),
+    store("Payments DB listens on 5432 per the on-call.", [sess("sess-k")]),
+    fact("Payments DB", "host", "10.0.0.9", origin="user", confidence=0.9),
+    fact("Payments DB", "port", "5432", origin="user", confidence=0.9),
+    store("The backup job runs at 02:00 nightly.", [sess("sess-h")]),
+    store("The flaky test needs a warm cache.", [sess("sess-h")]),
+    store("A sess-h aside about lunch.", [sess("sess-h")]),
+    store("An on-call handover note.", [sess("sess-m")]),
+    store("Payments DB replica is db-2.", [sess("sess-n")]),
+    store("Payments DB replica confirmed as db-2 by the DBA.", [sess("sess-n")]),
+    fact("Payments DB", "replica", "db-2", origin="user", confidence=0.9),
+    tool("memory_graph_relate", src="flaky test", relation="uses", dst="warm cache"),
+    # the digest of sess-f's root, retired as history by a source forget
+    sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, source, "
+        "episode_id, episode_title, tags, slots, dream_state) SELECT band, "
+        f"'{DIGEST_TEXT}', embedding, surprise, ts + 1, 0, 'digest', episode_id, "
+        "episode_title, '[]'::jsonb, '[]'::jsonb, 'pending' FROM entries "
+        "WHERE text = 'Keep the deploy checklist current.'", after_stop=True),
+    # a retired digest of sess-m's root: kept as history by a source forget
+    sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, source, "
+        "superseded_at, superseded_by_text, episode_id, episode_title, tags, slots, "
+        "dream_state) SELECT band, 'Retired digest of the handover session.', embedding, "
+        "surprise, ts + 1, 0, 'digest', 1700000000.5, 'an older digest', episode_id, "
+        "episode_title, '[]'::jsonb, '[]'::jsonb, 'pending' FROM entries "
+        "WHERE text = 'An on-call handover note.'", after_stop=True),
+    # an existing digest cursor: ts, retry and context_deferred kept,
+    # regenerate merged
+    sql("INSERT INTO meta (key, value) VALUES ('session_digest_cursor', "
+        "'{\"ts\": 5, \"retry\": {\"x\": 1}, \"regenerate\": [\"zz-root\"], "
+        "\"context_deferred\": [\"q\"]}'::jsonb) ON CONFLICT (key) DO UPDATE "
+        "SET value = EXCLUDED.value", after_stop=True),
+    # replica rests on two entries forgotten together: the bank names the
+    # larger source, the facts row the smaller, until the next cortex save
+    trace_sql("Payments DB replica is db-2.", "payments-db", "replica"),
+    trace_sql("Payments DB replica confirmed as db-2 by the DBA.", "payments-db", "replica"),
+    # host rests on one entry; port on two, one of which survives
+    trace_sql("Payments DB moved to host 10.0.0.9 per the runbook.", "payments-db", "host"),
+    trace_sql("Payments DB moved to host 10.0.0.9 per the runbook.", "payments-db", "port"),
+    trace_sql("Payments DB listens on 5432 per the on-call.", "payments-db", "port"),
+    # one lesson rests on the backup entry alone, one on it and a survivor
+    *lineage_lesson("schedule backups", "timing", "schedule-backups", "timing",
+                    "Run backups at night.", None, ["The backup job runs at 02:00 nightly."],
+                    "The backup job runs at 02:00 nightly."),
+    *lineage_lesson("schedule backups", "checks", "schedule-backups", "checks",
+                    "Check the deploy checklist after a backup.", "Payments DB",
+                    ["The backup job runs at 02:00 nightly.", "A sess-h aside about lunch."],
+                    "The backup job runs at 02:00 nightly."),
+    # the dream's edge: agent origin, the flaky-test entry its evidence
+    sql("UPDATE edges SET origin = 'agent' WHERE relation = 'uses'", after_stop=True),
+    sql("INSERT INTO edge_evidence (edge_id, entry_id) SELECT g.id, e.id FROM edges g, "
+        "entries e WHERE g.relation = 'uses' "
+        "AND e.text = 'The flaky test needs a warm cache.'", after_stop=True),
+]
+
+SCENARIOS.update({
+    "forget-memory": {
+        "config": "memory:\n  delete_confirm_threshold: 2\n",
+        "seed": FORGET_SEED,
+        "ops": [
+            # a filter is required; an empty string is no filter here
+            forget("memory"),
+            forget("memory", text=""),
+            # nothing matches: the note (an empty text is still a filter below)
+            forget("memory", text="no such entry"),
+            forget("memory", text="", source="status"),
+            # a source and its session's digest together: the digest is kept
+            # as retired history, the session root queued for regeneration
+            forget("memory", substring="deploy checklist"),
+            # over the threshold: refused, nothing removed; then confirmed
+            forget("memory", source="status"),
+            forget("memory", source="status", confirm_bulk=True),
+            # the tag filter normalizes
+            forget("memory", tag=" SCRATCH "),
+            # the cascade: host loses its only source and retires; port keeps one
+            forget("memory", text="Payments DB moved to host 10.0.0.9 per the runbook."),
+            fact_get("Payments DB", "host"),
+            fact_get("Payments DB", "port"),
+            # the lesson resting only on this entry retires, with its audit
+            forget("memory", text="The backup job runs at 02:00 nightly."),
+            lesson_search("when should backups run"),
+            # the dream edge resting only on this entry retires
+            forget("memory", text="The flaky test needs a warm cache."),
+            # by episode id
+            forget("memory", episode="@root:sess-h:32"),
+            # a source with its session's retired digest: the digest is kept
+            forget("memory", substring="handover"),
+            # two sources of one slot together; then a cortex save writes the
+            # retired slot (the larger source named) and the audit log
+            forget("memory", episode="@root:sess-n:32"),
+            fact("Payments DB", "owner", "the ops team", origin="user", confidence=0.9),
+            # a digest-only selection deletes the digests
+            forget("memory", source="digest"),
+        ],
+    },
+    "forget-slots": {
+        "config": None,
+        "seed": [
+            store("A note so the bank is not empty."),
+            fact("Payments DB", "host", "10.0.0.5", origin="user", confidence=0.9),
+            fact("Payments DB", "host", "10.0.0.6", origin="user", confidence=0.9),
+            fact("Payments DB", "port", "5432", origin="user", confidence=0.9),
+            fact("Old Router", "ip", "192.168.1.1", origin="user", confidence=0.9),
+            fact_get("Payments DB", "host"),
+            fact_get("Payments DB", "port"),
+            world_set("Rust", "latest stable version", "1.90.0",
+                      source_url="https://blog.rust-lang.org/"),
+            world_set("Rust", "edition", "2024", source_url="https://doc.rust-lang.org/"),
+            world_set("Python", "latest version", "3.13.0", source_url="https://www.python.org/"),
+            *lineage_lesson("deploy engine to host", "approach", "deploy-engine-to-host",
+                            "approach", "Deploy through the pipeline.", "Payments DB",
+                            ["A note so the bank is not empty."],
+                            "A note so the bank is not empty."),
+            # a lesson whose task is a graph entity (fact_set minted it)
+            *lineage_lesson("Payments DB", "tuning", "payments-db", "tuning",
+                            "Tune the pool before the replica.", None,
+                            ["A note so the bank is not empty."],
+                            "A note so the bank is not empty."),
+            *lineage_lesson("deploy engine to host", "pitfall", "deploy-engine-to-host",
+                            "pitfall", "Never deploy on Fridays.", None,
+                            ["A note so the bank is not empty."],
+                            "A note so the bank is not empty."),
+        ],
+        "ops": [
+            # the entity is required for these scopes
+            forget("fact"),
+            forget("world", entity=""),
+            forget("fact", entity="Nobody"),
+            # one slot, every version, its read counter too
+            forget("fact", entity="payments db", attribute="HOST"),
+            fact_get("Payments DB", "host"),
+            # the whole entity
+            forget("fact", entity="Old Router"),
+            # world facts retire with an audit row; the slot is rewritten
+            forget("world", entity="rust", attribute="Edition"),
+            world_search("rust edition"),
+            forget("world", entity="Rust"),
+            forget("world", entity="Rust"),
+            # lessons likewise; the rewritten row is linked to its entities
+            forget("lesson", entity="Deploy Engine To Host", attribute="approach"),
+            lesson_search("how do I deploy the engine"),
+            forget("lesson", entity="deploy engine to host"),
+            forget("lesson", entity="nothing here"),
+            # the rewritten row links its subject entity
+            forget("lesson", entity="Payments DB", attribute="tuning"),
+        ],
+    },
+    # The bulk guard disabled: any match count is removed.
+    "forget-unbounded": {
+        "config": "memory:\n  delete_confirm_threshold: 0\n",
+        "seed": [store(f"Status probe {n}.", source="status") for n in ("one", "two", "three")],
+        "ops": [forget("memory", source="status")],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -1745,6 +1958,11 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
                 elif key == "cortex_supersession_log" and isinstance(value, list):
                     row[1] = [{**x, "timestamp": _clock(x.get("timestamp"))}
                               if isinstance(x, dict) else x for x in value]
+        if name == "store_decisions" and "record" in t["columns"]:
+            ri = t["columns"].index("record")
+            for row in t["rows"]:
+                if isinstance(row[ri], dict) and "superseded_at" in row[ri]:
+                    row[ri] = {**row[ri], "superseded_at": _clock(row[ri]["superseded_at"])}
         t["rows"] = [_rename(r, emap) for r in t["rows"]]
         if name != "entries":
             t["rows"].sort(key=lambda r: json.dumps(r, sort_keys=True))
@@ -2047,7 +2265,8 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 # Tables the write path touches: recorded every step (the rest only at init).
 WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions", "facts", "entities",
                 "outcome_signals", "world_facts", "memory_trace_invalidations",
-                "entry_reinstatement_decisions")
+                "entry_reinstatement_decisions", "lessons", "edges", "store_decisions",
+                "slot_reads")
 
 
 def pack(state: dict, full: bool) -> dict:

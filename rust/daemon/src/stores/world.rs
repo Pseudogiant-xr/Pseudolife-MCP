@@ -12,7 +12,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio_postgres::Client;
 
 use crate::read::cortex_search::{decay_factor, normalize_class, ttl};
@@ -56,6 +56,21 @@ pub struct WorldRecord {
 }
 
 impl WorldRecord {
+    /// `_world_record_snapshot` (`service.py:506-519`): the verbatim fields
+    /// for the retire/restore audit, no read-time decay applied.
+    pub fn audit_snapshot(&self) -> Value {
+        json!({
+            "entity": self.entity, "attribute": self.attribute, "value": self.value,
+            "polarity": self.polarity, "status": self.status,
+            "confidence": crate::store::round4(self.confidence), "origin": ORIGIN,
+            "source_url": self.source_url, "source_quote": self.source_quote,
+            "freshness_class": self.freshness_class,
+            "retrieved_at": self.retrieved_at, "content_hash": self.content_hash,
+            "source_doc_id": self.source_doc_id, "asserted_at": self.asserted_at,
+            "last_confirmed": self.last_confirmed,
+        })
+    }
+
     fn refresh_derived(&mut self) {
         self.key = slot_key(&self.entity, &self.attribute);
         self.unit = self.embedding.as_deref().map(|e| Arc::from(unit_f32(e)));
@@ -114,6 +129,28 @@ impl WorldStore {
             .filter(|(_, r)| r.status == "current")
             .map(|(i, r)| (r.key.clone(), i))
             .collect();
+    }
+
+    /// `retire` (`world_cortex.py:259-282`): every CURRENT record at the
+    /// entity, or at one exact slot, becomes `retired` at `now`, kept, its
+    /// slot dirty; the current index is rebuilt. Returns the retired record
+    /// indexes.
+    pub fn retire(&mut self, entity: &str, attribute: Option<&str>, now: f64) -> Vec<usize> {
+        let ne = norm_key(entity);
+        let na = attribute.map(norm_key);
+        let mut out = Vec::new();
+        for (i, r) in self.records.iter_mut().enumerate() {
+            if r.status == "current" && r.key.0 == ne && na.as_ref().is_none_or(|a| r.key.1 == *a) {
+                r.status = "retired".into();
+                r.superseded_at = Some(now);
+                self.dirty_slots.insert(r.key.clone());
+                out.push(i);
+            }
+        }
+        if !out.is_empty() {
+            self.reindex();
+        }
+        out
     }
 
     /// `lookup`: the slot's current record.
