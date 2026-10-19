@@ -3190,14 +3190,16 @@ def _number_failures(claims: list[Claim]) -> list[str]:
             failures.append(
                 f"{claim.id}: missing artifact {', '.join(missing)}")
             continue
-        try:
+        try:  # one broken claim must not hide the rest
             actual = claim.actual()
-        except Exception as exc:  # one broken claim must not hide the rest
+            matches = (round(actual, claim.places)
+                       == round(claim.stated, claim.places))
+        except Exception as exc:
             failures.append(
                 f"{claim.id}: reading {'+'.join(claim.artifacts)} raised "
                 f"{type(exc).__name__}: {exc}")
             continue
-        if round(actual, claim.places) != round(claim.stated, claim.places):
+        if not matches:
             failures.append(
                 f"{claim.id}: {claim.doc} publishes {claim.stated}, but "
                 f"{'+'.join(claim.artifacts)} gives {actual:.5f}")
@@ -3205,10 +3207,22 @@ def _number_failures(claims: list[Claim]) -> list[str]:
 
 
 def _text_failures(claims: list[Claim]) -> list[str]:
-    return [
-        f"{claim.id}: {claim.doc} no longer contains the guarded text\n    "
-        f"{claim.needle!r}"
-        for claim in claims if claim.needle not in _read_doc(claim.doc)]
+    failures = []
+    for claim in claims:
+        try:
+            text = _read_doc(claim.doc)
+        except OSError as exc:
+            failures.append(f"{claim.id}: cannot read {claim.doc}: {exc}")
+            continue
+        if claim.needle not in text:
+            failures.append(
+                f"{claim.id}: {claim.doc} no longer contains the guarded "
+                f"text\n    {claim.needle!r}")
+    return failures
+
+
+def test_every_claim_document_has_a_group():
+    assert {_claim_group(c.doc) for c in CLAIMS} <= set(CLAIM_GROUPS)
 
 
 def test_claim_ids_are_unique():
@@ -3259,17 +3273,25 @@ def test_grouped_checks_report_every_failing_claim():
     broken = Claim(id="broken-accessor", doc=spec, needle="Acknowledgment",
                    artifacts=(probe,), value=lambda d: d["no-such-key"],
                    stated=1.0, places=0)
+    null = Claim(id="null-value", doc=spec, needle="Acknowledgment",
+                 artifacts=(probe,), value=lambda d: None, stated=1.0,
+                 places=0)
     reworded = Claim(id="reworded", doc=spec,
                      needle="text no document contains", artifacts=(probe,),
                      value=lambda d: 1.0, stated=1.0, places=0)
-    claims = [good, wrong, gone, broken, reworded]
+    no_doc = Claim(id="missing-doc", doc="docs/no-such-doc.md",
+                   needle="Acknowledgment", artifacts=(probe,),
+                   value=lambda d: 1.0, stated=1.0, places=0)
+    claims = [good, wrong, gone, broken, null, reworded, no_doc]
     numbers = _number_failures(claims)
     assert [f.split(":")[0] for f in numbers] == [
-        "wrong-value", "missing-artifact", "broken-accessor"]
+        "wrong-value", "missing-artifact", "broken-accessor", "null-value"]
     assert "publishes 2.0" in numbers[0]
     assert "no-such-artifact.json" in numbers[1]
     assert "KeyError" in numbers[2]
-    assert [f.split(":")[0] for f in _text_failures(claims)] == ["reworded"]
+    assert "TypeError" in numbers[3]
+    assert [f.split(":")[0] for f in _text_failures(claims)] == [
+        "reworded", "missing-doc"]
     assert _claim_group(spec) == "other"
     assert _claim_group("docs/guide/benchmarks.md") == "docs/guide"
 

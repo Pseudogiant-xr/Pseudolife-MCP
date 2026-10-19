@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
@@ -700,7 +701,8 @@ _ENTRY_NOISE = ("timestamp", "access_count", "surprise_score", "bank",
 _COMPACT_EXTRA_KEYS = 2
 
 
-def _assert_compact(payload: dict, required: set[str], excluded) -> None:
+def _assert_compact(payload: dict, required: set[str],
+                    excluded: Iterable[str]) -> None:
     keys = set(payload)
     assert required <= keys, f"compact payload lost {sorted(required - keys)}"
     leaked = keys & set(excluded)
@@ -725,8 +727,11 @@ def test_memory_search_entries_are_compact_by_default(tmp_path: Path, monkeypatc
     out = _invoke("memory_search", {"query": "widget port"})
     assert out["count"] >= 1
     e = out["entries"][0]
-    _assert_compact(e, {"id", "text", "source", "tags", "score", "date"},
-                    _ENTRY_NOISE + ("superseded", "superseded_by_text"))
+    required = {"id", "text", "source", "tags", "score", "date"}
+    full = _invoke("memory_search", {"query": "widget port",
+                                     "verbose": True})["entries"][0]
+    _assert_compact(e, required, (set(full) - required).union(
+        _ENTRY_NOISE, ("superseded", "superseded_by_text")))
 
 
 def test_compact_entries_carry_their_write_date(
@@ -989,9 +994,10 @@ def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monke
     _invoke("memory_store", {"text": "recent shape probe", "source": "notes",
                              "tags": ["probe"]})
     compact = _invoke("memory_recent", {"n": 5})["entries"][0]
-    _assert_compact(compact, {"id", "text", "source", "tags", "date"},
-                    _ENTRY_NOISE + ("superseded", "superseded_by_text"))
     full = _invoke("memory_recent", {"n": 5, "verbose": True})["entries"][0]
+    required = {"id", "text", "source", "tags", "date"}
+    _assert_compact(compact, required, (set(full) - required).union(
+        _ENTRY_NOISE, ("superseded", "superseded_by_text")))
     for k in _ENTRY_NOISE + ("superseded",):
         assert k in full, f"verbose entry missing {k!r}"
 
