@@ -432,7 +432,10 @@ suite_workers() {
         return
     fi
     local cpus mem_kb limit group n
-    cpus="$(nproc 2>/dev/null || echo 1)"
+    # GNU nproc answers OMP_NUM_THREADS / OMP_THREAD_LIMIT when set (CI's
+    # Linux lanes export OMP_NUM_THREADS=2), which is a thread budget, not
+    # the CPUs here (Codex review, 2026-10-19).
+    cpus="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc 2>/dev/null || echo 1)"
     mem_kb="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || true)"
     [[ "$mem_kb" =~ ^[0-9]+$ ]] || mem_kb=0
     group="$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)"

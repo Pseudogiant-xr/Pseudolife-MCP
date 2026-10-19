@@ -816,7 +816,11 @@ def _expected_workers() -> int:
 
 @_LINUX_ONLY
 def test_the_default_worker_count_follows_cpus_and_memory(tmp_path):
-    proc, argv = _pytest_argv(tmp_path)
+    """OMP_NUM_THREADS is set on purpose, as CI's Linux lanes set it: GNU
+    nproc reports that value instead of the CPUs (Codex review,
+    2026-10-19), and the launcher must count the CPUs."""
+    proc, argv = _pytest_argv(tmp_path, OMP_NUM_THREADS="1",
+                              OMP_THREAD_LIMIT="1")
     assert proc.returncode == 0, proc.stderr
     workers = _expected_workers()
     if workers >= 2:
