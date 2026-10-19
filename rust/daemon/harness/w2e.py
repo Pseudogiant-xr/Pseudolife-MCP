@@ -2096,6 +2096,16 @@ SCENARIOS.update({
             recall("rack a", verbose=True),
         ],
     },
+    "recall-ceiling": {
+        "config": "memory:\n  recall:\n    max_total_searches: 2\n",
+        "seed": RECALL_SEED,
+        "ops": [
+            # the seed search and one re-query, then the ceiling: truncated,
+            # with searches_issued
+            recall("What does the web app run on?", verbose=True),
+            recall("What does the web app run on?"),
+        ],
+    },
     "recall-ungated": {
         "config": ("memory:\n  recall:\n    hub_gate: false\n    max_searches_per_hop: 0\n"
                    "    max_total_searches: 0\n    time_budget_seconds: 0\n"

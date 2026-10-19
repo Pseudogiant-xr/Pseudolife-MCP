@@ -1208,7 +1208,7 @@ the maintainer's 2026-10-19 decision returned it to scope.
 generated corpus (`harness/goldens/recall-mentions.json`, written by
 `harness/gen_recall_mentions_goldens.py`), and its tables against their
 generator (`harness/gen_recall_unicode.py`). `harness/w2e.py live --only
-recall recall-wide recall-caps recall-ungated` compares every answer and the full bank
+recall recall-wide recall-caps recall-ceiling recall-ungated` compares every answer and the full bank
 (retrieval events and access counts included) after each call, on templates
 the Python daemon's own tools wrote (memories, facts with a constraint, a
 graph with a part-of chain, an alias, a fact whose source memory a
@@ -1216,7 +1216,7 @@ correction retired after it was traced): blank queries; the walk compact and
 verbose; hop and width clamps; a pinned seed constraint and an alias seed;
 `re_verify` verbose and compact; seeds from the hits and none; a walk after
 a write; under tight settings the hub gate, the expansion budget, the per-hop
-and total ceilings (`truncated`), part-of arrivals and the entity ceiling;
+ceiling, part-of arrivals and the entity ceiling; the total-search ceiling alone (`truncated`, `searches_issued`);
 with the gate, the ceilings, pinning and trace annotation off; and a hub of
 twelve leaves with one deeper node, where the entity cap keeps the deepest
 hop. The
