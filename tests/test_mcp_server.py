@@ -693,6 +693,22 @@ def test_restates_fact_requires_word_boundary_and_min_length() -> None:
 _ENTRY_NOISE = ("timestamp", "access_count", "surprise_score", "bank",
                 "episode_id", "episode_title")
 
+# A compact payload is pinned by the keys it must carry and the verbose-only
+# keys it must leave out, not by its exact key set, so adding a field does
+# not break these tests; a regression back to the full row still fails on
+# the excluded keys and on the key budget.
+_COMPACT_EXTRA_KEYS = 2
+
+
+def _assert_compact(payload: dict, required: set[str], excluded) -> None:
+    keys = set(payload)
+    assert required <= keys, f"compact payload lost {sorted(required - keys)}"
+    leaked = keys & set(excluded)
+    assert not leaked, f"compact payload carries verbose-only {sorted(leaked)}"
+    assert len(keys) <= len(required) + _COMPACT_EXTRA_KEYS, (
+        f"compact payload grew to {sorted(keys)}; raise _COMPACT_EXTRA_KEYS "
+        f"only on purpose")
+
 
 def _reload_mod(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
@@ -709,9 +725,8 @@ def test_memory_search_entries_are_compact_by_default(tmp_path: Path, monkeypatc
     out = _invoke("memory_search", {"query": "widget port"})
     assert out["count"] >= 1
     e = out["entries"][0]
-    assert set(e) == {"id", "text", "source", "tags", "score", "date"}
-    for noise in _ENTRY_NOISE + ("superseded", "superseded_by_text"):
-        assert noise not in e
+    _assert_compact(e, {"id", "text", "source", "tags", "score", "date"},
+                    _ENTRY_NOISE + ("superseded", "superseded_by_text"))
 
 
 def test_compact_entries_carry_their_write_date(
@@ -974,7 +989,8 @@ def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monke
     _invoke("memory_store", {"text": "recent shape probe", "source": "notes",
                              "tags": ["probe"]})
     compact = _invoke("memory_recent", {"n": 5})["entries"][0]
-    assert set(compact) == {"id", "text", "source", "tags", "date"}
+    _assert_compact(compact, {"id", "text", "source", "tags", "date"},
+                    _ENTRY_NOISE + ("superseded", "superseded_by_text"))
     full = _invoke("memory_recent", {"n": 5, "verbose": True})["entries"][0]
     for k in _ENTRY_NOISE + ("superseded",):
         assert k in full, f"verbose entry missing {k!r}"
@@ -996,8 +1012,9 @@ def test_memory_lesson_search_compact_by_default(monkeypatch) -> None:
         mcp_server.service, "lesson_search",
         lambda *a, **k: {"count": 1, "entries": [dict(_FULL_LESSON)]})
     e = _invoke("memory_lesson_search", {"query": "deploy"})["entries"][0]
-    assert set(e) == {"task", "aspect", "lesson", "about", "polarity",
-                      "outcome", "confidence", "score"}
+    required = {"task", "aspect", "lesson", "about", "polarity", "outcome",
+                "confidence", "score"}
+    _assert_compact(e, required, set(_FULL_LESSON) - required)
     full = _invoke("memory_lesson_search", {"query": "deploy", "verbose": True})
     assert set(full["entries"][0]) == set(_FULL_LESSON)
 
@@ -1034,8 +1051,9 @@ def test_memory_world_search_compact_by_default(monkeypatch) -> None:
         mcp_server.service, "world_search",
         lambda *a, **k: {"count": 1, "entries": [dict(_FULL_WORLD)]})
     e = _invoke("memory_world_search", {"query": "fastmcp version"})["entries"][0]
-    assert set(e) == {"entity", "attribute", "value", "effective_confidence",
-                      "stale", "source_url", "source_quote", "score"}
+    required = {"entity", "attribute", "value", "effective_confidence",
+                "stale", "source_url", "source_quote", "score"}
+    _assert_compact(e, required, set(_FULL_WORLD) - required)
     full = _invoke("memory_world_search", {"query": "fastmcp version",
                                            "verbose": True})
     assert set(full["entries"][0]) == set(_FULL_WORLD)
