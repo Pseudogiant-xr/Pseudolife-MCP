@@ -239,23 +239,26 @@ def test_spawn_serve_waits_for_the_stored_principals_after_init(tmp_path, monkey
         worker = threading.Thread(target=spawn, daemon=True)
         worker.start()
         try:
-            # Init finishes while the principals stay held: the helper must
-            # still be waiting, on that stage alone.
-            body = readiness.wait_ready(base, 240, stages=("init",))
-            assert body["pending"] == ["principals"], body
-            time.sleep(1.0)  # several of spawn_serve's 0.5 s polls
-            assert worker.is_alive() and not result, (
-                "spawn_serve returned while the stored principals were still loading")
-            assert _unknown_bearer_status(base)[0] == 503
-        finally:
-            gate.touch()
-            worker.join(timeout=240)
-        if "error" in result:
-            raise result["error"]
-        proc, health, _port = result["started"]
-        try:
+            try:
+                # Init finishes while the principals stay held: the helper
+                # must still be waiting, on that stage alone.
+                body = readiness.wait_ready(base, 240, stages=("init",))
+                assert body["pending"] == ["principals"], body
+                time.sleep(1.0)  # several of spawn_serve's 0.5 s polls
+                assert worker.is_alive() and not result, (
+                    "spawn_serve returned while the stored principals were still loading")
+                assert _unknown_bearer_status(base)[0] == 503
+            finally:
+                gate.touch()
+                worker.join(timeout=240)
+            if "error" in result:
+                raise result["error"]
+            _proc, health, _port = result["started"]
             assert (health.get("ready"), health.get("pending")) == (True, [])
             status, refused = _unknown_bearer_status(base)
             assert (status, refused.get("error")) == (401, "unauthorized")
         finally:
-            stop_daemon(proc)
+            # Whichever assertion failed, the gate is open, so the daemon
+            # finished starting: stop it before its bank is dropped.
+            if "started" in result:
+                stop_daemon(result["started"][0])
