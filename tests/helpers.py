@@ -197,13 +197,17 @@ def _is_run_database(database_url: str) -> bool:
 
 
 def spawn_serve(data_dir, database_url: str, *,
-                env_extra: dict | None = None, wait_s: float = 60.0,
+                env_extra: dict | None = None, wait_s: float = 240.0,
                 argv: tuple[str, ...] = SERVE_ARGV, attempts: int = 3):
-    """Start the real ``pseudolife-mcp serve`` daemon and wait for /health.
+    """Start the real ``pseudolife-mcp serve`` daemon and wait until its
+    /health reports ``ready: true`` (pseudolife_memory/readiness.py).
 
     Returns ``(proc, health, port)``; raises ``RuntimeError`` (with the
-    daemon's stderr tail) if the process exits early or never answers. The
-    60 s default matches the daemon suites: a cold torch import is slow.
+    daemon's stderr tail and its last /health answer) if the process exits
+    early or is not ready in time. Any earlier answer, a 503 or
+    ``ready: false``, means "still starting": returning on the first answer
+    let tests race the stored-principal load and the warm-up. The 240 s
+    default covers a cold torch import plus the embedder load.
 
     Refuses the run's own database with ``ValueError``: in-process tests
     hold its writer lease, and a daemon there boots degraded (see
@@ -234,8 +238,9 @@ def spawn_serve(data_dir, database_url: str, *,
     import subprocess
     import sys
     import time
-    import urllib.request
     from pathlib import Path
+
+    from pseudolife_memory import readiness
 
     # Before any spawn: a missing psutil must not leave a daemon running.
     import psutil  # noqa: F401 — used by _owns_listener
@@ -268,6 +273,7 @@ def spawn_serve(data_dir, database_url: str, *,
             )
 
         lost_port = False
+        last = (None, None)
         deadline = time.time() + wait_s
         while True:
             exited = proc.poll() is not None
@@ -282,22 +288,20 @@ def spawn_serve(data_dir, database_url: str, *,
             if time.time() >= deadline:
                 break
             try:
-                with urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/health", timeout=1.0
-                ) as r:
-                    health = json.loads(r.read().decode())
+                last = readiness.read_health(f"http://127.0.0.1:{port}", 1.0)
             except Exception:  # noqa: BLE001 — not up yet
                 time.sleep(0.5)
                 continue
-            if (_owns_listener(proc, port) is not False
-                    and proc.poll() is None):
-                return proc, health, port
-            lost_port = True  # something else answers on our port
-            break
+            if _owns_listener(proc, port) is False or proc.poll() is not None:
+                lost_port = True  # something else answers on our port
+                break
+            if readiness.is_ready(*last):
+                return proc, last[1], port
+            time.sleep(0.5)  # ours, still starting (pseudolife_memory/readiness.py)
         stop_daemon(proc)
         if not lost_port:
-            raise RuntimeError("daemon never became healthy:\n"
-                               + stderr[-4000:])
+            raise RuntimeError("daemon never became ready (last answer: "
+                               f"{readiness.describe(*last)}):\n" + stderr[-4000:])
     raise RuntimeError(f"daemon lost its port on all {attempts} attempts; "
                        "last stderr:\n" + stderr[-4000:])
 

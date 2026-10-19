@@ -63,6 +63,10 @@ pub struct Snapshot {
     pub not_ready: Option<String>,
     pub storage: Option<Arc<Storage>>,
     pub embedder: Option<Value>,
+    /// The published stores' startup state, once an init has completed its
+    /// clock reseed: `/health` `ready` reads its live reseed flag
+    /// (`MemoryService.coordination_tier_ready`).
+    pub startup: Option<Arc<crate::startup::StartupState>>,
 }
 
 #[derive(Default)]
@@ -231,12 +235,15 @@ impl Service {
                 && r.startup.clock_state().hlc_reseed_pending
             {
                 inner.ready = None;
+                self.update(|s| s.startup = None);
             } else {
                 if r.startup.clock_state().hlc_reseed_pending {
                     r.startup
                         .reseed(r.storage.client())
                         .await
                         .map_err(|error| format!("{error:#}"))?;
+                    let startup = r.startup.clone();
+                    self.update(|s| s.startup = Some(startup));
                 }
                 return Ok(r.clone());
             }
@@ -311,6 +318,10 @@ impl Service {
                     .reseed(ready.storage.client())
                     .await
                     .map_err(|error| format!("{error:#}"))?;
+                // Published only now, as Python's flag stays pending until
+                // the reseed: `ready` never leads the clock.
+                let startup = ready.startup.clone();
+                self.update(|s| s.startup = Some(startup));
                 Ok(ready)
             }
             Err(e) => {
@@ -1010,7 +1021,10 @@ mod tests {
             inner.ready = None;
             inner.storage = None;
         }
-        service.update(|snapshot| snapshot.storage = None);
+        service.update(|snapshot| {
+            snapshot.storage = None;
+            snapshot.startup = None;
+        });
         drop(service);
         Arc::try_unwrap(storage)
             .ok()

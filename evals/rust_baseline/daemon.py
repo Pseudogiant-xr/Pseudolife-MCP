@@ -24,50 +24,6 @@ SEED = 61003
 TOPICS = ("apricot", "birch", "cobalt", "dahlia", "elm", "fern", "granite", "hazel")
 
 
-# A token-mode daemon checks a bearer the environment does not match against
-# its stored-principal view, which a background thread loads after /health
-# already answers (pseudolife_memory/daemon.py start_stored_principals; Rust
-# principals::spawn_refresher). Until a read lands, such a bearer gets 503
-# principals_unavailable instead of 401, and a failed first read is retried
-# 10 s later (principal_store.REFRESH_INTERVAL_S). Hosted Windows run
-# 39116824665 (PR #826) failed full_bank's search-wrong-bearer contract on a
-# fresh daemon; rust/daemon/harness/run.py waits the same way.
-PRINCIPAL_PROBE = "Bearer pl-harness-principal-probe"
-
-
-def wait_for_principals(url, deadline, *, alive=lambda: True) -> int:
-    """Wait until a bearer no token matches is no longer answered 503
-    ``principals_unavailable``; return how many such answers came first.
-
-    Only that exact refusal means "not loaded yet": any other answer (401, an
-    open daemon's search, a stand-in's 200) is the daemon's own and is left
-    for the caller's contract to judge. On a token-mode daemon (every current
-    caller) the refusal precedes every handler, so the probe writes nothing;
-    on an open daemon the probe is a real search."""
-    import httpx
-    unavailable = 0
-    while True:
-        if not alive():
-            raise RuntimeError("disposable daemon exited while its stored principals loaded")
-        try:
-            response = httpx.get(url + "/api/search?q=", headers={"Authorization": PRINCIPAL_PROBE},
-                                 timeout=max(0.001, min(5, deadline - time.monotonic())),
-                                 trust_env=False, follow_redirects=False)
-            try:
-                error = response.json().get("error") if response.status_code == 503 else None
-            except (ValueError, AttributeError):
-                error = None
-            if not (response.status_code == 503 and error == "principals_unavailable"):
-                return unavailable
-            unavailable += 1
-        except httpx.HTTPError:
-            pass
-        if time.monotonic() >= deadline:
-            raise RuntimeError("disposable daemon's stored-principal view did not load before the "
-                               f"startup deadline ({unavailable} principals_unavailable answers)")
-        time.sleep(0.1)
-
-
 def corpus(count, seed=SEED):
     rng = random.Random(seed)
     return [{"text": f"Project {TOPICS[i % len(TOPICS)]} record {i:05d} has calibration value {rng.randrange(1000000):06d}.",
@@ -213,40 +169,40 @@ def launched_daemon(dsn, private, *, env_extra=None, source_root=None, startup_t
                 command = _daemon_command(source_root)
             with owned_process(command, cwd=source_root, env=env,
                                stdin=subprocess.DEVNULL, stdout=log, stderr=log) as process:
-                deadline = time.monotonic() + startup_timeout
-                while time.monotonic() < deadline:
-                    if process.poll() is not None:
-                        raise RuntimeError("disposable daemon exited during startup")
-                    try:
-                        response = httpx.get(url + "/health", timeout=min(1, max(0.001, deadline - time.monotonic())),
-                                             trust_env=False, follow_redirects=False)
-                        if response.status_code == 200:
-                            try:
-                                payload = response.json()
-                            except ValueError:
-                                raise RuntimeError("disposable daemon readiness identity mismatch") from None
-                            identity = payload.get("baseline_instance") if isinstance(payload, dict) else None
-                            observed = identity.get("nonce") if isinstance(identity, dict) else None
-                            verified = (isinstance(observed, str) and observed.isascii()
-                                        and secrets.compare_digest(observed, nonce)
-                                        and process.owns_runtime_pid(identity.get("pid"))
-                                        and payload.get("status") == "ok")
-                            if not verified:
-                                raise RuntimeError("disposable daemon readiness identity mismatch")
-                            if process.poll() is not None:
-                                raise RuntimeError("disposable daemon exited during startup")
-                            process.verified_runtime_pid = identity["pid"]
-                            cleanup["readiness_identity_verified"] = True
-                            if isinstance(identity.get("runtime"), dict):
-                                cleanup["actual_child_runtime"] = identity["runtime"]
-                            break
-                    except httpx.HTTPError:
-                        pass
-                    time.sleep(0.1)
-                else:
-                    raise RuntimeError("disposable daemon startup deadline exceeded")
-                cleanup["principals_unavailable_before_ready"] = wait_for_principals(
-                    url, deadline, alive=lambda: process.poll() is None)
+                answers = []
+
+                def verify(status, payload):
+                    # Every answer before readiness is checked: a listener
+                    # that is not this owned instance is refused at once.
+                    answers.append(status)
+                    if status != 200:
+                        return  # still starting (a degraded payload is 503)
+                    identity = payload.get("baseline_instance") if isinstance(payload, dict) else None
+                    observed = identity.get("nonce") if isinstance(identity, dict) else None
+                    verified = (isinstance(observed, str) and observed.isascii()
+                                and secrets.compare_digest(observed, nonce)
+                                and process.owns_runtime_pid(identity.get("pid"))
+                                and payload.get("status") == "ok")
+                    if not verified:
+                        raise RuntimeError("disposable daemon readiness identity mismatch")
+
+                from pseudolife_memory import readiness
+                try:
+                    # One readiness contract (pseudolife_memory/readiness.py):
+                    # initialized and stored principals loaded, so the
+                    # corpus never meets a 503 principals_unavailable.
+                    payload = readiness.wait_ready(url, startup_timeout, check=verify, poll=0.1,
+                                                   alive=lambda: process.poll() is None)
+                except readiness.NotReady as exc:
+                    if exc.exited:
+                        raise RuntimeError("disposable daemon exited during startup") from exc
+                    raise RuntimeError(f"disposable daemon startup deadline exceeded ({exc})") from exc
+                identity = payload["baseline_instance"]
+                process.verified_runtime_pid = identity["pid"]
+                cleanup["readiness_identity_verified"] = True
+                cleanup["health_answers_before_ready"] = len(answers) - 1
+                if isinstance(identity.get("runtime"), dict):
+                    cleanup["actual_child_runtime"] = identity["runtime"]
                 print(json.dumps({"daemon_health_observed": True, "readiness_identity_verified": True}), flush=True)
                 yield process, url, cleanup
         finally:
