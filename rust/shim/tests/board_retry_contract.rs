@@ -794,6 +794,12 @@ async fn board_identity_recovered_check_leaves_no_degraded_note() {
         .filter(|request| request.path.ends_with("/context"))
         .map(|request| request.body.clone())
         .collect::<Vec<_>>();
-    assert_eq!(checks, vec![json!({"read_only":true}); 2]);
+    // The renew loop's heartbeat checks through the same path, so count
+    // at least the board call's two checks, and require each to be read-only.
+    assert!(checks.len() >= 2, "{checks:?}");
+    assert!(
+        checks.iter().all(|body| *body == json!({"read_only":true})),
+        "{checks:?}"
+    );
     board.close().await;
 }
