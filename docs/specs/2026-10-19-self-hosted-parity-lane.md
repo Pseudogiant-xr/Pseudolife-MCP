@@ -208,9 +208,8 @@ authority if the endpoint differs.
 
 This setting is a **precondition for registering any runner**, not an
 option (decision 1). The stronger control, a runner group limited to
-selected workflows and refs (only `rust.yml` on master), is an
-organization feature; this repository belongs to a personal account, so it
-is not available. A guard job inside `rust.yml` would not help either: a
+selected workflows and refs (only `rust.yml` on master), cannot be set up
+for a repository owned by a personal account, which this one is. A guard job inside `rust.yml` would not help either: a
 fork that edits the workflow can delete the guard in the same edit. What
 limits an approved run's reach is the dedicated account and the absence of
 credentials on the machine.
