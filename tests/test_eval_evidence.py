@@ -3160,29 +3160,118 @@ def test_every_published_number_names_a_committed_artifact():
           "the claim from the docs.")
 
 
-@pytest.mark.parametrize("claim", CLAIMS, ids=lambda c: c.id)
-def test_published_number_matches_its_artifact(claim: Claim):
-    for artifact in claim.artifacts:
-        if not (REPO / artifact).exists():
-            pytest.fail(f"{claim.id}: missing artifact {artifact}")
-    actual = claim.actual()
-    assert round(actual, claim.places) == round(claim.stated, claim.places), (
-        f"{claim.id}: {claim.doc} publishes {claim.stated}, but "
-        f"{'+'.join(claim.artifacts)} gives {actual:.5f}")
+# The two checks below run once per group of guarded documents, not once per
+# claim: a case per claim made this file a third of the suite's collected
+# cases (2026-10-20 audit: 6,705 of 19,087). Every claim is still checked,
+# and a failure names every failing claim id in one message. A document
+# outside the named groups falls into "other", so no claim can escape.
+CLAIM_GROUPS = (EVALS, CHANGELOG, READ_ME, "docs/guide", "other")
 
 
-@pytest.mark.parametrize("claim", CLAIMS, ids=lambda c: c.id)
-def test_claim_text_still_appears_in_its_doc(claim: Claim):
+def _claim_group(doc: str) -> str:
+    if doc in (EVALS, CHANGELOG, READ_ME):
+        return doc
+    if doc.startswith("docs/guide/"):
+        return "docs/guide"
+    return "other"
+
+
+def _claims_in(group: str) -> list[Claim]:
+    claims = [c for c in CLAIMS if _claim_group(c.doc) == group]
+    assert claims, f"no claim guards {group}; drop it from CLAIM_GROUPS"
+    return claims
+
+
+def _number_failures(claims: list[Claim]) -> list[str]:
+    failures = []
+    for claim in claims:
+        missing = [a for a in claim.artifacts if not (REPO / a).exists()]
+        if missing:
+            failures.append(
+                f"{claim.id}: missing artifact {', '.join(missing)}")
+            continue
+        try:
+            actual = claim.actual()
+        except Exception as exc:  # one broken claim must not hide the rest
+            failures.append(
+                f"{claim.id}: reading {'+'.join(claim.artifacts)} raised "
+                f"{type(exc).__name__}: {exc}")
+            continue
+        if round(actual, claim.places) != round(claim.stated, claim.places):
+            failures.append(
+                f"{claim.id}: {claim.doc} publishes {claim.stated}, but "
+                f"{'+'.join(claim.artifacts)} gives {actual:.5f}")
+    return failures
+
+
+def _text_failures(claims: list[Claim]) -> list[str]:
+    return [
+        f"{claim.id}: {claim.doc} no longer contains the guarded text\n    "
+        f"{claim.needle!r}"
+        for claim in claims if claim.needle not in _read_doc(claim.doc)]
+
+
+def test_claim_ids_are_unique():
+    """Failure messages identify a claim by its id alone."""
+    seen: set[str] = set()
+    dupes = sorted({c.id for c in CLAIMS if c.id in seen or seen.add(c.id)})
+    assert not dupes, f"claim ids used more than once: {dupes}"
+
+
+@pytest.mark.parametrize("group", CLAIM_GROUPS)
+def test_published_number_matches_its_artifact(group: str):
+    failures = _number_failures(_claims_in(group))
+    if failures:
+        pytest.fail(
+            f"{len(failures)} published number(s) in {group} do not match "
+            f"their artifact:\n  " + "\n  ".join(failures), pytrace=False)
+
+
+@pytest.mark.parametrize("group", CLAIM_GROUPS)
+def test_claim_text_still_appears_in_its_doc(group: str):
     """Keeps the guard load-bearing.
 
     Without this, rewording a table would leave the row above asserting
     against a number no page still shows — green, and guarding nothing.
     """
-    text = _read_doc(claim.doc)
-    assert claim.needle in text, (
-        f"{claim.id}: {claim.doc} no longer contains the guarded text\n  "
-        f"{claim.needle!r}\nIf the number changed, update this table; if the "
-        f"claim was dropped, delete its row.")
+    failures = _text_failures(_claims_in(group))
+    if failures:
+        pytest.fail(
+            f"{len(failures)} guarded text(s) in {group} are gone:\n  "
+            + "\n  ".join(failures)
+            + "\nIf the number changed, update this table; if the claim was "
+              "dropped, delete its row.", pytrace=False)
+
+
+def test_grouped_checks_report_every_failing_claim():
+    """The per-group checks must name each bad claim, not stop at the first."""
+    probe = "evals/results/codex-doorbell-probe-20260928.json"
+    spec = "docs/specs/2026-09-12-codex-coordination.md"
+    good = Claim(id="good", doc=spec, needle="Acknowledgment",
+                 artifacts=(probe,), value=lambda d: 1.0, stated=1.0,
+                 places=0)
+    wrong = Claim(id="wrong-value", doc=spec, needle="Acknowledgment",
+                  artifacts=(probe,), value=lambda d: 1.0, stated=2.0,
+                  places=0)
+    gone = Claim(id="missing-artifact", doc=spec, needle="Acknowledgment",
+                 artifacts=(RESULTS + "no-such-artifact.json",),
+                 value=lambda d: 1.0, stated=1.0, places=0)
+    broken = Claim(id="broken-accessor", doc=spec, needle="Acknowledgment",
+                   artifacts=(probe,), value=lambda d: d["no-such-key"],
+                   stated=1.0, places=0)
+    reworded = Claim(id="reworded", doc=spec,
+                     needle="text no document contains", artifacts=(probe,),
+                     value=lambda d: 1.0, stated=1.0, places=0)
+    claims = [good, wrong, gone, broken, reworded]
+    numbers = _number_failures(claims)
+    assert [f.split(":")[0] for f in numbers] == [
+        "wrong-value", "missing-artifact", "broken-accessor"]
+    assert "publishes 2.0" in numbers[0]
+    assert "no-such-artifact.json" in numbers[1]
+    assert "KeyError" in numbers[2]
+    assert [f.split(":")[0] for f in _text_failures(claims)] == ["reworded"]
+    assert _claim_group(spec) == "other"
+    assert _claim_group("docs/guide/benchmarks.md") == "docs/guide"
 
 
 # ── the review-queue judge gates (2026-09-02) ─────────────────────────────
