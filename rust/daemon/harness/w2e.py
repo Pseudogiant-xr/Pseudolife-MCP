@@ -1714,12 +1714,15 @@ SCENARIOS.update({
             store("Deploys happen on Tuesdays after the staging database check.",
                   [sess("sess-c1")], tags=["ops"]),
             store("The staging database used to be on db-stage-0.", [sess("sess-c1")]),
-            # an exact twin in sess-c1: the episode walk offers one per text
+            # a twin text in sess-c1 (the episode walk offers one per text),
+            # with another entry's vector: an exact score tie would leave the
+            # retrieval order free (torch.topk; divergences.md)
             sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, source, "
-                "episode_id, episode_title, tags, slots, dream_state) SELECT band, text, "
-                "embedding, surprise, ts + 1, 0, source, episode_id, episode_title, tags, slots, "
-                "dream_state FROM entries WHERE text = 'Our CI runs on GitHub Actions.'",
-                after_stop=True),
+                "episode_id, episode_title, tags, slots, dream_state) SELECT a.band, a.text, "
+                "b.embedding, a.surprise, a.ts + 1, 0, a.source, a.episode_id, a.episode_title, "
+                "a.tags, a.slots, a.dream_state FROM entries a, entries b "
+                "WHERE a.text = 'Our CI runs on GitHub Actions.' "
+                "AND b.text = 'I like oat milk in my coffee.'", after_stop=True),
             supersede("The staging database moved off db-stage-0 to db-stage-1.",
                       old_text="The staging database used to be on db-stage-0."),
         ],
