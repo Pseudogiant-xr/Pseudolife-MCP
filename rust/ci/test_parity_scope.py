@@ -76,6 +76,9 @@ def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
     "tests/test_coordination_audit.py",
     # evals/rust_port modules the harness imports.
     "evals/rust_port/sent_http.py", "evals/rust_port/processes.py", "evals/rust_port/harness.py",
+    # Reached through relative imports, and the packages' __init__ (reviewer,
+    # 2026-10-20: oracle_selection imports .oracle_pins).
+    "evals/rust_port/oracle_pins.py", "evals/rust_port/__init__.py", "tests/__init__.py",
 ])
 def test_anything_it_cannot_place_runs_every_suite(path):
     assert reached(path) == ALL
@@ -92,10 +95,22 @@ def test_the_import_scan_follows_test_helpers_transitively(tmp_path, monkeypatch
     (tmp_path / "tests/a.py").write_text("import tests.b as helper\n", encoding="utf-8")
     (tmp_path / "tests/b.py").write_text("x = 1\n", encoding="utf-8")
     (tmp_path / "tests/c.py").write_text("from tests.a import seed\n", encoding="utf-8")
+    # Relative imports inside the package, and a list spanning lines.
+    (tmp_path / "tests/d.py").write_text("from .f import x\nfrom . import (\n    g,\n    h as other,\n)\n",
+                                         encoding="utf-8")
+    for name in ("e", "f", "g", "h"):
+        (tmp_path / f"tests/{name}.py").write_text("y = 2\n", encoding="utf-8")
+    # evals.rust_port: the oracle modules seed the closure; a relative import
+    # from one of them is reached though no harness names it.
+    (tmp_path / "evals/rust_port/oracle_selection.py").write_text("from .pins import P\n", encoding="utf-8")
+    (tmp_path / "evals/rust_port/pins.py").write_text("P = 1\n", encoding="utf-8")
+    (tmp_path / "evals/rust_port/unrelated.py").write_text("Q = 1\n", encoding="utf-8")
     monkeypatch.setattr(parity_scope, "ROOT", tmp_path)
     parity_scope.harness_imports.cache_clear()
     try:
-        assert parity_scope.harness_imports("tests") == {"a", "b", "d", "e"}
+        assert parity_scope.harness_imports("tests") == {"a", "b", "d", "e", "f", "g", "h"}
+        rust_port = parity_scope.harness_imports("evals.rust_port")
+        assert {"oracle_selection", "pins"} <= rust_port and "unrelated" not in rust_port
     finally:
         parity_scope.harness_imports.cache_clear()
 

@@ -162,10 +162,9 @@ def reached(path: str) -> tuple[str, ...]:
         return ALL  # rust/ci, rust/shared and anything new
     if top == "evals" and len(parts) > 1:
         if parts[1] == "rust_port":
-            # Every shard binds its Python oracle through these; the harness
-            # imports others.
-            if parts[-1] in ("oracle_selection.py", "phase1_oracle.py", "provenance.py") \
-                    or module_of(parts[2:]) in harness_imports("evals.rust_port"):
+            # Every shard binds its Python oracle through ORACLE_MODULES; the
+            # harness imports others; the package's __init__ runs for all.
+            if parts[-1] == "__init__.py" or module_of(parts[2:]) in harness_imports("evals.rust_port"):
                 return ALL
             return ("eval", "judges")
         if parts[1] == "rust_baseline":
@@ -176,7 +175,9 @@ def reached(path: str) -> tuple[str, ...]:
         # A test module the harness imports (rows seed banks with
         # tests.test_transfer_cli, judges start fake embedders) reaches every
         # suite; any other Python test only the floor's MCP catalogue step.
-        return ALL if module_of(parts[1:]) in harness_imports("tests") else ()
+        if parts[-1] == "__init__.py" or module_of(parts[1:]) in harness_imports("tests"):
+            return ALL
+        return ()
     # The Console bundle: the floor's static-serving rows.
     if top == "frontend":
         return ()
@@ -189,26 +190,40 @@ def module_of(parts: tuple[str, ...]) -> str:
     return parts[0].removesuffix(".py") if parts else ""
 
 
+# The evals.rust_port modules every parity shard runs to bind its oracle.
+ORACLE_MODULES = ("oracle_selection", "phase1_oracle", "provenance")
+# The scan's own tests name packages in strings; they import nothing.
+SCAN_EXCLUDES = ("rust/ci/test_parity_scope.py",)
+
+
 @functools.lru_cache(maxsize=None)
 def harness_imports(package: str) -> frozenset[str]:
     """The top-level modules of ``package`` (tests or evals.rust_port) that
-    the parity harnesses import, directly or through each other."""
+    the parity harnesses import, directly or through each other, absolute or
+    relative imports alike."""
     sources = [ROOT / "rust"] + ([ROOT / "evals/rust_port"] if package == "tests" else [])
     directory = ROOT / package.replace(".", "/")
     escaped = re.escape(package)
-    pattern = re.compile(rf"\b(?:from|import)\s+{escaped}\.(\w+)|\bfrom\s+{escaped}\s+import\s+\(?([\w ,]+)")
+    absolute = re.compile(rf"\b(?:from|import)\s+{escaped}\.(\w+)|"
+                          rf"\bfrom\s+{escaped}\s+import\s+(\([^)]*\)|[\w ,]+)")
+    # Inside the package: from .x import y, from . import (x, y).
+    relative = re.compile(r"\bfrom\s+\.(\w+)|\bfrom\s+\.\s+import\s+(\([^)]*\)|[\w ,]+)")
 
-    def imported(text: str) -> set[str]:
+    def names(pattern, text: str) -> set[str]:
         found = set()
         for dotted, listed in pattern.findall(text):
-            found.update([dotted] if dotted else (name.strip() for name in listed.split(",") if name.strip()))
-        return found
+            found.update([dotted] if dotted else
+                         (name.strip() for name in listed.strip("()").replace("\n", " ").split(",")
+                          if name.strip() and name.strip() != "as"))
+        return {name.split()[0] for name in found}
 
+    excluded = {ROOT / path for path in SCAN_EXCLUDES}
     seen: set[str] = set()
-    pending = set()
+    pending = set(ORACLE_MODULES) if package == "evals.rust_port" else set()
     for source in sources:
         for path in source.rglob("*.py"):
-            pending |= imported(path.read_text(encoding="utf-8", errors="replace"))
+            if path not in excluded:
+                pending |= names(absolute, path.read_text(encoding="utf-8", errors="replace"))
     while pending:
         name = pending.pop()
         if name in seen:
@@ -216,7 +231,8 @@ def harness_imports(package: str) -> frozenset[str]:
         seen.add(name)
         for path in [directory / f"{name}.py", *(directory / name).rglob("*.py")]:
             if path.is_file():
-                pending |= imported(path.read_text(encoding="utf-8", errors="replace"))
+                text = path.read_text(encoding="utf-8", errors="replace")
+                pending |= names(absolute, text) | names(relative, text)
     return frozenset(seen)
 
 
