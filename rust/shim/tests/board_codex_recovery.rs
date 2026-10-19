@@ -36,7 +36,9 @@ fn codex_runtime(
 }
 fn codex_options(runtime: &pseudolife_stdio::lifecycle::Runtime, home: &Home) -> Options {
     let mut options = options(runtime, home, "1");
-    options.timing.validation = Duration::from_millis(150);
+    // Wide enough for a loopback answer on a loaded Windows runner; the
+    // deadline cases hold their answer well past it.
+    options.timing.validation = Duration::from_secs(1);
     options
 }
 async fn ack(board: &Board) -> Result<Preparation, rmcp::ErrorData> {
@@ -99,7 +101,7 @@ async fn codex_existing_thread_recovers_one_transient_check() {
         ("dropped", Answer::text(0, b"")),
         ("body cut", ordinary().truncated()),
         ("503", Answer::json(503, json!({"error":"private fixture"}))),
-        ("deadline", ordinary().delayed(Duration::from_millis(600))),
+        ("deadline", ordinary().delayed(Duration::from_millis(3500))),
     ] {
         let fixture = Fixture::new(0);
         let home = Home::new();
@@ -131,7 +133,7 @@ async fn codex_existing_thread_recovers_one_transient_check() {
 async fn codex_unresolved_check_never_forwards_and_names_its_cause() {
     let slow = || {
         Answer::json(200, json!({"bank_id":BANK,"principal":"fixture"}))
-            .delayed(Duration::from_millis(600))
+            .delayed(Duration::from_millis(3500))
     };
     let cases: Vec<(&str, Vec<Answer>, usize, &str)> = vec![
         (
@@ -240,7 +242,7 @@ async fn codex_check_spanning_a_credential_rotation_is_never_retried() {
 async fn codex_startup_failures_name_the_attachment() {
     // Startup is "identity attachment", not "authority validation".
     let slow = Answer::json(200, json!({"bank_id":BANK,"principal":"fixture"}))
-        .delayed(Duration::from_millis(600));
+        .delayed(Duration::from_millis(3500));
     for (name, action, answer, hint) in [
         (
             "503",
@@ -265,7 +267,7 @@ async fn codex_startup_failures_name_the_attachment() {
         let home = Home::new();
         let runtime = codex_runtime(&fixture, None);
         let mut options = codex_options(&runtime, &home);
-        options.timing.startup = Duration::from_millis(200);
+        options.timing.startup = Duration::from_secs(1);
         fixture.answer(action, answer);
         let board = Board::attach_options(runtime.clone(), options).await;
         let error = ack(&board).await.err().unwrap();

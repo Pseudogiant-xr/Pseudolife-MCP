@@ -563,26 +563,17 @@ impl Adapter {
         if self.closing.load(Ordering::Acquire) {
             return Err(Failure::local("closing"));
         }
-        let context = match fetch_context(&self.client, &self.config, snapshot, None, true).await {
-            Ok(context) => context,
-            Err(failure) => {
-                // A check that got no answer, or a 5xx, says nothing about
-                // delivery; like Python's validate_snapshot it records no
-                // failure, so a call that recovers on its retry carries no
-                // "degraded" note and starts no reattach.
-                if !failure.transient() {
-                    self.record_failure(failure.clone()).await;
-                }
-                return Err(failure);
-            }
-        };
+        // A per-call check records no failure, as Python's validate_snapshot
+        // records none: its caller refuses or downgrades that one call, and
+        // background delivery is judged by its own requests (heartbeat,
+        // receive and attempt record what they meet through post_retry).
+        // Recording here let one blip mark delivery degraded and start a
+        // reattach, and one unreadable answer stop delivery outright.
+        let context = fetch_context(&self.client, &self.config, snapshot, None, true).await?;
         let mut mailbox = self.mailbox.lock().await;
-        if let Err(code) = context.check_binding(&mailbox.identity) {
-            let failure = Failure::local(code);
-            drop(mailbox);
-            self.record_failure(failure.clone()).await;
-            return Err(failure);
-        }
+        context
+            .check_binding(&mailbox.identity)
+            .map_err(Failure::local)?;
         current(&self.config.provider, snapshot)?;
         mailbox.context = context;
         if mailbox.failure.as_ref().is_some_and(|failure| {
