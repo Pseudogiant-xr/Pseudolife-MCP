@@ -1224,6 +1224,64 @@ hop. The
 `mcp-recall-no-pin`, `mcp-recall-no-annotate` and `mcp-recall-flat-caps`
 mutants must be caught.
 
+### memory_graph_review over MCP: list and the decision actions (2026-10-19)
+
+`graph_review.rs` (the analyzers of `memory/graph_review.py`),
+`graph_review_tools.rs` (the tool, its dispatch, the list service and its
+storage readers) and `graph_review_actions.rs` (the decision actions, their
+storage writes and the automatic-decision index), on the ported graph store
+(`storage/graph.rs`: `merge_entity`, `delete_entity`, `upsert_edge`) and
+`graph_write_tools.rs` (`relate`, entity resolution); the two
+`memory.deep_dream` switches in `config.rs`; registered in
+`mcp::dispatch::registry`. Python: `mcp_server.py` `memory_graph_review`
+(2290-2431, `_noted` and `_REVIEW_NOTES` 683-751); `service.py`
+`graph_review` (7812-7895), `graph_dismiss_duplicate` (7897-7942),
+`_fold_direction` (8787-8799), `graph_propose_links` (8809-8854),
+`graph_accept_link` (8867-8922), `graph_reject_link` (8930-8946),
+`graph_accept_entity_merge` (8965-8999), `graph_accept_junk` (9006-9032),
+`graph_reject_entity_proposal` (9039-9083); `memory/graph_review.py`;
+`memory/review_decisions.py` (`recent_decisions` 53-68,
+`confirm_human_pair` 598-611, `confirm_human_proposal` 614-626);
+`relation_quality.py`; `storage/postgres.py` (the proposal, decision and
+dismissal statements). No action calls a model: the judges, the three-judge
+tiebreak and the filers run from the background sweep and are task O2.
+
+| # | Exact item | Source |
+|---|---|---|
+| RV1 | Bound arguments: `memory_graph_review(action="list", proposal_id=None, proposal_ids=None, proposals=None, scope=None, src=None, dst=None, relation=None, store=None)`. Every action runs under the service lock (the writer lock); the mutating ones run detached from the request. | `mcp_server.py:2309-2356` |
+| RV2 | `list`: under the lock, the graph, the source map, the pending link and entity proposals, the proposal states, the dismissed pairs, the lesson-linked entity ids and the current-fact counts. A pending merge row is presented in the direction an accept will apply: swapped when its stored from-side carries strictly more evidence (degree plus current facts, over the whole graph). | `service.py:7812-7845,8787-8799` |
+| RV3 | A truthy `scope` other than "all" keeps the entities with that source and the edges between them; queued proposals always list. | `service.py:7846-7849` |
+| RV4 | The findings, in order: `duplicate` (token-Jaccard ≥ 0.6 over tokens longer than two characters or holding a digit, lesson-only nodes left out, dismissed pairs and name-shape vetoes skipped, a file and its own stem offered as `relate`/`implements`, score to 3 places, sorted by score descending, stably), `test_artifact`, `dubious_edge` (agent-origin edges at confidence ≤ 0.6, a 0.0 counting as 1.0), `orphan` (degree ≤ 1), `unattributed`, `proposed_link` (tagged AMBIGUOUS), `merge_candidate` (grouped on shared nodes, with the judge, second and third votes parsed from their columns and note tails), `junk_candidate`. | `graph_review.py:160-554` |
+| RV5 | Each finding carries `automation {state, reason}`: queued kinds `pending`; a duplicate `pending`/`terminal` from its proposal's status, else `gated` when `memory.deep_dream.judges_enabled` or `analyzer_file_duplicates` is off, else `unfiled`; anything else `manual`. The answer adds the state counts, `recent_merges` (20), `merge_decision_stats` and the 20 most recent automatic decisions (their non-sensitive fields). | `service.py:7850-7895`; `review_decisions.py:53-68` |
+| RV6 | `propose`: an empty or missing list answers `proposals_required`. Each proposal: names as `str()` (so `None` is "None"), an unregistered relation (or `prefers`/`avoids`) as `related-to`; skipped on an empty side, equal normalized names or a hard type violation; both entities resolved or minted first; confidence 0.70 (0.45 for `related-to`, ×0.25 on a violation); inserted with source "deep-dream", a conflict skipped. `{proposed, skipped}`. | `service.py:8809-8854`; `relation_quality.py:86-108` |
+| RV7 | `relate`: `src`, `relation` and `dst` required (`src_relation_dst_required`); `memory_graph_relate`'s body with origin "agent" (its refusals pass through), then the pair dismissed as `dismiss_pair` does: the relate answer plus `pair_dismissed`. | `mcp_server.py:2363-2376` |
+| RV8 | `dismiss_pair`: `src` and `dst` required (`src_dst_required`); normalized names, empty or equal answering `bad_pair`; each mapped to a stored canonical by canonical or display (not aliases); in one transaction the automatic-decision index rewritten (always, created on first use) and the sorted pair stored once. `{dismissed, new, a, b}`. | `service.py:7897-7942`; `review_decisions.py:598-611` |
+| RV9 | The id actions take `proposal_ids` first (a list or a JSON list in a string; a non-empty one answers `{action, settled, results}`, `settled` counting truthy `accepted`/`rejected`), else `proposal_id` (`proposal_id_required`), each with `decided_by` "agent"; `note` is added for `bad_pair`, `bad_store`, `not_pending`, `stale_review`, `nothing_retired` and `slot_live`. | `mcp_server.py:2290-2306,2400-2431,683-751` |
+| RV10 | `accept_link`: a pending link proposal (else `not_pending`); the edge upserted at `max(confidence, 0.7)` with origin "action", then (a second commit) the proposal marked accepted under `FOR UPDATE` and the pending guard, an analyzer row also dismissing its pair. | `service.py:8867-8922`; `storage/postgres.py:3603-3630` |
+| RV11 | `reject_link`: the automatic decision on it retired, then the proposal marked rejected; `{rejected, id}` (a stale id: false, no reason). | `service.py:8930-8946`; `review_decisions.py:614-626` |
+| RV12 | `accept_merge`: a pending merge proposal (else `not_pending`), folded in the RV2 direction: the merge audit (with the votes), then `merge_entity`, then the status, three commits, the audit written even when the fold finds its ends gone. `{accepted, from, into}`. | `service.py:8965-8999` |
+| RV13 | `accept_junk`: a pending junk proposal; the audit (`junk: <reason>`), then `delete_entity`, then the status. `{accepted, entity}`. | `service.py:9006-9032` |
+| RV14 | `reject_entity`: the automatic decision retired first, then in one transaction the status, the audit and the dismissal (a merge's pair as stored; a junk node as `junk:<canonical>` twice). `{rejected, id}`; a stale id answers `not_pending`. | `service.py:9039-9083` |
+| RV15 | `dismiss_slot_pair` and `restore_slot` answer the `not_implemented` refusal (task O1c). | — |
+
+`harness/w2e.py live --only review-list review-list-gated
+review-list-no-analyzer review-actions` compares every answer and the full
+bank after each call, on a template the Python daemon's own tools wrote
+(the graph, a hand dismissal, an outcome's lesson nodes, proposed links
+through `propose`) plus what only the dream and its judges write, as SQL
+seeds: source attribution, merge and junk proposals with first, second and
+third votes, a decided merge, earlier audit rows, an automatic decision in
+the index. `review-list` reaches every finding type and automation state
+(pending, terminal, unfiled, manual, and a relate-form duplicate), scopes,
+and a list after writes and a proposal filed behind the daemons' backs; the
+two `-gated` scenarios turn each switch off. `review-actions` runs every
+action, the batch form (a JSON-string list, duplicates and stale ids) and
+each refusal, with active automatic decisions in the index and its row
+deleted. The `mcp-review-dup-threshold`, `-no-merge-veto`, `-no-fold-swap`,
+`-terminal-as-pending`, `-accept-no-fold`, `-accept-no-floor`,
+`-dismiss-aliases`, `-reject-no-dismiss`, `-propose-keep-violations` and
+`-pair-index-noop` mutants must be caught.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

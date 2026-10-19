@@ -39,7 +39,6 @@ tool's answers by value.
 | `document_search` | W2-D | No reference-pool search service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
-| `memory_graph_review` | W3-H | No graph review/proposal service. |
 | `memory_consolidate` | W3-H | No consolidation service. |
 
 The integration batch retains W2-G's refusal stubs for every tool except
@@ -52,7 +51,8 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_world_search`, `memory_lesson_search`, `memory_supersede`,
 `memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
 `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
-`memory_relation_define`, `memory_graph`, `memory_recall`, `memory_agents` and `memory_message`. The two board tools
+`memory_relation_define`, `memory_graph`, `memory_recall`,
+`memory_graph_review` (all but two actions, below), `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -331,7 +331,7 @@ this increment does not claim the complete write boundary or cutover readiness.
 | A lesson read racing a forget | waits on the service lock and the refresh barrier | reads its snapshot without the lock: between the cascade's commit and the mirror it can still serve a lesson retiring | the read slices' lock-free snapshots (as for the cortex) |
 | A malformed `meta.session_digest_cursor` (a `ts` that is not a number or numeric string, a `retry` that is not an object, a non-iterable or non-string `regenerate`) | `float()` / `dict()` / `sorted()` raise their own `TypeError` / `ValueError` text | the same refusal kind (`invalid_argument`) with Rust's own wording | corrupt persisted data only; the dream writes the cursor |
 | `memory.delete_confirm_threshold` of the wrong type | `int(value or 0)` per call (a float truncates) | refused at config load, like every other typed key | the existing config-type substitution |
-| The restore path (`memory_graph_review(action="restore_slot")`) and file mode | served | not reachable: the review tool is W3-H, the daemon PostgreSQL-only | W3-H |
+| The restore path (`memory_graph_review(action="restore_slot")`) and file mode | served | not reachable: `restore_slot` is task O1c, the daemon PostgreSQL-only | W3-H |
 
 ### memory_consolidation_candidates (2026-10-19)
 
@@ -368,6 +368,18 @@ this increment does not claim the complete write boundary or cutover readiness.
 | The order of seed-search and re-query hits | `CMS.retrieve`'s ranking | `search::rank` | the search rows above: equal scores under `torch.topk` are free, and embeddings agree within the measured tolerance, so near-equal hits can swap and with them `texts` and the mention counts behind the re-query order |
 | The order of the inverse-derived edges that mirror asserted edges, in `edges` | the graph read's hash order (the memory_graph row above) | the read model's order | inherited from `memory_graph`; recall's edges carry no provenance, so when the 15-edge cap binds, which of them survive can differ too. The harness's recall templates hold no asserted inverse pair |
 | `GET /api/recall` (the uncapped walk) | served | not served | the Console REST rows (PARITY.md) |
+
+### memory_graph_review: list and the decision actions (2026-10-19)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `dismiss_slot_pair` and `restore_slot` | served | the `not_implemented` refusal | task O1c |
+| A batch (`proposal_ids`) | takes the service lock per call | holds the writer lock for the whole batch | no state differs; nothing else runs between the calls on either side |
+| A `proposals` entry whose `rationale` is a list or object | stored as its text form | refused (`invalid_argument`) | the binder's `list[dict]` admits it; no producer sends one |
+| A corrupt automatic-decision index (`next_seq` not an integer, `cursors`/`active` not mappings) | `int()` / `dict()` raise | read leniently in `list` | corrupt persisted data only; the judges write the index |
+| A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
+| The judges (merge two- and three-vote, link, junk, curation, candidates), their freshness and the sweep tick that runs them | served by the background sweep | not run | task O2, with the dream (task P), behind a stub extractor |
+| Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution |
 
 ## Coordination board completion (W2-F)
 
