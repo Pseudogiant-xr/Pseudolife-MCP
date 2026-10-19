@@ -27,8 +27,9 @@ const SESSION_END_BODY_LIMIT: usize = 16 * 1024;
 const PAIR_BODY_LIMIT: usize = 1024;
 const REFUSAL_DRAIN_DEADLINE: Duration = Duration::from_millis(250);
 /// Bytes a refusal discards after its answer before giving up on keeping the
-/// connection: the MCP body budget, the largest any route admits.
-const REFUSAL_DISCARD_BUDGET: usize = 4 * 1024 * 1024;
+/// connection: twice the MCP body budget, the largest any route admits, so a
+/// body just over any limit is always discarded and its connection kept.
+const REFUSAL_DISCARD_BUDGET: usize = 8 * 1024 * 1024;
 const TEXT_BODY_PATHS: [&str; 3] = ["/api/facts/set", "/api/consolidate", "/api/supersede"];
 const OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", "/api/daemon-notice"];
 /// `principal_store.FAILED_REDEMPTIONS_PER_MINUTE`, `REDEMPTION_SLOTS`.
@@ -776,8 +777,12 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
         .get_all("expect")
         .iter()
         .any(|value| value.as_bytes().eq_ignore_ascii_case(b"100-continue"));
+    let declared = h
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok());
     let mut body = RequestBody::new(body);
-    let response = dispatch(&app, &path, &method, &h, raw_query.as_deref(), &mut body).await;
+    let mut response = dispatch(&app, &path, &method, &h, raw_query.as_deref(), &mut body).await;
     // These hooks intentionally answer 200 without reading a rejected body.
     let bodyless_hook = response.status() == StatusCode::OK
         && matches!(
@@ -788,13 +793,7 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 | "/api/hook/subagent"
                 | "/api/hook/coordination-start"
         );
-    // Polling an Expect body would send 100 Continue after admission refused
-    // it, so that body is dropped unread: Hyper then skips the 100 and closes
-    // after the answer, through the listener's lingering close.
-    if (response.status().as_u16() >= 400 || bodyless_hook)
-        && !body.inner.is_end_stream()
-        && !expect_continue
-    {
+    if (response.status().as_u16() >= 400 || bodyless_hook) && !body.inner.is_end_stream() {
         // uvicorn answers at once and discards the rest of the body on the
         // kept connection. Discard at most REFUSAL_DISCARD_BUDGET more bytes
         // within REFUSAL_DRAIN_DEADLINE after the answer is selected; a body
@@ -803,6 +802,17 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
         // (`linger.rs`) reads what the client still sends, so the close is
         // never a reset that takes the answer with it.
         let cap = body.received.saturating_add(REFUSAL_DISCARD_BUDGET);
+        // Polling an Expect body would send 100 Continue after admission
+        // refused it, so that body is dropped unread (Hyper then skips the
+        // 100), as is one declared longer than the budget. Either connection
+        // will close, and the answer says so, so no client pools it.
+        let beyond = declared.is_some_and(|length| length > cap as u64);
+        if expect_continue || beyond {
+            response
+                .headers_mut()
+                .insert(header::CONNECTION, HeaderValue::from_static("close"));
+            return response;
+        }
         tokio::spawn(async move {
             let outcome = finish_unread_body(
                 &mut body,
@@ -970,22 +980,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_refusal_complete_drain_preserves_connection() {
-        for path in ["/mcp", "/mcp/"] {
-            let chunks = [
-                Ok::<_, std::io::Error>(vec![b' '; CONTROL_BODY_LIMIT]),
-                Ok(vec![b' '; 1]),
-            ];
-            let request = Request::builder()
+    async fn refusal_that_will_close_says_so() {
+        let pending =
+            || Body::from_stream(futures::stream::pending::<Result<Vec<u8>, std::io::Error>>());
+        // (declared length, Expect, closes): only a body the cleanup will not
+        // read to its end announces the close.
+        let just_over = (crate::mcp::BODY_LIMIT + 1).to_string();
+        let beyond = (REFUSAL_DISCARD_BUDGET + 1).to_string();
+        for (length, expect, closes) in [
+            (just_over.as_str(), false, false),
+            (beyond.as_str(), false, true),
+            (just_over.as_str(), true, true),
+        ] {
+            let mut request = Request::builder()
                 .method("POST")
-                .uri(path)
-                .body(Body::from_stream(futures::stream::iter(chunks)))
-                .unwrap();
-            let response = handle(State(mcp_refusal_app()), request).await;
+                .uri("/mcp")
+                .header("content-length", length);
+            if expect {
+                request = request.header("expect", "100-continue");
+            }
+            let response = tokio::time::timeout(
+                REFUSAL_DRAIN_DEADLINE / 5,
+                handle(State(mcp_refusal_app()), request.body(pending()).unwrap()),
+            )
+            .await
+            .unwrap();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-            assert!(
-                response.headers().get(header::CONNECTION).is_none(),
-                "{path}"
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::CONNECTION)
+                    .is_some_and(|v| v == "close"),
+                closes,
+                "{length} expect={expect}"
             );
         }
     }
@@ -1023,7 +1050,7 @@ mod tests {
         for expect in [false, true] {
             let polls = Arc::new(AtomicUsize::new(0));
             let count = polls.clone();
-            let chunks = futures::stream::iter([vec![b' '; crate::mcp::BODY_LIMIT], vec![b' '; 1]])
+            let chunks = futures::stream::iter([vec![b' '; REFUSAL_DISCARD_BUDGET], vec![b' '; 1]])
                 .map(move |chunk| {
                     count.fetch_add(1, Ordering::SeqCst);
                     Ok::<_, std::io::Error>(chunk)
@@ -1038,7 +1065,8 @@ mod tests {
             )
             .await;
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-            assert!(response.headers().get(header::CONNECTION).is_none());
+            // An unread Expect body closes the connection, and says so.
+            assert_eq!(response.headers().get(header::CONNECTION).is_some(), expect);
             // Cleanup runs after the answer: it takes the budget's one frame
             // and never polls past it; an Expect body is never polled.
             tokio::time::sleep(Duration::from_millis(50)).await;

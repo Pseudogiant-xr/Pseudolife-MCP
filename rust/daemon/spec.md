@@ -1174,13 +1174,14 @@ incomplete tool coverage and incorrect per-case or corpus totals before writing 
 ### MCP refusal cleanup (2026-10-13)
 
 MCP admission uses the SDK's 4 MiB body limit. Since 2026-10-20 every
-refusal is answered at once without a `Connection` header; the shared
-cleanup then discards at most 4 MiB more within 250 ms, keeping the
-connection when the body ends, and otherwise closes after the answer through
-the listener's lingering close (`src/linger.rs`), never with request bytes
-unread. An unread Expect body is never polled. `MCP-REFUSAL-CLEANUP` in
-`divergences.md` records the change and the Windows measurements; the strict
-live comparator now reports no differences (`mcp_ci.py`).
+refusal is answered at once; the shared cleanup then discards at most 8 MiB
+more within 250 ms, keeping the connection when the body ends, and otherwise
+closes after the answer through the listener's lingering close
+(`src/linger.rs`). An unread Expect body is never polled, and it and a
+declared length past the budget are answered with `Connection: close`.
+`MCP-REFUSAL-CLEANUP` in `divergences.md` records the change and the
+Windows measurements; the strict live comparator keeps two declared
+differences, `body_limit[4]` and `[5]` (`mcp_ci.py`).
 
 Initialization validates known client-capability object fields and the SDK's
 boolean spellings for `roots.listChanged`; unknown capability fields remain

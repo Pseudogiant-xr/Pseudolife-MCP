@@ -72,23 +72,25 @@ harness-gated store body, and W2-F supplies the REST board. Their presence
 does not register MCP tool bodies: their projections remain the
 prerequisites listed above. Bound identity is enforced on the mount (M18).
 
-**MCP-REFUSAL-CLEANUP** (closed 2026-10-20): every refusal, REST, hook or
-MCP, is answered at once with no `Connection` header, as uvicorn answers it.
-The rest of the body is then discarded, at most 4 MiB more within 250 ms;
-a body read to its end keeps the connection, as Python's does. Past that
-budget or deadline, after a failed read, or for an unread
-`Expect: 100-continue` body (never polled, so Hyper sends no interim 100),
-the connection closes after the answer through the listener's lingering
-close (`src/linger.rs`): FIN, then discard until the client closes, 250 ms
-pass with nothing arriving, or 2 s pass. Python keeps such a connection
-open and discards indefinitely; the remaining difference is that bounded
-lifetime, which no comparator observes. The previous close with request
-bytes unread made the stack send RST, and Windows clients discarded the
-answer they had already received: a read-after-send probe on Windows 11
-lost 34 of 2000 refusals idle and 117 of 2000 under 15 CPU burners, against
-0 of 3800 for Python and 0 of 5200 after this change. The strict MCP
-corpus's five `body_limit` differences (the added `Connection: close` on a
-413) are gone; `mcp_ci.py` now requires zero.
+**MCP-REFUSAL-CLEANUP** (narrowed 2026-10-20): every refusal, REST, hook
+or MCP, is answered at once, as uvicorn answers it. The rest of the body is
+then discarded, at most 8 MiB more (twice the largest admitted body) within
+250 ms; a body read to its end keeps the connection, as Python's does. An
+unread `Expect: 100-continue` body (never polled, so Hyper sends no interim
+100) or a declared `Content-Length` past that budget is not read, and that
+answer carries `Connection: close`, so no client pools a connection about to
+close; Python keeps both open and discards without a limit. A connection
+that closes (those two, a budget or deadline cut, a failed read) goes
+through the listener's lingering close (`src/linger.rs`): FIN after the
+answer, then discard until the client closes, 250 ms pass with nothing
+arriving, or 2 s pass. Before this the daemon closed with request bytes
+unread, its stack sent RST, and Windows clients discarded the answer they
+had already received: a read-after-send probe on Windows 11 lost 34 of 2000
+refusals idle and 117 of 2000 under 15 CPU burners, against 0 of 3800 for
+Python. The strict MCP corpus keeps two `body_limit` differences (indices 4
+and 5, GETs declaring 9999999 bytes: the added `Connection: close` on the
+413); `mcp_ci.py` declares exactly those. Indices 0, 2 and 3, which used to
+differ the same way, now match.
 
 **MCP-TOKENLESS-GUARD:** the Host/Origin helper exists inside the transport,
 but the production tokenless mount still returns 501 before reaching it.
@@ -174,7 +176,7 @@ binding"). What it cannot or does not reproduce:
 |---|---|---|
 | Noncanonical static drive-relative requests and lexical escapes through linked roots | captured oracle observations | `lexical-outside-root`: 403 before filesystem access, exact refusal headers/body; shipped Console asset paths are unchanged |
 | Windows nonempty dot/space-only segments except `.` and `..`, including `. ` and all-space segments | captured path-dependent refusal/fallback observations | `parent-space-refusal`: exact 403 before filesystem access; outside the shipped asset URLs |
-| HTTP-BODY-LIMITS: cap enforced at frame granularity | uvicorn sends the selected early response immediately, keeps the connection alive when permitted and discards unread body data after the response | Rust also answers at once with no `Connection` header and discards afterwards, but for at most 4 MiB more within 250 ms (early Expect refusals skip polling); a body read to its end keeps the connection, otherwise it closes after the answer through the lingering close (MCP-REFUSAL-CLEANUP above). Polling stops at the discard budget or a failed read, with one in-flight frame and Hyper's final drop poll able to overshoot; a slow body can outlast the deliberate deadline |
+| HTTP-BODY-LIMITS: cap enforced at frame granularity | uvicorn sends the selected early response immediately, keeps the connection alive when permitted and discards unread body data after the response | Rust also answers at once and discards afterwards, but for at most 8 MiB more within 250 ms; a body read to its end keeps the connection, otherwise it closes after the answer through the lingering close, and an unread Expect body or a declared length past the budget is announced with `Connection: close` (MCP-REFUSAL-CLEANUP above). Polling stops at the discard budget or a failed read, with one in-flight frame and Hyper's final drop poll able to overshoot; a slow body can outlast the deliberate deadline |
 | Malformed or non-object SessionEnd bodies | becomes an empty object and returns 200 `{ok:true}` with no writes | deliberately returns 400 `invalid_json`: never acknowledge a close that did not happen; non-object SessionEnd bodies also use `invalid_json`, while other REST routes use `body_must_be_object`; empty bodies and valid objects retain their handling. The four HTTP-BODY-LIMITS scenarios now contain 132 live/golden cases, including 16 invalid SessionEnd probes. |
 | Noncanonical JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels); a truthy SessionEnd ID may enter its mutation handler | REST and SessionEnd return 400 `invalid_json`, preserving the native strict JSON domain; the HTTP-BODY-LIMITS corpus includes fixed/chunked `{"session_id": NaN}` probes whose Python replies are 200 `{ok:true}` with unchanged disposable bank state; outside shipped canonical SessionEnd producers |
 | Static types for extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` for unknown extensions; the shipped vendor Markdown notice uses its platform type |
