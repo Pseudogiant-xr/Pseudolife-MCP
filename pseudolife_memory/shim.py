@@ -1306,17 +1306,19 @@ def _transient_board_failure(exc: BaseException) -> bool:
 # validate_snapshot refuses a stale snapshot before its request.
 _BOARD_CHECK_RETRY_DELAYS = (0.5,)
 _BOARD_CHECK_FAILED_MESSAGE = (
-    "The memory daemon could not confirm this session's board identity ({cause}), "
-    "so this board call did not run. This is a passing failure, not a lost "
-    "identity, and memory tools still work: retry this call in a few seconds. If "
-    "it keeps failing, check the daemon with `pseudolife-mcp doctor`.")
+    "This session's board identity could not be checked with the memory daemon "
+    "({cause}), so this board call did not run. A failed check does not by itself "
+    "mean the identity is lost: retry this call in a few seconds. If it keeps "
+    "failing, check the daemon with `pseudolife-mcp doctor`.")
 
 
 def _board_check_cause(exc: BaseException) -> str:
+    # A proxy in front of the daemon can be the one answering, so the
+    # status is the check's, not necessarily the daemon's.
     status = getattr(exc, "status", None)
     if status is not None:
-        return f"it answered the check with HTTP {status}"
-    return "it did not answer the check"
+        return f"the check was answered with HTTP {status}"
+    return "the check got no answer"
 
 
 async def _validate_board_identity(adapter, snapshot) -> None:
@@ -1806,21 +1808,26 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
 
     async def _call_tool(ctx, params):
         _remember_session(ctx)
+        # One total deadline (PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS) covers
+        # the call and any resend below.
+        deadline = anyio.current_time() + _operation_timeout_seconds()
         try:
-            return await _forward_call(ctx, params)
+            return await _forward_call(ctx, params, deadline)
         except MCPError as error:
             # Every call retries the daemon; one that could not reach it says
             # so instead of the generic connection advice, and starts the
             # background watch that re-lists tools when it answers.
             if not _never_reached_daemon(error):
                 raise
-            if link["up"]:
+            if (link["up"] and anyio.current_time() + _UNREACHED_RETRY_SECONDS
+                    < deadline):
                 # Nothing ran, and the daemon answered the call before: one
                 # failed connection is sent once more before the call is
-                # refused. A daemon already known to be down is not.
+                # refused, inside the same deadline. A daemon already known
+                # to be down is not.
                 await asyncio.sleep(_UNREACHED_RETRY_SECONDS)
                 try:
-                    return await _forward_call(ctx, params)
+                    return await _forward_call(ctx, params, deadline)
                 except MCPError as retry_error:
                     if not _never_reached_daemon(retry_error):
                         raise
@@ -1828,13 +1835,13 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             _daemon_lost()
             raise MCPError(error.code, _DAEMON_UNREACHABLE_MESSAGE, error.data) from None
 
-    async def _forward_call(ctx, params):
+    async def _forward_call(ctx, params, deadline):
         call_headers = {}
         call_hint = coordination_hint
         noted_thread = None
         attempt = _UpstreamAttempt(phase="initialize")
         try:
-            with anyio.fail_after(_operation_timeout_seconds()):
+            with anyio.fail_after(max(0.0, deadline - anyio.current_time())):
                 from pseudolife_memory.repository_claims import FileClaimError, prepare_claim_arguments
                 # Refuse first: a shared process serves remote conversations,
                 # and preparing a claim runs git and reads host paths.

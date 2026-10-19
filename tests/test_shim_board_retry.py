@@ -738,7 +738,7 @@ def test_a_board_call_rides_out_one_failed_identity_check(monkeypatch, blip):
 
 
 @pytest.mark.parametrize("blip,cause", [
-    ("dropped", "did not answer"),
+    ("dropped", "got no answer"),
     ("cold", "HTTP 500"),
 ])
 def test_an_identity_check_that_keeps_failing_names_its_real_cause(monkeypatch, blip, cause):
@@ -783,28 +783,34 @@ def test_an_ordinary_memory_call_does_not_wait_for_the_identity_check(monkeypatc
     assert "X-PL-Agent" not in call["headers"]
 
 
-def test_a_pending_registration_refusal_is_not_retried_as_a_blip():
+def test_a_pending_registration_refusal_is_not_retried_as_a_blip(monkeypatch):
     """The near miss for a session that legitimately has no identity yet:
-    a late registration still pending refuses with its own message, which
-    the identity-check retry must neither repeat nor replace."""
-    import asyncio as aio
+    while a late registration is pending, a board write is refused at once
+    with its own message, which the identity-check retry neither waits
+    for, repeats nor replaces."""
+    monkeypatch.setattr(shim, "_BOARD_CHECK_RETRY_DELAYS", (5.0,), raising=False)
+    daemon = Daemon("refused")
+    seen = {}
 
-    async def drive():
-        late = shim._LateBoardAdapter(lambda: None, None)
-        with pytest.raises(shim._CoordinationUnavailableError) as caught:
-            await late.validate_snapshot(object())
-        return caught.value
+    async def driver(handler, calls, inbox):
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with pytest.raises(Exception) as caught:
+            await handler(None, _update())
+        seen["elapsed"] = loop.time() - started
+        seen["refusal"] = caught.value
 
-    refusal = aio.run(drive())
-    assert not shim._transient_board_failure(refusal)
-    assert refusal.message == shim._BOARD_PENDING_REFUSAL
+    _board_session(monkeypatch, daemon, driver=driver)
+    assert seen["refusal"].message == shim._BOARD_PENDING_REFUSAL
+    assert seen["elapsed"] < 2.0
 
 
-def _proxy_with_connections(monkeypatch, refuse, driver):
+def _proxy_with_connections(monkeypatch, refuse, driver, fail_call=None):
     """Run :func:`shim._proxy` with no board, its upstream faked; ``refuse(n)``
     says whether the n-th upstream connection (1 is the startup instructions
     fetch) fails before reaching the daemon. ``driver(handler)`` plays the
-    client. Returns how many connections were opened."""
+    client; ``fail_call(n)`` makes the tool call on the n-th connection fail
+    after it was sent. Returns how many connections were opened."""
     from mcp import types
     from mcp.client import session, streamable_http
     from mcp.server import Server, stdio
@@ -828,6 +834,8 @@ def _proxy_with_connections(monkeypatch, refuse, driver):
         async def __aexit__(self, *args): pass
         async def initialize(self): return SimpleNamespace(instructions="fixture")
         async def call_tool(self, name, arguments):
+            if fail_call is not None and fail_call(len(opened)):
+                raise httpx.ReadError("connection reset by peer")
             return types.CallToolResult(content=[], is_error=False)
 
     async def serve(server, *args, **kwargs):
@@ -878,3 +886,42 @@ def test_a_daemon_that_stays_unreachable_is_reported_after_one_resend(monkeypatc
     for refusal in seen.values():
         assert refusal.message == shim._DAEMON_UNREACHABLE_MESSAGE
         assert refusal.data["operation_outcome"] == "not_dispatched"
+
+
+def test_a_call_that_failed_after_it_was_sent_is_never_resent(monkeypatch):
+    """The near miss for the resend: a connection that drops after the call
+    went out may have run the tool, so the call is reported with an unknown
+    outcome and is not sent again."""
+    seen = {}
+
+    async def driver(handler):
+        with pytest.raises(Exception) as caught:
+            await handler(None, _update())
+        seen["refusal"] = caught.value
+
+    opened = _proxy_with_connections(
+        monkeypatch, lambda n: False, driver, fail_call=lambda n: n == 2)
+    assert opened == 2  # instructions, then the one call: no resend
+    assert seen["refusal"].data["operation_outcome"] == "unknown"
+
+
+def test_the_resend_stays_inside_the_operation_deadline(monkeypatch):
+    """Codex review 2026-10-19: the resend began a fresh timeout, so a call
+    could outlast ``PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS``. With no room
+    left for the pause, the call is refused at once instead."""
+    seen = {}
+
+    async def driver(handler):
+        monkeypatch.setattr(shim, "_UNREACHED_RETRY_SECONDS", 5.0)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with pytest.raises(Exception) as caught:
+            await handler(None, _update())
+        seen["elapsed"] = loop.time() - started
+        seen["refusal"] = caught.value
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "1")
+    opened = _proxy_with_connections(monkeypatch, lambda n: n == 2, driver)
+    assert opened == 2  # instructions, the failed connection: no resend
+    assert seen["elapsed"] < 1.0
+    assert seen["refusal"].message == shim._DAEMON_UNREACHABLE_MESSAGE
