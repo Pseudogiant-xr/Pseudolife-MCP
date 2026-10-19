@@ -69,6 +69,10 @@ pub struct MemoryConfig {
     /// (`memory.lessons.top_k` is never read over MCP: the binder always
     /// passes a width.)
     pub lessons_min_confidence: f64,
+    /// `memory.lessons.infer_outcomes` (on) and `infer_outcomes_max_signals`
+    /// (3): whether `dream_status` counts sessions awaiting outcome inference.
+    pub lessons_infer_outcomes: bool,
+    pub lessons_infer_outcomes_max_signals: i64,
     /// `memory.delete_confirm_threshold` (20): a memory-scope forget matching
     /// more entries is refused unless confirmed; zero or less disables it.
     pub delete_confirm_threshold: i64,
@@ -82,12 +86,27 @@ pub struct MemoryConfig {
     pub deep_dream: DeepDreamConfig,
 }
 
-/// `DeepDreamConfig` (`utils/config.py:513-712`), the switches
-/// `graph_review`'s automation accounting reads (`service.py:7880-7884`).
+/// `DeepDreamConfig` (`utils/config.py:513-712`): the switches
+/// `graph_review`'s automation accounting reads (`service.py:7880-7884`),
+/// and the need signal, judge modes and gates `dream_status` reports
+/// (`service_dream.py:3677-3819`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeepDreamConfig {
     pub judges_enabled: bool,
     pub analyzer_file_duplicates: bool,
+    pub auto_min_new_entities: i64,
+    pub auto_interval_days: f64,
+    pub review_queue_alert_pending: i64,
+    pub review_queue_alert_age_days: f64,
+    pub review_queue_alert_min_pending: i64,
+    pub judge_mode: String,
+    pub link_judge_mode: String,
+    pub junk_judge_mode: String,
+    pub curation_judge_mode: String,
+    pub candidate_judge_mode: String,
+    pub judge_accept_min_confidence: f64,
+    pub judge_reject_min_confidence_2: f64,
+    pub link_two_vote_min_confidence: f64,
 }
 
 impl Default for DeepDreamConfig {
@@ -95,6 +114,19 @@ impl Default for DeepDreamConfig {
         Self {
             judges_enabled: true,
             analyzer_file_duplicates: true,
+            auto_min_new_entities: 150,
+            auto_interval_days: 7.0,
+            review_queue_alert_pending: 500,
+            review_queue_alert_age_days: 14.0,
+            review_queue_alert_min_pending: 100,
+            judge_mode: "shadow".into(),
+            link_judge_mode: "shadow".into(),
+            junk_judge_mode: "shadow".into(),
+            curation_judge_mode: "shadow".into(),
+            candidate_judge_mode: "off".into(),
+            judge_accept_min_confidence: 0.6,
+            judge_reject_min_confidence_2: 0.7,
+            link_two_vote_min_confidence: 0.7,
         }
     }
 }
@@ -307,6 +339,25 @@ pub struct DreamConfig {
     pub sweep_interval_ok: bool,
     pub sweep_interval_seconds: f64,
     pub runs_keep: i64,
+    pub extractor_api_key: Option<String>,
+    /// `extractor_reasoning_effort`: sent as `reasoning_effort` to the
+    /// primary only (`memory/dream.py:2192-2204`).
+    pub extractor_reasoning_effort: Option<String>,
+    pub extractor_max_tokens: i64,
+    /// `extractor_cache_prompt` (`bool | None`, default false): `None`
+    /// leaves the field out of the request body (`memory/dream.py:2181-2189`).
+    pub extractor_cache_prompt: Option<bool>,
+    pub extractor_timeout_seconds: f64,
+    pub fallback_api_key: Option<String>,
+    pub extractor_mode: String,
+    /// `None` (default) consolidates every source not in `exclude_sources`.
+    pub eligible_sources: Option<Vec<String>>,
+    pub exclude_sources: Vec<String>,
+    pub min_batch: i64,
+    pub idle_seconds: f64,
+    pub max_batch: i64,
+    pub digest_enabled: bool,
+    pub digest_max_per_cycle: i64,
 }
 
 impl Config {
@@ -528,6 +579,8 @@ impl Default for MemoryConfig {
             retrieval_retention_days: 365.0,
             lessons_enabled: true,
             lessons_min_confidence: 0.0,
+            lessons_infer_outcomes: true,
+            lessons_infer_outcomes_max_signals: 3,
             delete_confirm_threshold: 20,
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
@@ -606,6 +659,22 @@ impl Default for DreamConfig {
             sweep_interval_ok: true,
             sweep_interval_seconds: 600.0,
             runs_keep: 50,
+            extractor_api_key: None,
+            extractor_reasoning_effort: None,
+            extractor_max_tokens: 2048,
+            extractor_cache_prompt: Some(false),
+            extractor_timeout_seconds: 240.0,
+            fallback_api_key: None,
+            extractor_mode: "auto".to_string(),
+            eligible_sources: None,
+            exclude_sources: ["consolidation", "reflection", "status", "log", "digest"]
+                .map(String::from)
+                .to_vec(),
+            min_batch: 8,
+            idle_seconds: 600.0,
+            max_batch: 40,
+            digest_enabled: false,
+            digest_max_per_cycle: 4,
         }
     }
 }
@@ -1455,6 +1524,9 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         if let Some(l) = section(m, "lessons", "memory.")? {
             memory.lessons_enabled = want_bool(l, "enabled", "memory.lessons", true)?;
             memory.lessons_min_confidence = want_float(l, "min_confidence", "memory.lessons", 0.0)?;
+            memory.lessons_infer_outcomes = want_bool(l, "infer_outcomes", "memory.lessons", true)?;
+            memory.lessons_infer_outcomes_max_signals =
+                want_int(l, "infer_outcomes_max_signals", "memory.lessons", 3)?;
         }
         if let Some(r) = section(m, "compaction", "memory.")? {
             memory.compaction_enabled = want_bool(r, "enabled", "memory.compaction", true)?;
@@ -1505,6 +1577,59 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                     "analyzer_file_duplicates",
                     p,
                     d.analyzer_file_duplicates,
+                )?,
+                auto_min_new_entities: want_int(
+                    r,
+                    "auto_min_new_entities",
+                    p,
+                    d.auto_min_new_entities,
+                )?,
+                auto_interval_days: want_float(r, "auto_interval_days", p, d.auto_interval_days)?,
+                review_queue_alert_pending: want_int(
+                    r,
+                    "review_queue_alert_pending",
+                    p,
+                    d.review_queue_alert_pending,
+                )?,
+                review_queue_alert_age_days: want_float(
+                    r,
+                    "review_queue_alert_age_days",
+                    p,
+                    d.review_queue_alert_age_days,
+                )?,
+                review_queue_alert_min_pending: want_int(
+                    r,
+                    "review_queue_alert_min_pending",
+                    p,
+                    d.review_queue_alert_min_pending,
+                )?,
+                judge_mode: want_str(r, "judge_mode", p, &d.judge_mode)?,
+                link_judge_mode: want_str(r, "link_judge_mode", p, &d.link_judge_mode)?,
+                junk_judge_mode: want_str(r, "junk_judge_mode", p, &d.junk_judge_mode)?,
+                curation_judge_mode: want_str(r, "curation_judge_mode", p, &d.curation_judge_mode)?,
+                candidate_judge_mode: want_str(
+                    r,
+                    "candidate_judge_mode",
+                    p,
+                    &d.candidate_judge_mode,
+                )?,
+                judge_accept_min_confidence: want_float(
+                    r,
+                    "judge_accept_min_confidence",
+                    p,
+                    d.judge_accept_min_confidence,
+                )?,
+                judge_reject_min_confidence_2: want_float(
+                    r,
+                    "judge_reject_min_confidence_2",
+                    p,
+                    d.judge_reject_min_confidence_2,
+                )?,
+                link_two_vote_min_confidence: want_float(
+                    r,
+                    "link_two_vote_min_confidence",
+                    p,
+                    d.link_two_vote_min_confidence,
                 )?,
             };
         }
@@ -1782,6 +1907,42 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
             Some(value) => node_f64(value).unwrap_or(f64::NAN),
         },
         runs_keep: want_int(d, "runs_keep", p, def.runs_keep)?,
+        extractor_api_key: want_opt_str(d, "extractor_api_key", p)?,
+        extractor_reasoning_effort: want_opt_str(d, "extractor_reasoning_effort", p)?,
+        extractor_max_tokens: want_int(d, "extractor_max_tokens", p, def.extractor_max_tokens)?,
+        extractor_cache_prompt: match lookup(d, "extractor_cache_prompt") {
+            None => def.extractor_cache_prompt,
+            Some(Node::Null) => None,
+            Some(Node::Bool(b)) => Some(*b),
+            Some(other) => {
+                return Err(wrong_type(
+                    &format!("{p}.extractor_cache_prompt"),
+                    "a boolean or null",
+                    other,
+                ));
+            }
+        },
+        extractor_timeout_seconds: want_float(
+            d,
+            "extractor_timeout_seconds",
+            p,
+            def.extractor_timeout_seconds,
+        )?,
+        fallback_api_key: want_opt_str(d, "fallback_api_key", p)?,
+        extractor_mode: want_str(d, "extractor_mode", p, &def.extractor_mode)?,
+        eligible_sources: match lookup(d, "eligible_sources") {
+            None | Some(Node::Null) => None,
+            Some(node) => Some(want_str_list(node, &format!("{p}.eligible_sources"))?),
+        },
+        exclude_sources: match lookup(d, "exclude_sources") {
+            None => def.exclude_sources.clone(),
+            Some(node) => want_str_list(node, &format!("{p}.exclude_sources"))?,
+        },
+        min_batch: want_int(d, "min_batch", p, def.min_batch)?,
+        idle_seconds: want_float(d, "idle_seconds", p, def.idle_seconds)?,
+        max_batch: want_int(d, "max_batch", p, def.max_batch)?,
+        digest_enabled: want_bool(d, "digest_enabled", p, def.digest_enabled)?,
+        digest_max_per_cycle: want_int(d, "digest_max_per_cycle", p, def.digest_max_per_cycle)?,
     };
     // DreamConfig.__post_init__ (utils/config.py:503-509).
     if let Some(hours) = lookup(d, "stall_repeat_hours") {
@@ -1795,6 +1956,20 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         }
     }
     Ok(dream)
+}
+
+/// A list of strings (`list[str]` dataclass fields); anything else refuses.
+fn want_str_list(node: &Node, path: &str) -> Result<Vec<String>, ConfigError> {
+    match node {
+        Node::Seq(items) => items
+            .iter()
+            .map(|item| match item {
+                Node::Str(s) => Ok(s.clone()),
+                other => Err(wrong_type(path, "a list of strings", other)),
+            })
+            .collect(),
+        other => Err(wrong_type(path, "a list of strings", other)),
+    }
 }
 
 /// A principal list: a YAML list of strings, each non-blank after Python's

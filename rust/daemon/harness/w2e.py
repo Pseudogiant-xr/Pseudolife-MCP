@@ -73,6 +73,14 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``ended_at`` keep only null-or-not, a generic session title keeps its
   shape, and a record's ``age`` may differ by one step ("just now" /
   "1 minute ago"), since the two daemons answer seconds apart;
+* the dream's display clocks: in a ``memory_dream`` answer, a
+  ``timestamp``, ``cursor`` or ``dream_cursor`` equal to an entry's ``ts``
+  on the same side becomes ``<ts:ENTRY_ID>`` (and so does a
+  ``cortex_dream_cursor`` meta value), so an entry stored seconds apart on
+  each side compares by identity; a ``commit_token`` compares as its
+  decoded payload (backend, generation, entry ids, timestamp token) without
+  its signature, which covers the wall-clock timestamp; ``idle_seconds``
+  keeps only null-or-not;
 * rows are compared as sorted sets (row order is the primary key's order,
   which renamed ids change), except that entry ids themselves must match.
 
@@ -96,6 +104,20 @@ run on both banks between two calls (its result is not compared, only what
 the next call makes of it), for a row changed behind the daemons' backs.
 Only the scenarios in ``EXTERNAL_WRITES`` may use it.
 
+A scenario may carry ``"extractor": {...}``, the spec of a stub
+OpenAI-style chat-completions endpoint (``stub_extractor.py``: health,
+models and chat routes, replies looked up by the SHA-256 of the exact
+request body or by prompt kind and user message), plus optional
+``"extractor_fallback": true``. Each side's daemon (and the seeding daemon)
+gets its own stub through ``PSEUDOLIFE_DREAM_BASE_URL`` and
+``PSEUDOLIFE_DREAM_MODEL`` (and the ``_FALLBACK_`` pair). After every
+operation the harness drains both stubs, reports any request no table entry
+answered, and compares the two request sequences element by element on
+method, path and body bytes; each side's stub origin in its responses
+becomes ``http://stub``. The claim: given identical model replies, both
+daemons send byte-identical requests and write identical banks; it claims
+nothing about model behaviour.
+
 Exit status: 0 only when no response and no bank state differs.
 Environment: ``ORT_DYLIB_PATH`` and ``PSEUDOLIFE_DAEMON_ONNX_DIR`` for the
 Rust daemon; the test login (``pgdisposable``) for the banks.
@@ -103,6 +125,7 @@ Rust daemon; the test login (``pgdisposable``) for the banks.
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import math
@@ -120,6 +143,7 @@ import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
 import run as w1a  # noqa: E402
+from stub_extractor import StubExtractor  # noqa: E402
 
 pg.DISPOSABLE_NAME = re.compile(r"pl_cf_w2e_[a-z0-9_]{1,40}")
 GOLDENS = HERE / "goldens" / "w2e"
@@ -243,7 +267,11 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-review-analyzer-no-dismiss", "mcp-review-relate-state-miss",
            # memory_graph_review's slot actions: caught by review-slots.
            "mcp-review-slot-meta-noop", "mcp-review-slot-restore-oldest",
-           "mcp-review-slot-restore-over-live", "mcp-review-slot-no-decision"]
+           "mcp-review-slot-restore-over-live", "mcp-review-slot-no-decision",
+           # memory_dream status/pull/commit and the stub extractor: caught by
+           # dream-basics.
+           "mcp-dream-store-not-pending", "mcp-dream-commit-resident-stale",
+           "mcp-dream-pull-newest-first", "mcp-dream-status-no-probe"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -2672,6 +2700,72 @@ SCENARIOS.update({
 })
 
 
+# memory_dream status/pull/commit/runs (P1-A) against the stub extractor.
+# The seed is one canonical fact (an entity, so the deep-dream need block has
+# something to report) and no entry: the first status and pull see an empty
+# backlog. Entries are then stored through each daemon's own write path, so
+# the pull proves a newly stored resident is pullable; one is a ``log``
+# entry (an excluded source) and one carries a session (its episode id
+# rides the pull). The extractor model is the ``extractor`` alias with a
+# fallback configured, so status resolves the served model (GET /v1/models,
+# cached five minutes) and probes the primary (GET /health) each call: the
+# stub compares those request sequences. No call reaches the model, so the
+# reply table is empty: any POST would be an unanswered-request diff.
+def dream(action, **kw) -> dict:
+    return tool("memory_dream", action=action, **kw)
+
+
+# A tool argument naming the last commit_token this side answered.
+PULL_TOKEN = "@pull_token"
+
+
+DREAM_NOTES = [
+    "The deploy target moved from staging to prod-eu this week.",
+    "Bob prefers green tea over coffee in the mornings.",
+    "The release runbook requires a signed tag for every release.",
+    "Our CI cache lives on the build-02 host now.",
+    "The staging database was upgraded to PostgreSQL 17.",
+    "Alice owns the billing service rewrite.",
+    "The weekly sync moved to Thursday afternoons.",
+    "We pinned the embedding model to Qwen3-Embedding-0.6B.",
+]
+
+SCENARIOS.update({
+    "dream-basics": {
+        "config": None,
+        "extractor": {"model": "extractor", "served_model": "stub-served-model",
+                      "replies": []},
+        "extractor_fallback": True,
+        "seed": [fact("Dream Host", "OS", "Debian 12")],
+        "ops": [
+            dream("status"),
+            dream("pull"),
+            dream("runs"),
+            dream("commit", commit_token=PULL_TOKEN),  # no pull token yet: None -> required
+            store(DREAM_NOTES[0]),
+            store("sweep tick done in 0.4s", source="log"),
+            store(DREAM_NOTES[1], headers=[sess("w2e-dream")]),
+            dream("status"),
+            *[store(t) for t in DREAM_NOTES[2:]],
+            dream("status"),
+            dream("pull", limit=2),
+            dream("commit", commit_token="v1.bad.token"),
+            dream("commit", cursor=1.5),
+            dream("commit"),
+            dream("commit", commit_token=PULL_TOKEN),
+            dream("commit", commit_token=PULL_TOKEN),
+            dream("status"),
+            dream("pull"),
+            dream("commit", commit_token=PULL_TOKEN),
+            dream("pull", limit=5),
+            dream("status"),
+            dream("runs", limit=3),
+            dream("bogus"),
+        ],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -2917,7 +3011,57 @@ def rename_prefixes(v, emap: dict[str, str]):
     return v
 
 
-def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
+def ts_tokens(raw: dict) -> dict[float, str]:
+    """Each entry's raw ``ts`` -> ``<ts:ID>`` (first id on a tie), read from
+    a dump before ``normalize_state`` drops the clock."""
+    t = raw["rows"].get("public.entries")
+    out: dict[float, str] = {}
+    if not t:
+        return out
+    idx, ts = t["columns"].index("id"), t["columns"].index("ts")
+    for row in sorted(t["rows"], key=lambda r: r[idx]):
+        if isinstance(row[ts], (int, float)):
+            out.setdefault(float(row[ts]), f"<ts:{row[idx]}>")
+    return out
+
+
+def _dream_token_payload(token):
+    """A commit token as its payload, signature dropped (the token signs a
+    wall-clock timestamp, so the bytes cannot match across sides)."""
+    import base64
+    try:
+        version, body, _sig = token.split(".")
+        raw = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4))
+        return {"version": version, "payload": json.loads(raw)}
+    except Exception:  # noqa: BLE001 - a malformed token compares as text
+        return token
+
+
+def dream_tokens(value, ts_map: dict[float, str]):
+    """The ``memory_dream`` answer normalizer (module docstring)."""
+    def walk(v, key=None):
+        if isinstance(v, dict):
+            return {k: walk(x, k) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x, key) for x in v]
+        if key in ("timestamp", "cursor", "dream_cursor") and isinstance(v, (int, float)) \
+                and not isinstance(v, bool) and float(v) in ts_map:
+            return ts_map[float(v)]
+        if key == "commit_token" and isinstance(v, str):
+            payload = _dream_token_payload(v)
+            if isinstance(payload, dict) and isinstance(payload.get("payload"), dict):
+                t = payload["payload"].get("t")
+                if isinstance(t, (int, float)) and float(t) in ts_map:
+                    payload["payload"]["t"] = ts_map[float(t)]
+            return payload
+        if key == "idle_seconds":
+            return _clock(v)
+        return v
+    return walk(value)
+
+
+def normalize_state(state: dict, before: dict,
+                    ts_map: dict[float, str] | None = None) -> tuple[dict, dict, dict]:
     state = w1a.scrub_declared_rows(state, before)["state"]
     state = dbstate.normalize(state, w1a.DB_NONDETERMINISTIC, before)
     numeric = extract_numeric(state)
@@ -2944,6 +3088,10 @@ def normalize_state(state: dict, before: dict) -> tuple[dict, dict, dict]:
                               for k, x in value.items()}
                 elif key == "deferred_empty_roots" and isinstance(value, dict):
                     row[1] = {k: _clock(x) for k, x in value.items()}
+                elif (key == "cortex_dream_cursor" and ts_map
+                      and isinstance(value, (int, float)) and not isinstance(value, bool)
+                      and float(value) in ts_map):
+                    row[1] = ts_map[float(value)]
                 elif key == "cortex_supersession_log" and isinstance(value, list):
                     row[1] = [{**x, "timestamp": _clock(x.get("timestamp"))}
                               if isinstance(x, dict) else x for x in value]
@@ -3206,12 +3354,122 @@ def run_root(prefix: str = "w2e") -> Path:
     return Path(tempfile.mkdtemp(prefix=f"{prefix}-{os.getpid()}-", dir=daemons.scratch_root()))
 
 
+# ── dream extractor stub ──────────────────────────────────────────────────
+
+STUB_ORIGIN_TOKEN = "http://stub"
+EXTRACTOR_BODY_DIFF_CHARS = 600
+
+
+def replace_origin(value, origin: str, token: str = STUB_ORIGIN_TOKEN):
+    """``value`` with every occurrence of ``origin`` in its strings (keys
+    included) replaced by ``token``, recursively."""
+    if isinstance(value, str):
+        return value.replace(origin, token)
+    if isinstance(value, list):
+        return [replace_origin(v, origin, token) for v in value]
+    if isinstance(value, tuple):
+        return tuple(replace_origin(v, origin, token) for v in value)
+    if isinstance(value, dict):
+        return {replace_origin(k, origin, token): replace_origin(v, origin, token)
+                for k, v in value.items()}
+    return value
+
+
+def start_stubs(scn: dict, names) -> dict[str, StubExtractor]:
+    """One started stub per name when the scenario declares an extractor."""
+    if "extractor" not in scn:
+        return {}
+    stubs: dict[str, StubExtractor] = {}
+    try:
+        for n in names:
+            stubs[n] = StubExtractor(scn["extractor"], n).start()
+    except BaseException:
+        close_stubs(stubs)
+        raise
+    return stubs
+
+
+def close_stubs(stubs: dict[str, StubExtractor]) -> None:
+    for stub in stubs.values():
+        stub.close()
+
+
+def extractor_env(scn: dict, stub: StubExtractor | None) -> dict:
+    """The dream-extractor endpoint variables pointing a daemon at its stub."""
+    if stub is None:
+        return {}
+    spec = scn.get("extractor") or {}
+    env = {"PSEUDOLIFE_DREAM_BASE_URL": stub.base_url,
+           "PSEUDOLIFE_DREAM_MODEL": spec.get("model", "stub-model")}
+    if scn.get("extractor_fallback"):
+        env["PSEUDOLIFE_DREAM_FALLBACK_BASE_URL"] = stub.fallback_base_url
+        env["PSEUDOLIFE_DREAM_FALLBACK_MODEL"] = spec.get("fallback_model", "stub-fallback-model")
+    return env
+
+
+def _request_label(req: dict | None, short: bool = True) -> str:
+    if req is None:
+        return "<none>"
+    digest = req.get("sha256")
+    digest = (digest[:16] if short else digest) if digest else "-"
+    return f"{req['method']} {req['path']} sha256={digest}"
+
+
+def _body_diff(a: str, b: str) -> str:
+    """A short unified diff of two request bodies, split after each comma so
+    a one-line JSON body shows where it differs."""
+    at = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+    lines = difflib.unified_diff(re.split(r"(?<=,)", a), re.split(r"(?<=,)", b),
+                                 "python", "rust", n=1, lineterm="")
+    text = f"first difference at byte {at}\n" + "\n".join(lines)
+    if len(text) > EXTRACTOR_BODY_DIFF_CHARS:
+        text = text[:EXTRACTOR_BODY_DIFF_CHARS] + "..."
+    return text
+
+
+def extractor_summary(requests: list[dict]) -> list[dict]:
+    return [{"method": r["method"], "path": r["path"], "sha256": r["sha256"]} for r in requests]
+
+
+def extractor_unanswered(side: str, requests: list[dict]) -> list[str]:
+    return [f"extractor {side}: unanswered {_request_label(r, short=False)}"
+            for r in requests if not r.get("answered")]
+
+
+def extractor_diffs(py: list[dict], rs: list[dict]) -> list[str]:
+    """Unanswered requests on either side, then the two request sequences
+    compared element by element on (method, path, body)."""
+    out = extractor_unanswered("python", py) + extractor_unanswered("rust", rs)
+    if len(py) != len(rs):
+        out.append(f"extractor requests: python sent {len(py)}, rust sent {len(rs)}")
+    for i in range(max(len(py), len(rs))):
+        a = py[i] if i < len(py) else None
+        b = rs[i] if i < len(rs) else None
+        key = (lambda r: None if r is None else (r["method"], r["path"], r["body"]))
+        if key(a) == key(b):
+            continue
+        line = f"extractor request {i}: python {_request_label(a)} vs rust {_request_label(b)}"
+        if a and b and a["method"] == "POST" and b["method"] == "POST":
+            line += "\n" + _body_diff(a["body"] or "", b["body"] or "")
+        out.append(line)
+    return out
+
+
 def side_env(scn: dict, dsn: str, extra: dict | None = None) -> dict:
     env = {"PSEUDOLIFE_RELEASE_CHECK": "0", "PSEUDOLIFE_PLUGIN_DIR": str(w1a.REPO / "plugin"),
            "PSEUDOLIFE_MCP_DATABASE_URL": dsn, "PSEUDOLIFE_MCP_TOKEN": TOKEN}
     env.update(scn.get("env", {}))
     env.update(extra or {})
     return env
+
+
+def with_pull_token(op: dict, token: str | None) -> dict:
+    """``@pull_token`` in a tool argument: the last ``commit_token`` this
+    side's daemon answered (each side commits its own pull)."""
+    args = op.get("args")
+    if not isinstance(args, dict) or PULL_TOKEN not in args.values():
+        return op
+    return {**op, "args": {k: (token if v == PULL_TOKEN else v) for k, v in args.items()}}
 
 
 def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
@@ -3256,13 +3514,15 @@ def wait_landed(dsn: str, text: str, deadline_s: float = 30.0) -> None:
             time.sleep(0.25)
 
 
-def prepare_template(scn: dict, tag: str, root: Path, owned: list[str]) -> str:
+def prepare_template(scn: dict, tag: str, root: Path, owned: list[str],
+                     stub: StubExtractor | None = None) -> str:
     template = pg.name(f"pl_cf_w2e_{tag}_t")
     owned.append(template)
     dsn = pg.create(template)
     home = daemons.make_home(root, f"{tag}-seed", scn.get("config"))
+    extra = {**extractor_env(scn, stub), **(scn.get("seed_env") or {})}
     d = daemons.python_daemon(home, daemons.free_port(),
-                              daemons.base_env(home, side_env(scn, dsn, scn.get("seed_env"))))
+                              daemons.base_env(home, side_env(scn, dsn, extra)))
     try:
         d.start(300)
         w1a.wait_settled([d.port], token=TOKEN)
@@ -3298,7 +3558,17 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
     tag = name.replace("-", "_")
     if mode == "golden":
         return run_golden(name, binary, root, tol, owned)
-    template = prepare_template(scn, tag, root, owned)
+    stubs = start_stubs(scn, ("seed", "python", "rust"))
+    try:
+        return _run_live(name, scn, tag, binary, root, record, tol, mutant, owned, stubs)
+    finally:
+        close_stubs(stubs)
+
+
+def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: bool,
+              tol: dict, mutant: str | None, owned: list[str],
+              stubs: dict[str, StubExtractor]) -> dict:
+    template = prepare_template(scn, tag, root, owned, stubs.get("seed"))
     dbs = {side: pg.name(f"pl_cf_w2e_{tag}_{suffix}")
            for side, suffix in (("python", "py"), ("rust", "rs"))}
     owned.extend(dbs.values())
@@ -3308,9 +3578,10 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
     steps, stats = [], {}
     try:
         home = daemons.make_home(root, f"{tag}-py", scn.get("config"))
+        penv = side_env(scn, dsns["python"], extractor_env(scn, stubs.get("python")))
         procs["python"] = daemons.python_daemon(home, daemons.free_port(),
-                                                daemons.base_env(home, side_env(scn, dsns["python"])))
-        renv = w1a.rust_env(side_env(scn, dsns["rust"]))
+                                                daemons.base_env(home, penv))
+        renv = w1a.rust_env(side_env(scn, dsns["rust"], extractor_env(scn, stubs.get("rust"))))
         if mutant:
             renv["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
         home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
@@ -3321,15 +3592,34 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
         clients = {side: Mcp(d.port) for side, d in procs.items()}
         for client in clients.values():
             client.init()
+        tokens: dict[str, str | None] = {"python": None, "rust": None}
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
             row = {"step": i, "op": op, "diffs": []}
             if op["op"] != "init":
-                py = run_op(op, procs["python"].port, clients["python"], dsns["python"])
-                rs = run_op(op, procs["rust"].port, clients["rust"], dsns["rust"])
+                py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
+                            clients["python"], dsns["python"])
+                rs = run_op(with_pull_token(op, tokens["rust"]), procs["rust"].port,
+                            clients["rust"], dsns["rust"])
+                for side, r in (("python", py), ("rust", rs)):
+                    v = r.get("value") if isinstance(r, dict) else None
+                    if isinstance(v, dict) and isinstance(v.get("commit_token"), str):
+                        tokens[side] = v["commit_token"]
+                if stubs:
+                    py = replace_origin(py, stubs["python"].origin)
+                    rs = replace_origin(rs, stubs["rust"].origin)
                 row["python"], row["rust"] = py, rs
-            sp, np_, ep = normalize_state(dbstate.dump(dsns["python"]), before["python"])
-            sr, nr, er = normalize_state(dbstate.dump(dsns["rust"]), before["rust"])
+            if stubs:
+                sent = {side: stubs[side].drain() for side in ("python", "rust")}
+                row["extractor"] = {side: extractor_summary(r) for side, r in sent.items()}
+                row["diffs"] += extractor_diffs(sent["python"], sent["rust"])
+            raw_py, raw_rs = dbstate.dump(dsns["python"]), dbstate.dump(dsns["rust"])
+            tsm_py, tsm_rs = ts_tokens(raw_py), ts_tokens(raw_rs)
+            sp, np_, ep = normalize_state(raw_py, before["python"], tsm_py)
+            sr, nr, er = normalize_state(raw_rs, before["rust"], tsm_rs)
             if op["op"] != "init":
+                if op.get("name") == "memory_dream":
+                    row["python"] = dream_tokens(row["python"], tsm_py)
+                    row["rust"] = dream_tokens(row["rust"], tsm_rs)
                 row["python"] = rename_prefixes(row["python"], ep)
                 row["rust"] = rename_prefixes(row["rust"], er)
                 row["diffs"] += compare_response(row["python"], row["rust"], tol, stats)
@@ -3412,8 +3702,9 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
     dsn = pg.create(db)
     before = dbstate.dump(dsn)
     home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
-    d = daemons.rust_daemon(binary, home, daemons.free_port(),
-                            daemons.base_env(home, w1a.rust_env(side_env(scn, dsn))))
+    stubs = start_stubs(scn, ("rust",))
+    renv = w1a.rust_env(side_env(scn, dsn, extractor_env(scn, stubs.get("rust"))))
+    d = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
     steps, stats, numeric = [], {}, {}
     try:
         # The oracle's template was booted once to seed it and once to run,
@@ -3429,6 +3720,14 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
             op = rec["op"]
             row = {"step": i, "op": op, "diffs": []}
             rs = run_op(op, d.port, client, dsn) if op["op"] != "init" else None
+            if stubs:
+                if rs is not None:
+                    rs = replace_origin(rs, stubs["rust"].origin)
+                # No oracle requests to compare against: record the sequence
+                # and report what the table left unanswered.
+                sent = stubs["rust"].drain()
+                row["extractor"] = {"rust": extractor_summary(sent)}
+                row["diffs"] += extractor_unanswered("rust", sent)
             sr, nr, er = normalize_state(dbstate.dump(dsn), before)
             if rs is not None:
                 row["rust"] = rename_prefixes(rs, er)
@@ -3443,6 +3742,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
             steps.append(row)
     finally:
         d.stop()
+        close_stubs(stubs)
     return {"scenario": name, "steps": steps, "stats": stats}
 
 

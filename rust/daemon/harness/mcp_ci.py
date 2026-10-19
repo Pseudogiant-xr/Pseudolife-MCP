@@ -33,7 +33,7 @@ def _expected_pair(name):
 def check_baseline(report):
     """Accept exactly the declared differences; the strict report stays red."""
     summary = report["summary"]
-    assert (summary["responses"], summary["cases"], summary["diffs"]) == (318, 18, 5)
+    assert (summary["responses"], summary["cases"], summary["diffs"]) == (317, 18, 5)
     assert set(summary["unserved_checked"]) == set(UNSERVED)
     expected = REFUSAL_CLEANUP
     seen = set()
