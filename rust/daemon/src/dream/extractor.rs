@@ -652,6 +652,25 @@ impl ExtractorError {
     }
 }
 
+/// `classify_extractor_error` for any failure a method returns: an
+/// `ExtractorError` by its chain, an escaped exception by its type name.
+pub fn classify_failure(e: &ExtractFailure) -> (&'static str, String) {
+    match e {
+        ExtractFailure::Extractor(x) => x.classify(),
+        ExtractFailure::Uncaught(u) => {
+            let auth = auth_words().is_match(&u.message);
+            (
+                if auth {
+                    "login_expired"
+                } else {
+                    "extractor_error"
+                },
+                u.type_name.to_string(),
+            )
+        }
+    }
+}
+
 /// A method's failure: Python's `ExtractorError`, or an exception raised
 /// outside the method's `try`.
 #[derive(Debug, Clone, PartialEq)]
@@ -1257,7 +1276,7 @@ fn fallback_extractor(cfg: &DreamConfig, r: &Endpoints, key: Option<String>) -> 
 /// the ValueError for mode `fallback` with no fallback endpoint.
 pub async fn build_extractor_with_fallback_using(
     cfg: &DreamConfig,
-    env: &dyn Fn(&str) -> Option<String>,
+    env: &(dyn Fn(&str) -> Option<String> + Sync),
     retry_delay: f64,
 ) -> Result<(Extractor, &'static str), String> {
     let r = resolve_endpoints_with(cfg, env);
@@ -1387,7 +1406,7 @@ fn served_id(body: &[u8]) -> Option<String> {
 /// `_status_extractor_fields` (`memory/dream.py:2250-2275`), in its key order.
 pub async fn status_extractor_fields(
     cfg: &DreamConfig,
-    last_dream_extractor: Option<&str>,
+    last_dream_extractor: Option<&Value>,
 ) -> Map<String, Value> {
     let r = resolve_endpoints(cfg);
     let has_fallback = r.has_fallback();

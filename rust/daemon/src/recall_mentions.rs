@@ -24,7 +24,7 @@ fn contains(ranges: &[(u32, u32)], c: char) -> bool {
 }
 
 /// `\w` for str patterns: `Py_UNICODE_ISALNUM` or `_`.
-fn is_word(c: char) -> bool {
+pub(crate) fn is_word(c: char) -> bool {
     contains(data::WORD, c)
 }
 
@@ -37,7 +37,7 @@ fn is_apostrophe(c: char) -> bool {
     matches!(c, '\'' | '\u{2019}')
 }
 
-fn is_mark(c: char) -> bool {
+pub(crate) fn is_mark(c: char) -> bool {
     contains(data::MARK, c)
 }
 

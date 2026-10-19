@@ -14,7 +14,8 @@
 //! classified the two are indistinguishable; rows with a NULL state are
 //! classified at the first call here (declared).
 //!
-//! `run`, `deep` and `rollback` answer the `not_implemented` refusal.
+//! `run` is the consolidation pass (`run.rs`); `deep` and `rollback`
+//! answer the `not_implemented` refusal.
 
 use std::sync::Arc;
 
@@ -56,8 +57,6 @@ pub struct Tracking {
     cursor: f64,
     error: Option<String>,
     retryable: bool,
-    /// `_last_dream_extractor`: which endpoint served the last dream run.
-    pub last_dream_extractor: Option<String>,
 }
 
 impl Tracking {
@@ -68,6 +67,11 @@ impl Tracking {
         } else {
             0.0
         }
+    }
+
+    /// `_dream_display_cursor()`, for the dream pass.
+    pub(crate) fn display_cursor_value(&self) -> f64 {
+        self.display_cursor()
     }
 
     fn error_code(&self) -> Option<(String, String)> {
@@ -813,8 +817,13 @@ pub async fn status(ready: &Ready, config: &Config) -> Result<Value, ToolError> 
         (0, 0)
     };
     let error = tracking.error_code();
-    let last_dream_extractor = tracking.last_dream_extractor.clone();
     drop(tracking);
+    let last_dream_extractor = ready
+        .dream_run
+        .last_dream_extractor
+        .lock()
+        .expect("extractor record")
+        .clone();
     let now = crate::episodes::now();
     let idle = if latest != 0.0 { now - latest } else { 0.0 };
     let would_fire = error.is_none()
@@ -841,13 +850,18 @@ pub async fn status(ready: &Ready, config: &Config) -> Result<Value, ToolError> 
     );
     out.insert("deep_dream".into(), deep);
     out.insert("review_queue".into(), review);
-    // The stall tracker is process-local and starts empty; it is armed by
-    // the sweep tick, which this daemon does not run yet.
-    out.insert("stall".into(), Value::Null);
-    out.insert("last_stall".into(), Value::Null);
-    out.extend(
-        super::extractor::status_extractor_fields(cfg, last_dream_extractor.as_deref()).await,
-    );
+    // The stall tracker is process-local; its overdue rule is armed by the
+    // sweep tick, which this daemon does not run yet, so only `run` passes
+    // move it.
+    let (stall, last_stall) = ready
+        .dream_run
+        .stall
+        .lock()
+        .expect("stall tracker")
+        .snapshot();
+    out.insert("stall".into(), stall);
+    out.insert("last_stall".into(), last_stall);
+    out.extend(super::extractor::status_extractor_fields(cfg, last_dream_extractor.as_ref()).await);
     if let Some((code, detail)) = error {
         out.insert("error".into(), json!(code));
         out.insert("detail".into(), json!(detail));
@@ -886,9 +900,31 @@ fn mcp_memory_dream<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFu
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+    if action == "run" {
+        let service = app.service.clone();
+        let limit = call.args.get("limit").and_then(Value::as_i64);
+        let caller = crate::episodes::Caller {
+            header_session: call.ident.header_session.clone(),
+            transport_session: call.ident.transport_session.clone(),
+        };
+        let writer = call.ident.writer.clone();
+        return Box::pin(async move {
+            if let Some(refused) = super::run::refusal(&service.config) {
+                return Err(refused);
+            }
+            let ready = service.ensure_init().await.map_err(internal)?;
+            let r2 = ready.clone();
+            let svc = service.clone();
+            ready
+                .writes
+                .spawn(async move { super::run::run_auto(&svc, r2, caller, writer, limit).await })
+                .await
+                .map_err(internal)?
+        });
+    }
     if !matches!(action.as_str(), "status" | "pull" | "commit" | "runs") {
         return Box::pin(async move {
-            if matches!(action.as_str(), "run" | "deep" | "rollback") {
+            if matches!(action.as_str(), "deep" | "rollback") {
                 Err(unserved())
             } else {
                 Ok(json!({"error": "unknown_action", "actions": ACTIONS}))

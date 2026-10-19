@@ -28,7 +28,7 @@ use crate::service::Ready;
 use crate::storage::graph;
 
 #[path = "graph_review_actions.rs"]
-mod actions;
+pub(crate) mod actions;
 #[path = "graph_review_slots.rs"]
 mod slots;
 

@@ -4,7 +4,10 @@
 
 pub mod cursors;
 pub mod extractor;
+pub mod gates;
 pub mod judge_agreement;
 pub mod prompts;
+pub mod relations;
+pub mod run;
 pub mod service;
 pub mod token;

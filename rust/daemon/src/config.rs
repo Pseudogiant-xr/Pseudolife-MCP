@@ -73,6 +73,16 @@ pub struct MemoryConfig {
     /// (3): whether `dream_status` counts sessions awaiting outcome inference.
     pub lessons_infer_outcomes: bool,
     pub lessons_infer_outcomes_max_signals: i64,
+    /// `memory.lessons.synthesize_in_dream` (on): whether the dream pass
+    /// runs lesson synthesis (not ported: `memory_dream run` refuses).
+    pub lessons_synthesize_in_dream: bool,
+    /// `memory.graph_insight.enabled` (on): the dream's graph-insight
+    /// refresh (not ported: `memory_dream run` refuses while it is on).
+    pub graph_insight_enabled: bool,
+    /// `memory.scopes` (`ScopesConfig`): source tags that never become
+    /// projects, and fine-grained sources rolled up to an umbrella.
+    pub scopes_exclude: Vec<String>,
+    pub scopes_rollup: Vec<(String, String)>,
     /// `memory.delete_confirm_threshold` (20): a memory-scope forget matching
     /// more entries is refused unless confirmed; zero or less disables it.
     pub delete_confirm_threshold: i64,
@@ -212,6 +222,8 @@ pub struct CortexConfig {
     pub protect_provenance: bool,
     pub supersede_confidence_margin: f64,
     pub reinforce_rate: f64,
+    /// `dream_slot_match_threshold` (0.0, off): the dream's slot resolver.
+    pub dream_slot_match_threshold: f64,
 }
 
 impl Default for CortexConfig {
@@ -225,6 +237,7 @@ impl Default for CortexConfig {
             protect_provenance: true,
             supersede_confidence_margin: 0.15,
             reinforce_rate: 0.34,
+            dream_slot_match_threshold: 0.0,
         }
     }
 }
@@ -358,6 +371,22 @@ pub struct DreamConfig {
     pub max_batch: i64,
     pub digest_enabled: bool,
     pub digest_max_per_cycle: i64,
+    /// The consolidation pass (`service_dream.py:_dream_run_locked`).
+    pub stall_notice: bool,
+    pub quarantine_low_trust: bool,
+    pub trusted_sources: Vec<String>,
+    pub assistant_claims: String,
+    pub extract_relations: bool,
+    pub min_relation_confidence: f64,
+    pub relation_quarantine_below: f64,
+    pub retype_quarantined_max: i64,
+    pub write_dedup_min_jaccard: f64,
+    pub alias_candidate_min_cosine: f64,
+    pub known_facts_window: i64,
+    pub literal_gate: String,
+    pub literal_gate_scope: String,
+    pub span_gate: String,
+    pub chronicle: bool,
 }
 
 impl Config {
@@ -581,6 +610,12 @@ impl Default for MemoryConfig {
             lessons_min_confidence: 0.0,
             lessons_infer_outcomes: true,
             lessons_infer_outcomes_max_signals: 3,
+            lessons_synthesize_in_dream: true,
+            graph_insight_enabled: true,
+            scopes_exclude: ["status", "claude", "agent", "correction"]
+                .map(String::from)
+                .to_vec(),
+            scopes_rollup: Vec::new(),
             delete_confirm_threshold: 20,
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
@@ -675,6 +710,21 @@ impl Default for DreamConfig {
             max_batch: 40,
             digest_enabled: false,
             digest_max_per_cycle: 4,
+            stall_notice: true,
+            quarantine_low_trust: false,
+            trusted_sources: Vec::new(),
+            assistant_claims: "contender".into(),
+            extract_relations: true,
+            min_relation_confidence: 0.2,
+            relation_quarantine_below: 0.5,
+            retype_quarantined_max: 3,
+            write_dedup_min_jaccard: 0.6,
+            alias_candidate_min_cosine: 0.7,
+            known_facts_window: 0,
+            literal_gate: "enforce".into(),
+            literal_gate_scope: "batch".into(),
+            span_gate: "off".into(),
+            chronicle: true,
         }
     }
 }
@@ -1527,6 +1577,38 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.lessons_infer_outcomes = want_bool(l, "infer_outcomes", "memory.lessons", true)?;
             memory.lessons_infer_outcomes_max_signals =
                 want_int(l, "infer_outcomes_max_signals", "memory.lessons", 3)?;
+            memory.lessons_synthesize_in_dream =
+                want_bool(l, "synthesize_in_dream", "memory.lessons", true)?;
+        }
+        if let Some(g) = section(m, "graph_insight", "memory.")? {
+            memory.graph_insight_enabled = want_bool(g, "enabled", "memory.graph_insight", true)?;
+        }
+        if let Some(sc) = section(m, "scopes", "memory.")? {
+            if let Some(node) = lookup(sc, "exclude") {
+                memory.scopes_exclude = want_str_list(node, "memory.scopes.exclude")?;
+            }
+            match lookup(sc, "rollup") {
+                None | Some(Node::Null) => {}
+                Some(Node::Map(pairs)) => {
+                    let mut out = Vec::new();
+                    for (k, v) in pairs {
+                        match (k, v) {
+                            (Node::Str(k), Node::Str(v)) => out.push((k.clone(), v.clone())),
+                            (_, other) => {
+                                return Err(wrong_type(
+                                    "memory.scopes.rollup",
+                                    "a mapping of strings",
+                                    other,
+                                ));
+                            }
+                        }
+                    }
+                    memory.scopes_rollup = out;
+                }
+                Some(other) => {
+                    return Err(wrong_type("memory.scopes.rollup", "a mapping", other));
+                }
+            }
         }
         if let Some(r) = section(m, "compaction", "memory.")? {
             memory.compaction_enabled = want_bool(r, "enabled", "memory.compaction", true)?;
@@ -1661,6 +1743,12 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                     d.supersede_confidence_margin,
                 )?,
                 reinforce_rate: want_float(c, "reinforce_rate", p, d.reinforce_rate)?,
+                dream_slot_match_threshold: want_float(
+                    c,
+                    "dream_slot_match_threshold",
+                    p,
+                    d.dream_slot_match_threshold,
+                )?,
             };
         }
         if let Some(c) = section(m, "mcp", "memory.")? {
@@ -1943,6 +2031,63 @@ fn read_dream(d: &[(Node, Node)]) -> Result<DreamConfig, ConfigError> {
         max_batch: want_int(d, "max_batch", p, def.max_batch)?,
         digest_enabled: want_bool(d, "digest_enabled", p, def.digest_enabled)?,
         digest_max_per_cycle: want_int(d, "digest_max_per_cycle", p, def.digest_max_per_cycle)?,
+        stall_notice: want_bool(d, "stall_notice", p, def.stall_notice)?,
+        quarantine_low_trust: want_bool(d, "quarantine_low_trust", p, def.quarantine_low_trust)?,
+        trusted_sources: match lookup(d, "trusted_sources") {
+            None | Some(Node::Null) => Vec::new(),
+            Some(node) => want_str_list(node, &format!("{p}.trusted_sources"))?,
+        },
+        assistant_claims: match lookup(d, "assistant_claims") {
+            None | Some(Node::Null) => def.assistant_claims.clone(),
+            Some(Node::Str(s)) if s.is_empty() => def.assistant_claims.clone(),
+            Some(Node::Str(s)) => s.clone(),
+            Some(other) => {
+                return Err(wrong_type(
+                    &format!("{p}.assistant_claims"),
+                    "a string",
+                    other,
+                ));
+            }
+        },
+        extract_relations: want_bool(d, "extract_relations", p, def.extract_relations)?,
+        min_relation_confidence: want_float(
+            d,
+            "min_relation_confidence",
+            p,
+            def.min_relation_confidence,
+        )?,
+        relation_quarantine_below: want_float(
+            d,
+            "relation_quarantine_below",
+            p,
+            def.relation_quarantine_below,
+        )?,
+        retype_quarantined_max: want_int(
+            d,
+            "retype_quarantined_max",
+            p,
+            def.retype_quarantined_max,
+        )?,
+        write_dedup_min_jaccard: want_float(
+            d,
+            "write_dedup_min_jaccard",
+            p,
+            def.write_dedup_min_jaccard,
+        )?,
+        alias_candidate_min_cosine: want_float(
+            d,
+            "alias_candidate_min_cosine",
+            p,
+            def.alias_candidate_min_cosine,
+        )?,
+        known_facts_window: match lookup(d, "known_facts_window") {
+            None | Some(Node::Null) => 0,
+            Some(_) => want_int(d, "known_facts_window", p, 0)?,
+        },
+        literal_gate: want_str(d, "literal_gate", p, &def.literal_gate)?,
+        literal_gate_scope: want_str(d, "literal_gate_scope", p, &def.literal_gate_scope)?,
+        span_gate: want_str(d, "span_gate", p, &def.span_gate)?,
+        chronicle: want_bool(d, "chronicle", p, def.chronicle)?,
     };
     // DreamConfig.__post_init__ (utils/config.py:503-509).
     if let Some(hours) = lookup(d, "stall_repeat_hours") {
