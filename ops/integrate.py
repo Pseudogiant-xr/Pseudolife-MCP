@@ -202,13 +202,17 @@ def _changed(sha: str, base: str) -> set[str]:
     return set(_out("diff", "--name-only", f"{base}...{sha}").splitlines())
 
 
-def _open_batches() -> list[tuple[int, str, str]]:
-    """(number, branch, url) of every open pull request from an
-    `integrate/` branch, however named."""
-    rows = json.loads(gh("pr", "list", "--state", "open", "--limit", "500",
-                         "--json", "number,headRefName,url") or "[]")
-    return [(r["number"], r["headRefName"], r.get("url", "")) for r in rows
-            if r.get("headRefName", "").startswith(PREFIX)]
+def _open_batches() -> list[tuple[int, str, str, str]]:
+    """(number, branch, url, head sha) of every open pull request from an
+    `integrate/` branch of this repository, however named. A fork's branch
+    can carry any name, so fork pull requests are not batches."""
+    rows = json.loads(gh("pr", "list", "--state", "open", "--limit", "500", "--json",
+                         "number,headRefName,url,headRefOid,isCrossRepository")
+                      or "[]")
+    return [(r["number"], r["headRefName"], r.get("url", ""), r.get("headRefOid", ""))
+            for r in rows
+            if r.get("headRefName", "").startswith(PREFIX)
+            and not r.get("isCrossRepository", False)]
 
 
 def _used_numbers(date: str) -> set[int]:
@@ -359,7 +363,7 @@ def build(args: argparse.Namespace) -> int:
     open_prs = _open_batches()
     if open_prs:
         raise Refusal("a batch is already open: " + ", ".join(
-            f"#{n} ({name})" for n, name, _ in open_prs)
+            f"#{n} ({name})" for n, name, _, _ in open_prs)
             + "; merge or close it before building the next one")
     members = ready(args.label)
     waiting = [(m, _not_ready(m)) for m in members if _not_ready(m)]
@@ -478,14 +482,21 @@ def open_(args: argparse.Namespace) -> int:
                       f"back with `git switch --detach {REMOTE}/{BASE}`, remove the "
                       "local branch and build again")
     open_prs = _open_batches()
-    others = [(n, name) for n, name, _ in open_prs if name != plan.branch]
+    others = [(n, name) for n, name, _, _ in open_prs if name != plan.branch]
     if others:
         raise Refusal("a batch is already open: " + ", ".join(
             f"#{n} ({name})" for n, name in others))
     text = body(plan, _suite_line(args, head))
     # A rerun after a failure past the push resumes: this branch's own pull
-    # request is the one to finish, not a second batch.
-    url = next((u for _, name, u in open_prs if name == plan.branch), None)
+    # request is the one to finish, not a second batch, but only while it
+    # still points at the head the suite passed on.
+    own = [(n, u, sha) for n, name, u, sha in open_prs if name == plan.branch]
+    url = None
+    if own:
+        number, url, sha = own[0]
+        if sha != plan.head:
+            raise Refusal(f"#{number} is open from {plan.branch} at {sha[:12]}, not "
+                          f"the built head {plan.head[:12]}; check it by hand")
     if url is None:
         try:
             git("push", "-q", "-u", REMOTE, plan.branch)

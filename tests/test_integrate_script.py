@@ -95,8 +95,10 @@ class FakeGh:
             if self.fail_create == "before":
                 raise integrate.Refusal("`gh pr create` failed (1): HTTP 502")
             url = "https://github.example/pr/900"
+            head = args[args.index("--head") + 1]
             self.history.append({"number": 900, "state": "OPEN", "url": url,
-                                 "headRefName": args[args.index("--head") + 1]})
+                                 "headRefName": head, "isCrossRepository": False,
+                                 "headRefOid": _git(self.origin, "rev-parse", head)})
             if self.fail_create == "after":  # created, but the reply was lost
                 raise integrate.Refusal("`gh pr create` failed (1): HTTP 504")
             return url + "\n"
@@ -129,6 +131,7 @@ def world(tmp_path, monkeypatch):
     _configure(work)
     monkeypatch.chdir(work)
     fake = FakeGh()
+    fake.origin = origin
     monkeypatch.setattr(integrate, "gh", fake)
 
     class World:
@@ -591,6 +594,34 @@ def test_a_failed_label_removal_resumes_without_a_second_comment(world, capsys):
 
     assert [args[2] for args, _ in world.gh.bodies("comment")] == ["11"]
     assert [args[2] for args, _ in world.gh.bodies("edit")] == ["11", "11"]
+
+
+def test_a_fork_pr_named_like_a_batch_neither_blocks_nor_is_resumed(world, capsys):
+    _three_with_a_collision(world)
+    branch = f"integrate/{DATE}-batch-1"
+    world.gh.history = [{"number": 870, "headRefName": branch, "state": "OPEN",
+                         "url": "https://github.example/pr/870",
+                         "isCrossRepository": True, "headRefOid": "f" * 40}]
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert "resuming" not in capsys.readouterr().out
+    (args, _), = world.gh.bodies("create")
+    (_, comment), = world.gh.bodies("comment")
+    assert "pr/870" not in comment and "pr/900" in comment
+
+
+def test_open_will_not_resume_on_its_own_branch_pr_at_another_head(world, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    world.gh.history = [{"number": 871, "headRefName": f"integrate/{DATE}-batch-1",
+                         "state": "OPEN", "url": "https://github.example/pr/871",
+                         "isCrossRepository": False, "headRefOid": "e" * 40}]
+    capsys.readouterr()
+
+    assert _open(world) == 2
+    assert "#871" in capsys.readouterr().err
+    assert world.gh.mutations() == [] and world.remote_branches() == []
 
 
 def test_open_accepts_only_a_full_suite_result(world, capsys):
