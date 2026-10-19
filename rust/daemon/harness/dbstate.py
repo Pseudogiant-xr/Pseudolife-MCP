@@ -15,6 +15,7 @@ normalizers, which replace nondeterministic values by rule, never by hand:
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import date, datetime, time
 from decimal import Decimal
 
@@ -77,7 +78,7 @@ _CATALOG = {
 def _plain(value):
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
-    if isinstance(value, Decimal):
+    if isinstance(value, (Decimal, uuid.UUID)):
         return str(value)
     if isinstance(value, (bytes, memoryview)):
         return bytes(value).hex()

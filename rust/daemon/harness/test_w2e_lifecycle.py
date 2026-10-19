@@ -232,8 +232,10 @@ def test_fact_set_scenarios_reach_every_declared_mutant(harness):
     assert len(fact_mutants) == 4
     ops = [op for n in names for op in harness.SCENARIOS[n]["ops"]]
     assert all(op["name"] == "memory_fact_set" for op in ops)
-    # SQL is seed-only: the compared operations all go through MCP.
-    assert all(op["op"] != "sql" for n in harness.SCENARIOS for op in harness.SCENARIOS[n]["ops"])
+    # SQL is seed-only: the compared operations all go through MCP, except a
+    # declared external write (another process) in a declared scenario.
+    assert all(op["op"] != "sql" or (op.get("external") and n in harness.EXTERNAL_WRITES)
+               for n in harness.SCENARIOS for op in harness.SCENARIOS[n]["ops"])
 
 
 def test_set_scenarios_reach_every_declared_mutant(harness):

@@ -40,8 +40,6 @@ tool's answers by value.
 | `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
 | `memory_consolidation_candidates` | W2-D | No consolidation candidate service. |
-| `memory_supersede` | W2-E | No supersession service, audit lineage or resident publication. |
-| `memory_reinstate` | W2-E | No reinstatement decision service. |
 | `memory_forget` | W2-E | No forget/cascade service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
@@ -59,8 +57,8 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_fact_resolve`, `memory_stats`, `memory_episode_start`,
 `memory_episode_end`, `memory_session_title`, `memory_episode_summary`,
 `memory_outcome`, `memory_reinforce`, `memory_history`, `memory_world_set`,
-`memory_world_search`, `memory_lesson_search`, `memory_agents` and
-`memory_message`. The two board tools
+`memory_world_search`, `memory_lesson_search`, `memory_supersede`,
+`memory_reinstate`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -320,6 +318,15 @@ The remaining write work is deliberately split into subsequent increments:
 
 The WRITE-CMS, WRITE-CORTEX and CONTRADICTION parity rows remain deferred;
 this increment does not claim the complete write boundary or cutover readiness.
+
+### memory_supersede and memory_reinstate (2026-10-19)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A correction or reinstatement whose outcome is unknown (the lock session or connection lost around `COMMIT`) | `PendingCorrectionRecovery` / `PendingEntryReinstatementRecovery` classify the durable state under fresh locks and publish whichever outcome committed; ordinary reads wait behind the recovery | a failed transaction rolls back and the resident bank is unchanged; a commit whose answer was lost leaves the row changed and the resident bank stale until restart, and the call answers `internal_error` | the lifecycle increment, with the store path's own commit-unknown handling (`Entry insert fails after eviction` above); failure path only |
+| `entry_mutation_lock` (session advisory locks per target id, held from before the transaction to after publication) | taken | not taken; the per-operation `pg_advisory_xact_lock` of `reinstate_entry` is | the leased single writer already serializes every entry mutation in one process; another writer cannot hold the bank |
+| The promotion walk after the replacement (`_consolidate_eligible`) | runs, as after any store | not run | the multi-band row above: the flat default never promotes |
+| File-mode corrections (unique exact text without row ids, `id_unavailable`, the file-signature recovery) | served | unreachable: the Rust daemon runs on PostgreSQL only | not ported |
 
 ## Coordination board completion (W2-F)
 
