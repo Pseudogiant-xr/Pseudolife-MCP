@@ -95,6 +95,8 @@ T_COLON = "tok:with:colons-0003"
 # waiting. Other hosts keep received data readable, so there a reset without
 # a response is the daemon's own fault and is never replayed.
 HOST_DISCARDS_ON_RESET = os.name == "nt"
+# How a send ends when the daemon refuses before reading all of the body.
+CUT_OFF_BY_REFUSAL = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
@@ -150,9 +152,13 @@ def _exchange(port: int, method: str, path: str, headers, body: bytes | None, *,
         # body is sent, as mcp_wire posts it, lost 0 of 2000 (#830). A send
         # cut off by the refusal is not an error when the response is
         # complete; with no complete response the read's error is raised,
-        # for call() to judge.
+        # for call() to judge. Any other send failure, such as a timeout
+        # because the daemon answered early but never read the body, still
+        # fails the case.
         try:
-            r, raw, _ = send_while_reading(c, method, data, encode_chunked=chunked)
+            r, raw, send_exc = send_while_reading(c, method, data, encode_chunked=chunked)
+            if send_exc is not None and not isinstance(send_exc, CUT_OFF_BY_REFUSAL):
+                raise send_exc
         except Exception:
             c.close()
             raise
@@ -162,7 +168,7 @@ def _exchange(port: int, method: str, path: str, headers, body: bytes | None, *,
             c.endheaders()
         else:
             c.endheaders(data, encode_chunked=chunked)
-    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+    except CUT_OFF_BY_REFUSAL:
         # A server can send its refusal before the request finishes. Read
         # that response; a missing or failed response remains a case error.
         pass
@@ -1703,9 +1709,10 @@ def scenario_error(exc: BaseException, scn: Scenario) -> str:
     """The exception, with the case in flight and the deepest harness line it passed through.
 
     A Windows dev VM golden run failed once on a bare "TimeoutError: [WinError
-    10060]" connect timeout that named neither (#830)."""
+    10060]" that named neither (#830)."""
     where = [f"case {scn.case_in_flight!r}"] if scn.case_in_flight else []
-    frames = [f for f in traceback.extract_tb(exc.__traceback__) if Path(f.filename).resolve().parent == HERE]
+    frames = [f for f in traceback.extract_tb(exc.__traceback__)
+              if Path(f.filename).is_absolute() and Path(f.filename).resolve().parent == HERE]
     if frames:
         where.append(f"at {Path(frames[-1].filename).name}:{frames[-1].lineno} in {frames[-1].name}")
     return f"{type(exc).__name__}: {exc}" + (f" ({'; '.join(where)})" if where else "")
@@ -1899,7 +1906,8 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
             rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
-        scn.case_in_flight = None
+            # A generator timeline runs its next steps before the next case.
+            scn.case_in_flight = None
         if not scn.settle and scn.snapshot_settle and not scn.unreachable_database:
             from pseudolife_memory.principals import env_auth
             mapped, singular = env_auth(scn.env)

@@ -416,6 +416,31 @@ def test_replayed_response_is_recorded_in_the_row_not_diffed(side):
     assert "transport_replays" not in run.compare_case(c, response, response)
 
 
+@pytest.mark.parametrize("chunked", [False, True])
+def test_send_timeout_after_an_early_answer_still_fails(chunked, monkeypatch):
+    # The near miss of a send cut off by a refusal: a daemon that answers
+    # early but never reads the body and never closes. Only a send ended by
+    # the refusal (broken pipe, reset, abort) may give way to the response.
+    monkeypatch.setattr(http.client, "HTTPConnection", UnbufferedSend)
+    listener = socket.create_server(("127.0.0.1", 0))
+    held = []
+
+    def answer_and_hold():
+        conn, _ = listener.accept()
+        held.append(conn)
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += conn.recv(65536)
+        conn.sendall(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}")
+
+    threading.Thread(target=answer_and_hold, daemon=True).start()
+    with listener, pytest.raises(TimeoutError):
+        run.call(listener.getsockname()[1], "POST", "/api/nope", body=b" " * (32 * 1024 * 1024),
+                 timeout=2, chunked=chunked)
+    for conn in held:
+        conn.close()
+
+
 def test_scenario_error_names_the_case_in_flight_and_the_harness_line():
     listener = socket.create_server(("127.0.0.1", 0))
 
