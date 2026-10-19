@@ -143,7 +143,8 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("entry_reinstatement_decisions", "decided_at"),
          ("lessons", "superseded_at"), ("edges", "superseded_at"),
          ("store_decisions", "decided_at"), ("slot_reads", "last_read_at"),
-         ("edges", "asserted_at"), ("relations", "created_at")}
+         ("edges", "asserted_at"), ("relations", "created_at"),
+         ("retrieval_events", "created_at")}
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
 RECENT_CLOCK = {("world_facts", "retrieved_at")}
