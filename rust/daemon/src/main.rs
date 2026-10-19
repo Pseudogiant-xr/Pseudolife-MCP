@@ -9,6 +9,7 @@ mod background_sessions;
 mod bank;
 mod board;
 mod config;
+mod consolidation_tools;
 mod contradiction;
 mod correction_tools;
 mod dream;

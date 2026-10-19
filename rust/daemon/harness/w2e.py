@@ -13,8 +13,8 @@ Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
 ``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce``,
 ``memory_history``, ``memory_world_set``, ``memory_world_search``,
-``memory_lesson_search``, ``memory_supersede``, ``memory_reinstate`` and
-``memory_forget`` on ``/mcp`` (``--features mutants`` adds the
+``memory_lesson_search``, ``memory_supersede``, ``memory_reinstate``,
+``memory_forget`` and ``memory_consolidation_candidates`` on ``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -45,6 +45,9 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``hlc_phys`` keep only null-or-not; ``retrieved_at`` (column and answer)
   does only when it lies within a day of now (a write without one takes the
   clock), and an explicit past value compares exactly;
+* a candidate cluster's ``seed_score`` compares like a search ``score`` and
+  its ``cohesion`` within one rounding unit (1e-4), only inside a cluster
+  (an object with ``members``);
 * a search ``score`` in a response, and each ``score`` in a
   ``lesson_search_events.served`` list, compares within 1.5e-4: the two
   embedders agree to the measured tolerance, and scores are rounded to 4
@@ -151,6 +154,9 @@ RESPONSE_RECENT_CLOCK = {"retrieved_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
 SCORE_TOLERANCE = 1.5e-4
+# A cluster's cohesion: cosines over vectors both banks hold identically,
+# rounded to 4 places, so at most one rounding unit apart.
+COHESION_TOLERANCE = 1e-4
 # meta key -> paths (keys) inside its JSON value that are wall-clock.
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -200,7 +206,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-forget-no-bulk-guard", "mcp-forget-delete-digests", "mcp-forget-cortex-stale",
            "mcp-forget-no-lesson-cascade", "mcp-forget-lessons-stale", "mcp-forget-facts-kept",
            "mcp-forget-edges-kept", "mcp-forget-slot-reads-kept", "mcp-forget-no-world-audit",
-           "mcp-forget-no-lesson-audit"]
+           "mcp-forget-no-lesson-audit",
+           # memory_consolidation_candidates (spec CC1-CC9): caught by
+           # consolidation-candidates.
+           "mcp-consolidation-unsorted", "mcp-consolidation-unverified"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1211,7 +1220,7 @@ def supersede(new_text, headers=(), **kw) -> dict:
 
 
 # Scenarios whose operations may include ``external`` writes.
-EXTERNAL_WRITES = {"supersede-branches", "reinstate"}
+EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates"}
 
 
 def external(statement: str) -> dict:
@@ -1683,6 +1692,71 @@ SCENARIOS.update({
 })
 
 
+# memory_consolidation_candidates (spec CC1-CC9), read-only, on templates
+# whose entries (near-duplicates across sessions, a retired one, a tagged
+# one) the Python daemon's own tools wrote.
+def candidates(headers=(), **kw) -> dict:
+    return {"op": "tool", "name": "memory_consolidation_candidates", "args": kw,
+            "headers": list(headers)}
+
+
+STAGING = "staging database host"
+SCENARIOS.update({
+    "consolidation-candidates": {
+        "config": None,
+        "seed": [
+            store("The staging database lives on host db-stage-1.", [sess("sess-c1")]),
+            store("Staging DB host is db-stage-1.", [sess("sess-c2")]),
+            store("db-stage-1 hosts the staging database.", [sess("sess-c3")], source="user"),
+            store("Our CI runs on GitHub Actions.", [sess("sess-c1")]),
+            store("Continuous integration uses GitHub Actions runners.", [sess("sess-c2")]),
+            store("I like oat milk in my coffee.", [sess("sess-c1")]),
+            store("Deploys happen on Tuesdays after the staging database check.",
+                  [sess("sess-c1")], tags=["ops"]),
+            store("The staging database used to be on db-stage-0.", [sess("sess-c1")]),
+            # a twin text in sess-c1 (the episode walk offers one per text),
+            # with another entry's vector: an exact score tie would leave the
+            # retrieval order free (torch.topk; divergences.md)
+            sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, source, "
+                "episode_id, episode_title, tags, slots, dream_state) SELECT a.band, a.text, "
+                "b.embedding, a.surprise, a.ts + 1, 0, a.source, a.episode_id, a.episode_title, "
+                "a.tags, a.slots, a.dream_state FROM entries a, entries b "
+                "WHERE a.text = 'Our CI runs on GitHub Actions.' "
+                "AND b.text = 'I like oat milk in my coffee.'", after_stop=True),
+            supersede("The staging database moved off db-stage-0 to db-stage-1.",
+                      old_text="The staging database used to be on db-stage-0."),
+        ],
+        "ops": [
+            # no anchor (an empty query is none): nothing to cluster
+            candidates(),
+            candidates(query=""),
+            # the query anchor: retrieval (access accrual), retired entries
+            # excluded, clusters by cosine to the seed
+            candidates(query=STAGING),
+            candidates(query=STAGING, min_cohesion=0.95),
+            candidates(query="continuous integration", sources=["agent"], top_k=5),
+            candidates(query=STAGING, tags=[" OPS "]),
+            candidates(query="what do we run", min_cluster_size=1, max_clusters=2),
+            candidates(query=STAGING, min_cohesion="nan"),
+            candidates(query=STAGING, episode="@root:sess-c2:32"),
+            # empty lists and an empty episode are no filter
+            candidates(query=STAGING, sources=[], tags=[], episode=""),
+            # the episode anchor: its entries in band order, score 1.0
+            candidates(episode="@root:sess-c1:32", min_cohesion=0.3),
+            candidates(episode="@root:sess-c1:32", sources=["user"]),
+            candidates(episode="@root:sess-c1:32", tags=["ops"], min_cluster_size=1),
+            # the episode walk compares tags as stored: no normalization
+            candidates(episode="@root:sess-c1:32", tags=[" OPS "], min_cluster_size=1),
+            # a row gone behind the daemons' backs is filtered out
+            external("DELETE FROM entries WHERE text = 'Staging DB host is db-stage-1.'"),
+            candidates(query=STAGING),
+            # the episode walk's candidates are checked too, before the cut
+            candidates(episode="@root:sess-c2:32", top_k=1, min_cluster_size=1),
+        ],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -2057,6 +2131,15 @@ def normalize_records(a, b, stats=None):
                 a[k], b[k] = _clock(a[k]), _clock(b[k])
             elif k in RESPONSE_RECENT_CLOCK:
                 a[k], b[k] = _recent_clock(a[k]), _recent_clock(b[k])
+            elif (k in ("cohesion", "seed_score") and "members" in a and "members" in b
+                  and isinstance(a[k], (int, float)) and isinstance(b[k], (int, float))
+                  and not isinstance(a[k], bool)):
+                # A candidate cluster: its seed score rests on the query
+                # embedding (the score allowance); its cohesion on vectors
+                # both banks hold identically (one rounding unit).
+                allow = COHESION_TOLERANCE if k == "cohesion" else SCORE_TOLERANCE
+                if abs(a[k] - b[k]) <= allow:
+                    a[k] = b[k] = f"<{k}>"
             elif (k == "score" and isinstance(a[k], (int, float))
                   and isinstance(b[k], (int, float)) and not isinstance(a[k], bool)):
                 d = abs(a[k] - b[k])
