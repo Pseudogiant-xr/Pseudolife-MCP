@@ -205,8 +205,10 @@ def check_w1c_shards(jobs):
             if words[:2] == ["python", "rust/cli_harness"]:
                 assert not any(word in W1C_ROWS for word in words)
     for step in job["steps"]:
-        if step.get("uses") in ("dtolnay/rust-toolchain@stable", "Swatinem/rust-cache@v2"):
+        if step.get("uses") == "dtolnay/rust-toolchain@stable":
             assert step["if"] == "!startsWith(matrix.suite, 'w1c-')"
+        if step.get("uses") == "Swatinem/rust-cache@v2":
+            assert "w1c-" not in step["if"] and CACHED_SUITES == {"eval", "cli", "cli-daemon"}
 
 
 def check_executable_coverage(jobs):
@@ -1402,3 +1404,123 @@ def test_windows_live_job_reports_but_never_gates():
     assert "pull_request" not in live["if"] and "merge_group" not in live["if"]
     assert live["name"] == "Parity live (non-gating) / ${{ matrix.os }} / ${{ matrix.suite }}"
     assert not live["name"].startswith("Parity /")
+
+
+# --- Rust caches: one key per compiling suite, saved on failure, no image toolchain ---
+
+TOOLCHAIN_STEP = "Keep only the pinned Rust toolchain"
+# The parity suites that compile (sent-YAML mutants in cli, the storage test
+# binary in cli-daemon, which_comparison in eval); the rest restored a 71 MB
+# registry they never read (master run 39236836263, 2026-10-19).
+CACHED_SUITES = {"eval", "cli", "cli-daemon"}
+CACHED_IF = "matrix.suite == 'eval' || matrix.suite == 'cli' || matrix.suite == 'cli-daemon'"
+
+
+def pinned_channel():
+    text = (ROOT / "rust/rust-toolchain.toml").read_text(encoding="utf-8")
+    return re.search(r'^channel = "([^"]+)"$', text, re.M).group(1)
+
+
+def cached_jobs():
+    jobs = workflow()["jobs"]
+    return {name: job for name, job in jobs.items()
+            if any(step.get("uses") == "Swatinem/rust-cache@v2" for step in job.get("steps", []))}
+
+
+def test_every_rust_cache_is_saved_on_failure_and_keeps_the_lockfile_hash():
+    jobs = cached_jobs()
+    assert set(jobs) >= {"rust", "candidate", "parity-checks", "source-mutants"}
+    for name, job in jobs.items():
+        cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
+        assert cache["with"]["cache-on-failure"] is True, name
+        # Turning the environment hash off also drops the Cargo.lock hash:
+        # the key would never change, and rust-cache skips the save on an
+        # exact hit, so the cache would freeze at its first save.
+        assert "add-rust-environment-hash-key" not in cache["with"], name
+
+
+def test_every_rust_cache_hashes_only_the_pinned_toolchain():
+    for name, job in cached_jobs().items():
+        steps = job["steps"]
+        toolchain = next(step for step in steps if step.get("uses") == "dtolnay/rust-toolchain@stable")
+        assert toolchain["with"]["toolchain"] == pinned_channel(), name
+        keep = next(step for step in steps if step.get("name") == TOOLCHAIN_STEP)
+        cache = next(step for step in steps if step.get("uses") == "Swatinem/rust-cache@v2")
+        assert steps.index(toolchain) < steps.index(keep) < steps.index(cache), name
+        # Never on a self-hosted runner: its toolchains belong to its owner.
+        expected = "runner.environment != 'self-hosted'"
+        if cache.get("if"):
+            expected += f" && ({cache['if']})"
+        assert keep["if"] == expected, name
+        assert keep["shell"] == "pwsh" and keep["run"] == steps_by_name("parity-checks")[TOOLCHAIN_STEP]["run"]
+
+
+def steps_by_name(job):
+    return {step.get("name"): step for step in workflow()["jobs"][job]["steps"]}
+
+
+def test_parity_suites_cache_under_their_own_keys():
+    cache = next(step for step in workflow()["jobs"]["parity-checks"]["steps"]
+                 if step.get("uses") == "Swatinem/rust-cache@v2")
+    # Nine suites shared one key: the first to save fixed it, and on an
+    # exact hit no later suite's compile was ever saved.
+    assert cache["with"]["key"] == "${{ matrix.suite }}"
+    assert "shared-key" not in cache["with"]
+    assert cache["if"] == CACHED_IF
+    assert CACHED_SUITES <= set(PARITY_SUITES)
+
+
+TOOLCHAIN_STUBS = r'''$ErrorActionPreference = 'stop'
+function rustup {
+    Add-Content -LiteralPath $env:PL_LOG -Value ($args -join ' ')
+    if ($args[0] -eq 'toolchain' -and $args[1] -eq 'list') {
+        $env:PL_TOOLCHAINS -split ';'
+        $global:LASTEXITCODE = 0
+    } elseif ($args[1] -eq 'uninstall') {
+        $global:LASTEXITCODE = [int]$env:PL_UNINSTALL_EXIT
+    } else { $global:LASTEXITCODE = 0 }
+}
+'''
+
+
+@pytest.mark.parametrize("toolchains, removed, exit_code, accepted", [
+    (["stable-x86_64-pc-windows-msvc", "1.94.0-x86_64-pc-windows-msvc (active, default)"],
+     ["stable-x86_64-pc-windows-msvc"], 0, True),
+    (["1.94.0-x86_64-unknown-linux-gnu (default)"], [], 0, True),
+    (["stable-x86_64-unknown-linux-gnu", "1.99.0-x86_64-unknown-linux-gnu",
+      "1.94.0-x86_64-unknown-linux-gnu (default)"],
+     ["stable-x86_64-unknown-linux-gnu", "1.99.0-x86_64-unknown-linux-gnu"], 0, True),
+    (["stable-x86_64-pc-windows-msvc", "1.94.0-x86_64-pc-windows-msvc (default)"],
+     ["stable-x86_64-pc-windows-msvc"], 1, False),
+    # A near miss: 1.94.0 as a prefix of another release is not the pin.
+    (["1.94.01-x86_64-pc-windows-msvc", "1.94.0-x86_64-pc-windows-msvc (default)"],
+     ["1.94.01-x86_64-pc-windows-msvc"], 0, True),
+])
+def test_toolchain_cleanup_removes_only_unpinned_toolchains(tmp_path, toolchains, removed, exit_code, accepted):
+    import os
+    step = steps_by_name("parity-checks")[TOOLCHAIN_STEP]
+    log = tmp_path / "rustup.log"
+    log.write_text("", encoding="utf-8")
+    env = dict(os.environ, PL_LOG=str(log), PL_TOOLCHAINS=";".join(toolchains),
+               PL_UNINSTALL_EXIT=str(exit_code), GITHUB_WORKSPACE=str(ROOT))
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", TOOLCHAIN_STUBS + step["run"]],
+                            env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == accepted, result.stdout + result.stderr
+    calls = log.read_text(encoding="utf-8").splitlines()
+    uninstalled = [call.split()[-1] for call in calls if call.startswith("toolchain uninstall")]
+    assert uninstalled == (removed if accepted else removed[:1])
+
+
+def test_toolchain_cleanup_refuses_without_a_pinned_channel(tmp_path):
+    import os
+    step = steps_by_name("parity-checks")[TOOLCHAIN_STEP]
+    (tmp_path / "rust").mkdir()
+    (tmp_path / "rust/rust-toolchain.toml").write_text("[toolchain]\n", encoding="utf-8")
+    log = tmp_path / "rustup.log"
+    log.write_text("", encoding="utf-8")
+    env = dict(os.environ, PL_LOG=str(log), PL_TOOLCHAINS="stable-x86_64-pc-windows-msvc",
+               PL_UNINSTALL_EXIT="0", GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", TOOLCHAIN_STUBS + step["run"]],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "uninstall" not in log.read_text(encoding="utf-8")

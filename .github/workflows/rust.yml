@@ -118,10 +118,11 @@ jobs:
     # 116323387861, 116326383784), 20 min in before the override builds,
     # after the daemon's warm release compile went from about 1 to 2 min.
     # No cold run has finished since: an estimated 26-34 min. Warm runs
-    # peak at 17.5 min. A cold run must finish, or the cache is never saved
-    # and every later run is cold too: the cache key hashes the runner
-    # image's own Rust, so each image rollout starts cold (windows-latest
-    # 1.98.1 -> 1.99.0, 2026-10-15).
+    # peak at 17.5 min. A cold run used to have to finish, or the cache was
+    # never saved and every later run was cold too, and the cache key hashed
+    # the runner image's own Rust, so each image rollout started cold
+    # (windows-latest 1.98.1 -> 1.99.0, 2026-10-15). The cache now saves on
+    # failure and hashes only the pinned toolchain (see its steps).
     timeout-minutes: 45
     defaults:
       run:
@@ -186,9 +187,37 @@ jobs:
         with:
           toolchain: 1.94.0
           components: rustfmt, clippy
+      # rust-cache hashes every installed toolchain (`rustup toolchain list`)
+      # into its key, so each rollout of the runner image's own stable Rust
+      # started every cache cold (windows-latest 1.98.1 -> 1.99.0,
+      # 2026-10-15). With only the pin left, the key changes when the pin or
+      # Cargo.lock does. add-rust-environment-hash-key: false would drop the
+      # Cargo.lock hash too, and a key that never changes is never saved
+      # again (rust-cache skips the save on an exact hit). Hosted only: a
+      # self-hosted runner's toolchains belong to its owner.
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted'
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+          # A cold run that times out still saves what it compiled, so the
+          # next run is not cold too (three cold cancellations, 2026-10-15).
+          cache-on-failure: true
       - name: Install pinned nextest in the runner temporary directory
         shell: pwsh
         run: |
@@ -278,10 +307,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted'
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
           shared-key: shim-release
+          cache-on-failure: true
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3
       - name: Retain default static candidate
@@ -480,10 +527,35 @@ jobs:
         if: "!startsWith(matrix.suite, 'w1c-')"
         with:
           toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted' && (matrix.suite == 'eval' || matrix.suite == 'cli' || matrix.suite == 'cli-daemon')
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      # One key per suite. All suites shared one key: the first to save fixed
+      # it, and on an exact hit no later suite's compile was ever saved.
+      # Only the suites that compile cache (sent-YAML mutants in cli, the
+      # storage test binary in cli-daemon, which_comparison in eval); the
+      # rest restored a 71 MB registry they never read (master run
+      # 39236836263, 2026-10-19).
       - uses: Swatinem/rust-cache@v2
-        if: "!startsWith(matrix.suite, 'w1c-')"
+        if: matrix.suite == 'eval' || matrix.suite == 'cli' || matrix.suite == 'cli-daemon'
         with:
           workspaces: rust
+          key: ${{ matrix.suite }}
+          cache-on-failure: true
           save-if: ${{ runner.environment != 'self-hosted' }}
       - name: Install checkout and test dependencies
         timeout-minutes: 10
@@ -1201,10 +1273,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted'
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
           key: cli-source-mutants
+          cache-on-failure: true
       - name: Install source harness dependencies
         # Network-bound setup keeps the existing ten-minute dependency floor.
         timeout-minutes: 10
