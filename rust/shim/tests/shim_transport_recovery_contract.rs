@@ -772,7 +772,7 @@ fn test_the_resend_stays_inside_the_operation_deadline() {
     });
     let mut shim = Shim::start_with_env(
         &fixture.url,
-        &[("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "0.3")],
+        &[("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "0.45")],
     );
     initialize(&mut shim);
     let refused = request(

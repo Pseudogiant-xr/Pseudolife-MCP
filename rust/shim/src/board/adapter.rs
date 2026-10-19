@@ -189,12 +189,18 @@ async fn fetch_context(
     config: &Config,
     snapshot: &CredentialSnapshot,
     saved: Option<&Value>,
+    read_only: bool,
 ) -> Result<Context, Failure> {
     let nonce = uuid::Uuid::new_v4().simple().to_string();
-    let body = saved.map_or_else(
+    let mut body = saved.map_or_else(
         || json!({}),
         |identity| json!({"agent_id":identity["agent_id"],"nonce":nonce}),
     );
+    if read_only {
+        // An existing authority check must never initialize the bank
+        // identity or its audit history (Python `validate_snapshot`).
+        body["read_only"] = json!(true);
+    }
     let value = request(
         client,
         config,
@@ -276,7 +282,7 @@ impl Adapter {
             .map(Ok)
             .unwrap_or_else(|| config.provider.snapshot())
             .map_err(|_| Failure::local("credential_unavailable"))?;
-        let mut context = fetch_context(&client, &config, &snapshot, None).await?;
+        let mut context = fetch_context(&client, &config, &snapshot, None, false).await?;
         current(&config.provider, &snapshot)?;
         let loaded_identity = config
             .state
@@ -305,7 +311,8 @@ impl Adapter {
         let mut identity = if let Some(mut saved) = saved {
             match saved.get("version") {
                 None => {
-                    let proved = fetch_context(&client, &config, &snapshot, Some(&saved)).await?;
+                    let proved =
+                        fetch_context(&client, &config, &snapshot, Some(&saved), false).await?;
                     if proved != context {
                         return Err(Failure::local("bank_identity_mismatch"));
                     }
@@ -337,7 +344,7 @@ impl Adapter {
             }
             saved
         } else {
-            context = fetch_context(&client, &config, &snapshot, None).await?;
+            context = fetch_context(&client, &config, &snapshot, None, false).await?;
             let mut capabilities = if config.codex {
                 json!({"pull":true,"channel":false,"codex":config.wake,"resumable":config.state.is_some()})
             } else {
@@ -394,7 +401,7 @@ impl Adapter {
             saved
         };
         // Every instance request validates the current bank before exposing its key.
-        context = fetch_context(&client, &config, &snapshot, None).await?;
+        context = fetch_context(&client, &config, &snapshot, None, false).await?;
         context.check_binding(&identity).map_err(Failure::local)?;
         let attachment = uuid::Uuid::new_v4().simple().to_string();
         let mut body =
@@ -540,10 +547,16 @@ impl Adapter {
         if self.closing.load(Ordering::Acquire) {
             return Err(Failure::local("closing"));
         }
-        let context = match fetch_context(&self.client, &self.config, snapshot, None).await {
+        let context = match fetch_context(&self.client, &self.config, snapshot, None, true).await {
             Ok(context) => context,
             Err(failure) => {
-                self.record_failure(failure.clone()).await;
+                // A check that got no answer, or a 5xx, says nothing about
+                // delivery; like Python's validate_snapshot it records no
+                // failure, so a call that recovers on its retry carries no
+                // "degraded" note and starts no reattach.
+                if !failure.transient() {
+                    self.record_failure(failure.clone()).await;
+                }
                 return Err(failure);
             }
         };
@@ -775,7 +788,7 @@ impl Adapter {
             .provider
             .snapshot()
             .map_err(|_| Failure::local("credential_unavailable"))?;
-        let context = fetch_context(&self.client, &self.config, &snapshot, None).await?;
+        let context = fetch_context(&self.client, &self.config, &snapshot, None, false).await?;
         let wake = self.wake.load(Ordering::Acquire);
         let mut capabilities = if self.config.codex {
             json!({"pull":true,"channel":false,"codex":wake,"resumable":false})
@@ -1145,7 +1158,8 @@ impl Adapter {
         self.tasks.wait().await;
         let snapshot = self.config.provider.snapshot().ok();
         if let Some(snapshot) = snapshot
-            && let Ok(context) = fetch_context(&self.client, &self.config, &snapshot, None).await
+            && let Ok(context) =
+                fetch_context(&self.client, &self.config, &snapshot, None, false).await
         {
             let mailbox = self.mailbox.lock().await;
             if context.check_binding(&mailbox.identity).is_ok()

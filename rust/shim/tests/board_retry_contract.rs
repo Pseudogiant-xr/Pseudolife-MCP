@@ -741,7 +741,9 @@ async fn board_identity_pending_registration_is_not_retried_as_a_blip() {
     // The near miss for a session that legitimately has no identity yet: a
     // pending registration refuses a board write at once with its own text.
     let fixture = Fixture::new(0);
-    for _ in 0..20 {
+    // Enough refusals that registration cannot land before the call, even
+    // on a stalled runner (40 ms backoff each).
+    for _ in 0..200 {
         fixture.answer("context", outage("refused"));
     }
     let home = Home::new();
@@ -753,5 +755,45 @@ async fn board_identity_pending_registration_is_not_retried_as_a_blip() {
     let error = board_call(&board, "memory_agents").await.err().unwrap();
     assert_eq!(error.message, policy::PENDING);
     assert!(started.elapsed() < Duration::from_secs(2));
+    board.close().await;
+}
+
+#[tokio::test]
+async fn board_identity_recovered_check_leaves_no_degraded_note() {
+    // A check that failed once and then passed was a blip, not a delivery
+    // outage: like Python's validate_snapshot, it records no failure, so
+    // the call that recovered carries no "degraded" note and starts no
+    // reattach. The check asks the daemon for a read-only answer.
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let runtime = runtime(&fixture, false);
+    let board = Board::attach_options(runtime.clone(), checking(&runtime, &home)).await;
+    let call = registered(&board).await;
+    let mut result = rmcp::model::CallToolResult::success(vec![]);
+    board.finish_call(&call, &mut result).await;
+    let attaches = fixture.count("/attach");
+    let start = fixture.requests.lock().unwrap().len();
+    fixture.answer("context", blip("dropped"));
+    let Ok(Preparation::Forward(call)) = board_call(&board, "memory_agents").await else {
+        panic!("one failed identity check refused the board call");
+    };
+    let mut result = rmcp::model::CallToolResult::success(vec![]);
+    let hint = board.finish_call(&call, &mut result).await;
+    assert!(
+        !hint.unwrap_or_default().contains("degraded"),
+        "a recovered check left a degraded note"
+    );
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(
+        fixture.count("/attach"),
+        attaches,
+        "a recovered check reattached"
+    );
+    let checks = fixture.requests.lock().unwrap()[start..]
+        .iter()
+        .filter(|request| request.path.ends_with("/context"))
+        .map(|request| request.body.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(checks, vec![json!({"read_only":true}); 2]);
     board.close().await;
 }
