@@ -511,6 +511,30 @@ def test_an_empty_or_malformed_digest_never_fires(tmp_path, watermark, body):
     assert _read_seen(tmp_path) == "3"
 
 
+def test_a_wait_already_used_up_still_looks_once(tmp_path):
+    """SECONDS counts the hook's own start-up, which costs seconds per spawn
+    on a loaded Windows runner: a short PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT used
+    to expire before the first look, so mail already waiting was missed and
+    every "never wakes" test with a short wait passed without looking. The
+    first look now always happens; the wait bounds only what follows it."""
+    _digest(tmp_path, 3, BODY)
+    result, _ = _run(_env(tmp_path, wait=0))
+    assert result.returncode == 2 and _woke(result.stderr)
+    assert _read_seen(tmp_path) == "3"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Git Bash spawns make wall-clock bounds unreliable")
+def test_the_wait_ends_at_its_deadline_not_a_poll_later(tmp_path):
+    """The last sleep is cut to the time left: a 1 s wait used to sleep a
+    whole 5 s poll before noticing it was over (2026-10-19: every short-wait
+    test here took 5 or 10 s)."""
+    _digest(tmp_path, 3, BODY)
+    _seen(tmp_path, 3)
+    result, elapsed = _run(_env(tmp_path, wait=1))
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert elapsed < _constant("POLL") - 1, elapsed
+
+
 def test_times_out_quietly(tmp_path):
     _digest(tmp_path, 3, BODY)
     _seen(tmp_path, 3)
@@ -734,7 +758,7 @@ def test_a_digest_change_without_a_ring_does_not_wake(tmp_path):
     ``<key>.ring`` only for a ring the daemon decided (chatter to a parked
     session is withheld), and the hook fires only on a ring past ``.seen``."""
     _digest(tmp_path, 3, BODY, ring=False)
-    result, _ = _run(_env(tmp_path, wait=8))
+    result, _ = _run(_env(tmp_path, wait=1))
     assert (result.returncode, result.stderr) == (0, "")
     assert _read_seen(tmp_path) is None
 
@@ -753,7 +777,7 @@ def test_a_ring_for_a_digest_already_seen_holds_fire(tmp_path):
     moved ``.seen``): the ring is stale and the hook waits for the next."""
     _digest(tmp_path, 3, BODY, ring="rung anyone")
     _seen(tmp_path, 3)
-    result, _ = _run(_env(tmp_path, wait=8))
+    result, _ = _run(_env(tmp_path, wait=1))
     assert (result.returncode, result.stderr) == (0, "")
 
 
@@ -772,7 +796,7 @@ def test_a_nudged_ring_never_wakes(tmp_path):
     ``nudged`` marker (an idle session that never parked), left by a shim
     from before the change, is no ring. Only ``rung`` fires."""
     _digest(tmp_path, 3, BODY, ring="nudged no_park")
-    result, _ = _run(_env(tmp_path, wait=8))
+    result, _ = _run(_env(tmp_path, wait=1))
     assert (result.returncode, result.stderr) == (0, "")
     assert _read_seen(tmp_path) != "3"
 
@@ -791,7 +815,7 @@ def test_an_urgent_ring_wakes_a_session_that_never_parked(tmp_path):
 def test_a_malformed_ring_never_wakes(tmp_path, ring):
     _digest(tmp_path, 3, BODY, ring=False)
     (tmp_path / "digests" / f"{_key()}.ring").write_text(ring)
-    result, _ = _run(_env(tmp_path, wait=8))
+    result, _ = _run(_env(tmp_path, wait=1))
     assert (result.returncode, result.stderr) == (0, "")
 
 
@@ -894,7 +918,7 @@ def _turn(tmp_path, stamp, key=None):
 
 
 def _gate_env(tmp_path, server, **extra):
-    return _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+    return _env(tmp_path, wait=1, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
                 PSEUDOLIFE_MCP_TOKEN="fixture-token", **extra)
 
 
