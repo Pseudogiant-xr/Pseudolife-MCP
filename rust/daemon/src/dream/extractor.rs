@@ -741,6 +741,8 @@ fn json_error_expects_value(text: &str) -> bool {
         Value,
         Other,
     }
+    /// `py_loads`' nesting cap (`mcp/py_loads.rs` `MAX_DEPTH`).
+    const MAX_NESTING: usize = 900;
     fn ws(s: &[char], mut i: usize) -> usize {
         while i < s.len() && matches!(s[i], ' ' | '\t' | '\n' | '\r') {
             i += 1;
@@ -812,7 +814,13 @@ fn json_error_expects_value(text: &str) -> bool {
         }
         Some(k)
     }
-    fn value(s: &[char], i: usize) -> Result<usize, Fail> {
+    // Nesting past the depth `py_loads` caps (its `MAX_DEPTH`) stops here,
+    // as CPython's scanner stops with a RecursionError: never "Expecting
+    // value", and never an unbounded recursion on untrusted model output.
+    fn value(s: &[char], i: usize, depth: usize) -> Result<usize, Fail> {
+        if depth > MAX_NESTING {
+            return Err(Fail::Other);
+        }
         let Some(&c) = s.get(i) else {
             return Err(Fail::Value);
         };
@@ -831,7 +839,7 @@ fn json_error_expects_value(text: &str) -> bool {
                     if s.get(i) != Some(&':') {
                         return Err(Fail::Other);
                     }
-                    i = ws(s, value(s, ws(s, i + 1))?);
+                    i = ws(s, value(s, ws(s, i + 1), depth + 1)?);
                     match s.get(i) {
                         Some('}') => return Ok(i + 1),
                         Some(',') => i = ws(s, i + 1),
@@ -845,7 +853,7 @@ fn json_error_expects_value(text: &str) -> bool {
                     return Ok(i + 1);
                 }
                 loop {
-                    i = ws(s, value(s, i)?);
+                    i = ws(s, value(s, i, depth + 1)?);
                     match s.get(i) {
                         Some(']') => return Ok(i + 1),
                         Some(',') => i = ws(s, i + 1),
@@ -867,7 +875,7 @@ fn json_error_expects_value(text: &str) -> bool {
     if s.first() == Some(&'\u{feff}') {
         return false;
     }
-    match value(&s, ws(&s, 0)) {
+    match value(&s, ws(&s, 0), 0) {
         Err(f) => f == Fail::Value,
         Ok(_) => false,
     }
@@ -1601,6 +1609,18 @@ pub async fn status_extractor_fields(
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[test]
+    fn deeply_nested_replies_neither_recurse_unbounded_nor_read_as_expecting_value() {
+        // A hostile or broken model reply nested far past the cap must not
+        // overflow the stack; CPython stops it with a RecursionError, which
+        // is not "Expecting value".
+        for open in ["[", "{\"k\":"] {
+            let text = open.repeat(100_000);
+            assert!(!json_error_expects_value(&text));
+        }
+        assert!(json_error_expects_value(&"[".repeat(10)));
+    }
 
     #[test]
     fn json_errors_classify_like_the_c_scanner() {
