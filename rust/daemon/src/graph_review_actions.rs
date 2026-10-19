@@ -66,7 +66,7 @@ const REVIEW_NOTES: &[(&str, &str)] = &[
     ),
 ];
 
-fn now() -> f64 {
+pub(super) fn now() -> f64 {
     crate::episodes::now()
 }
 
@@ -238,7 +238,7 @@ fn py_int_str(s: &str) -> Option<Value> {
 
 /// Python's `int(value)` for a decoded JSON value, or the message of the
 /// TypeError / ValueError it raises.
-fn py_int(v: &Value) -> Result<Value, String> {
+pub(super) fn py_int(v: &Value) -> Result<Value, String> {
     match v {
         Value::Bool(b) => Ok(json!(i64::from(*b))),
         Value::Number(n) if super::is_int_literal(n) => Ok(int_value(&n.to_string())),
@@ -520,7 +520,7 @@ fn json_key(k: &Value) -> Result<String, String> {
 }
 
 /// `dict(value or {})` over a decoded JSON value.
-fn py_dict(v: Option<&Value>) -> Result<Map<String, Value>, String> {
+pub(super) fn py_dict(v: Option<&Value>) -> Result<Map<String, Value>, String> {
     let v = match v {
         Some(v) if py_truthy(v) => v,
         _ => return Ok(Map::new()),
@@ -565,7 +565,7 @@ fn py_dict(v: Option<&Value>) -> Result<Map<String, Value>, String> {
     }
 }
 
-async fn set_meta_body(c: &Client, key: &str, value: &Value) -> Result<(), ToolError> {
+pub(super) async fn set_meta_body(c: &Client, key: &str, value: &Value) -> Result<(), ToolError> {
     c.execute(
         "INSERT INTO meta (key, value) VALUES ($1, $2::jsonb) \
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
@@ -700,7 +700,7 @@ async fn confirm_human_proposal_body(c: &Client, queue: &str, pid: &Pid) -> Resu
 }
 
 /// A tool error raised inside `txn::run`, so the transaction rolls back.
-struct Tx(ToolError);
+pub(super) struct Tx(pub(super) ToolError);
 
 impl From<tokio_postgres::Error> for Tx {
     fn from(e: tokio_postgres::Error) -> Self {
@@ -708,7 +708,7 @@ impl From<tokio_postgres::Error> for Tx {
     }
 }
 
-async fn in_txn<'c, T, F, Fut>(client: &'c Client, body: F) -> Result<T, ToolError>
+pub(super) async fn in_txn<'c, T, F, Fut>(client: &'c Client, body: F) -> Result<T, ToolError>
 where
     F: FnOnce(&'c Client) -> Fut,
     Fut: std::future::Future<Output = Result<T, ToolError>>,
@@ -718,7 +718,7 @@ where
         .map_err(|Tx(e)| e)
 }
 
-async fn reads<'c, T, F, Fut>(client: &'c Client, body: F) -> Result<T, ToolError>
+pub(super) async fn reads<'c, T, F, Fut>(client: &'c Client, body: F) -> Result<T, ToolError>
 where
     F: FnOnce(&'c Client) -> Fut,
     Fut: std::future::Future<Output = Result<T, ToolError>>,
@@ -873,7 +873,7 @@ async fn insert_proposal(
 }
 
 /// `dismiss_pair` (3414-3425) on a borrowed client.
-async fn dismiss_pair_body(c: &Client, a: &str, b: &str) -> Result<bool, ToolError> {
+pub(super) async fn dismiss_pair_body(c: &Client, a: &str, b: &str) -> Result<bool, ToolError> {
     let mut pair = [a, b];
     pair.sort();
     Ok(c.query_opt(
@@ -1530,7 +1530,7 @@ async fn reject_entity(ready: &Ready, pid: &Pid) -> Result<Value, ToolError> {
 }
 
 /// `_noted(out, _REVIEW_NOTES)`: a known `reason` gains its `note`.
-fn noted(mut out: Value) -> Value {
+pub(super) fn noted(mut out: Value) -> Value {
     if let Value::Object(m) = &mut out
         && let Some(Value::String(code)) = m.get("reason")
         && let Some((_, note)) = REVIEW_NOTES.iter().find(|(c, _)| c == code)

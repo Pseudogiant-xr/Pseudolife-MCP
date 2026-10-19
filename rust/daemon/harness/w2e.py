@@ -103,6 +103,7 @@ Rust daemon; the test login (``pgdisposable``) for the banks.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -238,7 +239,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-review-accept-no-fold", "mcp-review-accept-no-floor",
            "mcp-review-dismiss-aliases", "mcp-review-reject-no-dismiss",
            "mcp-review-propose-keep-violations", "mcp-review-pair-index-noop",
-           "mcp-review-analyzer-no-dismiss", "mcp-review-relate-state-miss"]
+           "mcp-review-analyzer-no-dismiss", "mcp-review-relate-state-miss",
+           # memory_graph_review's slot actions: caught by review-slots.
+           "mcp-review-slot-meta-noop", "mcp-review-slot-restore-oldest",
+           "mcp-review-slot-restore-over-live", "mcp-review-slot-no-decision"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1250,7 +1254,7 @@ def supersede(new_text, headers=(), **kw) -> dict:
 
 # Scenarios whose operations may include ``external`` writes.
 EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates",
-                   "review-list", "review-actions"}
+                   "review-list", "review-actions", "review-slots"}
 
 
 def external(statement: str) -> dict:
@@ -2329,6 +2333,282 @@ SCENARIOS.update({
         "config": "memory:\n  deep_dream:\n    analyzer_file_duplicates: false\n",
         "seed": REVIEW_SEED,
         "ops": [review()],
+    },
+})
+
+
+# memory_graph_review's slot actions: dismiss_slot_pair and restore_slot
+# through every branch and refusal. World facts come from
+# memory_world_set; the seeding daemon's own memory_forget retires the ones
+# a compaction purge (an after-stop DELETE of the retired row) leaves only
+# as an audit snapshot. Lessons are SQL seeds (only the dream writes
+# lessons), with fixed stamps and no embedding, and so are the curated
+# duplicate retirements (only the dream's curation writes them): their
+# evidence is curation_safety.snapshot_record's shape over those rows,
+# fingerprinted as evidence_fingerprint fingerprints a plain dict.
+def slot_norm(s: str) -> str:
+    """``cortex._norm_key`` for the ASCII names below."""
+    return re.sub(r"[\s._\-/]+", "-", s.strip().casefold()).strip("-")
+
+
+def evidence_fp(record: dict) -> str:
+    """``curation_safety.evidence_fingerprint`` of a plain JSON dict."""
+    return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=False, allow_nan=False)
+                          .encode("utf-8")).hexdigest()
+
+
+def _lit(v) -> str:
+    if v is None:
+        return "NULL"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, (list, dict)):
+        return "'" + json.dumps(v).replace("'", "''") + "'::jsonb"
+    return "'" + str(v).replace("'", "''") + "'"
+
+
+SLOT_STAMP = 1700000000.0
+_SLOT_COMMON = ("entity", "attribute", "value", "polarity", "status", "confidence", "origin",
+                "support", "provenance", "asserted_at", "last_confirmed", "supersedes_value",
+                "superseded_by_value", "superseded_at", "tx_time", "valid_time", "hlc_phys",
+                "hlc_logical", "writer_id", "session_id", "version")
+
+
+def slot_lesson(task, aspect, lesson, *, status="current", about=None, polarity="+",
+                asserted=SLOT_STAMP, superseded_at=None, hlc_logical=0) -> dict:
+    """A lessons row (its columns, no embedding)."""
+    return {"entity": task, "attribute": aspect, "value": lesson, "polarity": polarity,
+            "status": status, "confidence": 0.8, "origin": "agent", "support": [],
+            "provenance": ["signal:1"], "asserted_at": asserted, "last_confirmed": asserted,
+            "supersedes_value": None, "superseded_by_value": None,
+            "superseded_at": superseded_at, "tx_time": asserted, "valid_time": asserted,
+            "hlc_phys": int(asserted * 1000), "hlc_logical": hlc_logical, "writer_id": "seed",
+            "session_id": None, "version": 1, "about": about, "outcome": "success"}
+
+
+def slot_world(entity, attribute, value, *, status="current", asserted=SLOT_STAMP,
+               superseded_at=None, hlc_logical=0) -> dict:
+    """A world_facts row (its columns, no embedding)."""
+    return {"entity": entity, "attribute": attribute, "value": value, "polarity": "+",
+            "status": status, "confidence": 0.9, "origin": "source", "support": ["source"],
+            "provenance": [], "asserted_at": asserted, "last_confirmed": asserted,
+            "supersedes_value": None, "superseded_by_value": None,
+            "superseded_at": superseded_at, "tx_time": asserted, "valid_time": asserted,
+            "hlc_phys": int(asserted * 1000), "hlc_logical": hlc_logical, "writer_id": "seed",
+            "session_id": None, "version": 1, "source_url": "https://example.org/host",
+            "source_quote": value, "retrieved_at": SLOT_STAMP, "freshness_class": "evergreen",
+            "content_hash": None, "source_doc_id": None}
+
+
+def slot_row_sql(store: str, row: dict) -> dict:
+    """Seed-only: the row, after the seeding daemon stopped (its exit flush
+    rewrites the slots it holds)."""
+    table = "lessons" if store == "lesson" else "world_facts"
+    cols = dict(row, entity_norm=slot_norm(row["entity"]),
+                attribute_norm=slot_norm(row["attribute"]))
+    return sql(f"INSERT INTO {table} ({', '.join(cols)}) "
+               f"VALUES ({', '.join(_lit(v) for v in cols.values())})", after_stop=True)
+
+
+def slot_snapshot(store: str, row: dict, **changes) -> dict:
+    """``snapshot_record(store, record)`` of the row as hydration holds it."""
+    row = dict(row, **changes)
+    en, an = slot_norm(row["entity"]), slot_norm(row["attribute"])
+    snap = {"store": store, "key": f"{en}|{an}", "entity_norm": en, "attribute_norm": an}
+    snap.update({k: row[k] for k in _SLOT_COMMON})
+    snap.update({k: row[k] for k in (("about", "outcome") if store == "lesson" else
+                                     ("source_url", "source_quote", "retrieved_at",
+                                      "freshness_class", "content_hash", "source_doc_id"))})
+    snap["embedding"] = None
+    return snap
+
+
+def curated_retire(store: str, survivor: dict, loser: dict, *, keep="a", slot=None,
+                   decided_at=SLOT_STAMP + 500) -> dict:
+    """Seed-only: a curated duplicate retirement's audit row
+    (``curation_safety._audit_snapshot``): the loser retired at
+    ``decided_at``, the pair's evidence, which side was kept. ``slot`` names
+    the row (by default the loser's)."""
+    a, b = (survivor, loser) if keep == "a" else (loser, survivor)
+    retired = dict(loser, status="retired", superseded_at=decided_at)
+    record = dict(retired)
+    record.update({
+        "_curation_evidence_fingerprint": evidence_fp(loser),
+        "_curation_retired_fingerprint": evidence_fp(retired),
+        "_curation_duplicate": {"version": 1, "keep": keep, "a": a, "b": b,
+                                "a_fingerprint": evidence_fp(a),
+                                "b_fingerprint": evidence_fp(b), "loser_embedding": None},
+    })
+    record.pop("embedding")
+    if store == "lesson":
+        record.update(task=record.pop("entity"), aspect=record.pop("attribute"),
+                      lesson=record.pop("value"))
+    en, an = slot or (loser["entity_norm"], loser["attribute_norm"])
+    return sql("INSERT INTO store_decisions (store, entity_norm, attribute_norm, action, "
+               f"decided_by, reason, record, decided_at) VALUES ('{store}', {_lit(en)}, "
+               f"{_lit(an)}, 'retire', 'dream-curation', 'duplicate', {_lit(record)}, "
+               f"{decided_at!r})", after_stop=True)
+
+
+def audit_only(store: str, entity_norm: str, attribute_norm: str, record: dict) -> dict:
+    """Seed-only: a retire audit row whose slot row compaction purged."""
+    return sql("INSERT INTO store_decisions (store, entity_norm, attribute_norm, action, "
+               f"decided_by, reason, record, decided_at) VALUES ('{store}', "
+               f"{_lit(entity_norm)}, {_lit(attribute_norm)}, 'retire', 'human', NULL, "
+               f"{_lit(record)}, {SLOT_STAMP + 10!r})", after_stop=True)
+
+
+CURATE_SURVIVOR = slot_lesson("Curate Keys", "Approach", "Rotate keys quarterly.")
+CURATE_LOSER = slot_lesson("Curate Keys", "Method", "Rotate keys every quarter.",
+                           about="vault", asserted=SLOT_STAMP + 100, hlc_logical=1)
+CURATE_PURGED = slot_lesson("Curate Keys", "Schedule", "Rotate keys each quarter.",
+                            asserted=SLOT_STAMP + 200, hlc_logical=2)
+CURATE_WINDOW = slot_lesson("Curate Keys", "Window", "Rotate keys in the window.",
+                            asserted=SLOT_STAMP + 300)
+CURATE_HOST = slot_world("Curate Host", "OS", "Debian 12")
+CURATE_HOST_LOSER = slot_world("Curate Host", "Operating System", "Debian 12 (bookworm)",
+                               asserted=SLOT_STAMP + 50, hlc_logical=1)
+_L, _W = (lambda row, **kw: slot_snapshot("lesson", row, **kw),
+          lambda row, **kw: slot_snapshot("world", row, **kw))
+
+REVIEW_SLOTS_SEED = [
+    store("A note so the bank is not empty."),
+    # world facts the legacy restore brings back, and ones whose retired row
+    # a purge leaves only as an audit snapshot (a whole entity: mixed)
+    world_set("Rust", "edition", "2024", source_url="https://doc.rust-lang.org/"),
+    world_set("Rust", "latest stable version", "1.90.0", source_url="https://blog.rust-lang.org/"),
+    world_set("Python", "latest version", "3.13.0", source_url="https://www.python.org/"),
+    world_set("Kotlin", "latest version", "2.1.0", source_url="https://kotlinlang.org/"),
+    world_set("Kotlin", "edition", "K2", source_url="https://kotlinlang.org/docs/"),
+    forget("world", entity="Python"),
+    forget("world", entity="Kotlin"),
+    sql("DELETE FROM world_facts WHERE status = 'retired' AND (entity_norm = 'python' OR "
+        "(entity_norm = 'kotlin' AND attribute_norm = 'edition'))", after_stop=True),
+    # audit snapshots nothing else holds: an unsafe citation (rejected on
+    # rewrite) and one carrying a source document id
+    audit_only("world", "evil", "link", {
+        "entity": "Evil", "attribute": "link", "value": "click", "polarity": "+",
+        "status": "retired", "confidence": 0.7, "origin": "source",
+        "source_url": "javascript:alert(1)", "source_quote": "", "freshness_class": "volatile",
+        "retrieved_at": SLOT_STAMP, "content_hash": None, "source_doc_id": None,
+        "asserted_at": SLOT_STAMP, "last_confirmed": SLOT_STAMP}),
+    audit_only("world", "manual", "page-count", {
+        "entity": "Manual", "attribute": "page count", "value": "212", "polarity": "+",
+        "status": "retired", "confidence": 0, "origin": "source",
+        "source_url": "https://example.org/manual", "source_quote": "212 pages",
+        "freshness_class": "evergreen", "retrieved_at": SLOT_STAMP, "content_hash": "abc123",
+        "source_doc_id": 7, "asserted_at": SLOT_STAMP, "last_confirmed": SLOT_STAMP}),
+    # lessons: two retired records at one slot (the newer comes back), a
+    # live slot with a retired record, and lessons to forget and restore
+    # (an avoid lesson, an about that is a compound and gets no node)
+    slot_row_sql("lesson", slot_lesson("Rotate Keys", "Cadence", "Rotate keys yearly.",
+                                       status="retired", about="vault",
+                                       superseded_at=SLOT_STAMP + 100)),
+    slot_row_sql("lesson", slot_lesson("Rotate Keys", "Cadence", "Rotate keys quarterly.",
+                                       status="retired", about="vault",
+                                       asserted=SLOT_STAMP + 50,
+                                       superseded_at=SLOT_STAMP + 200)),
+    slot_row_sql("lesson", slot_lesson("Rotate Keys", "Owner",
+                                       "The security team owns rotation.")),
+    slot_row_sql("lesson", slot_lesson("Rotate Keys", "Owner", "The ops team owns rotation.",
+                                       status="retired", superseded_at=SLOT_STAMP + 150)),
+    slot_row_sql("lesson", slot_lesson("Ship Release", "Checklist",
+                                       "Skip the manual checklist.", polarity="-",
+                                       about="release checklist")),
+    slot_row_sql("lesson", slot_lesson("Ship Release", "Freeze", "Freeze merges a day ahead.",
+                                       about="pg+extractor")),
+    # curated duplicate retirements: the loser's row retired (or purged),
+    # a row naming another slot's loser, and evidence the survivor no
+    # longer matches; a world pair
+    slot_row_sql("lesson", CURATE_SURVIVOR),
+    slot_row_sql("lesson", dict(CURATE_LOSER, status="retired", superseded_at=SLOT_STAMP + 500)),
+    curated_retire("lesson", _L(CURATE_SURVIVOR), _L(CURATE_LOSER)),
+    curated_retire("lesson", _L(CURATE_SURVIVOR), _L(CURATE_PURGED), decided_at=SLOT_STAMP + 510),
+    curated_retire("lesson", _L(CURATE_SURVIVOR), _L(CURATE_LOSER),
+                   slot=("curate-keys", "owner"), decided_at=SLOT_STAMP + 520),
+    curated_retire("lesson", _L(CURATE_SURVIVOR, value="Rotate keys yearly."),
+                   _L(CURATE_WINDOW), keep="b", decided_at=SLOT_STAMP + 530),
+    slot_row_sql("world", CURATE_HOST),
+    slot_row_sql("world", dict(CURATE_HOST_LOSER, status="retired",
+                               superseded_at=SLOT_STAMP + 500)),
+    curated_retire("world", _W(CURATE_HOST), _W(CURATE_HOST_LOSER)),
+]
+
+AUTO_MARKERS = (
+    "INSERT INTO meta (key, value) VALUES ('curation_auto_dismissals_v1', "
+    "'{\"m1\": {\"store\": \"lesson\", \"a\": {\"key\": \"rotate-keys|owner\"}, "
+    "\"b\": {\"key\": \"rotate-keys|cadence\"}}, \"m2\": {\"store\": \"world\", "
+    "\"a\": {\"key\": \"rotate-keys|cadence\"}, \"b\": {\"key\": \"rotate-keys|owner\"}}, "
+    "\"m3\": {\"store\": \"lesson\", \"a\": {\"key\": \"x|y\"}, \"b\": {\"key\": \"z|w\"}}, "
+    "\"m4\": {\"store\": \"world\", \"a\": {\"key\": \"x|y\"}, \"b\": null}}') "
+    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+)
+REVIEW_SLOTS_OPS = [
+    # dismiss_slot_pair: the argument refusals, a bad store, a pair that is
+    # one slot or has a blank component
+    review("dismiss_slot_pair", store="lesson", src="rotate keys|cadence"),
+    review("dismiss_slot_pair", store="", src="a|b", dst="c|d"),
+    review("dismiss_slot_pair", store="lesson", src="a|b|c", dst="c|d"),
+    review("dismiss_slot_pair", store="bogus", src="a|b", dst="c|d"),
+    review("dismiss_slot_pair", store="lesson", src="Rotate_Keys|CADENCE",
+           dst="rotate keys|cadence"),
+    review("dismiss_slot_pair", store="world", src="|x", dst="rust|edition"),
+    # the first verdict writes the (absent) markers back as {}; a repeat is
+    # not new; with markers, only the same store's same pair is dropped
+    review("dismiss_slot_pair", store="lesson", src="rotate keys|cadence",
+           dst="Rotate Keys|Owner"),
+    review("dismiss_slot_pair", store="lesson", src="Rotate Keys|Owner",
+           dst="rotate keys|cadence"),
+    external(AUTO_MARKERS),
+    # m1 dropped; m4 (another store, a null side) is never sorted
+    review("dismiss_slot_pair", store="lesson", src="rotate keys|owner",
+           dst="rotate keys|cadence"),
+    # a literal pipe is its own slot
+    review("dismiss_slot_pair", store="lesson", src="ci%7Ccd|deploy", dst="ci-cd|deploy"),
+    # the same store's broken marker raises (invalid_argument, rolled back)
+    review("dismiss_slot_pair", store="world", src="rust|edition",
+           dst="rust|latest stable version"),
+    # restore_slot: the argument refusals
+    review("restore_slot", store="bogus", src="rotate keys"),
+    review("restore_slot", store="lesson"),
+    review("restore_slot", store="world", src="a|b|c"),
+    # lessons: the newest retired record; a live slot; nothing retired
+    review("restore_slot", store="lesson", src="rotate keys|cadence"),
+    review("restore_slot", store="lesson", src="Rotate Keys|Owner"),
+    review("restore_slot", store="lesson", src="rotate keys"),
+    review("restore_slot", store="lesson", src="nobody"),
+    # a forgotten task comes back whole, its graph links with it
+    forget("lesson", entity="ship release"),
+    review("restore_slot", store="lesson", src="Ship Release"),
+    review("restore_slot", store="lesson", src="ship release|freeze"),
+    # world facts: a retired record; then the audit snapshots alone, mixed
+    # with a retired record, rejected, and carrying a source document
+    forget("world", entity="Rust", attribute="edition"),
+    review("restore_slot", store="world", src="rust|edition"),
+    review("restore_slot", store="world", src="rust|edition"),
+    review("restore_slot", store="world", src="python|latest version"),
+    review("restore_slot", store="world", src="kotlin"),
+    review("restore_slot", store="world", src="evil|link"),
+    review("restore_slot", store="world", src="manual"),
+    # curated duplicates: a whole entity is ambiguous; a row naming another
+    # loser; stale evidence; the retired loser; the purged loser rebuilt
+    # from its evidence; then the slot is live
+    review("restore_slot", store="lesson", src="curate keys"),
+    review("restore_slot", store="lesson", src="curate keys|owner"),
+    review("restore_slot", store="lesson", src="curate keys|window"),
+    review("restore_slot", store="lesson", src="curate keys|method"),
+    review("restore_slot", store="lesson", src="curate keys|schedule"),
+    review("restore_slot", store="lesson", src="curate keys|method"),
+    review("restore_slot", store="world", src="curate host|operating system"),
+    review(),
+]
+
+SCENARIOS.update({
+    "review-slots": {
+        "config": None,
+        "seed": REVIEW_SLOTS_SEED,
+        "ops": REVIEW_SLOTS_OPS,
     },
 })
 

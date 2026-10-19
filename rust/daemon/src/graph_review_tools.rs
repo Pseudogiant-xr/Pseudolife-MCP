@@ -2,9 +2,11 @@
 //! is served: `mcp_server.memory_graph_review` (2309-2431) →
 //! `service.graph_review(scope)` (`service.py:7812-7895`) over the analyzer
 //! in `graph_review.rs`. The mutating actions (`propose`, `relate`,
-//! `dismiss_pair` and the five id actions) live in `graph_review_actions.rs`.
-//! `dismiss_slot_pair` and `restore_slot` answer the declared
-//! `not_implemented` stub, byte for byte what an unregistered tool answers.
+//! `dismiss_pair` and the five id actions) live in `graph_review_actions.rs`,
+//! the slot actions (`dismiss_slot_pair`, `restore_slot`) in
+//! `graph_review_slots.rs`. A lesson restore that would need the
+//! audit-snapshot fallback answers the declared `not_implemented` stub,
+//! byte for byte what an unregistered tool answers.
 //!
 //! The list is read-only. Python takes the service lock in two blocks (the
 //! loads, then the decision audit) and runs the analyzer between them; this
@@ -27,6 +29,8 @@ use crate::storage::graph;
 
 #[path = "graph_review_actions.rs"]
 mod actions;
+#[path = "graph_review_slots.rs"]
+mod slots;
 
 const TOOL: &str = "memory_graph_review";
 /// `review_decisions._INDEX_KEY`.
@@ -64,7 +68,29 @@ fn mcp_memory_graph_review<'a>(app: &'a crate::http::App, call: ToolCall<'a>) ->
             let _ws = ready.write.lock().await;
             graph_review(&ready, &app.service.config.memory.deep_dream, scope).await
         }),
-        "dismiss_slot_pair" | "restore_slot" => Box::pin(async { Err(unserved()) }),
+        action @ ("dismiss_slot_pair" | "restore_slot") => match slots::plan(action, a) {
+            Err(answer) => Box::pin(async move { Ok(answer) }),
+            Ok(plan) => {
+                let svc = app.service.clone();
+                let caller = crate::episodes::Caller {
+                    header_session: call.ident.header_session.clone(),
+                    transport_session: call.ident.transport_session.clone(),
+                };
+                let writer = call.ident.writer.clone();
+                Box::pin(async move {
+                    let ready = svc.ensure_init().await.map_err(internal)?;
+                    let r2 = ready.clone();
+                    ready
+                        .writes
+                        .spawn(async move {
+                            let ws = r2.write.lock().await;
+                            slots::run(&svc, &r2, &ws, &caller, &writer, plan).await
+                        })
+                        .await
+                        .map_err(internal)?
+                })
+            }
+        },
         action => match actions::plan(action, a) {
             // The argument refusals `mcp_server` answers before any service call.
             Err(answer) => Box::pin(async move { Ok(answer) }),
