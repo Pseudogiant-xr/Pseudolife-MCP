@@ -40,7 +40,7 @@ def request(port, method, body, headers, timeout=120, *, connection=None):
         if data is not None:
             c.putheader("Content-Length", str(len(data)))
         if data:
-            r, raw, send_error = _send_while_reading(c, method, data)
+            r, raw, send_error = send_while_reading(c, method, data)
         else:
             c.endheaders(data)
             r = c.getresponse()
@@ -56,7 +56,7 @@ def request(port, method, body, headers, timeout=120, *, connection=None):
     return out
 
 
-def _send_while_reading(c, method, data):
+def send_while_reading(c, method, data, *, encode_chunked=False):
     """Read the response on a helper thread that is waiting before the request is sent.
 
     The Rust daemon refuses an MCP body over its 4 MiB budget after reading
@@ -70,7 +70,8 @@ def _send_while_reading(c, method, data):
     raises, never passes. A complete response is returned even if the send
     was cut off, which the result records as ``send_error``; without one the
     read's error is raised, so a daemon that closes without a complete
-    answer still fails.
+    answer still fails. ``run.py`` sends its admission bodies the same way
+    (``data`` an iterable of chunks with ``encode_chunked``).
     """
     if c.sock is None:
         c.connect()
@@ -92,7 +93,7 @@ def _send_while_reading(c, method, data):
     reader.start()
     reading.wait()
     try:
-        c.endheaders(data)
+        c.endheaders(data, encode_chunked=encode_chunked)
         send_error = None
     except Exception as exc:
         send_error = f"{type(exc).__name__}: {exc}"
