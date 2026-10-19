@@ -347,7 +347,7 @@ this increment does not claim the complete write boundary or cutover readiness.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| A read racing a relate or an alias | waits on the service lock, so it sees the call's commits all or none | the write tools hold the writer lock, but reads that resolve entities (`memory_fact_get`, `memory_lesson_search`) do not take it: between a relate's node mints and its edge commit, a read can see the minted node without the edge | the read slices' lock-free reads; Python commits each store call on its own too, so a crash between them leaves the same partial state on both |
+| A read racing a relate or an alias | waits on the service lock, so it sees the call's commits all or none | the write tools hold the writer lock, but two reads of the graph do not take it (`memory_fact_get`'s entity resolution, `memory_history`'s graph load): between a relate's node mints and its edge commit, they can see a minted node without its edge (`memory_lesson_search` holds the lock) | the read slices' lock-free reads; Python commits each store call on its own too, so a crash between them leaves the same partial state on both |
 | Several current facts owning one slot key (the slot-key fold) | `LIMIT 1` with no order | the same statement | declared free: both read one unordered row |
 | `POST /api/graph/relate` and `/api/graph/unrelate` (the Console's graph editor) | served over the same service bodies | not served | the Console REST rows (PARITY.md); the bodies are shared when they are |
 | File mode (`graph_requires_postgres`) | answered when no database is configured | not reachable: the daemon is PostgreSQL-only | the PostgreSQL-only rows above |

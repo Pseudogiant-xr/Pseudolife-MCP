@@ -1789,6 +1789,10 @@ SCENARIOS.update({
             fact("Postgres", "port", "5432"),
             fact("Kettle", "brand", "Breville"),
             fact("Redis", "role", "cache"),
+            # a current fact whose owner node is gone: the fold mints it
+            fact("Nginx", "port", "80"),
+            sql("UPDATE facts SET entity_id = NULL WHERE entity = 'Nginx'; "
+                "DELETE FROM entities WHERE canonical = 'nginx'", after_stop=True),
         ],
         "ops": [
             # an unknown relation: suggestions, nothing minted
@@ -1798,6 +1802,10 @@ SCENARIOS.update({
             relate("PgBouncer", "depends-on", "Postgres"),
             # the slot-key fold: "postgres.port" is the Postgres port slot
             relate("postgres.port", "related-to", "Kettle"),
+            # a typed fold: the owner is backfilled; an owner without a node
+            # is minted under its own name and type, relinking its fact
+            relate("postgres.port", "uses", "Kettle", src_type="database"),
+            relate("nginx.port", "related-to", "Kettle", src_type="proxy"),
             # minting Breville relinks the Kettle fact's object; a later
             # cortex save must keep the link
             relate("Breville", "related-to", "Kettle"),
@@ -1859,6 +1867,10 @@ SCENARIOS.update({
             define("Related To", "redefined"),
             define("hosted-on", "src runs on host dst", inverse_of="hosts-of"),
             define("mirrors", "src mirrors dst", inverse_of="   "),
+            # code-point order differs from a collation's for these two
+            define("ab-z", "a relation"),
+            define("abc", "a relation"),
+            define("cycles-with", "src cycles with dst", inverse_of="nope"),
             # definitions: types, an inverse, a self-inverse, an empty
             # inverse (none), a redefinition overwriting
             define("Hosted On", "  src runs on host dst  ", src_type="service",
