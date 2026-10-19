@@ -516,8 +516,8 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_store | minimal | 4 | ported |
 | memory_search | minimal | 3 | ported |
 | memory_recent | full | 3 | ported |
-| memory_supersede | full | 4 | deferred |
-| memory_reinstate | full | 4 | deferred |
+| memory_supersede | full | 4 | ported |
+| memory_reinstate | full | 4 | ported |
 | memory_stats | core | 3 | ported |
 | memory_get | core | 3 | ported |
 | memory_reinforce | full | 4 | ported |
