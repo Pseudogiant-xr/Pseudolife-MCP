@@ -1851,7 +1851,8 @@ SCENARIOS.update({
         ],
         "ops": [
             # refusals: no name, no description, a builtin, an unknown
-            # inverse (the known list sorted), a blank inverse
+            # inverse (the known list sorted), a blank inverse; punctuation
+            # survives normalization, so "!!" is a name
             define("", "a relation"),
             define("!!", "a relation"),
             define("serves", "   "),

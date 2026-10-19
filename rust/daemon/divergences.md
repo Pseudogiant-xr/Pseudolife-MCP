@@ -43,10 +43,6 @@ tool's answers by value.
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
 | `memory_graph_review` | W3-H | No graph review/proposal service. |
 | `memory_consolidate` | W3-H | No consolidation service. |
-| `memory_graph_relate` | W3-H | Edge storage exists, but service-level validation, provenance and fact projection do not. |
-| `memory_graph_unrelate` | W3-H | Edge storage exists, but the public unrelate service does not. |
-| `memory_alias` | W3-H | Alias storage exists, but the public alias service and resident graph synchronization do not. |
-| `memory_relation_define` | W3-H | Relation storage exists, but the public relation-definition service does not. |
 
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset` and, since their body registrations, `memory_store`,
@@ -57,7 +53,8 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_outcome`, `memory_reinforce`, `memory_history`, `memory_world_set`,
 `memory_world_search`, `memory_lesson_search`, `memory_supersede`,
 `memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
-`memory_agents` and `memory_message`. The two board tools
+`memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
+`memory_relation_define`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -180,7 +177,7 @@ binding"). What it cannot or does not reproduce:
 |---|---|---|---|
 | Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
 | Colliding inverse provenance | base-set iteration can select different source relation names for the same inverse triple depending on hash seed | choose the lexicographically smallest asserted source relation; exact triple and valid provenance membership are checked, with smallest-source choice pinned | W3-H; declared deterministic choice; all other provenance exact |
-| Whole graph caps, communities, graph service/MCP wiring, fact projection, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | store and GraphStore read-model helpers; these services are not wired | W3-H, subsequent increments |
+| Whole graph caps, communities, graph service/MCP wiring, fact projection, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | store and GraphStore read-model helpers; these services are not wired (the four write tools are served: see "The graph store's write tools" below) | W3-H, subsequent increments |
 
 ## W2-D: GET /api/search
 
@@ -345,6 +342,15 @@ this increment does not claim the complete write boundary or cutover readiness.
 | The cosine `_cosine` (`consolidation.py:81-92`) | torch float32: `torch.dot` (BLAS order) over float32 norms | each sum accumulated in f64 and rounded to f32, then the same float32 division | measured-tolerance numeric substitution: results agree to about 1e-7 before the 4-place rounding; a cosine within that of `min_cohesion` could join one cluster and not the other |
 | The reference pool (ChromaDB documents) in a query anchor's retrieval | queried, appended, then dropped as unaddressable; with documents present and the reranker on, the larger pool can skip the rerank (`len(combined) <= top_n`) | never queried, as for `memory_search` | the search reference-pool row above (delegate ruling 2026-10-09: harness banks hold no documents); with documents and the reranker on, scores and seed order can differ |
 | The episode anchor's walk order | `band.entries` per band, which a multi-band preset reorders on relocation | bank order per band | the declared multi-band store divergence (EP11); every episode score is 1.0, so the walk order picks the seeds and the one entry kept per text |
+
+### The graph store's write tools (2026-10-19)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A read racing a relate or an alias | waits on the service lock, so it sees the call's commits all or none | the write tools hold the writer lock, but reads that resolve entities (`memory_fact_get`, `memory_lesson_search`) do not take it: between a relate's node mints and its edge commit, a read can see the minted node without the edge | the read slices' lock-free reads; Python commits each store call on its own too, so a crash between them leaves the same partial state on both |
+| Several current facts owning one slot key (the slot-key fold) | `LIMIT 1` with no order | the same statement | declared free: both read one unordered row |
+| `POST /api/graph/relate` and `/api/graph/unrelate` (the Console's graph editor) | served over the same service bodies | not served | the Console REST rows (PARITY.md); the bodies are shared when they are |
+| File mode (`graph_requires_postgres`) | answered when no database is configured | not reachable: the daemon is PostgreSQL-only | the PostgreSQL-only rows above |
 
 ## Coordination board completion (W2-F)
 
