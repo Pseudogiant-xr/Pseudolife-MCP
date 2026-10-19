@@ -50,7 +50,9 @@ def render() -> str:
         "//! `str.isprintable()` behind `repr(str)`; do not edit by hand.",
         "",
         "#[cfg(test)]",
-        f'pub const NONPRINTABLE_SHA256: &str = "{digest(nonprintable)}";',
+        # rustfmt's layout, so `cargo fmt` leaves the file as generated
+        "pub const NONPRINTABLE_SHA256: &str =",
+        f'    "{digest(nonprintable)}";',
         "",
         "/// The code points `str.isprintable()` rejects, as inclusive ranges.",
         "pub const NONPRINTABLE: &[(u32, u32)] = &[",
