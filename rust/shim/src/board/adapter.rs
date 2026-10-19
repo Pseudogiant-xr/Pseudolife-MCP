@@ -496,6 +496,32 @@ impl Adapter {
             .get("generation")
             .and_then(Value::as_i64)
             .ok_or(Failure::local("invalid_response"))?;
+        // Read on the digest's queue, after any write an abandoned earlier
+        // attempt still has queued there.
+        let watermark = match &config.digest {
+            Some(path) => {
+                let files = [path.clone(), path.with_extension("seen")];
+                state::offload(path, move || {
+                    Ok(files
+                        .iter()
+                        .filter_map(|path| state::read(path, 16384).ok())
+                        .filter_map(|bytes| {
+                            String::from_utf8_lossy(&bytes)
+                                .lines()
+                                .next()
+                                .unwrap_or("")
+                                .trim()
+                                .parse::<u64>()
+                                .ok()
+                        })
+                        .max()
+                        .unwrap_or(0))
+                })
+                .await
+                .unwrap_or(0)
+            }
+            None => 0,
+        };
         let mailbox = Mailbox {
             identity: std::mem::take(&mut identity),
             context,
@@ -503,22 +529,7 @@ impl Adapter {
             count: None,
             preview: vec![],
             digest: String::new(),
-            watermark: config.digest.as_ref().map_or(0, |path| {
-                [path.clone(), path.with_extension("seen")]
-                    .iter()
-                    .filter_map(|path| state::read(path, 16384).ok())
-                    .filter_map(|bytes| {
-                        String::from_utf8_lossy(&bytes)
-                            .lines()
-                            .next()
-                            .unwrap_or("")
-                            .trim()
-                            .parse::<u64>()
-                            .ok()
-                    })
-                    .max()
-                    .unwrap_or(0)
-            }),
+            watermark,
             delivered: 0,
             calls_since: 0,
             turn_seen: false,
@@ -1223,7 +1234,10 @@ impl Adapter {
             }
             mailbox.delivered = mailbox.watermark;
             mailbox.calls_since = 0;
-            if let Some(path) = &self.config.digest {
+            // Once `close` has begun, the marker it removes must stay removed.
+            if let Some(path) = &self.config.digest
+                && !self.closing.load(Ordering::Acquire)
+            {
                 let (seen, delivered) = (path.with_extension("seen"), mailbox.delivered);
                 // Queued on the digest's queue, not awaited: a caller
                 // cancelled here would lose the hint it has already counted

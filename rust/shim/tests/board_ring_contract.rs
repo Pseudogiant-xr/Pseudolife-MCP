@@ -298,3 +298,36 @@ async fn board_ring_late_hint_write_never_lowers_a_hook_seen_mark() {
         "a late hint write lowered .seen"
     );
 }
+#[tokio::test]
+async fn board_ring_queued_hint_write_keeps_a_higher_seen_mark() {
+    // The hint's `.seen` write is queued behind the digest; a hook that
+    // raised the mark meanwhile keeps it.
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let adapter = Adapter::enter(adapter_config(&fixture, &home))
+        .await
+        .unwrap();
+    let digest = home.0.join("digest.txt");
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let gate = state::offload(&digest, move || {
+        let _ = started.send(());
+        let _ = held.recv();
+        Ok(())
+    });
+    ready.await.unwrap();
+    let watermark = adapter.view().await.watermark;
+    assert!(adapter.deliver_hint().await.is_some());
+    let raised = watermark + 5;
+    write(&home, "digest.seen", &format!("{raised}\n"));
+    release.send(()).unwrap();
+    gate.await.unwrap();
+    state::drain(&digest).await;
+    let marked = String::from_utf8(state::read(&home.0.join("digest.seen"), 128).unwrap()).unwrap();
+    adapter.close().await;
+    assert_eq!(
+        marked.trim(),
+        raised.to_string(),
+        "the hint write lowered .seen"
+    );
+}
