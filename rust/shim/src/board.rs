@@ -36,6 +36,7 @@ pub struct Timing {
     pub retry_delays: [Duration; 6],
     pub registry_retry: Duration,
     pub identity_check_retry: Duration,
+    pub validation: Duration,
 }
 impl Default for Timing {
     fn default() -> Self {
@@ -51,6 +52,11 @@ impl Default for Timing {
             // unavailable" when that one read-only check had failed; the same
             // call seconds later worked.
             identity_check_retry: Duration::from_millis(500),
+            // An existing Codex thread's authority check (Python #637
+            // `validation_seconds`): the context request allows 5 s, so the
+            // 3 s startup budget would cancel a slow answer instead of
+            // classifying it. Two checks bound recovery to 12 s.
+            validation: Duration::from_secs(6),
         }
     }
 }
@@ -643,22 +649,41 @@ impl Board {
         };
         let mut entry = entry.lock().await;
         if let Some(adapter) = entry.adapter.clone() {
-            let validation = tokio::select! {_ = self.cancel.cancelled() => return Err("Coordination: session is closing.".into()), value = tokio::time::timeout(self.options.timing.startup, adapter.validated_headers(snapshot)) => value};
-            return match validation {
-                Ok(Ok(_)) => {
-                    entry.failure_hint.clear();
-                    Ok(adapter)
+            // Python #637 `_verified_existing`: an existing thread's check
+            // is retried once, at once, when it failed transiently and the
+            // credential it ran under is still current. The same adapter
+            // and saved mailbox serve the call; nothing is replayed.
+            for attempt in 0..2 {
+                if self.closing.load(Ordering::Acquire) {
+                    return Err("Coordination: session is closing.".into());
                 }
-                Ok(Err(failure)) => {
-                    entry.failure_hint = policy::registry_failure_hint(failure.code).into();
-                    Err(entry.failure_hint.clone())
+                let validation = tokio::select! {_ = self.cancel.cancelled() => return Err("Coordination: session is closing.".into()), value = tokio::time::timeout(self.options.timing.validation, adapter.validated_headers(snapshot)) => value};
+                let (code, status) = match validation {
+                    Ok(Ok(_)) => {
+                        // A completed check is fenced by closing too.
+                        if self.closing.load(Ordering::Acquire) {
+                            return Err("Coordination: session is closing.".into());
+                        }
+                        entry.failure_hint.clear();
+                        return Ok(adapter);
+                    }
+                    Ok(Err(failure)) => (failure.code, failure.status),
+                    Err(_) => ("timeout", None),
+                };
+                let transient = matches!(code, "timeout" | "transport_unavailable")
+                    || (code == "context_unavailable"
+                        && matches!(status, Some(429 | 500 | 502 | 503 | 504)));
+                // A credential rotated meanwhile is not retried under the old
+                // one: validated_headers refuses a stale snapshot before its
+                // request (credential_unavailable), as Python's explicit
+                // generation check does.
+                if transient && attempt == 0 && !self.closing.load(Ordering::Acquire) {
+                    continue;
                 }
-                Err(_) => {
-                    entry.failure_hint =
-                        policy::registry_failure_hint("attachment_unavailable").into();
-                    Err(entry.failure_hint.clone())
-                }
-            };
+                entry.failure_hint = policy::registry_failure_hint(code, status, true);
+                return Err(entry.failure_hint.clone());
+            }
+            unreachable!("the second attempt always returns");
         }
         if entry.retry.as_ref().is_some_and(|(generation, time)| {
             generation == snapshot.generation()
@@ -707,9 +732,10 @@ impl Board {
         let doorbell = self.doorbell.lock().await.clone();
         config.ring = doorbell.is_some();
         let result = tokio::select! {_=self.cancel.cancelled()=>return Err("Coordination: session is closing.".into()),result=tokio::time::timeout(self.options.timing.startup,Adapter::enter(config))=>result};
-        let failure_code = match &result {
-            Ok(Err(failure)) => failure.code,
-            _ => "attachment_unavailable",
+        let (failure_code, failure_status) = match &result {
+            Ok(Err(failure)) => (failure.code, failure.status),
+            Ok(Ok(_)) => ("", None),
+            Err(_) => ("timeout", None),
         };
         if let Ok(Ok(adapter)) = result {
             if self.closing.load(Ordering::Acquire) {
@@ -748,7 +774,7 @@ impl Board {
                 delivery.close().await;
             }
             entry.retry = Some((snapshot.generation().clone(), tokio::time::Instant::now()));
-            entry.failure_hint = policy::registry_failure_hint(failure_code).into();
+            entry.failure_hint = policy::registry_failure_hint(failure_code, failure_status, false);
             if !self.registry_failure_reported.swap(true, Ordering::AcqRel) {
                 crate::stderrln!(
                     "pseudolife-mcp: coordination unavailable; memory proxy remains active. Check the daemon's coordination setting, authentication and private adapter state."
@@ -833,12 +859,19 @@ impl Board {
             adapter
         };
         if let Some(bound) = adapter.clone() {
-            let mut checked = bound.validated_headers(&snapshot).await;
+            // A Codex thread's adapter was checked (or attached) just now by
+            // thread_adapter, so its identity headers are read without a
+            // second request, as Python reads `instance_headers`.
+            let mut checked = if registry {
+                bound.instance_headers(&snapshot).await
+            } else {
+                bound.validated_headers(&snapshot).await
+            };
             // A board call checks once more before a transient failure (no
             // answer, 5xx, 429) refuses it; ordinary memory calls never wait.
             // A credential rotated meanwhile is not retried: the check
             // refuses a stale snapshot before its request.
-            if required && checked.as_ref().is_err_and(adapter::Failure::transient) {
+            if required && !registry && checked.as_ref().is_err_and(adapter::Failure::transient) {
                 tokio::time::sleep(self.options.timing.identity_check_retry).await;
                 checked = bound.validated_headers(&snapshot).await;
             }
@@ -854,7 +887,7 @@ impl Board {
                     bound.note_turn().await;
                     self.status.lock().await.validated = true;
                 }
-                Err(failure) if required && failure.transient() => {
+                Err(failure) if required && !registry && failure.transient() => {
                     return Err(coordination_error(
                         Some(&policy::identity_check_failed(failure.status)),
                         None,
@@ -865,7 +898,11 @@ impl Board {
                 }
                 Err(failure) => {
                     if registry {
-                        registry_hint = Some(policy::registry_failure_hint(failure.code).into());
+                        registry_hint = Some(policy::registry_failure_hint(
+                            failure.code,
+                            failure.status,
+                            true,
+                        ));
                     }
                     adapter = None;
                 }

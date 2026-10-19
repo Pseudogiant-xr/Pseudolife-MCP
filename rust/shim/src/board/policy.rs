@@ -50,17 +50,28 @@ pub fn canonical_uuid(candidate: &str) -> Option<String> {
         .map(|id| id.to_string())
         .filter(|id| id == candidate)
 }
-pub fn registry_failure_hint(code: &str) -> &'static str {
+/// The hint a Codex thread's failed coordination step leaves (Python
+/// `CodexCoordinationRegistry._note_failure`, #637). `validation` is an
+/// existing thread's authority check; otherwise it is the thread's first
+/// identity attachment. `code` is "timeout" when its deadline ran out.
+pub fn registry_failure_hint(code: &str, status: Option<u16>, validation: bool) -> String {
+    let origin = if validation {
+        "authority validation"
+    } else {
+        "identity attachment"
+    };
     match code {
-        "bank_identity_mismatch" => {
-            "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential."
+        "bank_identity_mismatch" => "Coordination: bank or principal differs from the saved mailbox; state was preserved. Check the configured bank and credential.".to_owned(),
+        "credential_unavailable" | "credential_changed" => "Coordination: credential source changed or is unavailable; saved identity was preserved. Retry after credential setup completes.".to_owned(),
+        _ if matches!(code, "unauthorized" | "authentication_required" | "principal_not_allowed")
+            || matches!(status, Some(401 | 403)) =>
+        {
+            format!("Coordination: {origin} was refused by authentication or access policy; saved state was preserved. Check the configured credential and access.")
         }
-        "credential_unavailable" | "credential_changed" => {
-            "Coordination: credential source changed or is unavailable; saved identity was preserved. Retry after credential setup completes."
-        }
-        _ => {
-            "Coordination: identity attachment unavailable; saved state was preserved. Check bank access or wait for the prior attachment lease to expire."
-        }
+        "timeout" => format!("Coordination: {origin} timed out (timeout); saved state was preserved. Retry when the bank responds."),
+        "transport_unavailable" | "context_unavailable" => format!("Coordination: {origin} failed ({code}); saved state was preserved. Retry when the bank responds."),
+        "attachment_busy" if !validation => "Coordination: identity attachment is busy (attachment_busy); saved state was preserved. Wait for the prior attachment lease to expire.".to_owned(),
+        _ => format!("Coordination: {origin} unavailable; saved state was preserved. Check bank access and private adapter state."),
     }
 }
 pub fn thread_id(meta: &Value) -> Option<String> {

@@ -155,7 +155,14 @@ async fn request(
         .map_err(|_| Failure::local("transport_unavailable"))?;
     current(&config.provider, snapshot)?;
     let status = response.status().as_u16();
-    let value = response.json::<Value>().await;
+    // A body that stops arriving is a transport failure, as in Python, where
+    // httpx reads it inside the request; only a complete body that does not
+    // parse is an invalid response.
+    let body = response
+        .bytes()
+        .await
+        .map_err(|_| Failure::local("transport_unavailable"))?;
+    let value = serde_json::from_slice::<Value>(&body);
     current(&config.provider, snapshot)?;
     if status != 200 {
         let code = if action == "context" {
@@ -209,7 +216,16 @@ async fn fetch_context(
         &body,
         bearer(snapshot)?,
     )
-    .await?;
+    .await
+    .map_err(|failure| {
+        // An answer that cannot be read as a bank identity verifies none
+        // (Python `fetch_context`).
+        if failure.code == "invalid_response" {
+            Failure::local("bank_identity_mismatch")
+        } else {
+            failure
+        }
+    })?;
     let context = Context::parse(&value).map_err(Failure::local)?;
     if let Some(saved) = saved {
         let credential = saved
@@ -583,6 +599,19 @@ impl Adapter {
             mailbox.failure = None;
             mailbox.failed_generation = None;
         }
+        bound_headers(snapshot, &mailbox.context, &mailbox.identity, true)
+    }
+    /// This adapter's identity headers from its last verified context,
+    /// without another check (Python `instance_headers`).
+    pub async fn instance_headers(
+        &self,
+        snapshot: &CredentialSnapshot,
+    ) -> Result<HeaderMap, Failure> {
+        if self.closing.load(Ordering::Acquire) {
+            return Err(Failure::local("closing"));
+        }
+        current(&self.config.provider, snapshot)?;
+        let mailbox = self.mailbox.lock().await;
         bound_headers(snapshot, &mailbox.context, &mailbox.identity, true)
     }
     pub async fn note_turn(&self) {
