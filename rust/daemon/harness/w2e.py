@@ -2064,6 +2064,21 @@ SCENARIOS.update({
             recall("What does the cache use?", verbose=True),
         ],
     },
+    "recall-wide": {
+        "config": None,
+        "seed": [
+            store("The switch hub links every rack leaf in the hall."),
+            *[relate("Switch Hub", "uses", f"Leaf {i:02d}") for i in range(12)],
+            relate("Leaf 00", "depends-on", "Deep Store"),
+            fact("Deep Store", "tier", "cold"),
+        ],
+        "ops": [
+            # 14 entities over three hops: the entity cap keeps a slot for
+            # the deepest hop, which a flat prefix would drop
+            recall("what hangs off the switch hub?", hops=3),
+            recall("what hangs off the switch hub?", hops=3, verbose=True),
+        ],
+    },
     "recall-caps": {
         "config": ("memory:\n  recall:\n    hub_floor: 2\n    hub_percentile: 50\n"
                    "    expand_budget: 1\n    max_searches_per_hop: 1\n"
