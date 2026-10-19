@@ -116,7 +116,7 @@ fn ci_eq(ch: char, pat: char) -> bool {
 
 /// `str.isdecimal()` / `re`'s `\d` on `str` under CPython 3.11 (Unicode 14):
 /// general category `Nd`.
-fn is_decimal(c: char) -> bool {
+pub(crate) fn is_decimal(c: char) -> bool {
     const ND: &[(u32, u32)] = &[
         (0x30, 0x39),
         (0x660, 0x669),

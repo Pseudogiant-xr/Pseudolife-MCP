@@ -144,14 +144,16 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("lessons", "superseded_at"), ("edges", "superseded_at"),
          ("store_decisions", "decided_at"), ("slot_reads", "last_read_at"),
          ("edges", "asserted_at"), ("relations", "created_at"),
-         ("retrieval_events", "created_at")}
+         ("retrieval_events", "created_at"), ("edge_proposals", "created_at"),
+         ("edge_proposals", "decided_at"), ("entity_proposals", "decided_at"),
+         ("merge_decisions", "decided_at"), ("dismissed_pairs", "dismissed_at")}
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
 RECENT_CLOCK = {("world_facts", "retrieved_at")}
 RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
-                  "started_at", "ended_at"}
+                  "started_at", "ended_at", "decided_at"}
 RESPONSE_RECENT_CLOCK = {"retrieved_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
@@ -160,7 +162,11 @@ SCORE_TOLERANCE = 1.5e-4
 # rounded to 4 places, so at most one rounding unit apart.
 COHESION_TOLERANCE = 1e-4
 # meta key -> paths (keys) inside its JSON value that are wall-clock.
-META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
+META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"},
+              # automatic review decisions a human verdict retires
+              "automatic_review_decision_v1:d1": {"ended_at"},
+              "automatic_review_decision_v1:d2": {"ended_at"},
+              "automatic_review_decision_v1:d3": {"ended_at"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
 GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # store-cancellable is w2e_shutdown.py's control: over MCP every call runs
@@ -226,7 +232,12 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # memory_graph_review's list (spec RV1-RV12): caught by the
            # review-list scenarios.
            "mcp-review-dup-threshold", "mcp-review-no-merge-veto", "mcp-review-no-fold-swap",
-           "mcp-review-terminal-as-pending"]
+           "mcp-review-terminal-as-pending",
+           # memory_graph_review's mutating actions (spec RV13-RV24): caught
+           # by review-actions.
+           "mcp-review-accept-no-fold", "mcp-review-accept-no-floor",
+           "mcp-review-dismiss-aliases", "mcp-review-reject-no-dismiss",
+           "mcp-review-propose-keep-violations", "mcp-review-pair-index-noop"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1238,7 +1249,7 @@ def supersede(new_text, headers=(), **kw) -> dict:
 
 # Scenarios whose operations may include ``external`` writes.
 EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates",
-                   "review-list"}
+                   "review-list", "review-actions"}
 
 
 def external(statement: str) -> dict:
@@ -2211,6 +2222,64 @@ REVIEW_SEED = [
         after_stop=True),
 ]
 
+# memory_graph_review's mutating actions (promoted from the live smoke the
+# implementation ran): every action, the batch form and each refusal.
+REVIEW_ACTIVE = (
+    "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', "
+    "'{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", "
+    "\"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, "
+    "\"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", "
+    "\"orbit-station-alpha-two\"]}, \"link:4\": {\"decision_id\": \"d3\", \"seq\": 3, "
+    "\"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') "
+    "WHERE key = 'automatic_review_decisions_v1'"
+)
+REVIEW_JUNK = (
+    "INSERT INTO entity_proposals (kind, entity_id, score, reason, created_at, "
+    "judge_verdict, judge_confidence, judge_model, judge_served_model) "
+    "SELECT 'junk', id, 0.8, NULL, 9, 'delete', 0.95, 'judge-a', 'served-a' "
+    "FROM entities WHERE canonical = 'deploy-smoke-run'"
+)
+REVIEW_OPS = [
+    review("propose", proposals=[
+        {"src": "Tide Gauge", "relation": "Runs On", "dst": "Harbor Host", "similarity": 0.3},
+        {"src": "llama-server", "relation": "runs-on", "dst": "postgres"},
+        {"src": None, "relation": "uses", "dst": "Ocean"},
+        {"src": "Warehouse", "relation": "depends-on", "dst": "Ocean"},
+        {"src": "Kelp Farm", "relation": "prefers", "dst": "Ocean", "similarity": "0.25",
+         "rationale": 7},
+        {"src": "Kelp Farm", "relation": "uses", "dst": "Ocean", "rationale": 1e16},
+    ]),
+    review("propose"),
+    review("propose", proposals=[]),
+    external(REVIEW_ACTIVE),
+    review("relate", src="tidecalc.py", relation="implements", dst="tidecalc"),
+    review("relate", src="a", relation="bogus-rel", dst="b"),
+    review("relate", src="x"),
+    review("dismiss_pair", src="orbit station alpha", dst="ORBIT STATION ALPHA TWO"),
+    review("dismiss_pair", src="orbit station alpha", dst="orbit station alpha"),
+    review("dismiss_pair", src="lonely-node-alias", dst="Lonely Node"),
+    review("dismiss_pair", src="  ", dst="Lonely Node"),
+    review("dismiss_pair", src="a"),
+    review("accept_link", proposal_id=1),
+    review("accept_link", proposal_ids=[2, 2, 999]),
+    review("reject_link", proposal_id=1),
+    review("reject_link", proposal_id=4),
+    review("reject_link", proposal_id=12345678901234567890),
+    review("reject_entity", proposal_id=3),
+    review("reject_entity", proposal_id=5),
+    review("reject_entity", proposal_id=1),
+    external(REVIEW_JUNK),
+    review("accept_junk", proposal_id=5),
+    review("accept_junk", proposal_id=6),
+    review("accept_merge", proposal_id=2),
+    review("accept_merge", proposal_ids="[4, 3]"),
+    review("accept_link"),
+    review("accept_merge", proposal_ids=[], proposal_id=None),
+    external("DELETE FROM meta WHERE key = 'automatic_review_decisions_v1'"),
+    review("dismiss_pair", src="harbor crane main", dst="tidecalc"),
+    review(),
+]
+
 SCENARIOS.update({
     "review-list": {
         "config": None,
@@ -2233,6 +2302,11 @@ SCENARIOS.update({
                      "b.canonical = 'alpha-beta-gamma-ct400'"),
             review(),
         ],
+    },
+    "review-actions": {
+        "config": None,
+        "seed": REVIEW_SEED,
+        "ops": REVIEW_OPS,
     },
     "review-list-gated": {
         "config": "memory:\n  deep_dream:\n    judges_enabled: false\n",

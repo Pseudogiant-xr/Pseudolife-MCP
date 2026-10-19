@@ -315,11 +315,15 @@ const DATASTORE: &[&str] = &[
     "bank",
 ];
 
-/// `re.fullmatch(r"v?\d+(?:\.\d+)*", n)`; `\d` is any Unicode decimal digit.
+/// `re.fullmatch(r"v?\d+(?:\.\d+)*", n)`; `\d` is CPython 3.11's Unicode 14
+/// decimal digit (`graph_review::is_decimal`), not the regex crate's newer
+/// tables.
 fn is_version(n: &str) -> bool {
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(r"^v?\d+(?:\.\d+)*$").expect("version pattern"))
-        .is_match(n)
+    let body = n.strip_prefix('v').unwrap_or(n);
+    !body.is_empty()
+        && body
+            .split('.')
+            .all(|run| !run.is_empty() && run.chars().all(crate::graph_review::is_decimal))
 }
 
 /// `relation_quality.infer_type`: a coarse entity type, or None.
