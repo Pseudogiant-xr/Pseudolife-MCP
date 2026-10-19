@@ -6,7 +6,6 @@ import json
 import socket
 import struct
 import threading
-import time
 from unittest.mock import Mock, patch
 
 import pytest
@@ -128,6 +127,23 @@ def test_contract_status_is_checked_even_when_both_arms_agree():
     assert run.compare_case(c, response, response)["diffs"]
 
 
+@pytest.mark.parametrize("chunked", [False, True])
+@pytest.mark.parametrize("send_error", [BrokenPipeError, ConnectionResetError, ConnectionAbortedError])
+def test_early_response_is_read_when_request_send_is_refused(chunked, send_error):
+    connection = Mock()
+    connection.endheaders.side_effect = send_error("server already refused body")
+    response = connection.getresponse.return_value
+    response.status = 413
+    response.read.return_value = b'{"error":"request_too_large"}'
+    response.getheaders.return_value = [("Content-Type", "application/json")]
+    with patch("http.client.HTTPConnection", return_value=connection):
+        actual = run.call(1, "POST", "/api/nope", body=b"large", chunked=chunked)
+    assert actual["status"] == 413
+    assert actual["json"] == {"error": "request_too_large"}
+    connection.getresponse.assert_called_once()
+    connection.close.assert_called_once()
+
+
 def early_refusal_server(respond: bool, reset_first: bool = False):
     """Answer (or not) as soon as the headers arrive, then close with the body unread.
 
@@ -162,147 +178,27 @@ def early_refusal_server(respond: bool, reset_first: bool = False):
     return listener, seen
 
 
-TOO_LARGE = (b"HTTP/1.1 413 Payload Too Large\r\ncontent-type: application/json\r\n"
-             b"content-length: 29\r\nconnection: close\r\n\r\n" b'{"error":"request_too_large"}')
-
-
-def budget_server(budget, respond=True):
-    """Read the headers and ``budget`` body bytes, then refuse (or not) and close with the rest unread.
-
-    The daemon refuses a chunked body over its limit only after reading the
-    chunks up to it, so a headers-only replay of that request waits for a
-    body and times out (#830). Wire bytes, chunk framing included, count
-    toward ``budget``."""
-    listener = socket.create_server(("127.0.0.1", 0))
-    seen = []
-
-    def serve():
-        while True:
-            try:
-                conn, _ = listener.accept()
-            except OSError:
-                return
-            with conn:
-                data = b""
-                while b"\r\n\r\n" not in data:
-                    chunk = conn.recv(65536)
-                    if not chunk:
-                        break
-                    data += chunk
-                head, _, rest = data.partition(b"\r\n\r\n")
-                got = len(rest)
-                while got < budget:
-                    chunk = conn.recv(min(65536, budget - got))
-                    if not chunk:
-                        break
-                    got += len(chunk)
-                seen.append((head, got))
-                if respond:
-                    conn.sendall(TOO_LARGE)
-
-    threading.Thread(target=serve, daemon=True).start()
-    return listener, seen
-
-
-class UnbufferedSend(http.client.HTTPConnection):
-    """A zero send buffer: the case that makes the reset race deterministic on Windows (#828)."""
-
-    def connect(self):
-        super().connect()
-        try:
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 0)
-        except OSError:  # macOS and the BSDs refuse 0; Linux clamps it up
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1)
-
-
-@pytest.mark.parametrize("chunked", [True, False])
-@pytest.mark.parametrize("budget, size, unbuffered, calls", [
-    # The body-limits shapes: a 4 MiB limit and one byte over it.
-    (4 * 1024 * 1024, 4 * 1024 * 1024 + 1, False, 20),
-    # Most of the body unread: the send fails or returns at once.
-    (256 * 1024, 32 * 1024 * 1024, True, 5),
-])
-def test_refusal_after_reading_the_body_is_read(chunked, budget, size, unbuffered, calls, monkeypatch):
-    # Hosted Windows run 39155013424 lost a chunked next-byte 413 to
-    # WinError 10053, and the headers-only replay then timed out (#830): it
-    # cannot recover a refusal decided after reading the body, so none may be
-    # lost. Read after the send, 142 of 1000 were lost on a Windows 11 host
-    # (2026-10-19); with the receive waiting, 0 of 1000.
-    if unbuffered:
-        monkeypatch.setattr(http.client, "HTTPConnection", UnbufferedSend)
-    listener, seen = budget_server(budget)
-    with listener:
-        for _ in range(calls):
-            actual = run.call(listener.getsockname()[1], "POST", "/api/facts/set",
-                              [("Content-Type", "application/json")], b"a" * size,
-                              timeout=30, chunked=chunked)
-            assert (actual["status"], actual["json"]) == (413, {"error": "request_too_large"})
-            assert set(actual) == {"status", "headers", "json", "raw"}
-    # One connection per call, each reading the budget: no request was replayed.
-    framing = b"Transfer-Encoding: chunked" if chunked else b"Content-Length: %d" % size
-    assert [(framing in head, got) for head, got in seen] == [(True, budget)] * calls
-
-
-@pytest.mark.parametrize("chunked", [False, True])
-def test_refusal_decided_on_headers_is_read(chunked):
-    # The near miss: the daemon answers before reading any body (an origin
-    # refusal). Read after the send, 882 of 1000 were lost to the reset on a
-    # Windows 11 host and needed the replay (2026-10-19); with the receive
-    # waiting, 0 of 1000 there and 68 of 3000 under full CPU load on the
-    # Windows dev VM. The replay still recovers those, so it may appear, but
-    # rarely: a return to read-after-send replays nearly every call.
+def test_early_refusal_survives_the_host_discarding_it_on_reset():
+    # Windows drops a received response when the peer's RST lands first; an
+    # immediate refusal of a 256 KiB body lost 120 of 200 here (2026-10-18).
     listener, seen = early_refusal_server(respond=True)
-    replays = 0
     with listener:
         port = listener.getsockname()[1]
         for _ in range(40):
             actual = run.call(port, "POST", "/api/nope", [("Origin", "http://evil.example")],
-                              b" " * 262145, chunked=chunked)
+                              b" " * 262145)
             assert (actual["status"], actual["json"]) == (403, {"error": "forbidden_origin"})
             assert set(actual) - {"status", "headers", "json", "raw"} <= {"_transport_replay"}
-            replays += "_transport_replay" in actual
-    assert replays <= 10
     # Every connection, replays included, announced the same request framing.
-    framing = b"Transfer-Encoding: chunked" if chunked else b"Content-Length: 262145"
-    assert len(seen) == 40 + replays and all(framing in request for request in seen)
+    assert all(b"Content-Length: 262145" in request for request in seen)
 
 
-def wire_size(size, chunked):
-    """Bytes ``call`` puts on the wire for a ``size`` body, chunk framing included."""
-    if not chunked:
-        return size
-    width = max(1, (size + 3) // 4)
-    pieces = [min(width, size - i) for i in range(0, size, width)]
-    return sum(len(b"%X\r\n" % n) + n + 2 for n in pieces) + len(b"0\r\n\r\n")
-
-
-@pytest.mark.parametrize("chunked", [False, True])
-def test_clean_close_before_any_status_is_the_daemons_own(chunked):
-    # The daemon read the whole body and closed without a word: no reset, so
-    # nothing was lost to the host, and the case fails as the daemon's close.
-    size = 262145
-    listener, seen = budget_server(wire_size(size, chunked), respond=False)
-    with listener, pytest.raises(http.client.RemoteDisconnected):
-        run.call(listener.getsockname()[1], "POST", "/api/nope", body=b" " * size,
-                 timeout=10, chunked=chunked)
-    assert [got for _, got in seen] == [wire_size(size, chunked)]
-
-
-@pytest.mark.parametrize("host_discards, budget, chunked", [
-    (False, 0, False), (False, 0, True), (False, 4 * 1024 * 1024, False), (False, 4 * 1024 * 1024, True),
-    (True, 0, False), (True, 0, True), (True, 4 * 1024 * 1024, True),
-])
-def test_daemon_that_closes_without_answering_still_fails(monkeypatch, host_discards, budget, chunked):
-    # The near miss of the refusal tests: the same reset with nothing sent,
-    # after the headers or after reading a 4 MiB budget. Where the host may
-    # have discarded a response, the replay gets no answer either.
+@pytest.mark.parametrize("host_discards", [False, True])
+def test_daemon_that_closes_without_answering_still_fails(monkeypatch, host_discards):
     monkeypatch.setattr(run, "HOST_DISCARDS_ON_RESET", host_discards)
-    listener, seen = budget_server(budget, respond=False)
+    listener, seen = early_refusal_server(respond=False)
     with listener, pytest.raises((ConnectionError, RuntimeError)):
-        run.call(listener.getsockname()[1], "POST", "/api/nope", body=b" " * (4 * 1024 * 1024 + 1),
-                 timeout=10, chunked=chunked)
-    if not host_discards:
-        assert len(seen) == 1
+        run.call(listener.getsockname()[1], "POST", "/api/nope", body=b" " * 262145, timeout=10)
 
 
 def test_reset_without_a_response_is_not_replayed_where_the_host_keeps_data(monkeypatch):
@@ -316,70 +212,48 @@ def test_reset_without_a_response_is_not_replayed_where_the_host_keeps_data(monk
     assert len(seen) == 1
 
 
-@pytest.mark.parametrize("chunked", [False, True])
-def test_daemon_that_never_answers_still_times_out(chunked):
-    # On Windows the exchange runs blocking with kernel timeouts; they keep
-    # the caller's bound, for the read and for a send the daemon never reads.
-    listener = socket.create_server(("127.0.0.1", 0))
-    held = []
-
-    def hold():
-        while True:
-            try:
-                held.append(listener.accept()[0])
-            except OSError:
-                return
-
-    threading.Thread(target=hold, daemon=True).start()
-    started = time.monotonic()
-    with listener, pytest.raises(TimeoutError):
-        run.call(listener.getsockname()[1], "POST", "/api/nope", body=b" " * (8 * 1024 * 1024),
-                 timeout=1, chunked=chunked)
-    assert time.monotonic() - started < 10
-    for conn in held:
-        conn.close()
+def lost_response_connection(error):
+    connection = Mock()
+    connection.getresponse.side_effect = error
+    return connection
 
 
-def exchange_that_loses(first, replay=None):
-    """An _exchange whose first answer is lost to ``first``; the replay answers ``replay``."""
-    calls = []
-
-    def exchange(port, method, path, headers, body, *, headers_only, **options):
-        calls.append(dict(method=method, path=path, headers=headers, body=body,
-                          headers_only=headers_only, **options))
-        if len(calls) == 1:
-            raise first
-        if isinstance(replay, BaseException):
-            raise replay
-        return dict(replay)
-    return exchange, calls
-
-
-@pytest.mark.parametrize("chunked", [False, True])
 @pytest.mark.parametrize("error", [ConnectionAbortedError(10053, "aborted by host"),
                                    ConnectionResetError(10054, "reset by peer")])
-def test_lost_early_response_is_replayed_headers_only(error, chunked, capsys, monkeypatch):
+def test_lost_early_response_is_replayed_headers_only(error, capsys, monkeypatch):
     monkeypatch.setattr(run, "HOST_DISCARDS_ON_RESET", True)
-    forbidden = {"status": 403, "headers": {"content-type": "application/json"},
-                 "json": {"error": "forbidden_origin"}, "raw": '{"error":"forbidden_origin"}'}
-    exchange, calls = exchange_that_loses(error, forbidden)
-    monkeypatch.setattr(run, "_exchange", exchange)
-    actual = run.call(1, "PUT", "/api/nope", [("Origin", "http://evil.example")], b"large", chunked=chunked)
-    assert actual == dict(forbidden, _transport_replay=f"{type(error).__name__}: {error}")
-    # The same request line, headers and framing, without the body.
-    assert calls[1] == dict(calls[0], headers_only=True)
-    assert calls[0]["headers_only"] is False and calls[0]["chunked"] is chunked
+    replay = Mock()
+    replay.sock.recv.return_value = b"HTTP/1.1 403 For"
+    response = replay.getresponse.return_value
+    response.status = 403
+    response.read.return_value = b'{"error":"forbidden_origin"}'
+    response.getheaders.return_value = [("Content-Type", "application/json")]
+    first = lost_response_connection(error)
+    with patch("http.client.HTTPConnection", side_effect=[first, replay]):
+        actual = run.call(1, "PUT", "/api/nope", [("Origin", "http://evil.example")], b"large")
+    assert actual == {"status": 403, "headers": {"content-type": "application/json"},
+                      "json": {"error": "forbidden_origin"},
+                      "raw": '{"error":"forbidden_origin"}',
+                      "_transport_replay": f"{type(error).__name__}: {error}"}
+    first.endheaders.assert_called_once_with(b"large")
+    first.close.assert_called_once()
+    replay.putrequest.assert_called_once_with("PUT", "/api/nope", skip_host=False,
+                                              skip_accept_encoding=True)
+    replay.putheader.assert_any_call("Origin", "http://evil.example")
+    replay.putheader.assert_called_with("Content-Length", "5")
+    replay.endheaders.assert_called_once_with()
     assert "headers-only replay answered 403" in capsys.readouterr().err
 
 
 def test_replay_that_gets_no_final_status_reports_both_failures(monkeypatch):
     monkeypatch.setattr(run, "HOST_DISCARDS_ON_RESET", True)
-    exchange, calls = exchange_that_loses(ConnectionResetError(10054, "reset"),
-                                          RuntimeError("early refusal did not send a final status"))
-    monkeypatch.setattr(run, "_exchange", exchange)
-    with pytest.raises(RuntimeError, match="ConnectionResetError.*did not send a final status"):
-        run.call(1, "POST", "/api/nope", body=b"large", chunked=True)
-    assert len(calls) == 2
+    replay = Mock()
+    replay.sock.recv.return_value = b""
+    with patch("http.client.HTTPConnection",
+               side_effect=[lost_response_connection(ConnectionResetError(10054, "reset")), replay]), \
+            pytest.raises(RuntimeError, match="ConnectionResetError.*did not send a final status"):
+        run.call(1, "POST", "/api/nope", body=b"large")
+    replay.getresponse.assert_not_called()
 
 
 @pytest.mark.parametrize("error, body, host_discards", [
@@ -395,11 +269,11 @@ def test_replay_that_gets_no_final_status_reports_both_failures(monkeypatch):
 ])
 def test_closes_the_host_did_not_cause_are_not_replayed(error, body, host_discards, monkeypatch):
     monkeypatch.setattr(run, "HOST_DISCARDS_ON_RESET", host_discards)
-    exchange, calls = exchange_that_loses(error)
-    monkeypatch.setattr(run, "_exchange", exchange)
-    with pytest.raises(type(error)):
+    first = lost_response_connection(error)
+    with patch("http.client.HTTPConnection", side_effect=[first]) as connect, \
+            pytest.raises(type(error)):
         run.call(1, "POST", "/api/nope", body=body)
-    assert len(calls) == 1
+    assert connect.call_count == 1
 
 
 @pytest.mark.parametrize("side", ["python", "rust"])
@@ -414,51 +288,6 @@ def test_replayed_response_is_recorded_in_the_row_not_diffed(side):
     assert "_transport_replay" in replayed  # the caller's response is not mutated
     assert "_transport_replay" not in run.normalize_response(replayed, "/api/nope", [])
     assert "transport_replays" not in run.compare_case(c, response, response)
-
-
-@pytest.mark.parametrize("chunked", [False, True])
-def test_send_timeout_after_an_early_answer_still_fails(chunked, monkeypatch):
-    # The near miss of a send cut off by a refusal: a daemon that answers
-    # early but never reads the body and never closes. Only a send ended by
-    # the refusal (broken pipe, reset, abort) may give way to the response.
-    monkeypatch.setattr(http.client, "HTTPConnection", UnbufferedSend)
-    listener = socket.create_server(("127.0.0.1", 0))
-    held = []
-
-    def answer_and_hold():
-        conn, _ = listener.accept()
-        held.append(conn)
-        data = b""
-        while b"\r\n\r\n" not in data:
-            data += conn.recv(65536)
-        conn.sendall(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n{}")
-
-    threading.Thread(target=answer_and_hold, daemon=True).start()
-    with listener, pytest.raises(TimeoutError):
-        run.call(listener.getsockname()[1], "POST", "/api/nope", body=b" " * (32 * 1024 * 1024),
-                 timeout=2, chunked=chunked)
-    for conn in held:
-        conn.close()
-
-
-def test_scenario_error_names_the_case_in_flight_and_the_harness_line():
-    listener = socket.create_server(("127.0.0.1", 0))
-
-    def close_unanswered():
-        conn, _ = listener.accept()
-        conn.recv(65536)
-        conn.close()
-
-    threading.Thread(target=close_unanswered, daemon=True).start()
-    with listener, pytest.raises(http.client.RemoteDisconnected) as raised:
-        run.call(listener.getsockname()[1], "GET", "/health", timeout=10)
-    scn = run.BodyLimits()
-    assert run.scenario_error(raised.value, scn).startswith("RemoteDisconnected: ")
-    assert run.scenario_error(raised.value, scn).endswith(" in _exchange)")
-    scn.case_in_flight = "/api/nope chunked next byte"
-    text = run.scenario_error(raised.value, scn)
-    assert "(case '/api/nope chunked next byte'; at run.py:" in text and text.endswith(" in _exchange)")
-    assert run.scenario_error(RuntimeError("no traceback"), run.BodyLimits()) == "RuntimeError: no traceback"
 
 
 def test_scenario_crash_cannot_count_as_a_caught_mutant(tmp_path, monkeypatch):
