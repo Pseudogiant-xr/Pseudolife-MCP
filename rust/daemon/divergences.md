@@ -372,7 +372,6 @@ this increment does not claim the complete write boundary or cutover readiness.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| A lesson `restore_slot` that needs the audit-snapshot fallback (a slot whose retired row compaction purged, alone or mixed with retired records) | rewrites it through `lesson_write` | the `not_implemented` refusal, predicted exactly and before any write; a restore Python would also fail in its legacy writes answers the refusal instead of the persistence error | a Rust `lesson_write` (the lesson write path); world facts restore their snapshots |
 | A curated restore whose commit outcome is unknown and whose reload cannot be classified | raises, and every later call retries the recovery until it resolves | raises the same internal error; later calls are not gated | the daemon runs no per-call recovery passes (the `_ensure_init` row above) |
 | A batch (`proposal_ids`) | takes the service lock per call, so another request can run between items | holds the writer lock for the whole batch | strictly more serialized; a single client sees the same results |
 | `list`'s analysis | between two locked blocks, so writes can land while it runs and `recent_merges` can follow a later state than the findings | under the writer lock throughout | writes wait for the analysis (quadratic in the entities); the answer is one consistent state |
@@ -388,7 +387,7 @@ this increment does not claim the complete write boundary or cutover readiness.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| `run` while lesson synthesis or outcome inference (`memory.lessons.enabled` with `synthesize_in_dream` or `infer_outcomes`), digests (`memory.dream.digest_enabled`) or graph insight (`memory.graph_insight.enabled`) is on, which is the default | runs those stages | refused (`not_implemented`, naming the stage) | tasks P1b (lessons, outcomes, digests) and P2b (graph insight); with them off the pass is served |
+| `run` while graph insight (`memory.graph_insight.enabled`) is on, which is the default | refreshes the graph-insight digest | refused (`not_implemented`, naming the stage) | task P2b (a maintainer decision on a structurally compared divergence); with it off the pass and the other stages are served |
 | `deep` and `rollback` | served | refused | tasks P2a (deep dream) and the rollback increment |
 | When dream tracking initializes (rows with no dream state classified) | at hydration | at the first `memory_dream` call | a Rust boot must not change the bank (the W1 boot comparison); every answer is the same once the call runs |
 | A pending entry whose row is missing at a write failure | re-flushed (`cms.reflush_entries`) | detected, not re-inserted | the store slice's persistence follow-up; the answer (a write hold) is the same |
@@ -405,6 +404,21 @@ this increment does not claim the complete write boundary or cutover readiness.
 | URL credentials in a base URL | percent-decoded before the host split; shown in its log | not decoded; redacted in logs | credentials in an extractor URL are refused on both sides before connecting |
 | A redirect target's text | `quote()` / `urljoin()` | the `url` crate's join | only auth-word matching on unusual `Location` values |
 | An environment integer past i64 (`PSEUDOLIFE_DREAM_MAX_TOKENS`) | kept | the configured default | no producer sets one |
+
+### memory_dream run: outcome inference, lesson synthesis and digests (2026-10-20)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| A digest's capacity victim with a deeper band configured | relocated to the next band | dropped (as `memory_store` drops it) | the store slice's band relocation, declared there; the default `flat` preset has one band |
+| A digest whose entry insert fails | the resident entry is kept without a row id, so later dreams see the root digested | nothing resident: the root is retried (one held retry, then advance) | failure path only |
+| An uncertain lesson commit that cannot be reconciled | latches `lesson_reconciliation_required`, blocking lesson reads and the snapshot until a recheck or restart | answers `reconciliation_required` and the error; reads are not blocked | the read slices' barrier work; a commit whose outcome is unknown |
+| A failed lesson batch's `error` text for a database failure | psycopg's message | tokio-postgres' message | failure path only; extractor failures and the acknowledgement mismatch carry Python's text |
+| An embedder refusing a claim or digest text with a lone surrogate | the tokenizer's `UnicodeEncodeError` | the same message, computed (`'utf-8' codec can't encode character ... surrogates not allowed`) | the message is assumed from PyO3's conversion |
+| The digest prompt-echo patterns | Python `re` (`IGNORECASE`, Unicode 14 `\b`) | the regex crate's Unicode `\b` and simple case folding | rare characters only |
+| `MUST INCLUDE:` detection | `str.upper()` (Unicode 14) | Rust's `to_uppercase` (the toolchain's Unicode) | only characters whose uppercase changed since Unicode 14 |
+| A stage cursor whose `retry` is a list of pairs with non-string keys, or whose lists hold non-strings where they are sorted | coerced by `dict()` / compared by `sorted()` (or raises) | refused (`internal_error`) | corrupt persisted data only; the stages write these cursors |
+| A lesson audit snapshot with a non-string `task`/`aspect`/`lesson`/`about`/`outcome`/`polarity`/`origin` or provenance item | passed to `lesson_write` as is | refused (`internal_error`) before that slot is written | corrupt audit rows only; as for world snapshots |
+| A `RecursionError` message from a too-deep reply | `while decoding a JSON object/array` at the interpreter's depth | the same text at a fixed depth of 900 | as for the consolidation pass |
 
 ## Coordination board completion (W2-F)
 

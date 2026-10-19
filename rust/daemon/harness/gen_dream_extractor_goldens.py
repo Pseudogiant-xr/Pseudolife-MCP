@@ -11,7 +11,10 @@ against the oracle:
   parsed claims/events/relations as ``json.dumps`` text, or the
   ``classify_extractor_error`` pair of the ExtractorError it raised;
 * ``endpoints``: ``resolve_endpoints`` and the extractor
-  ``build_extractor_with_fallback`` picks, for config/env combinations.
+  ``build_extractor_with_fallback`` picks, for config/env combinations;
+* ``stage_bodies`` / ``stage_replies``: the same for the dream stages'
+  calls (``infer_outcomes``, ``extract_lessons``, ``extract_rules`` with its
+  missing-values retry, ``summarize_session``), a reply sequence per call.
 
 Output: ``goldens/dream-extractor.json``.
 
@@ -33,7 +36,7 @@ sys.path.insert(0, str(REPO))
 from pseudolife_memory.memory import dream as d  # noqa: E402
 from pseudolife_memory.utils.config import DreamConfig  # noqa: E402
 
-STATE = {"status": 200, "body": b"", "headers": {}, "seen": []}
+STATE = {"status": 200, "body": b"", "headers": {}, "seen": [], "queue": []}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -43,6 +46,8 @@ class Handler(BaseHTTPRequestHandler):
     def _answer(self):
         n = int(self.headers.get("Content-Length") or 0)
         STATE["seen"].append(self.rfile.read(n) if n else b"")
+        if STATE["queue"]:
+            STATE["status"], STATE["body"] = STATE["queue"].pop(0)
         self.send_response(STATE["status"])
         for k, v in STATE["headers"].items():
             self.send_header(k, v)
@@ -197,6 +202,121 @@ def describe(ex):
             "extra_body": ex.extra_body}
 
 
+SIGNALS = [
+    {"id": 1, "task": "deploy engine", "outcome": "success", "about": "pipeline's",
+     "detail": "line\nbreak ͸ é \"q\"", "polarity": "+", "origin": "inferred",
+     "episode_id": "e", "created_at": 1.0, "used_ids": None},
+    {"id": 2, "task": 'say "hi" and \'bye\'', "outcome": "failure", "about": None,
+     "detail": None, "polarity": None, "origin": "action", "episode_id": None,
+     "created_at": 2.0, "used_ids": None},
+]
+RULE_SIGNAL = {"id": 7, "task": "checkout", "outcome": "success", "about": "rule: cart",
+               "detail": "user asked for refund\nMUST INCLUDE: Alpha; beta", "polarity": None,
+               "origin": "action", "episode_id": None, "created_at": 3.0, "used_ids": None}
+CONTEXT = "Session: deploy\nSub-task: probe\n- (conversation) café \"q\" \\ tab\t"
+
+
+def lessons_env(lessons) -> bytes:
+    return envelope(json.dumps({"lessons": lessons}))
+
+
+RULE_OK = {"task": "refund", "lesson": "WHEN refund THEN use Alpha and BETA",
+           "about": "rule: x", "polarity": "+", "outcome": "success", "confidence": 0.9}
+RULE_MISSING = dict(RULE_OK, lesson="WHEN refund THEN use Alpha")
+# (name, method, signals or context, cap or target, [(status, body), ...])
+STAGE_REPLIES = [
+    ("infer_mixed", "infer", CONTEXT, 2, [(200, envelope("sure: " + json.dumps({"outcomes": [
+        {"task": " deploy ", "outcome": "success", "about": "", "detail": " ok "},
+        {"task": "", "outcome": "success"},
+        {"task": "x", "outcome": "win"},
+        {"task": 5, "outcome": "failure", "about": 0, "detail": [1]},
+        {"task": "third", "outcome": "correction"}]})))]),
+    ("infer_cap_zero", "infer", CONTEXT, 0, [(200, envelope("not json"))]),
+    ("infer_no_object", "infer", CONTEXT, 3, [(200, envelope("nothing here"))]),
+    ("infer_bad_json", "infer", CONTEXT, 3, [(200, envelope('{"outcomes": [1 2]}'))]),
+    ("infer_not_list", "infer", CONTEXT, 3, [(200, envelope('{"outcomes": {}}'))]),
+    ("infer_missing", "infer", CONTEXT, 3, [(200, envelope('{"other": []}'))]),
+    ("infer_empty", "infer", CONTEXT, 3, [(200, envelope('{"outcomes": []}'))]),
+    ("infer_null_content", "infer", CONTEXT, 3, [(200, envelope(None))]),
+    ("infer_500", "infer", CONTEXT, 3, [(500, b"boom")]),
+    ("lessons_mixed", "lessons", SIGNALS, None, [(200, lessons_env([
+        {"task": " deploy ", "aspect": "", "lesson": " use the pipeline ", "about": None,
+         "polarity": "-", "outcome": "win", "confidence": "0.95"},
+        {"task": "t", "aspect": 0, "lesson": "l", "polarity": 1, "confidence": 3},
+        {"task": "t", "aspect": " pitfall ", "lesson": "l2", "about": 7, "confidence": None},
+        {"task": "", "lesson": "x"}, "not a dict",
+        {"task": "t", "lesson": "l3", "confidence": "nan", "outcome": "correction"}]))]),
+    ("lessons_not_list", "lessons", SIGNALS, None, [(200, lessons_env({"a": 1}))]),
+    ("lessons_array_top", "lessons", SIGNALS, None, [(200, envelope("[1]"))]),
+    ("lessons_bad_json", "lessons", SIGNALS, None, [(200, envelope("{bad"))]),
+    ("lessons_500", "lessons", SIGNALS, None, [(500, b"boom")]),
+    ("rules_retry_ok", "rules", [RULE_SIGNAL], None,
+     [(200, lessons_env([RULE_MISSING])), (200, lessons_env([RULE_OK, RULE_OK]))]),
+    ("rules_retry_empty", "rules", [RULE_SIGNAL, dict(SIGNALS[1], id=8)], None,
+     [(200, lessons_env([RULE_MISSING])), (200, lessons_env([])),
+      (200, lessons_env([dict(RULE_OK, polarity="-", outcome="failure")]))]),
+    ("rules_still_missing", "rules", [RULE_SIGNAL, dict(SIGNALS[1], id=8)], None,
+     [(200, lessons_env([RULE_MISSING])), (200, lessons_env([RULE_MISSING])),
+      (200, lessons_env([]))]),
+    ("rules_invalid_enum", "rules", [dict(SIGNALS[0], id=9)], None,
+     [(200, lessons_env([dict(RULE_OK, polarity="?")]))]),
+    ("rules_contradiction", "rules", [dict(SIGNALS[0], id=9, polarity=None)], None,
+     [(200, lessons_env([dict(RULE_OK, polarity="-")]))]),
+    ("rules_all_failed", "rules", [dict(SIGNALS[0], id=9), dict(SIGNALS[1], id=10)], None,
+     [(500, b"boom"), (500, b"boom")]),
+    ("rules_about_fallback", "rules", [dict(RULE_SIGNAL, detail="plain", about="rule: cart")],
+     None, [(200, lessons_env([dict(RULE_OK, about="  RULE:  ")]))]),
+    ("digest_ok", "digest", CONTEXT, 1200,
+     [(200, envelope('x {"digest": "  In this session the user deployed.  "} y'))]),
+    ("digest_blank", "digest", CONTEXT, 1200, [(200, envelope('{"digest": "   "}'))]),
+    ("digest_not_str", "digest", CONTEXT, 1200, [(200, envelope('{"digest": 5}'))]),
+    ("digest_echo", "digest", CONTEXT, 7, [(200, envelope(json.dumps({
+        "digest": "It reads as history, never as a claim about the present."})))]),
+    ("digest_500", "digest", CONTEXT, 1200, [(500, b"boom")]),
+]
+
+
+def stage_call(ex, method, arg, extra):
+    if method == "infer":
+        return ex.infer_outcomes(arg, cap=extra)
+    if method == "lessons":
+        return [dict(c) for c in ex.extract_lessons(arg)]
+    if method == "rules":
+        claims = [dict(c) for c in ex.extract_rules(arg)]
+        return {"claims": claims, "failed": ex.last_rule_failed_ids,
+                "empty": ex.last_rule_empty_ids}
+    return ex.summarize_session(arg, target_chars=extra)
+
+
+def stage_goldens(base: str, out: dict) -> None:
+    out["stage_bodies"], out["stage_replies"] = [], []
+    for ctor in CTORS:
+        ex = make(base, ctor)
+        for method, arg, extra, queue in (
+                ("infer", CONTEXT, 3, []),
+                ("lessons", SIGNALS, None, []),
+                ("rules", [RULE_SIGNAL], None,
+                 [(200, lessons_env([RULE_MISSING])), (200, lessons_env([RULE_OK]))]),
+                ("digest", CONTEXT, 1200, []),
+                ("digest", CONTEXT, 7, [])):
+            STATE.update(status=200, body=envelope('{"outcomes": []}'), headers={},
+                         queue=list(queue))
+            STATE["seen"].clear()
+            stage_call(ex, method, arg, extra)
+            out["stage_bodies"].append({"ctor": ctor, "method": method, "arg": arg,
+                                        "extra": extra,
+                                        "bodies": [b.decode("ascii") for b in STATE["seen"]]})
+    for name, method, arg, extra, queue in STAGE_REPLIES:
+        STATE.update(headers={}, queue=list(queue))
+        try:
+            got = {"ok": json.dumps(stage_call(make(base, "primary"), method, arg, extra))}
+        except d.ExtractorError as e:
+            got = {"error": str(e)}
+        out["stage_replies"].append({
+            "name": name, "method": method, "arg": arg, "extra": extra,
+            "queue": [[status, body.decode("latin-1")] for status, body in queue], **got})
+
+
 def main() -> None:
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -222,6 +342,7 @@ def main() -> None:
             got = {"error": list(d.classify_extractor_error(e))}
         out["replies"].append({"name": name, "method": method, "status": status,
                                "body": body.decode("latin-1"), "headers": headers, **got})
+    stage_goldens(base, out)
     server.shutdown()
     for name, cfg, env in ENDPOINT_CASES:
         dc = DreamConfig(**cfg)
@@ -239,7 +360,8 @@ def main() -> None:
                                  "resolved": resolved, "built": built})
     TARGET.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     print(f"wrote {TARGET} ({len(out['bodies'])} bodies, {len(out['replies'])} replies, "
-          f"{len(out['endpoints'])} endpoint cases)")
+          f"{len(out['endpoints'])} endpoint cases, {len(out['stage_bodies'])} stage bodies, "
+          f"{len(out['stage_replies'])} stage replies)")
 
 
 if __name__ == "__main__":

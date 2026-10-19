@@ -10,6 +10,9 @@
 //! its one transaction ([`write_staged`], the graph link on the borrowed
 //! client).
 
+// The bodies raise `ToolError` as the action modules do.
+#![allow(clippy::result_large_err)]
+
 use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
@@ -130,6 +133,11 @@ async fn link(
     }
     if crate::junk_names::junk_name_reason(about).is_some() || compound_halves(about).is_some() {
         return Ok(());
+    }
+    // psycopg refuses a parameter holding a reply's lone surrogate: the
+    // entity lookup fails, as the write's own error.
+    if let Some(e) = crate::dream::extractor::unencodable(&[about]) {
+        return Err(internal(e));
     }
     let node = if in_txn {
         resolve_or_create_in(client, about, None).await?

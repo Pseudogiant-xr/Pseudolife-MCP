@@ -740,6 +740,215 @@ mod tests {
         assert_eq!(split_session_context("é\né", 0), vec!["é", "é"]);
     }
 
+    const GOLDEN: &str = include_str!("../../harness/goldens/dream-extractor.json");
+
+    fn golden() -> Value {
+        serde_json::from_str(GOLDEN).expect("golden file")
+    }
+
+    fn ctor(name: &str, base: &str) -> Compat {
+        match name {
+            "primary" => {
+                let mut extra = Map::new();
+                extra.insert("cache_prompt".into(), json!(false));
+                extra.insert("reasoning_effort".into(), json!("high"));
+                Compat::new(base, "qwen-27b", Some("k".into()), 2048, 30.0, Some(extra))
+            }
+            _ => Compat::new(base, "m", None, 7, 30.0, None),
+        }
+    }
+
+    fn signals(v: &Value) -> Vec<Signal> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|s| Signal {
+                id: s["id"].as_i64().unwrap(),
+                task: s["task"].as_str().unwrap().into(),
+                outcome: s["outcome"].as_str().unwrap().into(),
+                about: s["about"].as_str().map(str::to_string),
+                detail: s["detail"].as_str().map(str::to_string),
+                polarity: s["polarity"].as_str().map(str::to_string),
+                origin: s["origin"].as_str().map(str::to_string),
+                episode_id: s["episode_id"].as_str().map(str::to_string),
+                created_at: s["created_at"].as_f64().unwrap(),
+                used_ids: None,
+            })
+            .collect()
+    }
+
+    /// One reply per connection, in order, as the oracle's endpoint
+    /// answered; each request body recorded.
+    fn serve_queue(
+        replies: Vec<(u16, Vec<u8>)>,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{Read, Write};
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen2 = seen.clone();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let mut replies = replies.into_iter();
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { return };
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 65536];
+                let body_at;
+                loop {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
+                        let len = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .map_or(0, |v| v.trim().parse().unwrap_or(0));
+                        if buf.len() >= end + 4 + len || n == 0 {
+                            body_at = end + 4;
+                            break;
+                        }
+                    } else if n == 0 {
+                        return;
+                    }
+                }
+                seen2
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&buf[body_at..]).into_owned());
+                let (status, body) = replies.next().unwrap_or((
+                    200,
+                    br#"{"choices":[{"message":{"content":"{\"outcomes\": []}"}}]}"#.to_vec(),
+                ));
+                let reason = if status == 500 {
+                    "Internal Server Error"
+                } else {
+                    "OK"
+                };
+                let head = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = s.write_all(head.as_bytes());
+                let _ = s.write_all(&body);
+            }
+        });
+        (format!("http://127.0.0.1:{port}/v1"), seen)
+    }
+
+    fn queue(case: &Value) -> Vec<(u16, Vec<u8>)> {
+        case["queue"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                let body = r[1]
+                    .as_str()
+                    .unwrap()
+                    .chars()
+                    .map(|c| c as u32 as u8)
+                    .collect();
+                (r[0].as_u64().unwrap() as u16, body)
+            })
+            .collect()
+    }
+
+    /// Run one golden call; `Ok(json text)` or `Err(str(exc))`.
+    async fn call(ex: &Compat, case: &Value) -> Result<String, String> {
+        let arg = &case["arg"];
+        let text = |e: ExtractFailure| match e {
+            ExtractFailure::Extractor(x) => x.message,
+            ExtractFailure::Uncaught(u) => u.message,
+        };
+        let got: Value = match case["method"].as_str().unwrap() {
+            "infer" => {
+                let r = ex
+                    .infer_outcomes(arg.as_str().unwrap(), case["extra"].as_i64().unwrap())
+                    .await
+                    .map_err(text)?;
+                r.map_or(Value::Null, |v| {
+                    Value::Array(v.iter().map(OutcomeClaim::to_json).collect())
+                })
+            }
+            "lessons" => Value::Array(
+                ex.extract_lessons(&signals(arg))
+                    .await
+                    .map_err(text)?
+                    .iter()
+                    .map(LessonClaim::to_json)
+                    .collect(),
+            ),
+            "rules" => {
+                let r = ex.extract_rules(&signals(arg)).await.map_err(text)?;
+                json!({"claims": r.claims.iter().map(LessonClaim::to_json).collect::<Vec<_>>(),
+                       "failed": r.failed_ids, "empty": r.empty_ids})
+            }
+            _ => json!(
+                ex.summarize_session(arg.as_str().unwrap(), case["extra"].as_i64().unwrap())
+                    .await
+                    .map_err(text)?
+            ),
+        };
+        Ok(crate::pyjson::dumps(&got))
+    }
+
+    #[tokio::test]
+    async fn stage_bodies_match_python_byte_for_byte() {
+        let g = golden();
+        let cases = g["stage_bodies"].as_array().unwrap();
+        assert_eq!(cases.len(), 10);
+        for case in cases {
+            let rules_queue = if case["method"] == "rules" {
+                // The golden's reply sequence: a rule missing a value, then the
+                // complete rule.
+                let rule = |lesson: &str| {
+                    let content = json!({"lessons": [{"task": "refund", "lesson": lesson,
+                        "about": "rule: x", "polarity": "+", "outcome": "success",
+                        "confidence": 0.9}]})
+                    .to_string();
+                    let env = json!({"choices": [{"message": {"content": content}}]});
+                    (200u16, env.to_string().into_bytes())
+                };
+                vec![
+                    rule("WHEN refund THEN use Alpha"),
+                    rule("WHEN refund THEN use Alpha and BETA"),
+                ]
+            } else {
+                Vec::new()
+            };
+            let (base, seen) = serve_queue(rules_queue);
+            let ex = ctor(case["ctor"].as_str().unwrap(), &base);
+            let _ = call(&ex, case).await;
+            let want: Vec<String> = case["bodies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| b.as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(
+                *seen.lock().unwrap(),
+                want,
+                "{} {}",
+                case["ctor"],
+                case["method"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn stage_replies_parse_and_fail_as_python() {
+        let g = golden();
+        for case in g["stage_replies"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let (base, _) = serve_queue(queue(case));
+            let got = call(&ctor("primary", &base), case).await;
+            match (&case["ok"], &case["error"], got) {
+                (Value::String(want), _, Ok(text)) => assert_eq!(&text, want, "{name}"),
+                (_, Value::String(want), Err(text)) => assert_eq!(&text, want, "{name}"),
+                (_, _, other) => panic!("{name}: {other:?}"),
+            }
+        }
+    }
+
     #[test]
     fn digest_echo_is_refused_unless_the_record_carries_it() {
         let reply = "{\"digest\": \"In this session it was written in past tense anchored to \

@@ -278,7 +278,7 @@ pub(crate) fn py_printable(c: char) -> bool {
     }
     let table = crate::py_repr_unicode14::NONPRINTABLE;
     let i = table.partition_point(|&(_, hi)| hi < n);
-    !table.get(i).is_some_and(|&(lo, _)| lo <= n)
+    table.get(i).is_none_or(|&(lo, _)| lo > n)
 }
 
 /// `_describe_lease_holder`'s message (postgres.py:584-601), from the

@@ -121,6 +121,19 @@ def test_kind_user_keyed_reply_envelope(stub_factory):
     assert all(r["answered"] for r in s.drain())
 
 
+def test_stage_prompts_have_their_own_kinds():
+    """The dream stages' real prompts key their own reply tables."""
+    import stub_extractor
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from pseudolife_memory.memory import dream as d
+    assert stub_extractor.request_kind(d._OUTCOME_INFER_SYSTEM_PROMPT) == "outcomes"
+    assert stub_extractor.request_kind(d._LESSON_SYSTEM_PROMPT) == "lessons"
+    assert stub_extractor.request_kind(d._RULE_LESSON_SYSTEM_PROMPT) == "rules"
+    assert stub_extractor.request_kind(
+        d._DIGEST_SYSTEM_PROMPT.format(target_chars=10)) == "digest"
+    assert stub_extractor.request_kind(d._SYSTEM_PROMPT) == "claims"
+
+
 def test_default_reply_model_and_raw_error_entry(stub_factory):
     s = stub_factory({"replies": [
         {"kind": "other", "user": "x", "content": "ok"},

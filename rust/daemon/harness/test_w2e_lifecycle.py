@@ -337,6 +337,45 @@ def test_dream_run_scenarios_switch_off_unported_stages_and_answer_every_request
     assert all(f'"{m}"' in text for m in extractor_mutants)
 
 
+def test_dream_stage_scenarios_key_their_replies_and_register_their_mutants(harness):
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("dream-stages-"))
+    assert names == ["dream-stages-digests", "dream-stages-infer", "dream-stages-inferred",
+                     "dream-stages-lessons", "dream-stages-rules"]
+    for n in names:
+        scn = harness.SCENARIOS[n]
+        # The graph-insight refresh is the one stage still refused.
+        assert "graph_insight:\n    enabled: false" in scn["config"], n
+        for reply in scn["extractor"]["replies"]:
+            assert "sha256" not in reply
+            assert reply["kind"] in ("outcomes", "lessons", "rules", "digest"), (n, reply)
+    # The digest map step's split agrees with Python's.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from pseudolife_memory.memory.dream import _format_signals, split_session_context
+    for text, cap in ((harness.DIGEST_B_CONTEXT, harness.DIGEST_CHARS), ("ab\ncd", 1),
+                      ("x" * 9 + "\ny", 4)):
+        assert harness.split_context(text, cap) == split_session_context(text, cap)
+    for sigs in (harness.RULE_SIGNALS, harness.LESSON_SIGNALS, [harness.INFERRED_SIGNAL]):
+        assert harness.fmt_signals(sigs) == _format_signals(sigs)
+    stage_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-stage-")]
+    assert len(stage_mutants) == 6
+    src = Path(__file__).resolve().parents[1] / "src"
+    text = "".join((src / f).read_text(encoding="utf-8") for f in (
+        "dream/stages.rs", "dream/lessons.rs", "dream/stage_calls.rs", "graph_review_slots.rs"))
+    assert all(f'"{m}"' in text for m in stage_mutants)
+
+
+def test_lesson_write_clocks_and_episode_tokens_normalize(harness):
+    import time
+    now = time.time()
+    assert harness._recent_clock(now) == "<clock>"
+    assert harness._recent_clock(1700000000.0) == 1700000000.0
+    assert harness._recent_clock_ms(now * 1000) == "<clock>"
+    assert harness._recent_clock_ms(1700000000000) == 1700000000000
+    emap = {"a" * 32: "<ep#0>"}
+    assert harness._rename(["episode:" + "a" * 32, "episode:x"], emap) == [
+        "episode:<ep#0>", "episode:x"]
+
+
 def test_idle_seconds_compare_within_the_longest_step(harness):
     py = {"isError": False, "value": {"backlog": 1, "idle_seconds": 12.5}}
     assert harness.idle_diffs(py, {"value": {"idle_seconds": 13.4}}, 1.0) == []

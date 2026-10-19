@@ -65,6 +65,14 @@ Normalizers (declared, spec "Free for W1 and W2"):
 * the forget clocks: ``lessons.superseded_at``, ``edges.superseded_at`` and
   ``store_decisions.decided_at`` keep only null-or-not, and so does the
   ``superseded_at`` inside a ``store_decisions.record`` snapshot;
+* the lesson write clocks (the dream's synthesis, a snapshot restore):
+  ``lessons`` ``asserted_at``, ``last_confirmed``, ``tx_time``,
+  ``valid_time`` and ``hlc_phys`` (milliseconds), and a lineage audit's
+  ``asserted_at``, keep only null-or-not when written from the clock (an
+  explicit seeded stamp compares exactly); ``outcome_signals.consumed_at``
+  keeps only null-or-not; ``lessons.embedding`` compares like
+  ``facts.embedding``; an ``episode:<id>`` provenance token is renamed like
+  an episode id;
 * the board columns a session title writes: ``coordination_agents.name_set_at``
   and ``coordination_events.created_at`` keep only null-or-not, and so do the
   audit chain's ``hash`` and ``prev_hash`` (they cover ``created_at``; the
@@ -174,7 +182,8 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("client_sessions", "ended_at"), ("client_sessions", "start_times"),
          ("facts", "asserted_at"), ("facts", "last_confirmed"), ("facts", "superseded_at"),
          ("facts", "tx_time"), ("facts", "valid_time"), ("facts", "hlc_phys"),
-         ("outcome_signals", "created_at"), ("entities", "created_at"),
+         ("outcome_signals", "created_at"), ("outcome_signals", "consumed_at"),
+         ("entities", "created_at"),
          ("coordination_agents", "name_set_at"), ("coordination_events", "created_at"),
          ("coordination_events", "hash"), ("coordination_events", "prev_hash"),
          ("retrieval_uses", "created_at"),
@@ -205,7 +214,13 @@ DREAM_CLOCK_KEYS = ("since", "last_success_at", "recovered_at", "at", "finished_
 DREAM_TS_KEYS = ("timestamp", "cursor", "dream_cursor", "cursor_before", "cursor_after")
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
-RECENT_CLOCK = {("world_facts", "retrieved_at")}
+RECENT_CLOCK = {("world_facts", "retrieved_at"),
+                # a lesson the dream or a snapshot restore writes takes the
+                # clock; seeded lessons carry explicit 2023 stamps
+                ("lessons", "asserted_at"), ("lessons", "last_confirmed"),
+                ("lessons", "tx_time"), ("lessons", "valid_time")}
+# The same in wall-clock milliseconds (the HLC's physical part).
+RECENT_CLOCK_MS = {("lessons", "hlc_phys")}
 RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
@@ -311,7 +326,14 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # (dream-run-redirect) and the fallback key (dream-run-fallback).
            "mcp-dream-run-encode-unchecked", "mcp-dream-extractor-ascii-digits",
            "mcp-dream-extractor-strict-surrogates", "mcp-dream-extractor-canonical-reason",
-           "mcp-dream-extractor-shared-key"]
+           "mcp-dream-extractor-shared-key",
+           # the dream's stages (P1b): outcome inference (dream-stages-infer),
+           # digests (dream-stages-digests), rules (dream-stages-rules),
+           # lesson synthesis (dream-stages-lessons) and the lesson
+           # audit-snapshot restore (review-slots).
+           "mcp-dream-stage-infer-retry-forever", "mcp-dream-stage-digest-echo-unchecked",
+           "mcp-dream-stage-rule-no-retry", "mcp-dream-stage-lessons-no-lineage",
+           "mcp-dream-stage-lessons-ack-unlanded", "mcp-dream-stage-snapshot-restore-skipped"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -2578,6 +2600,21 @@ EMBED_LOSER = slot_lesson("Embed Keys", "Method", "Pin the signing key identifie
 _L, _W = (lambda row, **kw: slot_snapshot("lesson", row, **kw),
           lambda row, **kw: slot_snapshot("world", row, **kw))
 
+# Lesson audit snapshots whose rows compaction purged: rewritten through
+# lesson_write on restore (an about that gets a graph node, and a polarity,
+# outcome and support of their own).
+PURGED_OWNER = {
+    "task": "Purge Keys", "aspect": "Owner", "lesson": "The ops team purges keys.",
+    "about": "vault", "polarity": "+", "outcome": "success", "status": "retired",
+    "confidence": 0.8, "origin": "agent", "provenance": ["signal:1"], "support": [],
+    "asserted_at": SLOT_STAMP, "last_confirmed": SLOT_STAMP, "supersedes_value": None,
+    "superseded_by_value": None, "superseded_at": SLOT_STAMP + 10}
+PURGED_APPROACH = {
+    "task": "Purged Task", "aspect": "Approach", "lesson": "Avoid manual purges.",
+    "about": None, "polarity": "-", "outcome": "failure", "status": "retired",
+    "confidence": 0, "origin": None, "provenance": ["signal:2", "entry:9"],
+    "support": ["agent"], "asserted_at": SLOT_STAMP, "last_confirmed": SLOT_STAMP,
+    "supersedes_value": None, "superseded_by_value": None, "superseded_at": SLOT_STAMP + 10}
 REVIEW_SLOTS_SEED = [
     store("A note so the bank is not empty."),
     # world facts the legacy restore brings back, and ones whose retired row
@@ -2649,6 +2686,12 @@ REVIEW_SLOTS_SEED = [
     slot_row_sql("lesson", dict(EMBED_LOSER, status="retired", superseded_at=SLOT_STAMP + 500)),
     curated_retire("lesson", _L(EMBED_SURVIVOR), _L(EMBED_LOSER),
                    loser_embedding=EMBED_LOSER["embedding"]),
+    # lessons whose retired row compaction purged: an audit snapshot alone,
+    # and beside a retired record at another slot of the task (mixed)
+    slot_row_sql("lesson", slot_lesson("Purge Keys", "Cadence", "Purge keys monthly.",
+                                       status="retired", superseded_at=SLOT_STAMP + 100)),
+    audit_only("lesson", "purge-keys", "owner", PURGED_OWNER),
+    audit_only("lesson", "purged-task", "approach", PURGED_APPROACH),
 ]
 
 AUTO_MARKERS = (
@@ -2728,6 +2771,11 @@ REVIEW_SLOTS_OPS = [
     review("restore_slot", store="world", src="edit host|operating system"),
     # vectors on both sides: the digests are part of each fingerprint
     review("restore_slot", store="lesson", src="embed keys|method"),
+    # lessons from their audit snapshots, through lesson_write: mixed with
+    # a retired record, then the slot is live; a snapshot alone
+    review("restore_slot", store="lesson", src="purge keys"),
+    review("restore_slot", store="lesson", src="purge keys|owner"),
+    review("restore_slot", store="lesson", src="purged task"),
     review(),
 ]
 
@@ -3289,6 +3337,313 @@ SCENARIOS.update({
 })
 
 
+# memory_dream run's post-consolidation stages (P1b): outcome inference,
+# lesson synthesis (clustering and rule mode) and session digests, each
+# against the stub. Session entries are ``status`` notes, which the dream
+# pull excludes, so every run takes the empty-pull branch (the only one that
+# digests). A session root is closed by the SessionEnd hook or the idle
+# reaper, neither an MCP tool: the seed closes it with a declared ``sql`` op
+# at fixed clocks, so the candidates' order and the cursors are exact.
+# Signals come from memory_outcome. The cross-key dedup gate is off: it
+# turns on embedding cosines.
+def stages_config(lessons: str = "", dream: str = "") -> str:
+    return ("memory:\n"
+            "  graph_insight:\n    enabled: false\n"
+            "  lessons:\n" + (lessons or "    enabled: true\n") +
+            "  dream:\n    enabled: false\n    stall_notice: false\n" + dream)
+
+
+def close_root(key: str, ended: float) -> dict:
+    """Seed-only: the session root closed (``started_at`` 50 s earlier)."""
+    return sql(f"UPDATE episodes SET started_at = {ended - 50!r}, ended_at = {ended!r} "
+               f"WHERE parent_id IS NULL AND session_key = '{key}'", after_stop=True)
+
+
+def session_context(title: str, entries, subtasks=()) -> str:
+    """``_episode_inference_context`` of a session: its title, sub-task
+    titles, then ``(text, source)`` entries in store order."""
+    lines = [f"Session: {title}"] + [f"Sub-task: {t}" for t in subtasks]
+    lines += [f"- ({src}) {text}" for text, src in entries]
+    return "\n".join(lines)
+
+
+def split_context(text: str, cap: int) -> list[str]:
+    """``memory/dream.py:split_session_context`` (the digest map step)."""
+    cap = max(1, int(cap))
+    if len(text) <= cap:
+        return [text]
+    parts, current, length = [], [], 0
+    for line in text.split("\n"):
+        while len(line) > cap:
+            if current:
+                parts.append("\n".join(current))
+                current, length = [], 0
+            parts.append(line[:cap])
+            line = line[cap:]
+        extra = len(line) + (1 if current else 0)
+        if length + extra > cap and current:
+            parts.append("\n".join(current))
+            current, length = [], 0
+            extra = len(line)
+        current.append(line)
+        length += extra
+    if current:
+        parts.append("\n".join(current))
+    return parts
+
+
+def fmt_signals(signals) -> str:
+    """``memory/dream.py:_format_signals`` (``repr`` of the free text)."""
+    lines = []
+    for sg in signals:
+        parts = [f"[{sg['outcome']}]", f"task={sg['task']!r}"]
+        if sg.get("about"):
+            parts.append(f"about={sg['about']!r}")
+        if sg.get("detail"):
+            parts.append(f"detail={sg['detail']!r}")
+        if sg.get("polarity"):
+            parts.append(f"polarity={sg['polarity']}")
+        line = " ".join(parts)
+        if sg.get("origin") == "inferred":
+            line = f"[machine-inferred] {line}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def stage_reply(kind: str, user: str, payload) -> dict:
+    return {"kind": kind, "user": user, "content": json.dumps(payload)}
+
+
+def outcome_signal(task, result, **kw) -> dict:
+    """A signal as memory_outcome stores it (origin ``action``)."""
+    return {"task": task, "outcome": result, "about": kw.get("about"),
+            "detail": kw.get("detail"), "polarity": kw.get("polarity"), "origin": "action"}
+
+
+# Outcome inference: A infers two signals (an enum violation dropped, a lone
+# surrogate refused by the insert, the cap of three reached), B answers
+# malformed twice (held, then passed), C finds nothing, D already has a
+# signal (no candidate), E's endpoint fails (the stage halts there).
+INFER_A = [("Deployed the engine to host-a with the blue-green pipeline.", "status"),
+           ("The smoke test passed after the engine deploy.", "status")]
+INFER_B = [("Read the css grid guide end to end.", "status")]
+INFER_C = [("Retried the flaky integration test twice.", "status")]
+INFER_D = [("Audited the nightly backup job.", "status")]
+INFER_E = [("Rotated the VPN gateway certificate.", "status")]
+INFER_EXTRACTOR = {"model": "stub-model", "replies": [
+    stage_reply("outcomes", session_context("Deploy engine", INFER_A), {"outcomes": [
+        {"task": "deploy engine to host", "outcome": "success",
+         "about": "blue-green pipeline", "detail": "The smoke test passed."},
+        {"task": "bad enum", "outcome": "won"},
+        {"task": "surrogate \ud83d task", "outcome": "success"},
+        {"task": "  verify the deploy  ", "outcome": "failure", "about": "", "detail": None},
+        {"task": "past the cap", "outcome": "success"}]}),
+    {"kind": "outcomes", "user": session_context("Read docs", INFER_B, ["Skim the guide"]),
+     "content": "not json at all"},
+    stage_reply("outcomes", session_context("Fix flaky test", INFER_C), {"outcomes": []}),
+    {"kind": "outcomes", "user": session_context("Rotate certs", INFER_E), "status": 500,
+     "body": json.dumps({"error": "upstream failure"})},
+]}
+
+# Lesson synthesis, clustering: three signals (one crediting the entries a
+# session search served) make two lessons and a lineage audit; the next
+# signals supersede one and confirm the other; a claim whose about holds a
+# lone surrogate fails its write, so its route stays pending.
+LESSON_SIGNALS = [
+    outcome_signal("deploy engine to host", "success", about="blue-green pipeline",
+                   detail="the pipeline rollout worked"),
+    outcome_signal("deploy engine to host", "failure", about="friday deploys",
+                   detail="cache broke", polarity="-"),
+    outcome_signal("trivia", "success"),
+]
+LESSON_SIGNALS_2 = [
+    outcome_signal("deploy engine to host", "success", about="blue-green pipeline",
+                   detail="rolled out again with a canary"),
+    outcome_signal("deploy engine to host", "failure", about="friday deploys",
+                   detail="broke again", polarity="-"),
+]
+LESSON_SIGNALS_3 = [outcome_signal("cache warmup", "failure", detail="cold start")]
+APPROACH = {"task": "deploy engine to host", "aspect": "approach",
+            "lesson": "Deploy through the blue-green pipeline.", "about": "blue-green pipeline",
+            "polarity": "+", "outcome": "success", "confidence": 0.8}
+PITFALL = {"task": "deploy engine to host", "aspect": "pitfall",
+           "lesson": "Avoid Friday deploys.", "about": "friday deploys", "polarity": "-",
+           "outcome": "failure", "confidence": 0.7}
+LESSONS_EXTRACTOR = {"model": "stub-model", "replies": [
+    stage_reply("lessons", fmt_signals(LESSON_SIGNALS), {"lessons": [APPROACH, PITFALL]}),
+    stage_reply("lessons", fmt_signals(LESSON_SIGNALS_2), {"lessons": [
+        dict(APPROACH, lesson="Deploy through the blue-green pipeline after a canary."),
+        dict(PITFALL, confidence=0.9)]}),
+    stage_reply("lessons", fmt_signals(LESSON_SIGNALS_3), {"lessons": [
+        {"task": "cache warmup", "lesson": "Warm the cache first.",
+         "about": "cache \ud83d"}]}),
+]}
+
+# Rule mode by the about prefix: one rule retried for a missing required
+# value, one empty, one failing; and a plain signal on the clustering path.
+RULE_SIGNALS = [
+    outcome_signal("checkout refund", "success", about="rule: refund flow",
+                   detail="user asked for a refund\nMUST INCLUDE: Alpha; beta"),
+    outcome_signal("checkout cancel", "success", about="rule: cancel flow",
+                   detail="cancel request"),
+    outcome_signal("checkout retry", "failure", about="rule: retry flow",
+                   detail="payment timeout"),
+    outcome_signal("deploy engine", "success", about="pipeline"),
+]
+RULE_REFUND = {"task": "refund request", "lesson": "WHEN a refund is requested THEN use Alpha",
+               "about": "rule: refund flow", "polarity": "+", "outcome": "success",
+               "confidence": 0.9}
+RULES_EXTRACTOR = {"model": "stub-model", "replies": [
+    stage_reply("rules", fmt_signals(RULE_SIGNALS[:1]), {"lessons": [RULE_REFUND]}),
+    stage_reply("rules", fmt_signals(RULE_SIGNALS[:1]) + "\n\nYour previous rule omitted "
+                "these values, which must appear verbatim: beta. Reply again with the "
+                "complete rule.", {"lessons": [
+                    dict(RULE_REFUND, lesson="WHEN a refund is requested THEN use Alpha "
+                                             "and beta")]}),
+    stage_reply("rules", fmt_signals(RULE_SIGNALS[1:2]), {"lessons": []}),
+    {"kind": "rules", "user": fmt_signals(RULE_SIGNALS[2:3]), "status": 500,
+     "body": json.dumps({"error": "upstream failure"})},
+    stage_reply("lessons", fmt_signals(RULE_SIGNALS[3:]), {"lessons": [
+        {"task": "deploy engine", "aspect": "approach", "lesson": "Use the pipeline.",
+         "about": "pipeline", "confidence": "0.75"}]}),
+]}
+
+# Inference feeding synthesis in one run: an all-inferred batch's lesson
+# starts at confidence 0.4, its provenance naming the episode.
+INFERRED_ENTRIES = [("Raised the cache TTL to 600 seconds; the hit rate improved.", "status")]
+INFERRED_SIGNAL = {"task": "tune cache ttl", "outcome": "success", "about": "cache ttl",
+                   "detail": "hit rate improved", "polarity": None, "origin": "inferred"}
+INFERRED_EXTRACTOR = {"model": "stub-model", "replies": [
+    stage_reply("outcomes", session_context("Tune the cache", INFERRED_ENTRIES), {"outcomes": [
+        {k: INFERRED_SIGNAL[k] for k in ("task", "outcome", "about", "detail")}]}),
+    stage_reply("lessons", fmt_signals([INFERRED_SIGNAL]), {"lessons": [
+        {"task": "tune cache ttl", "aspect": "approach",
+         "lesson": "Raise the TTL when the hit rate is low.", "about": "cache ttl",
+         "polarity": "+", "outcome": "success", "confidence": 0.9}]}),
+]}
+
+# Digests: a short session in one call; a long one split over the 100-char
+# context and reduced; one whose reply echoes the prompt (malformed: held,
+# then passed).
+DIGEST_CHARS = 100
+DIGEST_A = [("Tagged release 1.4.0.", "status"), ("Published the changelog.", "status")]
+DIGEST_B = [("Planned the migration from PostgreSQL 15 to 17 for billing.", "status"),
+            ("Copied the billing tables to the new cluster overnight.", "status"),
+            ("Switched billing to the new cluster and verified reads.", "status")]
+DIGEST_C = [("Removed stale feature flags.", "status")]
+DIGEST_B_CONTEXT = session_context("Migrate database", DIGEST_B, ["Copy data"])
+DIGEST_B_PARTS = split_context(DIGEST_B_CONTEXT, DIGEST_CHARS)
+DIGEST_B_SEGS = [f"Part {i + 1} of the migration session." for i in range(len(DIGEST_B_PARTS))]
+DIGESTS_EXTRACTOR = {"model": "stub-model", "replies": [
+    stage_reply("digest", session_context("Release prep", DIGEST_A), {
+        "digest": "In this session the user tagged release 1.4.0 and published the changelog."}),
+    *[stage_reply("digest", part, {"digest": f"  {seg}  "})
+      for part, seg in zip(DIGEST_B_PARTS, DIGEST_B_SEGS)],
+    stage_reply("digest", "\n\n".join(DIGEST_B_SEGS), {
+        "digest": "In this session the billing database moved from PostgreSQL 15 to 17."}),
+    stage_reply("digest", session_context("Clean up", DIGEST_C), {
+        "digest": "It was written in past tense anchored to the session."}),
+]}
+
+SCENARIOS.update({
+    "dream-stages-infer": {
+        "config": stages_config("    synthesize_in_dream: false\n"
+                                "    infer_outcomes_max_signals: 3\n"),
+        "extractor": INFER_EXTRACTOR,
+        "seed": [
+            *[store(t, [sess("inf-a")], source=src) for t, src in INFER_A],
+            session_title("Deploy engine", [sess("inf-a")]),
+            ep_start("Skim the guide", [sess("inf-b")]),
+            *[store(t, [sess("inf-b")], source=src) for t, src in INFER_B],
+            ep_end([sess("inf-b")]),
+            session_title("Read docs", [sess("inf-b")]),
+            *[store(t, [sess("inf-c")], source=src) for t, src in INFER_C],
+            session_title("Fix flaky test", [sess("inf-c")]),
+            *[store(t, [sess("inf-d")], source=src) for t, src in INFER_D],
+            outcome("audit backups", "success", [sess("inf-d")]),
+            *[store(t, [sess("inf-e")], source=src) for t, src in INFER_E],
+            session_title("Rotate certs", [sess("inf-e")]),
+            close_root("inf-a", 1700000100.0), close_root("inf-b", 1700000200.0),
+            close_root("inf-c", 1700000300.0), close_root("inf-d", 1700000350.0),
+            close_root("inf-e", 1700000400.0),
+        ],
+        "ops": [dream("status"), dream("run"), dream("run"), dream("run"), dream("status")],
+    },
+    "dream-stages-lessons": {
+        "config": stages_config("    infer_outcomes: false\n"
+                                "    synthesis_dedup_min_similarity: 0\n"),
+        "extractor": LESSONS_EXTRACTOR,
+        "seed": [
+            store("The warmup probe runs once when the daemon starts.", source="status"),
+            store("The engine deploys through the blue-green pipeline.", [sess("les-a")],
+                  source="status"),
+            store("Friday deploys broke the cache twice.", [sess("les-a")], source="status"),
+            search("blue-green pipeline deploys", [sess("les-a")], top_k=3),
+            *[outcome(sg["task"], sg["outcome"], [sess("les-a")],
+                      **{k: sg[k] for k in ("about", "detail", "polarity") if sg[k]},
+                      **({"used_ids": [2, 3]} if i == 0 else {}))
+              for i, sg in enumerate(LESSON_SIGNALS)],
+        ],
+        "ops": [
+            dream("run"),
+            dream("run"),
+            *[outcome(sg["task"], sg["outcome"], [sess("les-a")],
+                      **{k: sg[k] for k in ("about", "detail", "polarity") if sg[k]},
+                      **({"used_ids": [2]} if i == 0 else {}))
+              for i, sg in enumerate(LESSON_SIGNALS_2)],
+            dream("run"),
+            outcome("cache warmup", "failure", [sess("les-a")], detail="cold start"),
+            dream("run"),
+            dream("run"),
+            dream("status"),
+        ],
+    },
+    "dream-stages-rules": {
+        "config": stages_config("    infer_outcomes: false\n"
+                                "    synthesis_dedup_min_similarity: 0\n"),
+        "extractor": RULES_EXTRACTOR,
+        "seed": [
+            store("A note so the bank is not empty.", source="status"),
+            *[outcome(sg["task"], sg["outcome"],
+                      **{k: sg[k] for k in ("about", "detail", "polarity") if sg[k]})
+              for sg in RULE_SIGNALS],
+        ],
+        "ops": [dream("run"), dream("run")],
+    },
+    "dream-stages-inferred": {
+        "config": stages_config("    synthesis_dedup_min_similarity: 0\n"),
+        "extractor": INFERRED_EXTRACTOR,
+        "seed": [
+            *[store(t, [sess("inl-a")], source=src) for t, src in INFERRED_ENTRIES],
+            session_title("Tune the cache", [sess("inl-a")]),
+            close_root("inl-a", 1700000100.0),
+        ],
+        "ops": [dream("run"), dream("run")],
+    },
+    "dream-stages-digests": {
+        "config": stages_config("    enabled: false\n",
+                                "    digest_enabled: true\n"
+                                f"    digest_context_chars: {DIGEST_CHARS}\n"
+                                "    digest_target_chars: 300\n"),
+        "extractor": DIGESTS_EXTRACTOR,
+        "seed": [
+            *[store(t, [sess("dig-a")], source=src) for t, src in DIGEST_A],
+            session_title("Release prep", [sess("dig-a")]),
+            store(DIGEST_B[0][0], [sess("dig-b")], source=DIGEST_B[0][1]),
+            ep_start("Copy data", [sess("dig-b")]),
+            *[store(t, [sess("dig-b")], source=src) for t, src in DIGEST_B[1:]],
+            ep_end([sess("dig-b")]),
+            session_title("Migrate database", [sess("dig-b")]),
+            *[store(t, [sess("dig-c")], source=src) for t, src in DIGEST_C],
+            session_title("Clean up", [sess("dig-c")]),
+            close_root("dig-a", 1700000100.0), close_root("dig-b", 1700000200.0),
+            close_root("dig-c", 1700000300.0),
+        ],
+        "ops": [dream("status"), dream("run"), dream("run"), dream("run"), dream("status")],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -3494,6 +3849,9 @@ def _rename(v, emap):
     if isinstance(v, str):
         if v in emap:
             return emap[v]
+        # a synthesized lesson's provenance token names its episode
+        if v.startswith("episode:") and v[8:] in emap:
+            return "episode:" + emap[v[8:]]
         if GENERIC.match(v):
             return "session - <minute>"
         return v
@@ -3508,6 +3866,14 @@ def _clock(v):
     if isinstance(v, list):
         return [_clock(x) for x in v]
     return None if v is None else "<clock>"
+
+
+def _recent_clock_ms(v):
+    """``_recent_clock`` for wall-clock milliseconds."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) \
+            and abs(v / 1000.0 - time.time()) < RECENT_S:
+        return "<clock>"
+    return v
 
 
 def _recent_clock(v):
@@ -3666,6 +4032,7 @@ def normalize_state(state: dict, before: dict,
     numeric = extract_numeric(state)
     numeric["facts"] = extract_fact_numeric(state)
     numeric["world_facts"] = extract_fact_numeric(state, "world_facts")
+    numeric["lessons"] = extract_fact_numeric(state, "lessons")
     numeric["lesson_scores"] = extract_lesson_scores(state)
     emap = episode_map(state)
     for qualified, t in state["rows"].items():
@@ -3677,6 +4044,9 @@ def normalize_state(state: dict, before: dict,
             elif (name, col) in RECENT_CLOCK:
                 for row in t["rows"]:
                     row[idx] = _recent_clock(row[idx])
+            elif (name, col) in RECENT_CLOCK_MS:
+                for row in t["rows"]:
+                    row[idx] = _recent_clock_ms(row[idx])
         if name == "meta":
             for row in t["rows"]:
                 key, value = row
@@ -3708,6 +4078,9 @@ def normalize_state(state: dict, before: dict,
             for row in t["rows"]:
                 if isinstance(row[ri], dict) and "superseded_at" in row[ri]:
                     row[ri] = {**row[ri], "superseded_at": _clock(row[ri]["superseded_at"])}
+                # a synthesis lineage audit names its lesson by asserted_at
+                if isinstance(row[ri], dict) and "asserted_at" in row[ri]:
+                    row[ri] = {**row[ri], "asserted_at": _recent_clock(row[ri]["asserted_at"])}
         t["rows"] = [_rename(r, emap) for r in t["rows"]]
         if name != "entries":
             t["rows"].sort(key=lambda r: json.dumps(r, sort_keys=True))
@@ -3737,9 +4110,11 @@ def compare_numeric(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     diffs = compare_fact_numeric(py.get("facts", {}), rs.get("facts", {}), tol, stats)
     diffs += compare_fact_numeric(py.get("world_facts", {}), rs.get("world_facts", {}), tol,
                                   stats, "world_facts")
+    diffs += compare_fact_numeric(py.get("lessons", {}), rs.get("lessons", {}), tol, stats,
+                                  "lessons")
     diffs += compare_lesson_scores(py.get("lesson_scores", {}), rs.get("lesson_scores", {}),
                                    stats)
-    skip = ("facts", "world_facts", "lesson_scores")
+    skip = ("facts", "world_facts", "lessons", "lesson_scores")
     py = {k: v for k, v in py.items() if k not in skip}
     rs = {k: v for k, v in rs.items() if k not in skip}
     for eid in sorted(set(py) | set(rs)):
@@ -4321,7 +4696,7 @@ def pack_numeric(numeric: dict, seen: set) -> dict:
     import struct
     out = {}
     for eid, v in numeric.items():
-        if eid in ("facts", "world_facts", "lesson_scores") or eid in seen:
+        if eid in ("facts", "world_facts", "lessons", "lesson_scores") or eid in seen:
             continue  # fact embeddings are compared live only (declared)
         seen.add(eid)
         emb = v["embedding"]

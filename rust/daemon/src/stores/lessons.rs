@@ -3,9 +3,10 @@
 //! `memory/lessons.py` (`LessonRecord`, `LessonStore.current_records`,
 //! `search`, `retire`); `storage/sync.py` `_lesson_record_to_row`,
 //! `sync_lesson_slots` (409-450), `hydrate_lessons` (474-505);
-//! `storage/postgres.py` `load_lessons` (1998-2008). The dream's synthesis
-//! is not ported; `memory_forget` retires lessons (scope `lesson`, and the
-//! source cascade of scope `memory`).
+//! `storage/postgres.py` `load_lessons` (1998-2008), and `write_fact`
+//! (`memory/lessons.py:91-208`), the write the dream's lesson synthesis and
+//! `lesson_write` make (`crate::lesson_write`); `memory_forget` retires
+//! lessons (scope `lesson`, and the source cascade of scope `memory`).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, RwLock};
@@ -783,5 +784,89 @@ mod tests {
         assert_eq!(s.dirty_slots.len(), 2);
         // Restored slots are live now: nothing more to restore.
         assert!(s.restore("deploy", None).is_empty());
+    }
+
+    /// Expected values: Python's `LessonStore.write_fact` on the same calls.
+    #[test]
+    fn write_fact_inserts_supersedes_and_refuses_an_older_stamp() {
+        let mut s = LessonStore::default();
+        let w = |now: f64, hlc: (i64, i64), prov: &'static [String]| LessonWrite {
+            about: None,
+            outcome: "success",
+            polarity: "+",
+            confidence: 0.6,
+            origin: Some("agent"),
+            provenance: prov,
+            support: &[],
+            now,
+            hlc: Some(hlc),
+            valid_time: None,
+            writer_id: None,
+            session_id: None,
+        };
+        let first = LessonWrite {
+            about: Some("pipe"),
+            ..w(10.0, (5, 0), &[])
+        };
+        assert_eq!(
+            s.write_fact("Deploy", "Approach", "Use the pipeline.", None, &first)
+                .0,
+            "inserted"
+        );
+        let undo = s.slot_undo("deploy", "approach");
+        let second = LessonWrite {
+            about: Some(""),
+            outcome: "weird",
+            polarity: "-",
+            confidence: 0.9,
+            ..w(20.0, (6, 0), &[])
+        };
+        let (action, i) = s.write_fact("deploy", "approach", "use the  pipeline", None, &second);
+        assert_eq!(action, "superseded");
+        let r = &s.records[i];
+        assert_eq!(
+            (r.confidence, r.outcome.as_str(), r.polarity.as_str()),
+            (0.9, "success", "-")
+        );
+        assert_eq!(
+            (r.tx_time, r.valid_time, r.about.as_deref()),
+            (Some(20.0), Some(20.0), Some(""))
+        );
+        assert_eq!(s.records[0].status, "superseded");
+        assert_eq!(
+            s.records[0].superseded_by_value.as_deref(),
+            Some("use the  pipeline")
+        );
+        assert_eq!(
+            s.write_fact(
+                "deploy",
+                "approach",
+                "new lesson",
+                None,
+                &w(30.0, (4, 0), &[])
+            )
+            .0,
+            "stale"
+        );
+        // The undo puts back the slot as it was before the supersede.
+        s.undo(undo);
+        assert_eq!(s.records.len(), 1);
+        assert_eq!(s.records[0].status, "current");
+        let confirm = LessonWrite {
+            about: Some("pipeline"),
+            confidence: 0.3,
+            ..w(40.0, (7, 1), &[])
+        };
+        let (action, i) = s.write_fact("DEPLOY", "approach", "Use the pipeline.", None, &confirm);
+        assert_eq!(action, "confirmed");
+        let r = &s.records[i];
+        assert_eq!(
+            (r.confidence, r.last_confirmed, r.asserted_at),
+            (0.6, 40.0, 10.0)
+        );
+        assert_eq!(
+            (r.about.as_deref(), r.hlc_logical),
+            (Some("pipeline"), Some(1))
+        );
     }
 }

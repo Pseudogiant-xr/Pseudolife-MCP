@@ -892,13 +892,12 @@ pub(super) fn loads(text: &str) -> Result<Value, Raised> {
     if let Some(v) = parsed {
         return Ok(v);
     }
+    // `str(exc)`: Python's own message, which the lesson stage reports.
+    let message = super::py_json_error::message(text).unwrap_or_else(|| "invalid JSON".into());
     Err(match json_error_kind(text) {
-        JsonFail::ExpectingValue => Raised::other("StopIteration", "Expecting value"),
-        JsonFail::Decode => Raised::other("JSONDecodeError", "invalid JSON"),
-        JsonFail::Recursion => Raised::other(
-            "RecursionError",
-            "maximum recursion depth exceeded while decoding a JSON document",
-        ),
+        JsonFail::ExpectingValue => Raised::other("StopIteration", message),
+        JsonFail::Decode => Raised::other("JSONDecodeError", message),
+        JsonFail::Recursion => Raised::other("RecursionError", message),
     })
 }
 

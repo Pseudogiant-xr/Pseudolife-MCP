@@ -14,6 +14,9 @@
 //! the handled signals. The staged store is published only after the
 //! commit.
 
+// The bodies raise `ToolError` as the action modules do.
+#![allow(clippy::result_large_err)]
+
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -324,6 +327,7 @@ fn failure_text(e: &ExtractFailure) -> String {
 
 /// A failure inside the commit transaction: a body error, or a statement
 /// of the adapter itself (BEGIN, the commit probe, COMMIT).
+#[allow(clippy::large_enum_variant)]
 enum TxFail {
     Tool(ToolError),
     Pg(tokio_postgres::Error),
@@ -374,7 +378,7 @@ pub async fn synthesize_lessons(
     let now = crate::episodes::now();
     let cutoff = now - m.lessons_signal_retention_days as f64 * 86400.0;
     let retry_days = m.lessons_signal_retry_days;
-    let since = (retry_days > 0).then(|| now - retry_days as f64 * 86400.0);
+    let since = (retry_days > 0).then_some(now - retry_days as f64 * 86400.0);
     let cap = (m.lessons_synthesis_max_signals != 0).then_some(m.lessons_synthesis_max_signals);
     let state = &ready.dream_run;
     let signals = {
@@ -793,11 +797,6 @@ async fn write_claim(
     now: f64,
 ) -> Result<(), ToolError> {
     let provenance = w.provenance;
-    // psycopg refuses a reply's lone surrogate in the graph link's `about`
-    // (the claim's other texts were refused by the embedder already).
-    if let Some(e) = super::extractor::unencodable(&[claim.about.as_deref().unwrap_or("")]) {
-        return Err(internal(e));
-    }
     let (action, i) = crate::lesson_write::write_staged(
         c,
         staged,

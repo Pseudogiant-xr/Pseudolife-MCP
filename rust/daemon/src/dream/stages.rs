@@ -16,6 +16,9 @@
 //! `_load/_save_digest_cursor`, `_pending_digest_candidates` and
 //! `_store_digest` (3134-3283).
 
+// The bodies raise `ToolError` as the action modules do.
+#![allow(clippy::result_large_err)]
+
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
@@ -374,7 +377,9 @@ pub async fn infer_outcomes_stage(
         let mut cur = Cursor::load(ready, INFER_CURSOR_KEY, false).await?;
         let rid = cand.root_id.as_str();
         // STRICTLY greater: same-tick siblings share ended_at.
-        if cur.ts > cand.ended_at || count_signals(ready, &[cand.root_id.clone()]).await? > 0 {
+        if cur.ts > cand.ended_at
+            || count_signals(ready, std::slice::from_ref(&cand.root_id)).await? > 0
+        {
             continue;
         }
         let Some(claims) = claims else {
@@ -588,9 +593,6 @@ async fn summarize(
             Some(seg) => segs.push(seg),
             None => return Ok(None),
         }
-    }
-    if crate::mutants::active("mcp-dream-stage-digest-no-reduce") {
-        return Ok(Some(segs.join("\n\n")));
     }
     compat.summarize_session(&segs.join("\n\n"), target).await
 }

@@ -37,6 +37,11 @@ KIND_PREFIXES = (
     ("You consolidate numbered notes", "claims"),
     ("You extract EVENTS", "events"),
     ("You extract durable RELATIONSHIPS", "relations"),
+    # the dream's post-consolidation stages
+    ("You review the stored record of one work session", "outcomes"),
+    ("You consolidate an agent's work-outcome signals", "lessons"),
+    ("You turn ONE outcome signal", "rules"),
+    ("You write a factual narrative digest", "digest"),
 )
 CHAT_PATHS = {"/v1/chat/completions": "primary", "/fallback/v1/chat/completions": "fallback"}
 MODEL_PATHS = {"/v1/models": "primary", "/fallback/v1/models": "fallback"}

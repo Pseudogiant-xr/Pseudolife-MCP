@@ -301,25 +301,6 @@ fn retired_slots_keep_the_newest_hundred_retires() {
     assert_eq!((out[0].id, out[1].id, out[2].id), (3, 1, 119));
 }
 
-// ── the lesson snapshot-fallback prediction ──────────────────────────────
-
-/// A lesson at `t|aspect`, as the oracle's `LessonRecord(entity="t",
-/// attribute=aspect, status=..., superseded_at=..., asserted_at=1.0)`.
-fn bare(aspect: &str, status: &str, superseded_at: Option<f64>) -> LessonRecord {
-    LessonRecord {
-        entity: "t".into(),
-        attribute: aspect.into(),
-        value: format!("t/{aspect}"),
-        status: status.into(),
-        superseded_at,
-        asserted_at: 1.0,
-        last_confirmed: 0.0,
-        embedding: None,
-        key: slot_key("t", aspect),
-        ..lesson()
-    }
-}
-
 fn store_of(records: Vec<LessonRecord>) -> LessonStore {
     LessonStore {
         records,
