@@ -207,9 +207,15 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     download = next(step for step in loop["steps"] if step.get("uses") == "actions/download-artifact@v4")
     assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
     assert not any("cargo" in step.get("run", "") for step in loop["steps"])
-    # The event oracle binding accepts only master dispatches; a stress loop
-    # runs on any branch against its own checkout (Codex review of e56fe0f6).
-    assert not any("oracle_selection" in step.get("run", "") for step in loop["steps"])
+    # The event oracle binding accepts only master dispatches with frozen_head,
+    # so a loop on a branch must not stop there (Codex review of e56fe0f6);
+    # but oracle-dependent pytest selections need it when it can bind (Codex
+    # review of 028c3ebb), so it runs best-effort before the selection.
+    binds = [step for step in loop["steps"] if "evals.rust_port.oracle_selection" in step.get("run", "")]
+    assert len(binds) == 1 and binds[0]["continue-on-error"] is True
+    assert binds[0]["env"] == {"GITHUB_REF": "${{ github.ref }}"}
+    names = [step.get("name") for step in loop["steps"]]
+    assert names.index(binds[0]["name"]) < names.index("Run the selection once")
     assert report["needs"] == ["stress-plan", "stress"]
     assert report["if"] == "${{ always() && needs.stress-plan.result == 'success' }}"
     upload = next(step for step in report["steps"] if step.get("name") == "Retain the stress report")

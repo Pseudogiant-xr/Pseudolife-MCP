@@ -1434,8 +1434,8 @@ jobs:
 
   # A stress loop (mode=stress): run one selection on N fresh hosted runners
   # and report every iteration (rust/ci/stress.py). It compares against this
-  # checkout's Python on any branch, so it binds no event oracle (that
-  # binding takes only master dispatches). Inputs reach the scripts only through env,
+  # checkout's Python on any branch; the event oracle binds best-effort (only
+  # a master dispatch with frozen_head has one). Inputs reach the scripts only through env,
   # never inlined into a script.
   stress-plan:
     name: Stress / plan
@@ -1504,6 +1504,18 @@ jobs:
       - name: Restore executable permission
         if: runner.os == 'Linux'
         run: chmod +x rust/target/release/*
+      # Best effort: the event oracle binds only for a master dispatch with
+      # frozen_head. The CLI and daemon harnesses never read it; pytest
+      # selections under evals/rust_port that call selected_oracle() need it,
+      # and on a branch they fail with its "select the event oracle" error.
+      - name: Bind the event-selected Python oracle when the dispatch has one
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
+          exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL
         timeout-minutes: 10
         shell: pwsh
