@@ -1018,6 +1018,56 @@ read back through `memory_lesson_search`). The forget clocks keep only null-or-n
 `mcp-forget-no-world-audit` and `mcp-forget-no-lesson-audit` mutants must be
 caught.
 
+### memory_consolidation_candidates over MCP (2026-10-19)
+
+`consolidation_tools.rs` (the tool, the candidate pool and the greedy
+clustering), on `search::rank` for the query anchor (the reranker shared
+through `read/search_route.rs`'s `LazyReranker`) and `search::entry_json`
+for members; registered in `mcp::dispatch::registry`. Python:
+`mcp_server.py` `memory_consolidation_candidates` (2499-2545);
+`service.py` `_entry_to_dict` (147-196), `consolidation_candidates`
+(7294-7460); `memory/consolidation.py` `_cosine` (81-92),
+`_cluster_cohesion` (95-110), `cluster_candidates` (113-189);
+`memory/cms.py` `retrieve` (740-).
+
+| # | Exact item | Source |
+|---|---|---|
+| CC1 | Bound arguments: `memory_consolidation_candidates(query=None, episode=None, sources=None, tags=None, top_k=20, min_cohesion=0.6, min_cluster_size=2, max_clusters=10)` (the counts lax integers of at least 1, `min_cohesion` a lax float that may be non-finite). Read-only; under the service lock. | `mcp_server.py:2499-2545` |
+| CC2 | The addressable residents: live, and their row id held by exactly one resident entry (the correction path's uniqueness rule). | `service.py:7352-7370` |
+| CC3 | A truthy `query` anchors retrieval: the query embedding through `CMS.retrieve` with `top_k`, the sources, `[episode]` when truthy, the tags (normalized), the query text, superseded entries hidden before the caps, `min_score=0.0`, and the configured BM25, recency, fusion and rerank; served entries accrue access as any retrieval does. The candidates are the addressable hits, with their scores, in served order. | `service.py:7372-7390`; `cms.py:740-` |
+| CC4 | Else a truthy `episode`: every addressable resident entry, bands in configured order (bank order within a band: the multi-band divergence), whose episode id equals it, one per text (the first), passing a non-empty `sources` (its source listed) and a non-empty `tags` (a stored tag listed, unnormalized), each scored 1.0. | `service.py:7391-7410` |
+| CC5 | Neither: `{"query": null, "episode": null, "count": 0, "clusters": []}`. | `service.py:7411-7420` |
+| CC6 | With candidates, `SELECT id FROM entries WHERE id = ANY(...)` keeps those with a row (a failed read keeps them all, logged); then the pool is cut to `top_k`. | `service.py:7422-7439` |
+| CC7 | `cluster_candidates`: candidates in descending score, ties in pool order; each unclustered one in turn (until `max_clusters` are kept) seeds a cluster of every later unclustered candidate whose cosine to it is at least `min_cohesion`; a cluster smaller than `min_cluster_size` is released, else kept with its cohesion (the mean of every distinct pairwise cosine) and seed score; kept clusters sort stably by `cohesion × size`, largest first. The cosine is float32 over the stored vectors (0.0 for a zero norm; vectors of different lengths fail). | `consolidation.py:81-189` |
+| CC8 | The answer: `{query, episode, count, clusters: [{cohesion (4 places), seed_score (4 places), size, members: [_entry_to_dict(member) without score]}]}`, the query and episode echoed as given. | `service.py:7441-7459`; `service.py:147-196` |
+| CC9 | What the differential claims: the two daemons' embeddings agree within the measured tolerance (`goldens/w2e-tolerance.json`), so scores, cohesions and seed scores compare within 1.5e-4 and cluster membership can differ for a cosine within that tolerance of `min_cohesion`, or, under the query anchor, where two candidates' scores lie within it and swap seed order (the episode anchor scores every candidate 1.0); every corpus answer agrees. A cohesion rests only on the stored vectors, which both banks hold identically, so it compares within one rounding unit. Exact agreement with the ONNX graph is a cutover question, as for the world cortex, not a porting one. | `harness/w2e.py` |
+
+`harness/w2e.py live --only consolidation-candidates` compares every answer
+and the full bank after each call, on a template whose entries
+(near-duplicates across three sessions, a retired one and its correction,
+a tagged one) the Python daemon's own tools wrote: no anchor and an empty
+query; the query anchor with the defaults, a high cohesion floor, a source
+filter with a small `top_k`, a tag filter needing normalization, singleton
+clusters under a cluster cap, a NaN floor, an episode filter, and empty
+lists with an empty episode (no filters); the episode anchor with a low
+floor (an exact twin offered once), a source filter that excludes
+everything, a tag filter, and an unnormalized tag that matches nothing; and
+a row deleted behind the daemons' backs, then the episode anchor's check
+and cut. Inside a cluster, `seed_score` compares within 1.5e-4 and
+`cohesion` within one rounding unit. The
+`mcp-consolidation-unsorted` and `mcp-consolidation-unverified` mutants
+must be caught.
+
+`memory_consolidate` needs nothing from the W3-H graph/dream engine:
+`service.consolidate` (`service.py:7462-7516`) resolves its targets with
+`_resolve_correction_targets_locked` over lists and stores the replacement
+through `_apply_correction_locked` (source `consolidation` by default, the
+caller's tags, no derived-slot report), the correction machinery that
+`memory_supersede` ports. What remains for it is the list selectors (every
+target's error reported, the first error's reason), several targets in one
+retirement, label inheritance and capacity victim over them, and the tags
+path.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

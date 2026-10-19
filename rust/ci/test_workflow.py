@@ -57,6 +57,8 @@ PARITY_CHECKS = {
     "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
+# Parity uploads carry the lane prefix: empty on hosted, set by parity-selfhosted.
+ARTIFACT_PREFIX = "${{ env.PARITY_ARTIFACT_PREFIX }}"
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
                   "--collect-only", "--co", "--lf", "--last-failed", "--stepwise", "--sw"}
 
@@ -176,14 +178,14 @@ def check_w1c_shards(jobs):
                     ("--row", "test_login", "--record", "-v", "--out"))
     retained = steps["Retain the recorded Linux test_login golden"]
     assert retained["if"] == "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
-    assert retained["with"]["name"] == "test_login-linux-golden"
+    assert retained["with"]["name"] == ARTIFACT_PREFIX + "test_login-linux-golden"
     assert retained["with"]["path"].splitlines() == [
         "rust/cli_harness/goldens/test_login.linux.json",
         "${{ runner.temp }}/test-login-linux-record.json"]
     summaries = steps["Retain CLI harness summaries"]
     assert summaries["if"] == ("always() && (matrix.suite == 'cli' || "
                                "startsWith(matrix.suite, 'w1c-'))")
-    assert summaries["with"]["name"] == "cli-harness-${{ runner.os }}-${{ matrix.suite }}"
+    assert summaries["with"]["name"] == ARTIFACT_PREFIX + "cli-harness-${{ runner.os }}-${{ matrix.suite }}"
     assert summaries["with"]["path"] == "${{ runner.temp }}/cli-harness*.json"
     # A second explicit row invocation outside the shard step duplicates work.
     for step in job["steps"]:
@@ -1171,3 +1173,135 @@ def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
     # cancelled run saves no cache, so the next run on that image is cold too.
     assert job["timeout-minutes"] >= 45
     assert 0 < override["timeout-minutes"] < job["timeout-minutes"]
+
+
+# --- self-hosted comparison lane (docs/specs/2026-10-19-self-hosted-parity-lane.md) ---
+
+SELF_HOSTED = "runner.environment == 'self-hosted'"
+GATE_STEP = "Yield to this machine's full suite"
+VENV_STEP = "Give the shard its own Python environment"
+
+
+def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    # Anchors, not a copy: a step or shard added to the hosted matrix reaches
+    # the self-hosted lane in the same edit.
+    for alias in ("steps: *parity_steps", "suite: *parity_suites", "include: *parity_shards"):
+        assert text.count(alias) == 1, alias
+    jobs = workflow()["jobs"]
+    hosted, lane = jobs["parity-checks"], jobs["parity-selfhosted"]
+    assert lane["steps"] == hosted["steps"]
+    assert lane["strategy"]["matrix"]["suite"] == hosted["strategy"]["matrix"]["suite"]
+    assert lane["strategy"]["matrix"]["include"] == hosted["strategy"]["matrix"]["include"]
+    assert lane["strategy"]["matrix"]["runner"] == (
+        "${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
+    assert lane["strategy"]["fail-fast"] is False
+    assert lane["needs"] == hosted["needs"] == ["candidate", "rust"]
+    # Only the maintainer's registered runners: one label per machine.
+    assert lane["runs-on"] == ["self-hosted", "pseudolife-parity-${{ matrix.runner }}"]
+    assert lane["timeout-minutes"] >= 210 + int(lane["env"]["PARITY_YIELD_MINUTES"])
+    assert lane["env"]["PARITY_MIN_FREE_GB"] == "8"
+
+
+def test_selfhosted_lane_never_touches_a_required_check():
+    jobs = workflow()["jobs"]
+    lane = jobs["parity-selfhosted"]
+    assert lane["continue-on-error"] is True
+    for name, job in jobs.items():
+        needs = job.get("needs", [])
+        assert "parity-selfhosted" not in ([needs] if isinstance(needs, str) else needs), name
+    assert "parity-selfhosted" not in jobs["parity"]["steps"][0]["run"]
+    # Nightly and manual CI only: their concurrency groups are their own, so
+    # queued self-hosted jobs neither hold a PR's checks open nor let a newer
+    # master push cancel a run whose hosted jobs already finished.
+    assert lane["if"] == (
+        "${{ !cancelled() && (github.event_name == 'schedule' || "
+        "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
+        "&& vars.PARITY_SELFHOSTED_RUNNERS != '' "
+        "&& needs.candidate.result == 'success' && needs.rust.result == 'success' }}")
+    assert "pull_request" not in lane["if"] and "'push'" not in lane["if"]
+
+
+def test_both_lanes_upload_under_distinct_names():
+    jobs = workflow()["jobs"]
+    assert jobs["parity-checks"]["env"]["PARITY_ARTIFACT_PREFIX"] == ""
+    assert jobs["parity-selfhosted"]["env"]["PARITY_ARTIFACT_PREFIX"] == "self-hosted-"
+    uploads = [step for step in jobs["parity-checks"]["steps"]
+               if step.get("uses") == "actions/upload-artifact@v4"]
+    assert uploads
+    for step in uploads:
+        assert step["with"]["name"].startswith(ARTIFACT_PREFIX), step.get("name")
+
+
+def test_self_hosted_only_steps_leave_the_hosted_shard_unchanged():
+    steps = workflow()["jobs"]["parity-checks"]["steps"]
+    gate = steps[0]
+    assert gate["name"] == GATE_STEP and gate["if"] == SELF_HOSTED
+    assert steps[1]["uses"] == "actions/checkout@v4"
+    venv = next(step for step in steps if step.get("name") == VENV_STEP)
+    assert venv["if"] == SELF_HOSTED
+    setup = next(step for step in steps if step.get("uses") == "actions/setup-python@v5")
+    assert steps.index(setup) < steps.index(venv)
+    install = next(step for step in steps if step.get("name") == "Install checkout and test dependencies")
+    assert steps.index(venv) < steps.index(install)
+    # Self-hosted runners save nothing to the repository cache, which the
+    # hosted Rust caches need; hosted keeps both caches as before.
+    assert setup["with"]["cache"] == "${{ runner.environment != 'self-hosted' && 'pip' || '' }}"
+    cache = next(step for step in steps if step.get("uses") == "Swatinem/rust-cache@v2")
+    assert cache["with"]["save-if"] == "${{ runner.environment != 'self-hosted' }}"
+    added = [step for step in steps if SELF_HOSTED in step.get("if", "")]
+    assert [step["name"] for step in added] == [GATE_STEP, VENV_STEP]
+
+
+GATE_STUBS = r'''$ErrorActionPreference = 'stop'
+function Get-Command { if ($env:PL_NO_CLI -eq '1') { $null } else { $true } }
+function Start-Sleep { Add-Content -LiteralPath $env:PL_LOG -Value 'sleep' }
+function pseudolife-mcp {
+    Add-Content -LiteralPath $env:PL_LOG -Value ("call " + ($args -join ' ') + " | $env:PSEUDOLIFE_SUITE_LEASE | $env:PSEUDOLIFE_SUITE_LOCK_DIR")
+    $sequence = ConvertFrom-Json $env:PL_SEQUENCE -NoEnumerate
+    $calls = @(Get-Content -LiteralPath $env:PL_LOG | Where-Object { $_ -like 'call *' }).Count
+    $reply = $sequence[[math]::Min($calls, $sequence.Count) - 1]
+    ConvertTo-Json -Compress @{ name = $args[-1]; held = ($reply[0] -eq 1); local = @{ state = $reply[1] } }
+    $global:LASTEXITCODE = $reply[0]
+}
+'''
+
+
+@pytest.mark.parametrize("case, sequence, overrides, accepted, calls, sleeps", [
+    ("free", [[0, "free"]], {}, True, 1, 0),
+    ("waits for the suite", [[1, "held"], [1, "held"], [0, "free"]], {}, True, 3, 2),
+    ("yields", [[1, "held"]], {"PARITY_YIELD_MINUTES": "0"}, False, 1, 0),
+    ("check failed", [[70, None]], {}, False, 1, 0),
+    ("no lock file reads free", [[0, None]], {}, False, 1, 0),
+    ("the host's lease", [[0, "free"]], {"PSEUDOLIFE_PARITY_LEASE": "full-suite"}, False, 0, 0),
+    ("no lock directory", [[0, "free"]], {"PSEUDOLIFE_PARITY_LOCK_DIR": ""}, False, 0, 0),
+    ("no cli", [[0, "free"]], {"PL_NO_CLI": "1"}, False, 0, 0),
+    ("disk below the floor", [[0, "free"]], {"PARITY_MIN_FREE_GB": "1000000"}, False, 0, 0),
+])
+def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, overrides,
+                                                   accepted, calls, sleeps):
+    import os
+    gate = workflow()["jobs"]["parity-checks"]["steps"][0]
+    log, summary = tmp_path / "calls.log", tmp_path / "summary.md"
+    log.write_text("", encoding="utf-8")
+    env = dict(os.environ, PL_LOG=str(log), PL_SEQUENCE=json.dumps(sequence),
+               GITHUB_WORKSPACE=str(tmp_path), GITHUB_STEP_SUMMARY=str(summary),
+               PSEUDOLIFE_PARITY_LEASE="full-suite@fixture",
+               PSEUDOLIFE_PARITY_LOCK_DIR=str(tmp_path / "locks"),
+               **workflow()["jobs"]["parity-selfhosted"]["env"])
+    # Only the low-disk case may depend on this machine's free space.
+    env["PARITY_MIN_FREE_GB"] = "0"
+    env.pop("PSEUDOLIFE_SUITE_LEASE", None)
+    env.pop("PSEUDOLIFE_SUITE_LOCK_DIR", None)
+    env.update(overrides)
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                             GATE_STUBS + gate["run"]], env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == accepted, case + result.stdout + result.stderr
+    lines = log.read_text(encoding="utf-8").splitlines()
+    made = [line for line in lines if line.startswith("call ")]
+    assert len(made) == calls, lines
+    assert lines.count("sleep") == sleeps, lines
+    for line in made:
+        assert line == f"call lease check --json full-suite@fixture | full-suite@fixture | {tmp_path / 'locks'}"
+    yielded = summary.exists() and "Yielded" in summary.read_text(encoding="utf-8")
+    assert yielded == (case == "yields")
