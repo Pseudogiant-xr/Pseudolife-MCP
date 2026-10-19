@@ -1186,7 +1186,10 @@ mod tests {
         assert!(answers.starts_with("HTTP/1.1 403"), "{answers:?}");
         assert!(answers.contains("\r\n\r\n{\"error\""), "{answers:?}");
         assert!(answers.contains("HTTP/1.1 401"), "{answers:?}");
-        assert!(!answers.to_ascii_lowercase().contains("connection: close"), "{answers:?}");
+        assert!(
+            !answers.to_ascii_lowercase().contains("connection: close"),
+            "{answers:?}"
+        );
     }
 
     #[tokio::test]

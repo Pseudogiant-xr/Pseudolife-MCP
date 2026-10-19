@@ -1,4 +1,4 @@
-"""Only the exact declared differences may accompany MCP controls."""
+"""The strict MCP corpus must match exactly; no difference is declared."""
 import copy
 import json
 
@@ -11,16 +11,12 @@ def line(name, py, rs):
 
 
 def baseline():
-    """The shapes the strict corpus records on mcp 2.2.0: only MCP-REFUSAL-CLEANUP."""
-    py = {"status": 413, "headers": {"mcp-session-id": None}, "body": {"raw": "Request body too large"}}
-    rs = copy.deepcopy(py)
-    rs["headers"]["connection"] = "close"
-    diffs = [line(f"body_limit[{i}]", py, rs) for i in (0, 2, 3, 4, 5)]
-    return {"summary": {"responses": 325, "cases": 18, "diffs": 5, "unserved_checked": list(UNSERVED)},
-            "diffs": diffs}
+    """The shape the strict corpus records on mcp 2.2.0: complete, no differences."""
+    return {"summary": {"responses": 325, "cases": 18, "diffs": 0, "unserved_checked": list(UNSERVED)},
+            "diffs": []}
 
 
-def test_exact_declared_baseline_is_retained():
+def test_exact_baseline_is_retained():
     report = baseline()
     original = copy.deepcopy(report)
     check_baseline(report)
@@ -29,41 +25,30 @@ def test_exact_declared_baseline_is_retained():
                        "mcp-binding-open", "mcp-keep-failed-opening", "mcp-delete-keeps-session")
 
 
-# Each edit replaces text in the named diff: (diff name, old text, new text).
-EDITS = {
-    "status": ("body_limit[0]", '"status": 413', '"status": 500'),
-    "body": ("body_limit[0]", "Request body too large", "wrong refusal"),
-    "undeclared_index": ("body_limit[0]", "body_limit[0]", "body_limit[1]"),
-    "rust_keeps_connection": ("body_limit[2]", '"connection": "close"', '"connection": "keep-alive"'),
-}
+def refusal_close(index):
+    """The difference MCP-REFUSAL-CLEANUP used to declare: Rust closing after a 413."""
+    py = {"status": 413, "headers": {"mcp-session-id": None}, "body": {"raw": "Request body too large"}}
+    rs = copy.deepcopy(py)
+    rs["headers"]["connection"] = "close"
+    return line(f"body_limit[{index}]", py, rs)
 
 
-@pytest.mark.parametrize("change", ["missing", "extra", "duplicate", "incomplete", *EDITS])
-def test_any_other_difference_or_incomplete_corpus_fails(change):
+@pytest.mark.parametrize("change", ["refusal_close", "extra", "incomplete", "unserved", "count_only"])
+def test_any_difference_or_incomplete_corpus_fails(change):
     report = baseline()
-    if change == "missing":
-        report["diffs"].pop()
+    if change == "refusal_close":
+        report["diffs"] = [refusal_close(i) for i in (0, 2, 3, 4, 5)]
+        report["summary"]["diffs"] = 5
     elif change == "extra":
         report["diffs"].append("lists[0]: additional error")
-    elif change == "duplicate":
-        report["diffs"][0] = report["diffs"][1]
+        report["summary"]["diffs"] = 1
     elif change == "incomplete":
         report["summary"]["responses"] -= 1
+    elif change == "unserved":
+        report["summary"]["unserved_checked"] = report["summary"]["unserved_checked"][1:]
     else:
-        name, old, new = EDITS[change]
-        index = next(i for i, d in enumerate(report["diffs"]) if d.startswith(name + ":"))
-        assert old in report["diffs"][index], change
-        report["diffs"][index] = report["diffs"][index].replace(old, new, 1)
+        report["diffs"].append(refusal_close(0))
     with pytest.raises((AssertionError, ValueError, KeyError)):
-        check_baseline(report)
-
-
-@pytest.mark.parametrize("family", ["body_limit["])
-def test_every_declared_family_is_required(family):
-    report = baseline()
-    report["diffs"] = [d for d in report["diffs"] if not d.startswith(family)]
-    report["summary"]["diffs"] = len(report["diffs"])
-    with pytest.raises(AssertionError):
         check_baseline(report)
 
 
@@ -79,8 +64,9 @@ def test_rerun_cannot_reuse_reports_when_child_writes_nothing(tmp_path, monkeypa
     calls = []
 
     def failed(command, **kwargs):
+        # The baseline's expected exit, so only the missing report can fail it.
         calls.append(command)
-        return subprocess.CompletedProcess(command, 1)
+        return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(mcp_ci.subprocess, "run", failed)
     with pytest.raises(FileNotFoundError):

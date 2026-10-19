@@ -1173,14 +1173,14 @@ incomplete tool coverage and incorrect per-case or corpus totals before writing 
 
 ### MCP refusal cleanup (2026-10-13)
 
-MCP admission and cleanup share the SDK's 4 MiB body limit. A complete,
-in-budget refusal drain keeps the connection reusable; incomplete cleanup,
-read failure, an exhausted budget or an unread Expect body closes it. The
-shared 250 ms deadline bounds cleanup, including headers-only peers. This
-resolves the accidental use of the REST 256 KiB budget without weakening
-body admission or changing REST cleanup. `MCP-REFUSAL-CLEANUP` in
-`divergences.md` records the remaining Python connection-lifetime difference.
-The strict live comparator and committed goldens are unchanged.
+MCP admission uses the SDK's 4 MiB body limit. Since 2026-10-20 every
+refusal is answered at once without a `Connection` header; the shared
+cleanup then discards at most 4 MiB more within 250 ms, keeping the
+connection when the body ends, and otherwise closes after the answer through
+the listener's lingering close (`src/linger.rs`), never with request bytes
+unread. An unread Expect body is never polled. `MCP-REFUSAL-CLEANUP` in
+`divergences.md` records the change and the Windows measurements; the strict
+live comparator now reports no differences (`mcp_ci.py`).
 
 Initialization validates known client-capability object fields and the SDK's
 boolean spellings for `roots.listChanged`; unknown capability fields remain

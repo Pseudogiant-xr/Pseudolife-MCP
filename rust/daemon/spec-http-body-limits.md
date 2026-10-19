@@ -50,12 +50,27 @@ authenticated agents roster remain declared handler deferrals.
 
 The response is selected before cleanup; cleanup never parses or dispatches
 an unread body. The handler retains the body and counts received data frames.
-For an error response or a bodyless always-200 hook reply it discards remaining frames until the route budget or one
-absolute 250 ms deadline is reached, then returns the selected response with
-Connection: close. It never polls another application frame after a cap or
+For an error response or a bodyless always-200 hook reply the selected
+response is returned at once, with no `Connection` header, and a background
+task discards remaining frames until 4 MiB more than had already arrived
+(the MCP body budget, the largest any route admits) or one absolute 250 ms
+deadline is reached. A body read to its end keeps the connection, as
+uvicorn's does. Crossing a route's parse limit is not a read failure: the
+stream stays readable and is discarded like any other refused body. The
+task never polls another application frame after the discard budget or a
 reader failure. An early Expect: 100-continue refusal skips cleanup, so Hyper
-does not send an interim 100. Headers-only probes use a five-second client
-bound and reject an interim response rather than silently consuming it.
+does not send an interim 100; dropping that body closes the connection after
+the answer. Headers-only probes use a five-second client bound and reject an
+interim response rather than silently consuming it.
+
+Every connection Hyper closes goes through the listener's lingering close
+(`src/linger.rs`): FIN after the response, then read and discard until the
+client closes, 250 ms pass with nothing arriving, or 2 s pass, and only then
+drop the socket. A close with request bytes still unread makes the stack
+send RST, and a Windows client discards a received but unread response when
+the RST lands first; until 2026-10-20 the daemon closed that way after every
+over-budget, deadline or Expect refusal (MCP-REFUSAL-CLEANUP in
+`divergences.md` has the measurements).
 
 This is **cap enforced at frame granularity** (delegate ruling 2026-10-10).
 A frame already being received may cross the byte budget; parsing still
@@ -85,4 +100,4 @@ Always-200 memory-changes, park-gate, woke, subagent and coordination-start repl
 
 At runtime candidate 1d718112, the expanded corpus passed 118 live and 118 golden cases on each platform, with five declarations and four unchanged fixture comparisons. All four source controls were caught on each platform by 16/15/6/4 response differences without scenario errors. Windows passed 100 native units and Linux 105; each platform passed Clippy, builds and 84 guards plus 10 subtests, with one explicit production-artifact skip. The first Windows golden attempt timed out; a focused 78-case replay and two complete 118-case replays subsequently passed. The earlier 98-case telemetry above retains its own measured-run identity.
 
-Cleanup delays the selected response by up to 250 ms and closes the connection whenever unread-body cleanup was needed, even when the drain completed. Uvicorn selects the response immediately and can keep the connection alive while discarding the remainder afterward. The deliberate deadline can also end a slow in-cap body before completion. Connection lifetime is excluded from the differential header comparison. The body-stream-drain counterfactual is a manual native instrumented control, not one of the four hosted HTTP source controls.
+Cleanup no longer delays the selected response or adds `Connection: close` (2026-10-20): the answer leaves at once, as uvicorn's does, and a completed discard keeps the connection. Python discards without a budget or deadline; the daemon's bounded discard and lingering close are the remaining, unobserved difference in connection lifetime. Connection lifetime is excluded from the differential header comparison. The body-stream-drain counterfactual is a manual native instrumented control, not one of the four hosted HTTP source controls.
