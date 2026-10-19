@@ -305,3 +305,41 @@ def test_after_stop_sql_runs_once_the_seeding_daemon_has_stopped(harness, monkey
     harness.prepare_template(scn, "after_stop", tmp_path, [])
     assert events == ["start", "early", "memory_set_add", "stop", "late"]
     assert harness.SCENARIOS["set-cap"]["seed"][0]["after_stop"] is True
+
+
+def test_dream_run_scenarios_switch_off_unported_stages_and_answer_every_request(harness):
+    names = [n for n in harness.SCENARIOS if n.startswith("dream-run")]
+    assert set(names) == {"dream-run", "dream-run-hold", "dream-run-empty", "dream-run-gates"}
+    for n in names:
+        scn = harness.SCENARIOS[n]
+        config = scn["config"]
+        # The Rust daemon refuses `run` while an unported stage is on.
+        for switch in ("lessons:\n    enabled: false", "graph_insight:\n    enabled: false",
+                       "stall_notice: false"):
+            assert switch in config, (n, switch)
+        assert "extractor_fallback" not in scn
+        for reply in scn["extractor"]["replies"]:
+            assert "sha256" not in reply, "vocab hints depend on embeddings: key by kind/user"
+            assert reply["kind"] in ("claims", "events", "relations")
+    run_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-run-")]
+    assert len(run_mutants) == 6
+    src = Path(__file__).resolve().parents[1] / "src" / "dream"
+    text = (src / "run.rs").read_text(encoding="utf-8") + (src / "relations.rs").read_text(
+        encoding="utf-8")
+    assert all(f'"{m}"' in text for m in run_mutants)
+
+
+def test_dream_answers_normalize_stall_clocks_and_run_cursors(harness):
+    ts = {1700000000.5: "<ts:3>"}
+    value = {"stall": {"since": 1.0, "reason": "extractor_error", "last_success_at": None},
+             "last_stall": {"since": 2.0, "recovered_at": 3.0},
+             "last_dream_extractor": {"which": "primary", "base_url": "http://stub/v1", "at": 4.0},
+             "runs": [{"id": 1, "cursor_before": 0.0, "cursor_after": 1700000000.5,
+                       "finished_at": 5.0}]}
+    out = harness.dream_tokens(value, ts)
+    assert out["stall"] == {"since": "<clock>", "reason": "extractor_error",
+                            "last_success_at": None}
+    assert out["last_stall"]["recovered_at"] == "<clock>"
+    assert out["last_dream_extractor"]["at"] == "<clock>"
+    assert out["runs"][0] == {"id": 1, "cursor_before": 0.0, "cursor_after": "<ts:3>",
+                              "finished_at": "<clock>"}

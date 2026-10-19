@@ -723,18 +723,154 @@ fn loads(text: &str) -> Result<Value, Raised> {
     if let Some(v) = crate::mcp::py_loads::loads(text) {
         return Ok(v);
     }
-    let expecting_value = match serde_json::from_str::<serde::de::IgnoredAny>(text) {
-        Err(e) => {
-            let m = e.to_string();
-            m.starts_with("expected value") || m.starts_with("EOF while parsing a value")
-        }
-        Ok(_) => false,
-    };
-    Err(if expecting_value {
+    Err(if json_error_expects_value(text) {
         Raised::other("StopIteration", "Expecting value")
     } else {
         Raised::other("JSONDecodeError", "invalid JSON")
     })
+}
+
+/// Whether CPython's C scanner fails `text` with "Expecting value" (a
+/// value position, top-level or nested, that starts no value: its
+/// `StopIteration` reaches `raw_decode`, which leaves it as the context)
+/// rather than another `JSONDecodeError` (a delimiter, a property name, a
+/// string, extra data or a BOM). Only called once the parse has failed.
+fn json_error_expects_value(text: &str) -> bool {
+    #[derive(PartialEq)]
+    enum Fail {
+        Value,
+        Other,
+    }
+    fn ws(s: &[char], mut i: usize) -> usize {
+        while i < s.len() && matches!(s[i], ' ' | '\t' | '\n' | '\r') {
+            i += 1;
+        }
+        i
+    }
+    fn lit(s: &[char], i: usize, word: &str) -> bool {
+        let w: Vec<char> = word.chars().collect();
+        s.len() >= i + w.len() && s[i..i + w.len()] == w[..]
+    }
+    fn string(s: &[char], mut i: usize) -> Result<usize, Fail> {
+        i += 1;
+        while i < s.len() {
+            match s[i] {
+                '"' => return Ok(i + 1),
+                '\\' => {
+                    let Some(&e) = s.get(i + 1) else {
+                        return Err(Fail::Other);
+                    };
+                    if e == 'u' {
+                        if s.len() < i + 6 || !s[i + 2..i + 6].iter().all(char::is_ascii_hexdigit) {
+                            return Err(Fail::Other);
+                        }
+                        i += 6;
+                    } else if matches!(e, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't') {
+                        i += 2;
+                    } else {
+                        return Err(Fail::Other);
+                    }
+                }
+                c if (c as u32) < 0x20 => return Err(Fail::Other),
+                _ => i += 1,
+            }
+        }
+        Err(Fail::Other)
+    }
+    fn number(s: &[char], i: usize) -> Option<usize> {
+        let digit = |k: usize| s.get(k).is_some_and(char::is_ascii_digit);
+        let mut k = i;
+        if s.get(k) == Some(&'-') {
+            k += 1;
+        }
+        if s.get(k) == Some(&'0') {
+            k += 1;
+        } else if digit(k) {
+            while digit(k) {
+                k += 1;
+            }
+        } else {
+            return None;
+        }
+        if s.get(k) == Some(&'.') && digit(k + 1) {
+            k += 1;
+            while digit(k) {
+                k += 1;
+            }
+        }
+        if matches!(s.get(k), Some('e' | 'E')) {
+            let mut e = k + 1;
+            if matches!(s.get(e), Some('+' | '-')) {
+                e += 1;
+            }
+            if digit(e) {
+                while digit(e) {
+                    e += 1;
+                }
+                k = e;
+            }
+        }
+        Some(k)
+    }
+    fn value(s: &[char], i: usize) -> Result<usize, Fail> {
+        let Some(&c) = s.get(i) else {
+            return Err(Fail::Value);
+        };
+        match c {
+            '"' => string(s, i),
+            '{' => {
+                let mut i = ws(s, i + 1);
+                if s.get(i) == Some(&'}') {
+                    return Ok(i + 1);
+                }
+                loop {
+                    if s.get(i) != Some(&'"') {
+                        return Err(Fail::Other);
+                    }
+                    i = ws(s, string(s, i)?);
+                    if s.get(i) != Some(&':') {
+                        return Err(Fail::Other);
+                    }
+                    i = ws(s, value(s, ws(s, i + 1))?);
+                    match s.get(i) {
+                        Some('}') => return Ok(i + 1),
+                        Some(',') => i = ws(s, i + 1),
+                        _ => return Err(Fail::Other),
+                    }
+                }
+            }
+            '[' => {
+                let mut i = ws(s, i + 1);
+                if s.get(i) == Some(&']') {
+                    return Ok(i + 1);
+                }
+                loop {
+                    i = ws(s, value(s, i)?);
+                    match s.get(i) {
+                        Some(']') => return Ok(i + 1),
+                        Some(',') => i = ws(s, i + 1),
+                        _ => return Err(Fail::Other),
+                    }
+                }
+            }
+            _ => {
+                for word in ["null", "true", "false", "NaN", "Infinity", "-Infinity"] {
+                    if lit(s, i, word) {
+                        return Ok(i + word.chars().count());
+                    }
+                }
+                number(s, i).ok_or(Fail::Value)
+            }
+        }
+    }
+    let s: Vec<char> = text.chars().collect();
+    if s.first() == Some(&'\u{feff}') {
+        return false;
+    }
+    match value(&s, ws(&s, 0)) {
+        Err(f) => f == Fail::Value,
+        Ok(_) => false,
+    }
 }
 
 fn reqwest_failure(e: &reqwest::Error) -> Raised {
@@ -1465,6 +1601,48 @@ pub async fn status_extractor_fields(
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[test]
+    fn json_errors_classify_like_the_c_scanner() {
+        // CPython 3.11: `json.loads(s)` and whether the error's context is
+        // a StopIteration ("Expecting value").
+        let value = [
+            "not json at all",
+            "nope",
+            "[nope]",
+            "[1,]",
+            "{\"a\": }",
+            "",
+            "  ",
+            "-",
+            "-x",
+            "tru",
+            "-Inf",
+            "[",
+            "{\"claims\": [}",
+            "x",
+            "]",
+            ".5",
+        ];
+        let other = [
+            "{\"a\" 1}",
+            "{a:1}",
+            "null x",
+            "\"abc",
+            "[1 2]",
+            "1e",
+            "01",
+            "{",
+            "\u{feff}{}",
+            "1.",
+        ];
+        for s in value {
+            assert!(json_error_expects_value(s), "{s:?}");
+        }
+        for s in other {
+            assert!(!json_error_expects_value(s), "{s:?}");
+        }
+    }
 
     const GOLDEN: &str = include_str!("../../harness/goldens/dream-extractor.json");
 
