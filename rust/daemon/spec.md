@@ -511,9 +511,10 @@ and helpers; `storage/sync.py` `sync_cortex_slots` (225).
 Readers (`memory_fact_get`, the cortex block of `memory_search` and
 `/api/search`) take a snapshot of the resident cortex and never hold its
 lock across an await; the writer mutates it in place under `Ready.write`.
-Not reachable over MCP, so not ported: the quarantine park
-(`force_contend`), the dream guards and tier marks (`dream=True`) and the
-assistant-origin park (`support="assistant"`), see `divergences.md`.
+Not reachable over MCP, but ported for the dream (P1), which calls
+`fact_set::cortex_write` with them: the quarantine park (`force_contend`),
+the dream guards and tier marks (`dream=True`), the assistant-origin park
+(`support="assistant"`), stance and provenance, see `divergences.md`.
 
 `harness/w2e.py live --only fact-set-branches fact-set-newer-wins
 fact-set-tuned fact-set-freshness-auto fact-set-set-slot` compares every
@@ -557,9 +558,10 @@ settle and audit log; registered in `mcp::dispatch::registry`. Python:
 | SA10 | After `add_member`, whatever its action: `_ensure_subject_entity(entity)` (FS10; a blank, invalid or capped add can still mint the subject), then `_save_cortex` (FS11: member rows carry `value_norm` = `_norm_value(value)`, so the rewrite satisfies the one-current-member-per-value unique index). | `service.py:4087-4091`; `sync.py:170-209`; `schema.py:1565-1578` |
 | SA11 | `set_remove` under the service lock: no encode, no HLC tick, no writer resolution, no entity mint. `remove_member` takes the first current member (insertion order) whose `_norm_value` matches; none answers `member_not_found` and changes nothing. A match: slot dirty, `status` = `removed`, `superseded_at` = now, out of the member index (the row is kept), log `member_removed/user_removed` anchored on it with the raw `member` as `new_value`, `confidence_delta` 0.0, writer and session null; answers `member_removed`. Then `_save_cortex` and the SA2 answer. The removal refusal needs a support tier or `dream`, which the tool never passes. | `service.py:4100-4133`; `cortex.py:1083-1135` |
 
-Not reachable over MCP, so not ported: the assistant-origin guards, the
-conversion tier guard, the dream direct-write guard and tier mark, and the
-removal refusal (`divergences.md`).
+Not reachable over MCP, but ported for the dream (P1), which calls
+`set_members::set_add` / `set_remove` with them: the assistant-origin guards,
+the conversion tier guard, the dream direct-write guard and tier mark,
+provenance, and the removal refusal (`divergences.md`).
 
 `harness/w2e.py live --only set-add-branches set-add-aggregate set-cap`
 compares every answer and the full bank after each call, on templates
@@ -599,7 +601,7 @@ registered in `mcp::dispatch::registry`. Python: `mcp_server.py:1785-1801`;
 | FR5 | Accept: the slot is dirty. The current scalar (the slot's entry in the current index, if any) becomes `superseded` with `superseded_at` = now and `superseded_by_value` = the contender's value. The contender becomes `current`; `_norm_support("user") or "agent"` is marked (a direct tier clears its `dream:<tier>` provenance mark) and unioned into `support`; `last_confirmed` = `tx_time` = now; the fresh HLC stamp replaces its own; `supersedes_value` = the old current's value when there was one, else its own is kept; `asserted_at`, `valid_time`, confidence, labels, writer and session are unchanged. The current index names the contender. Log `resolved/accepted` anchored on the old current, or the contender when there is none (`new_value` the contender's value, `confidence_delta` = round(contender - anchor, 4), writer and session null). The action is `superseded`, naming the contender. | `cortex.py:1486-1508, 227-234, 731-751` |
 | FR6 | Reject: the slot is dirty; the contender becomes `retired` with `superseded_at` = now (`superseded_by_value` untouched); log `resolved/rejected` anchored as FR5. The action is `contested` (as Python names it), naming the current scalar, or the contender when the slot has none (a set slot, or one whose members were all removed). | `cortex.py:1509-1513` |
 | FR7 | After FR5 or FR6: `_save_cortex` (FS11), then the answer `{"resolved": true, "accepted": accept, "action", "current", "record"}`: `current` is `lookup(entity, attribute)` (the slot's current scalar, null for a set slot or an empty one) and `record` the named record, both as `_cortex_record_to_dict` with `age` and the stale policy (FS12). | `service.py:297-344, 4517-4528` |
-| FR8 | `refused_direct` (`dream=True` only) and `refused_changed` (`expect_value` only), with their `direct_write` and `contender_changed` answers, are unreachable over MCP and not ported (`divergences.md`). | `cortex.py:1477-1485`; `service.py:4509-4516` |
+| FR8 | `refused_direct` (`dream=True` only) and `refused_changed` (`expect_value` only), with their `direct_write` and `contender_changed` answers, are unreachable over MCP; ported for the dream's quarantine promotion (P1), which calls `fact_resolve::cortex_resolve` with them (`divergences.md`). | `cortex.py:1477-1485`; `service.py:4509-4516` |
 
 `harness/w2e.py live --only fact-resolve-scalar fact-resolve-set-slot`
 compares every answer and the full bank after each call, on templates whose
