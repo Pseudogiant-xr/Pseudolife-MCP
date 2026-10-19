@@ -131,15 +131,15 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncWrite for LingerStream<S> {
                     quiet_until,
                     wake,
                 } => {
-                    // Both limits are plain instants checked on every pass: a
-                    // Sleep registers its timer only once polled, and a client
-                    // that keeps the socket readable can keep it unpolled
-                    // (each read spends task budget), so it serves as the
-                    // wakeup only.
+                    // Both limits are plain instants: a Sleep registers its
+                    // timer only once polled, and a client that keeps the
+                    // socket readable can keep it unpolled (each read spends
+                    // task budget), so it serves as the wakeup only. Quiet is
+                    // judged only after a read finds nothing: a task woken
+                    // late must still read what arrived meanwhile.
                     let mut scratch = [0u8; 16 * 1024];
                     loop {
-                        let now = Instant::now();
-                        if now >= *deadline || now >= *quiet_until {
+                        if Instant::now() >= *deadline {
                             break;
                         }
                         let mut buf = ReadBuf::new(&mut scratch);
@@ -147,8 +147,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncWrite for LingerStream<S> {
                             // EOF or a failed read: nothing more can arrive unread.
                             Poll::Ready(Ok(())) if buf.filled().is_empty() => break,
                             Poll::Ready(Err(_)) => break,
-                            Poll::Ready(Ok(())) => *quiet_until = now + LINGER_QUIET,
+                            Poll::Ready(Ok(())) => *quiet_until = Instant::now() + LINGER_QUIET,
                             Poll::Pending => {
+                                if Instant::now() >= *quiet_until {
+                                    break;
+                                }
                                 let next = (*deadline).min(*quiet_until);
                                 if wake.deadline() != next {
                                     wake.as_mut().reset(next);

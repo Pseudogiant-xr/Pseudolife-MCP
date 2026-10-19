@@ -1077,13 +1077,28 @@ mod tests {
     /// One request on a fresh connection: send all of it, then read the
     /// status line. A reset before the read returns the error, as Windows
     /// discards a received response when the peer's RST lands first.
+    /// Connecting is retried: hundreds of loopback connections in a row can
+    /// meet port exhaustion (WinError 10048, or a 21 s SYN timeout), which
+    /// involves no refusal (measured 2026-10-20 with 17,500 sockets in
+    /// TIME_WAIT after repeated loops).
     fn read_after_send(
         address: std::net::SocketAddr,
         head: &[u8],
         body: &[u8],
     ) -> std::io::Result<String> {
         use std::io::{Read, Write};
-        let mut stream = std::net::TcpStream::connect(address)?;
+        let mut attempts = 0;
+        let mut stream = loop {
+            match std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2)) {
+                Ok(stream) => break stream,
+                Err(error) if attempts < 10 => {
+                    attempts += 1;
+                    eprintln!("connect retry {attempts}: {error}");
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                Err(error) => panic!("loopback connect failed {attempts} times: {error}"),
+            }
+        };
         stream.set_read_timeout(Some(Duration::from_secs(10)))?;
         stream.set_write_timeout(Some(Duration::from_secs(10)))?;
         // A daemon may answer before the upload ends; only the answer counts.
@@ -1151,14 +1166,27 @@ mod tests {
         let report = tokio::task::spawn_blocking(move || {
             let mut report = Vec::new();
             for (name, head, body, want) in shapes {
-                let mut lost = 0;
+                let (mut lost, mut failed) = (0, Vec::new());
                 for _ in 0..calls {
+                    let started = Instant::now();
                     match read_after_send(address, head.as_bytes(), &body) {
                         Ok(answer) => assert!(answer.starts_with(want), "{name}: {answer:?}"),
-                        Err(_) => lost += 1,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::ConnectionReset
+                                    | std::io::ErrorKind::ConnectionAborted
+                            ) =>
+                        {
+                            lost += 1
+                        }
+                        // A refusal that never arrives (a hang) fails as well.
+                        Err(error) => failed.push(format!("{error} after {:?}", started.elapsed())),
                     }
                 }
-                report.push(format!("{name}: {lost} of {calls} lost"));
+                report.push(format!(
+                    "{name}: {lost} of {calls} lost to a reset; other failures {failed:?}"
+                ));
             }
             report
         })
@@ -1166,7 +1194,9 @@ mod tests {
         .unwrap();
         server.abort();
         assert!(
-            report.iter().all(|line| line.contains(": 0 of ")),
+            report
+                .iter()
+                .all(|line| line.contains(": 0 of ") && line.ends_with("failures []")),
             "{report:#?}"
         );
     }
