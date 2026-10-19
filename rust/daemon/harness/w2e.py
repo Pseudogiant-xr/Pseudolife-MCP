@@ -2013,12 +2013,15 @@ RECALL_SEED = [
     fact("Postgres", "version", "16"),
     fact("Web App", "framework", "Django"),
     fact("Host-1", "vendor", "Dell"),
-    relate("Web App", "runs-on", "host-1"),
+    # no asserted inverse pair (runs-on / hosts): Python orders their
+    # mirrors by string hash, and recall's edges carry no provenance to
+    # tell them apart (divergences.md, memory_recall)
+    relate("Web App", "uses", "host-1"),
     relate("Web App", "depends-on", "Postgres"),
-    relate("Postgres", "runs-on", "host-1"),
+    relate("Postgres", "depends-on", "host-1"),
     relate("Web App", "uses", "Cache"),
     relate("Cache", "uses", "Redis"),
-    relate("Redis", "runs-on", "host-2"),
+    relate("Redis", "stores-data-in", "host-2"),
     relate("host-1", "part-of", "Rack A"),
     relate("host-2", "part-of", "Rack A"),
     relate("Rack A", "part-of", "Row 3"),
@@ -2537,6 +2540,45 @@ def graph_answer_free(v) -> None:
             graph_answer_free(x)
 
 
+# Search telemetry: the float leaves w2d_search.py compares within its
+# SCORE_TOL (scores and fusion inputs rest on the embeddings).
+EVENT_FLOAT_KEYS = {"score", "dense", "ce", "bm25", "slot", "recency", "margin"}
+EVENT_SCORE_TOL = 2e-4
+
+
+def _float_pair_free(x, y) -> None:
+    if isinstance(x, dict) and isinstance(y, dict):
+        for k in x.keys() & y.keys():
+            a, b = x[k], y[k]
+            if (k in EVENT_FLOAT_KEYS and isinstance(a, (int, float)) and isinstance(b, (int, float))
+                    and not isinstance(a, bool) and not isinstance(b, bool)
+                    and abs(a - b) <= EVENT_SCORE_TOL):
+                x[k] = y[k] = f"<{k}>"
+            else:
+                _float_pair_free(a, b)
+    elif isinstance(x, list) and isinstance(y, list):
+        for a, b in zip(x, y):
+            _float_pair_free(a, b)
+
+
+def events_float_free(a: dict, b: dict) -> None:
+    """The retrieval events both daemons log for a search: row by row, the
+    served entries' scores and fusion inputs compare within w2d_search.py's
+    tolerance; everything else stays exact."""
+    ea = a.get("rows", {}).get("public.retrieval_events")
+    eb = b.get("rows", {}).get("public.retrieval_events")
+    if not (isinstance(ea, dict) and isinstance(eb, dict)):
+        return
+    if ea.get("columns") != eb.get("columns") or "served" not in (ea.get("columns") or []):
+        return
+    i = ea["columns"].index("served")
+    by_id = {r[0]: r for r in eb.get("rows", [])}
+    for ra in ea.get("rows", []):
+        rb = by_id.get(ra[0])
+        if rb is not None:
+            _float_pair_free(ra[i], rb[i])
+
+
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     a, b = generic_titles(json.loads(json.dumps(py))), generic_titles(json.loads(json.dumps(rs)))
     graph_answer_free(a)
@@ -2693,7 +2735,7 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
                 row["rust"] = rename_prefixes(row["rust"], er)
                 row["diffs"] += compare_response(row["python"], row["rust"], tol, stats)
             row["diffs"] += compare_numeric(np_, nr, tol, stats)
-            row["diffs"] += [f"db {d}" for d in state_diff(sp, sr)]
+            row["diffs"] += [f"db {d}" for d in (events_float_free(sp, sr) or state_diff(sp, sr))]
             steps.append(row)
             if record:
                 row["_python_state"], row["_python_numeric"] = sp, np_
@@ -2798,7 +2840,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
             if i:
                 # Recordings that predate a write table are compared on theirs.
                 got["rows"] = {k: v for k, v in got["rows"].items() if k in rec["state"]["rows"]}
-            row["diffs"] += [f"db {x}" for x in state_diff(rec["state"], got)]
+            row["diffs"] += [f"db {x}" for x in (events_float_free(rec["state"], got) or state_diff(rec["state"], got))]
             steps.append(row)
     finally:
         d.stop()

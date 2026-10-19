@@ -365,6 +365,7 @@ this increment does not claim the complete write boundary or cutover readiness.
 | Locking across the walk | none of its own: each search and each graph read takes the service lock, so writes can land between them | the same: each search takes the search guard and each graph read the writer lock | exact in structure; a write landing mid-walk is visible to the later steps on both |
 | `time_budget_seconds` (20 s) | wall clock (`time.monotonic`) | wall clock (`Instant`) | a walk near the budget can stop at a different step; the harness's walks finish in well under a second |
 | The order of seed-search and re-query hits | `CMS.retrieve`'s ranking | `search::rank` | the search rows above: equal scores under `torch.topk` are free, and embeddings agree within the measured tolerance, so near-equal hits can swap and with them `texts` and the mention counts behind the re-query order |
+| The order of the inverse-derived edges that mirror asserted edges, in `edges` | the graph read's hash order (the memory_graph row above) | the read model's order | inherited from `memory_graph`; recall's edges carry no provenance, so when the 15-edge cap binds, which of them survive can differ too. The harness's recall templates hold no asserted inverse pair |
 | `GET /api/recall` (the uncapped walk) | served | not served | the Console REST rows (PARITY.md) |
 
 ## Coordination board completion (W2-F)
