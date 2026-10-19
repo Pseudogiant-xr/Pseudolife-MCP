@@ -504,6 +504,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Hosted Windows' vCPU count and image version were never recorded,
+      # so a slow or flaky shard could not be tied to its machine.
+      - name: Record the runner image and CPU count
+        shell: pwsh
+        run: |
+          $memory = [math]::Round([GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes / 1GB, 1)
+          $image = if ($env:ImageOS) { "$env:ImageOS $env:ImageVersion" } else { 'not a hosted image' }
+          $facts = "Runner: $env:RUNNER_OS $env:RUNNER_ARCH ($env:RUNNER_ENVIRONMENT), image $image, $([Environment]::ProcessorCount) logical CPUs, $memory GB memory"
+          Write-Output $facts
+          if ($env:GITHUB_STEP_SUMMARY) { $facts | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -583,7 +593,7 @@ jobs:
         run: |
           $suffix = if ($IsWindows) { '.exe' } else { '' }
           $env:PSEUDOLIFE_SENT_YAML_BIN = Join-Path (Get-Location) "rust/target/release/pseudolife-stdio$suffix"
-          python -m pytest rust/daemon/harness/test_sent_yaml.py rust/daemon/harness/test_sent_yaml_mutants.py -q
+          python -m pytest rust/daemon/harness/test_sent_yaml.py rust/daemon/harness/test_sent_yaml_mutants.py -q -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/compare-sent-yaml-startup-with-pyyaml.xml')
           exit $LASTEXITCODE
       - name: Bind the event-selected Python oracle
         shell: pwsh
@@ -594,7 +604,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Check CI coverage contract
         if: matrix.suite == 'eval'
-        run: python -m pytest -q rust/ci
+        run: python -m pytest -q rust/ci -ra --durations=30 --junitxml ${{ runner.temp }}/junit/check-ci-coverage-contract.xml
       - name: Run every eval harness test
         if: matrix.suite == 'eval'
         shell: pwsh
@@ -603,7 +613,7 @@ jobs:
           $episodeCandidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PSEUDOLIFE_PORT_EPISODE_JSON = ConvertTo-Json -InputObject @($episodeCandidate) -Compress
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
-          python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
+          python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard -ra --durations=30 --junitxml $evalReport
           exit $LASTEXITCODE
       # Linux 2026-10-13: offline W2-D checks measured below one second;
       # one minute is the smallest whole-minute timeout above twice that.
@@ -612,7 +622,7 @@ jobs:
         timeout-minutes: 1
         shell: pwsh
         run: |
-          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py
+          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-w2-d-search-harness-regressions.xml')
           exit $LASTEXITCODE
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
@@ -623,7 +633,7 @@ jobs:
           python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
-          python -m pytest -q rust/daemon/harness/test_embedding.py
+          python -m pytest -q rust/daemon/harness/test_embedding.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-embedding-golden-and-mutant-row.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py embedding --fixture --golden rust/daemon/harness/goldens/embedding-fixture.json --rust-bin (Join-Path 'rust/target/release' $binaryName) --out (Join-Path $env:RUNNER_TEMP 'embedding-fixture.json')
           exit $LASTEXITCODE
@@ -636,7 +646,7 @@ jobs:
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PSEUDOLIFE_RUST_BINARY = $candidate
           $env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'
-          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py rust/cli_harness/test_backup.py
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py rust/cli_harness/test_backup.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-differential-harness.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row mail --row hook --row episode --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-golden.json')
           exit $LASTEXITCODE
@@ -686,7 +696,7 @@ jobs:
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_lease_operator.py rust/cli_harness/test_lease_transport.py
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_lease_operator.py rust/cli_harness/test_lease_transport.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-lease-operator-differential-harness.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease_operator --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-lease-operator.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -705,7 +715,7 @@ jobs:
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           if (-not $IsWindows) { chmod +x $candidate }
           $env:PL_DREAM_CONTRACT_BINARY = $candidate
-          python -m pytest -q rust/daemon/harness/test_dream_cursors.py rust/daemon/harness/test_dream_cursor_cancel.py
+          python -m pytest -q rust/daemon/harness/test_dream_cursors.py rust/daemon/harness/test_dream_cursor_cancel.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/dream-cursor-differential-harness.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/dream_cursors.py golden --ci-fixture --rust-bin $candidate
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -732,7 +742,7 @@ jobs:
           $binaryName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PL_STATIC_DEFAULT_BIN = $candidate
-          python -m pytest -q rust/daemon/harness/test_static.py
+          python -m pytest -q rust/daemon/harness/test_static.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-static-http-parity.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $candidate --only static-build static-paths static-missing static-root-link --out (Join-Path $env:RUNNER_TEMP 'daemon-static-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -780,7 +790,7 @@ jobs:
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PL_HARNESS_SLICE = 'w3i'
           $env:PL_HARNESS_SCRATCH = Join-Path $env:RUNNER_TEMP 'daemon-background-harness'
-          python -m pytest -q -p no:cacheprovider rust/daemon/harness/test_background_harness.py
+          python -m pytest -q -p no:cacheprovider rust/daemon/harness/test_background_harness.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-background-pruning-golden.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py golden --rust-bin $candidate --only sweep-pruning --no-refusals
           exit $LASTEXITCODE
@@ -794,7 +804,7 @@ jobs:
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          python -m pytest -q rust/daemon/harness/test_body_cases.py
+          python -m pytest -q rust/daemon/harness/test_body_cases.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-body-admission-parity.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $candidate --only body-limits body-view-open body-pair-budget body-text-window --out (Join-Path $env:RUNNER_TEMP 'daemon-body-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -822,7 +832,7 @@ jobs:
           if (-not $IsWindows) { chmod +x $bindFixture }
           $env:PL_SECURITY_DEFAULT_BIN = $candidate
           $env:PL_SECURITY_RELEASE_MUTANTS_BIN = $mutants
-          python -m pytest -q rust/daemon/harness/test_security_cases.py rust/daemon/harness/test_principals_settle.py
+          python -m pytest -q rust/daemon/harness/test_security_cases.py rust/daemon/harness/test_principals_settle.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-security-admission-parity.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte security-refusals --out (Join-Path $env:RUNNER_TEMP 'daemon-security-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -854,7 +864,7 @@ jobs:
           # Scalar coercions are not fully described by the SDK JSON schemas.
           python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py rust/daemon/harness/test_mcp_binding.py rust/daemon/harness/test_mcp_wire.py
+          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py rust/daemon/harness/test_mcp_binding.py rust/daemon/harness/test_mcp_wire.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-mcp-live-parity-and-controls.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Tool argument binding: the table is current, then every generated
           # case matches Python in process and every binder mutant is caught.
@@ -1113,7 +1123,7 @@ jobs:
           $env:PSEUDOLIFE_RUST_BINARY = $candidatePath
           $env:PSEUDOLIFE_WAIT_MAIL_ORACLE_ROOT = $oracleSource
           $env:PSEUDOLIFE_WAIT_MAIL_NATIVE_REQUIRED = '1'
-          & $oraclePython -m pytest -q evals/rust_port/test_cli_wait_mail.py evals/rust_port/test_wait_mail_phase2d_native.py evals/rust_port/test_wait_mail_reduction_native.py evals/rust_port/test_wait_mail_producer_native.py evals/rust_port/test_wait_mail_candidate_contract.py evals/rust_port/test_wait_mail_measurement.py evals/rust_port/test_wait_mail_listener_events.py
+          & $oraclePython -m pytest -q evals/rust_port/test_cli_wait_mail.py evals/rust_port/test_wait_mail_phase2d_native.py evals/rust_port/test_wait_mail_reduction_native.py evals/rust_port/test_wait_mail_producer_native.py evals/rust_port/test_wait_mail_candidate_contract.py evals/rust_port/test_wait_mail_measurement.py evals/rust_port/test_wait_mail_listener_events.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/run-unchanged-candidates-and-differential-judges.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $leaseHeaderReceipt = Join-Path $env:RUNNER_TEMP 'lease-header-policy.json'
           & $oraclePython -m evals.rust_port.lease_headers --root $checkoutRoot --candidate $candidatePath --out $leaseHeaderReceipt
@@ -1166,6 +1176,14 @@ jobs:
           $processPublicReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process-public.json'
           & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --public-out $processPublicReceipt --modes help version lease --offline-resource-checked-at $resourceCheckedAt
           exit $LASTEXITCODE
+      - name: Retain parity pytest reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}parity-junit-${{ runner.os }}-${{ matrix.suite }}
+          path: ${{ runner.temp }}/junit/*.xml
+          # W1-C and H5 shards drive their harnesses without pytest.
+          if-no-files-found: ignore
       - name: Retain comparison summary
         if: always() && matrix.suite == 'judges'
         uses: actions/upload-artifact@v4

@@ -1524,3 +1524,59 @@ def test_toolchain_cleanup_refuses_without_a_pinned_channel(tmp_path):
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert "uninstall" not in log.read_text(encoding="utf-8")
+
+
+# --- observability: runner facts, failure names, durations and junit ---
+
+FACTS_STEP = "Record the runner image and CPU count"
+CONTROL_RUN = "admitted_commit_survives_cancel_and_next_pull"
+
+
+def pytest_lines(script):
+    return [line.strip() for line in script.splitlines()
+            if re.match(r"(& \$oraclePython|python) -m pytest\b", line.strip())]
+
+
+def test_parity_shards_record_their_runner():
+    steps = workflow()["jobs"]["parity-checks"]["steps"]
+    facts = steps[2]
+    assert facts["name"] == FACTS_STEP and "if" not in facts and facts["shell"] == "pwsh"
+    assert steps[1]["uses"] == "actions/checkout@v4"
+
+
+def test_parity_pytest_runs_name_failures_and_keep_reports():
+    steps = workflow()["jobs"]["parity-checks"]["steps"]
+    reports = []
+    for step in steps:
+        for line in pytest_lines(step.get("run", "")):
+            if CONTROL_RUN in line:
+                # The mutant control must fail; its report would read as a failure.
+                assert "--junitxml" not in line
+                continue
+            assert " -ra " in f" {line} " and "--durations=30" in line, (step["name"], line)
+            # pwsh steps name the report with Join-Path; a default-shell step
+            # (bash on Linux) with the runner.temp expression.
+            joined = re.search(r"--junitxml \(Join-Path \$env:RUNNER_TEMP '(junit/[^']+)'\)", line)
+            reports.append("${{ runner.temp }}/" + joined.group(1) if joined else
+                           re.search(r"--junitxml (\$\{\{ runner\.temp \}\}\S+|\S+)", line).group(1))
+    assert len(reports) >= 12 and len(set(reports)) == len(reports), reports
+    upload = next(step for step in steps if step.get("name") == "Retain parity pytest reports")
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == "${{ runner.temp }}/junit/*.xml"
+    assert upload["with"]["name"] == ARTIFACT_PREFIX + "parity-junit-${{ runner.os }}-${{ matrix.suite }}"
+    own = [path for path in reports if path.startswith("${{ runner.temp }}/junit/")]
+    # The eval suite keeps its own report and upload.
+    assert set(reports) - set(own) == {"$evalReport"}
+
+
+def test_runner_facts_name_cpus_and_image(tmp_path):
+    import os
+    step = next(s for s in workflow()["jobs"]["parity-checks"]["steps"] if s.get("name") == FACTS_STEP)
+    summary = tmp_path / "summary.md"
+    env = dict(os.environ, ImageOS="win25", ImageVersion="20261012.1.0", RUNNER_OS="Windows",
+               RUNNER_ARCH="X64", RUNNER_ENVIRONMENT="github-hosted", GITHUB_STEP_SUMMARY=str(summary))
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", step["run"]],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert f"image win25 20261012.1.0, {os.cpu_count()} logical CPUs" in result.stdout
+    assert result.stdout.strip() in summary.read_text(encoding="utf-8-sig")
