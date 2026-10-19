@@ -409,7 +409,10 @@ _HOLDS_ROWS_SQL = " UNION ALL ".join(
 # their serial and identity sequences, but through setval, which updates the
 # sequence page in place, where RESTART mints a new file. Only sequences used
 # since their last restart (pg_sequence_last_value is NULL until then), so an
-# idle reset writes nothing.
+# idle reset writes nothing. The CASE is load-bearing: Postgres may evaluate
+# WHERE conditions in any order, and pg_sequence_last_value on a non-sequence
+# relation errors ("cannot open relation pg_toast_...", the first 4-worker
+# run on 2026-10-19), so only CASE keeps it behind the relkind test.
 _RESTART_SKIPPED_SQL = """
 SELECT setval(s.oid, q.seqstart, false)
 FROM pg_depend d
@@ -421,7 +424,8 @@ WHERE d.classid = 'pg_class'::regclass
   AND d.deptype IN ('a', 'i')
   AND t.relnamespace = 'public'::regnamespace
   AND t.relname = ANY(%s) AND NOT t.relname = ANY(%s)
-  AND pg_sequence_last_value(s.oid) IS NOT NULL
+  AND CASE WHEN s.relkind = 'S'
+      THEN pg_sequence_last_value(s.oid) IS NOT NULL END
 """
 
 

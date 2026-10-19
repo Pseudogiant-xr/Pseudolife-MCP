@@ -101,3 +101,18 @@ def test_every_table_that_held_rows_is_empty_after_the_reset(pg_url):  # noqa: F
     [[(version,)]] = _execute(
         pg_url, "SELECT value FROM meta WHERE key = 'schema_version'")
     assert version is not None
+
+
+def test_the_sequence_restart_survives_any_plan(pg_url):  # noqa: F811
+    """Postgres may evaluate WHERE conditions in any order. The first
+    4-worker run with this reset (2026-10-19) errored at setup with
+    ``cannot open relation "pg_toast_..."``: its plan called
+    pg_sequence_last_value on a TOAST table before the relkind test dropped
+    the row. Nested loops over sequential scans force that plan here."""
+    _reset(pg_url)
+    with psycopg.connect(pg_url) as conn:
+        for setting in ("enable_hashjoin", "enable_mergejoin", "enable_indexscan",
+                        "enable_indexonlyscan", "enable_bitmapscan"):
+            conn.execute(f"SET LOCAL {setting} = off")
+        pg_fixtures._restart_skipped_sequences(conn, ["meta"])
+        conn.rollback()
