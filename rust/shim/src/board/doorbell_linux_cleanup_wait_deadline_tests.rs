@@ -94,8 +94,7 @@ async fn wait_cutoff_control(resume_pending: bool) {
     // An expired wait must finish on the first poll after its deadline: a
     // single-poll check, where an elapsed-time bound could be overrun by a
     // stalled runner.
-    let first_poll =
-        std::future::poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx))).await;
+    let first_poll = std::future::poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx))).await;
     drop(wait);
     let resumed_elapsed = resumed.elapsed();
     let Poll::Ready(result) = first_poll else {
