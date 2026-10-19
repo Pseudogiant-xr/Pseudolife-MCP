@@ -35,7 +35,7 @@
 # Merge queue (docs/specs/2026-10-19-merge-queue.md): `merge_group` runs the
 # same jobs under the same check names, so the ruleset's required `test` check
 # reports for a queued group. A group is classified like a pull request, over
-# its own range (merge_group.base_sha to the group head).
+# everything it adds to master (master's current tip to the group head).
 name: CI
 
 on:
@@ -71,7 +71,7 @@ jobs:
     # .github/workflows/rust.yml, CHANGELOG.md or a changelog.d/ fragment,
     # skips them; an empty or unreadable diff runs everything. A pull
     # request's change is its merge commit vs its base parent; a merge
-    # group's is merge_group.base_sha (fetched here) to the group head.
+    # group's is master's current tip (fetched here) to the group head.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -85,17 +85,20 @@ jobs:
         id: scope
         env:
           EVENT_NAME: ${{ github.event_name }}
-          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
         shell: bash
         run: |
           case "$EVENT_NAME" in
             pull_request) base=HEAD^1 ;;
             merge_group)
-              # Only an immutable commit, fetched by itself; anything else runs everything.
-              base=$MERGE_GROUP_BASE_SHA
-              if ! [[ "$base" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]                  || ! git fetch --no-tags --depth=1 origin "$base"; then
+              # Master's current tip, not merge_group.base_sha: that may be the
+              # queue entry ahead, which need not pass on its own, so every
+              # unmerged entry must count. Anything else runs everything.
+              if [ "$MERGE_GROUP_BASE_REF" != refs/heads/master ] ||
+                 ! git fetch --no-tags --depth=1 origin refs/heads/master; then
                 echo "python=true" >> "$GITHUB_OUTPUT"; exit 0
-              fi ;;
+              fi
+              base=FETCH_HEAD ;;
             *) echo "python=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
           esac
           if ! files=$(git diff --no-renames --name-only "$base" HEAD) || [ -z "$files" ]; then

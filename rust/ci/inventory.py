@@ -170,7 +170,7 @@ def check(workflow):
     events = workflow.get('on', workflow.get(True))
     assert events.get('push') == {'branches': ['master']} \
         and events.get('schedule') == [{'cron': '23 3 * * *'}], 'source events dropped or changed'
-    assert 'pull_request' in events and 'merge_group' in events and 'workflow_dispatch' in events,         'source events dropped or changed'
+    assert {'pull_request', 'merge_group', 'workflow_dispatch'} <= set(events), 'source events dropped or changed'
     assert source['if'] == (f"${{{{ !cancelled() && ({SOURCE_EVENTS}) "
                             "&& needs.candidate.result == 'success' }}"), 'source event selection changed'
     gate = jobs['parity']

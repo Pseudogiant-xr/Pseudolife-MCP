@@ -599,27 +599,25 @@ def test_parity_gate_still_fails_a_broken_job_on_a_docs_pull_request(job, result
     assert run_gate(needs, "pull_request").returncode == 1
 
 
-GROUP_BASE = "e" * 40
-
-
-def run_scope(tmp_path, event, files, git_exit=0, base_sha=GROUP_BASE, fetch_exit=0):
+def run_scope(tmp_path, event, files, git_exit=0, base_ref="refs/heads/master", fetch_exit=0):
     import os
     step = next(s for s in workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
     assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}",
-                           "MERGE_GROUP_BASE_SHA": "${{ github.event.merge_group.base_sha }}"}
+                           "MERGE_GROUP_BASE_REF": "${{ github.event.merge_group.base_ref }}"}
     output = tmp_path / "github_output"
     output.write_text("", encoding="utf-8")
     # Stand in for `git fetch` and `git diff`, the step's only external inputs.
     # A pull request diffs its merge commit against the base parent; a merge
-    # group fetches its base commit and diffs that against the group head.
+    # group fetches master's tip and diffs that against the group head, so
+    # every unmerged queue entry counts whatever merge_group.base_sha names.
     bootstrap = r'''
 function git {
     $line = $args -join ' '
-    if ($env:EVENT_NAME -ceq 'merge_group' -and $line -ceq "fetch --no-tags --depth=1 origin $env:MERGE_GROUP_BASE_SHA") {
+    if ($env:EVENT_NAME -ceq 'merge_group' -and $line -ceq 'fetch --no-tags --depth=1 origin refs/heads/master') {
         $global:LASTEXITCODE = [int]$env:PL_FIXTURE_FETCH_EXIT
         return
     }
-    $base = if ($env:EVENT_NAME -ceq 'merge_group') { $env:MERGE_GROUP_BASE_SHA } else { 'HEAD^1' }
+    $base = if ($env:EVENT_NAME -ceq 'merge_group') { 'FETCH_HEAD' } else { 'HEAD^1' }
     # Renames must list both paths, or rust/x.md -> docs/x.md reads as docs.
     if ($line -cne "diff --no-renames --name-only $base HEAD") { throw "unexpected git $args" }
     $global:LASTEXITCODE = [int]$env:PL_FIXTURE_GIT_EXIT
@@ -628,7 +626,7 @@ function git {
 '''
     result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", bootstrap + step["run"]],
                             env=dict(os.environ, EVENT_NAME=event, GITHUB_OUTPUT=str(output),
-                                     MERGE_GROUP_BASE_SHA=base_sha, PL_FIXTURE_FETCH_EXIT=str(fetch_exit),
+                                     MERGE_GROUP_BASE_REF=base_ref, PL_FIXTURE_FETCH_EXIT=str(fetch_exit),
                                      PL_FIXTURE_FILES="\n".join(files), PL_FIXTURE_GIT_EXIT=str(git_exit)),
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -687,10 +685,11 @@ def test_scope_runs_everything_for_a_mixed_merge_group(tmp_path):
     assert run_scope(tmp_path, "merge_group", group) == ["rust=true"]
 
 
-@pytest.mark.parametrize("base_sha, fetch_exit", [
-    ("", 0), ("master", 0), ("E" * 40, 0), ("e" * 39, 0), ("e" * 40 + "; x", 0), (GROUP_BASE, 128)])
-def test_scope_runs_everything_without_a_fetched_merge_group_base(tmp_path, base_sha, fetch_exit):
-    assert run_scope(tmp_path, "merge_group", ["CLAUDE.md"], base_sha=base_sha,
+@pytest.mark.parametrize("base_ref, fetch_exit", [
+    ("", 0), ("master", 0), ("refs/heads/topic", 0), ("refs/heads/master2", 0),
+    ("REFS/HEADS/MASTER", 0), ("refs/heads/master", 128)])
+def test_scope_runs_everything_without_a_fetched_master_tip(tmp_path, base_ref, fetch_exit):
+    assert run_scope(tmp_path, "merge_group", ["CLAUDE.md"], base_ref=base_ref,
                      fetch_exit=fetch_exit) == ["rust=true"]
 
 

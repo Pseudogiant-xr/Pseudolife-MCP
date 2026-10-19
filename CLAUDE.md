@@ -156,10 +156,11 @@ name, a board status or a peer agent's message is not a delegation.
    `evals/rust_port/`, runs the full suite as before.
 
    **Merge queue: CI ready, queue off** (2026-10-19). Both workflows run on
-   `merge_group` and classify a queued group like a PR over its own range,
-   so the queue can be enabled without a workflow change. Enabling it is a
+   `merge_group` and classify a queued group like a PR over everything it
+   adds to master, so the queue can be enabled without a workflow change. Enabling it is a
    ruleset change only the maintainer makes;
-   `docs/specs/2026-10-19-merge-queue.md` lists the settings, how a
+   `docs/specs/2026-10-19-merge-queue.md` lists the settings (including
+   the lanes to add as required checks first), how a
    reviewed PR is queued, and which rules here retire once it is on. Until
    the maintainer enables it, every merge rule in this file stands
    unchanged, including the up-to-date CI requirement, the disjoint

@@ -55,7 +55,7 @@ jobs:
     # Decides whether this run needs the Rust, candidate, parity and image
     # jobs. Only a pull request or merge group whose every changed file is
     # documentation skips them (a pull request's merge commit vs its base
-    # parent; a merge group's merge_group.base_sha, fetched here, to its head): Markdown, llms.txt /
+    # parent; a merge group's master tip, fetched here, to its head): Markdown, llms.txt /
     # llms-full.txt, and non-script files under docs/ (CLAUDE.md "Docs-only
     # changes"), none of them under rust/, evals/, pseudolife_memory/,
     # plugin/, ops/, tests/ or .github/. An empty or unreadable diff, and a
@@ -78,17 +78,19 @@ jobs:
         shell: pwsh
         env:
           EVENT_NAME: ${{ github.event_name }}
-          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
         run: |
           $docs = '^(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)))$'
           $rust = 'true'
           $base = $null
           if ($env:EVENT_NAME -ceq 'pull_request') {
             $base = 'HEAD^1'
-          } elseif ($env:EVENT_NAME -ceq 'merge_group' -and $env:MERGE_GROUP_BASE_SHA -cmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') {
-            # Only an immutable commit, fetched by itself; anything else runs everything.
-            git fetch --no-tags --depth=1 origin $env:MERGE_GROUP_BASE_SHA
-            if ($LASTEXITCODE -eq 0) { $base = $env:MERGE_GROUP_BASE_SHA }
+          } elseif ($env:EVENT_NAME -ceq 'merge_group' -and $env:MERGE_GROUP_BASE_REF -ceq 'refs/heads/master') {
+            # Master's current tip, not merge_group.base_sha: that may be the
+            # queue entry ahead, which need not pass on its own, so every
+            # unmerged entry must count. Anything else runs everything.
+            git fetch --no-tags --depth=1 origin refs/heads/master
+            if ($LASTEXITCODE -eq 0) { $base = 'FETCH_HEAD' }
           }
           if ($base) {
             $files = @(git diff --no-renames --name-only $base HEAD)

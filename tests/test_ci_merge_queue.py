@@ -5,9 +5,10 @@ ruleset (``master: PRs with review + CI``) requires the checks ``test``,
 ``Parity / ubuntu-latest`` and ``Parity / windows-latest``; each must report
 under the same name for a group as for a pull request, or the queue waits
 until its timeout. ci.yml's ``scope`` job classifies a group like a pull
-request, over the group's own range (``merge_group.base_sha`` to its head):
-only a Rust-only change skips the Python suite lanes. rust/ci/test_workflow.py
-covers rust.yml's own scope job and Parity gate.
+request, over everything the group adds to master (master's tip, fetched, to
+the group head; never ``merge_group.base_sha``, which may name the queue entry
+ahead): only a Rust-only change skips the Python suite lanes.
+rust/ci/test_workflow.py covers rust.yml's own scope job and Parity gate.
 """
 from __future__ import annotations
 
@@ -25,7 +26,11 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 # The ruleset's required_status_checks contexts, read 2026-10-19 with
 # `gh api repos/Pseudogiant-xr/Pseudolife-MCP/rulesets/19138403`.
 REQUIRED_CHECKS = {"test", "Parity / ubuntu-latest", "Parity / windows-latest"}
-GROUP_BASE = "e" * 40
+# The checks docs/specs/2026-10-19-merge-queue.md asks the maintainer to add
+# before enabling the queue, which waits only for required checks.
+ADDED_CHECKS = {"guards", "test-lite-linux", "test-lite-windows", "test-lite-macos",
+                "frontend", "Rust daemon / disposable image"}
+SPEC = ROOT / "docs" / "specs" / "2026-10-19-merge-queue.md"
 
 
 def load(name):
@@ -68,6 +73,14 @@ def test_every_required_check_reports_under_its_pull_request_name():
     assert "event_name" not in ci["jobs"]["test"]["if"]
 
 
+def test_every_check_the_spec_asks_to_require_exists():
+    names = check_names(load("ci.yml")) | check_names(load("rust.yml"))
+    assert ADDED_CHECKS <= names
+    spec = SPEC.read_text(encoding="utf-8")
+    for name in REQUIRED_CHECKS | ADDED_CHECKS:
+        assert f"`{name}`" in spec, name
+
+
 def test_merge_group_runs_are_never_cancelled_by_concurrency():
     concurrency = load("ci.yml")["concurrency"]
     # Keyed by ref: a group's queue branch is its own ref, distinct from
@@ -83,10 +96,10 @@ GIT_STUB = r'''
 git() {
   local line="$*" base=HEAD^1
   if [ "$EVENT_NAME" = merge_group ]; then
-    if [ "$line" = "fetch --no-tags --depth=1 origin $MERGE_GROUP_BASE_SHA" ]; then
+    if [ "$line" = "fetch --no-tags --depth=1 origin refs/heads/master" ]; then
       return "$PL_FETCH_EXIT"
     fi
-    base=$MERGE_GROUP_BASE_SHA
+    base=FETCH_HEAD
   fi
   if [ "$line" != "diff --no-renames --name-only $base HEAD" ]; then
     printf '%s\n' "$line" >> "$PL_UNEXPECTED"; return 97
@@ -97,19 +110,19 @@ git() {
 '''
 
 
-def run_scope(tmp_path, event, files, *, base_sha=GROUP_BASE, fetch_exit=0, diff_exit=0):
+def run_scope(tmp_path, event, files, *, base_ref="refs/heads/master", fetch_exit=0, diff_exit=0):
     if BASH is None:
         pytest.skip("needs bash (Git Bash on Windows)")
     step = next(s for s in load("ci.yml")["jobs"]["scope"]["steps"] if s.get("id") == "scope")
     assert step["shell"] == "bash"
     assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}",
-                           "MERGE_GROUP_BASE_SHA": "${{ github.event.merge_group.base_sha }}"}
+                           "MERGE_GROUP_BASE_REF": "${{ github.event.merge_group.base_ref }}"}
     output, unexpected = tmp_path / "github_output", tmp_path / "unexpected"
     output.write_text("", encoding="utf-8")
     script = tmp_path / "scope.sh"
     # Actions runs a bash step as `bash -e {0}` (pipefail too: shell: bash).
     script.write_text("set -eo pipefail\n" + GIT_STUB + step["run"], encoding="utf-8", newline="\n")
-    env = dict(os.environ, EVENT_NAME=event, MERGE_GROUP_BASE_SHA=base_sha,
+    env = dict(os.environ, EVENT_NAME=event, MERGE_GROUP_BASE_REF=base_ref,
                GITHUB_OUTPUT=str(output), PL_UNEXPECTED=str(unexpected),
                PL_FILES="\n".join(files), PL_FETCH_EXIT=str(fetch_exit), PL_DIFF_EXIT=str(diff_exit))
     result = subprocess.run([BASH, str(script)], env=env, capture_output=True, text=True, timeout=60)
@@ -145,10 +158,11 @@ def test_other_events_always_run_the_python_lanes(tmp_path, event):
     assert run_scope(tmp_path, event, RUST_ONLY) == ["python=true"]
 
 
-@pytest.mark.parametrize("base_sha, fetch_exit", [
-    ("", 0), ("master", 0), ("E" * 40, 0), ("e" * 39, 0), ("e" * 40 + " x", 0), (GROUP_BASE, 128)])
-def test_a_merge_group_without_a_fetched_base_runs_everything(tmp_path, base_sha, fetch_exit):
-    assert run_scope(tmp_path, "merge_group", RUST_ONLY, base_sha=base_sha,
+@pytest.mark.parametrize("base_ref, fetch_exit", [
+    ("", 0), ("master", 0), ("refs/heads/topic", 0), ("refs/heads/master2", 0),
+    ("refs/heads/master x", 0), ("refs/heads/master", 128)])
+def test_a_merge_group_without_a_fetched_master_tip_runs_everything(tmp_path, base_ref, fetch_exit):
+    assert run_scope(tmp_path, "merge_group", RUST_ONLY, base_ref=base_ref,
                      fetch_exit=fetch_exit) == ["python=true"]
 
 
