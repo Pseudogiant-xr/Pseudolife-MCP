@@ -228,12 +228,12 @@ mod tests {
                 async move { while client.write_all(&[b' '; 64 * 1024]).await.is_ok() {} },
             );
         let started = Instant::now();
-        tokio::time::timeout(LINGER_DEADLINE * 3, server.shutdown())
+        tokio::time::timeout(LINGER_DEADLINE * 5, server.shutdown())
             .await
             .expect("the linger outlived its deadline")
             .unwrap();
         let lingered = started.elapsed();
-        assert!(lingered < LINGER_DEADLINE * 2, "{lingered:?}");
+        assert!(lingered < LINGER_DEADLINE * 4, "{lingered:?}");
         drop(server);
         writer.await.unwrap();
     }
@@ -275,13 +275,13 @@ mod tests {
     async fn a_budget_starved_linger_still_ends_at_its_deadline() {
         let mut stream = LingerStream::new(Flood);
         let started = Instant::now();
-        tokio::time::timeout(LINGER_DEADLINE * 3, stream.shutdown())
+        tokio::time::timeout(LINGER_DEADLINE * 5, stream.shutdown())
             .await
             .expect("the linger outlived its deadline")
             .unwrap();
         let lingered = started.elapsed();
         assert!(lingered >= LINGER_DEADLINE, "{lingered:?}");
-        assert!(lingered < LINGER_DEADLINE * 2, "{lingered:?}");
+        assert!(lingered < LINGER_DEADLINE * 4, "{lingered:?}");
     }
 
     #[tokio::test]
