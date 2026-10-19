@@ -201,13 +201,23 @@ current merge ref, except as the `merge-forward` skill allows):
   fixes fall in a required class (a scope-widening fix is a new change);
   the PR says "local full suite: passed at `<head>`; later commits are
   review fixes" and lists the targeted runs.
-- **A merge of master forward, or an integration batch**
-  (`integrate/<date>-batch-N`), needs none when no code conflict was
-  resolved by hand and each branch's own required validation passed (a
-  pass carried under the review-fix rule counts); run
-  the overlap's tests (plus doc guards if docs overlap), and a batch PR says
-  "local full suite: not required, clean integration batch". A
-  hand-resolved code conflict always requires one.
+- **A merge of master forward** needs none when no code conflict was
+  resolved by hand and the branch's own required validation passed (a
+  pass carried under the review-fix rule counts); run the overlap's tests
+  (plus doc guards if docs overlap). A hand-resolved code conflict always
+  requires one.
+- **An integration batch** (`integrate/<date>-batch-N`, built by `python
+  ops/integrate.py build` from PRs labelled `ready-to-batch`, each with its
+  reviews and green CI on a head of its own) runs the local WSL full suite
+  on the batch head before its CI (cheaper than one CI run since #846);
+  build one when three or more PRs are ready or about every 4 hours.
+  - Nothing is fixed or hand-resolved inside a batch: the script drops a
+    conflicting member with a comment, and a red batch is bisected locally
+    (master plus half the members) and the culprit dropped with a comment.
+  - The batch PR merges with a merge commit, never squash, so its members
+    become reachable from master and GitHub marks them merged; the
+    maintainer or the delegated session clicks merge. Procedure:
+    `docs/dev/merge-batches.md`.
 - These suite-gate rules (the 2026-09-28 trial with its 2026-10-05
   amendments) are permanent by maintainer decision of 2026-10-19.
 
