@@ -155,7 +155,8 @@ def test_cli_mutant_summary_names_witnesses_and_durations(tmp_path, monkeypatch)
                                   "h5-background", "h5-daemon-mutants", "h5-graph-mutants"])
 def test_inventory_rejects_a_dropped_suite(suite):
     from inventory import check
-    workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8"))
+    from parity_scope import resolve
+    workflow = resolve(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
     workflow["jobs"]["parity-checks"]["strategy"]["matrix"]["suite"].remove(suite)
     with pytest.raises(AssertionError, match="missing H5 suite"):
         check(workflow)

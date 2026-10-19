@@ -69,6 +69,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       rust: ${{ steps.scope.outputs.rust }}
+      parity: ${{ steps.parity.outputs.parity }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,6 +103,21 @@ jobs:
           Write-Output "rust=$rust"
           "rust=$rust" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           exit 0
+      # The parity matrix (rust/ci/parity_scope.py). Master pushes, the
+      # nightly, manual CI and merge groups run every suite. A pull request
+      # runs the floor (eval, cli, cli-daemon, cli-live, h5-w1a) plus the
+      # suites its diff reaches: a row, its golden or its command's shim code
+      # reaches the shard that runs the row, the daemon crate its daemon
+      # suites, and anything the module cannot place (the Python oracle,
+      # this workflow, Cargo files) every suite. A divergence in a suite a
+      # pull request skipped surfaces on the master push that merges it.
+      # Before this, each pull request push queued 24 parity jobs behind the
+      # account's 20-job cap.
+      - name: Choose the parity suites
+        id: parity
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: python3 rust/ci/parity_scope.py --event "$EVENT_NAME" --github-output "$GITHUB_OUTPUT"
 
   rust:
     # Fail-safe: run unless scope affirmatively says skip.
@@ -357,20 +373,25 @@ jobs:
           if-no-files-found: error
 
   parity-checks:
-    # Explicit: the implicit success() also checks scope, an ancestor, so a
-    # failed scope would skip these jobs even after rust and candidate ran.
+    # Explicit: the implicit success() would also check scope. Scope is a
+    # direct need for the matrix; if it failed, the matrix cannot expand, so
+    # this job and the Parity gate fail rather than skip.
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
-    needs: [candidate, rust]
+    needs: [scope, candidate, rust]
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
-        # parity-selfhosted reuses this suite list, the include list and the
-        # steps below through YAML anchors, so both lanes run the same shards;
-        # parity-live reuses the steps.
-        suite: &parity_suites [eval, cli, cli-daemon, cli-live, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
+        # Every suite and its include values live in rust/ci/parity_scope.py,
+        # which the scope job turns into this run's selection: all of them on
+        # master pushes, the nightly, manual CI and merge groups; on a pull
+        # request the floor plus what its diff reaches. Only the selected
+        # suites' include entries come back: an entry matching no
+        # combination would add a job of its own. parity-selfhosted takes
+        # the same matrix, and parity-live reuses the steps below through
+        # the YAML anchor.
+        suite: ${{ fromJSON(needs.scope.outputs.parity).suite }}
         # The required gate holds only work hosted Windows runs
         # deterministically: builds, nextest, self-tests, goldens and
         # replays. cli-live holds the live Python-versus-Rust comparisons
@@ -382,75 +403,7 @@ jobs:
         exclude:
           - os: windows-latest
             suite: cli-live
-        # W1-C row sums: master run 38076979343, 2026-10-10, Windows.
-        # Live + golden: doctor 15.3m; pairing 17.6m; connection 20.1m.
-        # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice
-        # the total. Connection also keeps the existing 20m record budget.
-        include: &parity_shards
-          # Hosted Windows cli was one serial job: 70.4 and 61.5 min on
-          # master runs 39205533092 and 39236836263 (2026-10-19; Linux 40.3
-          # and 42.7). Split three ways so no shard runs past about half an
-          # hour. cli keeps the CLI rows' self-tests and goldens, lease,
-          # dream cursor, static, graph store, principal and background
-          # steps: about 22 min of steps on Windows plus about 4 min setup.
-          - suite: cli
-            job_timeout: 55
-          # Schema startup 5.9-7.1 min, then resident startup 12.1-14.9 min
-          # on the binary the schema step builds; about 26 min with setup.
-          - suite: cli-daemon
-            job_timeout: 55
-          # Same runs, the four live steps: Windows 22.4 min (body 2.5,
-          # security 8.6, MCP 8.9, CLI live arms about 2.5) plus about 4 min
-          # setup; Linux 14 min. About twice the Windows total.
-          - suite: cli-live
-            job_timeout: 55
-          - suite: w1c-doctor
-            w1c_rows: "'doctor'"
-            w1c_timeout: 32
-            job_timeout: 36
-          - suite: w1c-pairing
-            w1c_rows: "'transfer', 'invite', 'pair'"
-            w1c_timeout: 36
-            job_timeout: 40
-          - suite: w1c-connection
-            w1c_rows: "'test_login', 'connect', 'maintainer', 'move', 'tunnel'"
-            w1c_timeout: 42
-            job_timeout: 66
-          # Linux 2026-10-11, live + oracle capture + replay:
-          # audit 112s, backup 34s, W1-A 435s, daemon controls 189s,
-          # graph controls 394s. Linux step budgets are about twice these.
-          # Windows budgets are provisional until the first hosted run;
-          # each new job stays inside the existing ~56-minute slowest job.
-          # Hosted ubuntu 2026-10-12: the audit step's live phase alone took
-          # 201s and the step hit its 4-minute budget on three runs (PRs
-          # #661 and #737) with every compared case matching; 10 minutes
-          # is about twice the observed ~5-minute step.
-          - suite: h5-audit
-            h5_timeout: 10
-            h5_windows_timeout: 20
-            job_timeout: 30
-          - suite: h5-backup
-            h5_timeout: 2
-            h5_windows_timeout: 10
-            job_timeout: 20
-          - suite: h5-w1a
-            h5_timeout: 15
-            h5_windows_timeout: 40
-            job_timeout: 56
-          # Linux 2026-10-11: six background scenarios, 9 live cases,
-          # 110s combined; 4m allows about twice measured CPU work.
-          - suite: h5-background
-            h5_timeout: 4
-            h5_windows_timeout: 20
-            job_timeout: 30
-          - suite: h5-daemon-mutants
-            h5_timeout: 6
-            h5_windows_timeout: 20
-            job_timeout: 35
-          - suite: h5-graph-mutants
-            h5_timeout: 14
-            h5_windows_timeout: 30
-            job_timeout: 45
+        include: ${{ fromJSON(needs.scope.outputs.parity).include }}
     runs-on: ${{ matrix.os }}
     # Every cli and W1-C shard names its own budget beside its measurement
     # in the include list; eval and judges keep the 210-minute fallback.
@@ -1224,7 +1177,7 @@ jobs:
 
   parity-selfhosted:
     # A comparison lane, not a gate (docs/specs/2026-10-19-self-hosted-parity-lane.md):
-    # the same shards and steps as parity-checks, on the maintainer's dev
+    # the same matrix and steps as parity-checks, on the maintainer's dev
     # machines. continue-on-error and no place in the Parity gate's needs
     # keep its outcome out of every required check. It runs only on the
     # nightly and manual CI, which have their own concurrency groups: on a
@@ -1237,14 +1190,15 @@ jobs:
     # a day.
     if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && vars.PARITY_SELFHOSTED_RUNNERS != '' && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
     name: Parity self-hosted / ${{ matrix.runner }} / ${{ matrix.suite }}
-    needs: [candidate, rust]
+    needs: [scope, candidate, rust]
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
         runner: ${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '["off"]') }}
-        suite: *parity_suites
-        include: *parity_shards
+        # Every suite: the nightly and manual CI select them all.
+        suite: ${{ fromJSON(needs.scope.outputs.parity).suite }}
+        include: ${{ fromJSON(needs.scope.outputs.parity).include }}
     runs-on: [self-hosted, "pseudolife-parity-${{ matrix.runner }}"]
     # The slowest hosted shard budget (210m) plus the hour a shard may wait
     # for this machine's full suite before it yields.

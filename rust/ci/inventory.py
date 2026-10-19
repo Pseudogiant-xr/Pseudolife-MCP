@@ -104,6 +104,9 @@ def check(workflow):
     from control_selection import runtime_controls
     from rust.cli_harness import core
 
+    from parity_scope import resolve
+    # The full matrix, as master pushes and the nightly run it.
+    workflow = resolve(workflow)
     declared = cli_controls()
     selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
     assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"

@@ -416,7 +416,11 @@ def check_executable_coverage(jobs):
 
 
 def workflow():
-    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    """rust.yml as a master push runs it: the scope-chosen parity matrix
+    expanded to every suite (rust/ci/parity_scope.py; test_parity_scope.py
+    pins the expressions and the per-pull-request selection)."""
+    from parity_scope import resolve
+    return resolve(yaml.safe_load(WORKFLOW.read_text(encoding="utf-8")))
 
 
 
@@ -442,7 +446,7 @@ def test_shards_cover_both_systems_and_build_once():
         assert not jobs[name].get("continue-on-error", False)
     assert jobs["rust"]["name"] == "Rust / ${{ matrix.os }}"
     assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
-    assert jobs["parity-checks"]["needs"] == ["candidate", "rust"]
+    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "rust"]
     rust_steps = jobs["rust"]["steps"]
     override = commands(next(step["run"] for step in rust_steps
                              if step.get("name") == "Daemon override build configurations"))
@@ -795,7 +799,8 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     jobs = workflow()["jobs"]
     scope = jobs["scope"]
     assert scope["runs-on"] == "ubuntu-latest" and "needs" not in scope
-    assert scope["outputs"] == {"rust": "${{ steps.scope.outputs.rust }}"}
+    assert scope["outputs"] == {"rust": "${{ steps.scope.outputs.rust }}",
+                                "parity": "${{ steps.parity.outputs.parity }}"}
     checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["fetch-depth"] == 2
     gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') "
@@ -804,9 +809,10 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
         assert jobs[name]["needs"] == "scope", name
         assert jobs[name]["if"] == gated, name
     # Parity checks and source mutants inherit the skip through their needs.
-    # Their success checks name the direct needs: the implicit success() also
-    # covers scope, so a failed scope would skip them after rust/candidate ran.
-    assert jobs["parity-checks"]["needs"] == ["candidate", "rust"]
+    # Their success checks name rust and candidate: the implicit success()
+    # would also cover scope. Parity checks need scope for their matrix, so a
+    # failed scope fails them (and the gate) instead of skipping them.
+    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "rust"]
     assert jobs["parity-checks"]["if"].startswith("${{ !cancelled() && ")
     assert jobs["parity-checks"]["if"].endswith(
         "&& needs.candidate.result == 'success' && needs.rust.result == 'success' }}")
@@ -1228,9 +1234,9 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     text = WORKFLOW.read_text(encoding="utf-8")
     # Anchors, not a copy: a step or shard added to the hosted matrix reaches
     # the self-hosted lane in the same edit.
-    for alias in ("suite: *parity_suites", "include: *parity_shards"):
-        assert text.count(alias) == 1, alias
-    # parity-selfhosted and parity-live both reuse the hosted steps.
+    # parity-selfhosted and parity-live both reuse the hosted steps; the
+    # self-hosted lane takes the same scope-chosen matrix (every suite on the
+    # nightly and manual CI, its only events).
     assert text.count("steps: *parity_steps") == 2
     jobs = workflow()["jobs"]
     hosted, lane = jobs["parity-checks"], jobs["parity-selfhosted"]
@@ -1240,7 +1246,7 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     assert lane["strategy"]["matrix"]["runner"] == (
         "${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
     assert lane["strategy"]["fail-fast"] is False
-    assert lane["needs"] == hosted["needs"] == ["candidate", "rust"]
+    assert lane["needs"] == hosted["needs"] == ["scope", "candidate", "rust"]
     # Only the maintainer's registered runners: one label per machine.
     assert lane["runs-on"] == ["self-hosted", "pseudolife-parity-${{ matrix.runner }}"]
     assert lane["timeout-minutes"] >= 210 + int(lane["env"]["PARITY_YIELD_MINUTES"])
