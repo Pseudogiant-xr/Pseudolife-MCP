@@ -150,7 +150,7 @@ RECENT_CLOCK = {("world_facts", "retrieved_at")}
 RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
-                  "started_at", "ended_at"}
+                  "started_at", "ended_at", "created_at"}
 RESPONSE_RECENT_CLOCK = {"retrieved_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
@@ -215,7 +215,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # graph-writes and graph-relations scenarios.
            "mcp-graph-no-etype-backfill", "mcp-graph-no-slot-fold", "mcp-graph-no-warnings",
            "mcp-graph-unrelate-missing-dst", "mcp-graph-alias-canonical",
-           "mcp-graph-redefine-builtin", "mcp-graph-inverse-unchecked"]
+           "mcp-graph-redefine-builtin", "mcp-graph-inverse-unchecked",
+           # memory_graph (spec GR1-GR10): caught by graph-read.
+           "mcp-graph-no-relation-filter", "mcp-graph-tag-no-ambiguous",
+           "mcp-graph-facts-no-alias", "mcp-graph-no-labels"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1899,6 +1902,82 @@ SCENARIOS.update({
 })
 
 
+def graph_read(entity, **kw) -> dict:
+    return tool("memory_graph", entity=entity, **kw)
+
+
+SCENARIOS.update({
+    "graph-read": {
+        "config": None,
+        "seed": [
+            fact("Postgres", "port", "5432", authority="user",
+                 distortion_tolerance="constraint"),
+            fact("Web App", "framework", "Django"),
+            relate("Web App", "runs-on", "host-1", origin="user"),
+            relate("host-2", "hosts", "Web App"),
+            relate("Web App", "depends-on", "Postgres", origin="action"),
+            relate("Postgres", "depends-on", "Disk", confidence=0.9),
+            relate("Cache", "uses", "Web App", origin="agent"),
+            relate("Crawler", "related-to", "Web App", confidence=0.3),
+            relate("Spider", "related-to", "Crawler"),
+            relate("Moth", "related-to", "Spider"),
+            relate("Island", "related-to", "Atoll"),
+            alias("Postgres", "pg"),
+            # a fact written under the alias lands on the node
+            fact("pg", "version", "16"),
+            # what only the dream writes: communities and source attribution
+            sql("INSERT INTO entity_communities (entity_id, community_id, computed_at) "
+                "SELECT id, CASE WHEN canonical IN ('island', 'atoll') THEN 2 ELSE 1 END, 0 "
+                "FROM entities WHERE canonical IN ('web-app', 'postgres', 'disk', 'island', "
+                "'atoll')", after_stop=True),
+            sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+                "SELECT id, s, 1, 'derived', 0 FROM entities, "
+                "(VALUES ('claude-code'), ('agent')) v(s) WHERE canonical IN ('web-app', "
+                "'postgres')", after_stop=True),
+        ],
+        "ops": [
+            # the default neighborhood: asserted edges with tags, a transitive
+            # and inverse-derived edges, facts with labels and the alias fact
+            graph_read("web app"),
+            graph_read("Web App", depth=2),
+            graph_read("Web App", depth=3),
+            graph_read("Web App", depth=0),
+            graph_read("Web App", depth=9),
+            graph_read("Web App", include_facts=False),
+            # through an alias, and from a leaf
+            graph_read("pg", depth=2),
+            graph_read("Moth", depth=3),
+            # the path: found, to the root, an unknown target, an empty one,
+            # and a target in another component
+            graph_read("Moth", to="Disk"),
+            graph_read("Web App", to="web-app"),
+            graph_read("Web App", to="Nobody"),
+            graph_read("Web App", to=""),
+            graph_read("Web App", to="Atoll"),
+            # the relation filter: a case-folded substring, empty (no filter),
+            # one that empties the edges
+            graph_read("Web App", relation_filter="DEPENDS"),
+            graph_read("Web App", relation_filter=""),
+            graph_read("Web App", relation_filter="zzz"),
+            graph_read("Nobody", relation_filter="uses"),
+            # not found: unknown, blank after normalization
+            graph_read("Nobody"),
+            graph_read("   "),
+            # an empty entity is the whole graph, with sources
+            graph_read(""),
+            graph_read("", include_facts=False, relation_filter="relat"),
+            # the answers follow writes: a superseded edge leaves, a new
+            # alias resolves, a revived edge returns
+            unrelate("Web App", "depends-on", "Postgres"),
+            graph_read("Web App"),
+            alias("Web App", "frontend"),
+            relate("Web App", "depends-on", "Postgres"),
+            graph_read("frontend", to="Disk"),
+        ],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -2310,8 +2389,32 @@ def generic_titles(v):
     return v
 
 
+def inverse_derived_free(v) -> None:
+    """Python's ``derive_edges`` walks its inverse rule over a set of
+    ``(src, relation, dst)`` tuples, so the order of inverse-derived edges
+    follows the per-process string hash (divergences.md, Graph and review):
+    in a graph answer, those edges compare as a multiset in their slots."""
+    if isinstance(v, dict):
+        edges = v.get("edges")
+        if isinstance(edges, list):
+            slots = [i for i, e in enumerate(edges) if isinstance(e, dict) and e.get("derived")
+                     and any(str(x).startswith("inverse:") for x in e.get("via") or [])]
+            for i in slots:
+                edges[i]["via"] = sorted(edges[i]["via"])
+            for i, e in zip(slots, sorted((edges[i] for i in slots),
+                                          key=lambda e: json.dumps(e, sort_keys=True))):
+                edges[i] = e
+        for x in v.values():
+            inverse_derived_free(x)
+    elif isinstance(v, list):
+        for x in v:
+            inverse_derived_free(x)
+
+
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     a, b = generic_titles(json.loads(json.dumps(py))), generic_titles(json.loads(json.dumps(rs)))
+    inverse_derived_free(a)
+    inverse_derived_free(b)
     normalize_records(a, b, stats)
     out = []
     va, vb = a.get("value"), b.get("value")
