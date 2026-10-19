@@ -96,17 +96,18 @@ SHIM = CLI_HARNESS + ("judges",)
 # The pseudolife-daemon crate (and its graph and dream contract binaries).
 DAEMON = ("cli", "cli-daemon", "cli-live", "eval", "h5-w1a", "h5-background",
           "h5-daemon-mutants", "h5-graph-mutants")
-# rust/shim/src/cli entries that only one command uses, by the rows that
-# compare it; any other shim file reaches the whole binary.
+# rust/shim/src/cli entries that only one command's code uses, by the rows
+# that compare it; any other shim file reaches the whole binary. Shared
+# helpers (lease, pairing, hook_http, hook_json, doorbell_*) are left out:
+# other commands import them. test_parity_scope.py scans the shim source and
+# fails if another command starts using a mapped entry.
 SHIM_COMMANDS = {
     "backup": ("backup",), "backup_help.txt": ("backup",), "board_audit": ("audit",),
     "connect": ("connect",), "doctor": ("doctor",), "maintainer": ("maintainer",),
-    "move_cli.rs": ("move",), "pairing": ("invite", "pair"), "test_login": ("test_login",),
+    "move_cli.rs": ("move",), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
-    "lease": ("lease", "lease_operator"), "episode.rs": ("episode",), "episode_input.rs": ("episode",),
-    "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",), "hook_http.rs": ("hook",),
-    "hook_json.rs": ("hook",), "doorbell_files.rs": ("mail",), "doorbell_json.rs": ("mail",),
-    "doorbell_seen.rs": ("mail",),
+    "episode.rs": ("episode",), "episode_input.rs": ("episode",),
+    "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
 }
 # The scope step's documentation-only rule, which Python's re cannot take
 # verbatim (its lookbehind is variable-width); tests check both agree.

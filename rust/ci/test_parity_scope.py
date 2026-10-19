@@ -41,7 +41,12 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     (["rust/cli_harness/runner.py"], {"w1c-doctor", "w1c-pairing", "w1c-connection", "h5-audit", "h5-backup"}),
     # One command's shim code reaches its rows and the judges.
     (["rust/shim/src/cli/doctor/mod.rs"], {"w1c-doctor", "judges"}),
-    (["rust/shim/src/cli/pairing/invite.rs"], {"w1c-pairing", "judges"}),
+    (["rust/shim/src/cli/transfer/mod.rs"], {"w1c-pairing", "judges"}),
+    # Helpers other commands import reach the whole binary (Codex review:
+    # tunnel uses hook_json, board_audit uses lease).
+    (["rust/shim/src/cli/hook_json.rs"], set(parity_scope.SHIM) - set(FLOOR)),
+    (["rust/shim/src/cli/lease/args.rs"], set(parity_scope.SHIM) - set(FLOOR)),
+    (["rust/shim/src/cli/pairing/invite.rs"], set(parity_scope.SHIM) - set(FLOOR)),
     (["rust/shim/src/cli/wait_mail.rs"], set(parity_scope.SHIM) - set(FLOOR)),
     (["rust/shim/src/main.rs"], set(parity_scope.SHIM) - set(FLOOR)),
     # The daemon crate: its rows, not the CLI-only shards.
@@ -102,6 +107,48 @@ def test_every_row_has_a_suite_and_w1c_rows_match_their_shards():
                 set(re.findall(r"'([a-z_]+)'", shard["w1c_rows"]))
     assert {row for row, suite in ROW_SUITES.items() if suite.startswith("h5-")} == {"audit", "backup"}
     assert set(ROW_SUITES.values()) <= set(SUITES)
+
+
+SHIM_SOURCE = ROOT / "rust/shim/src"
+# Files that declare and dispatch every command; a reference there is not a use.
+DISPATCH = {"cli.rs", "main.rs", "lib.rs"}
+
+
+def entry_of(path):
+    """The rust/shim/src/cli entry a shim source file belongs to, or None."""
+    parts = path.relative_to(SHIM_SOURCE).parts
+    return parts[1] if parts[0] == "cli" and len(parts) > 1 else None
+
+
+def users(entry):
+    """Shim source files outside an entry that import or include it."""
+    module = entry.split(".", 1)[0]
+    pattern = re.compile(rf"\b{re.escape(module)}::|\buse [^;]*\b{re.escape(module)}\b|"
+                         rf"(path|include_str!)\s*[=(]\s*\"[^\"]*\b{re.escape(entry)}\"")
+    found = set()
+    for path in SHIM_SOURCE.rglob("*.rs"):
+        if path.name in DISPATCH and path.parent == SHIM_SOURCE or entry_of(path) == entry:
+            continue
+        if pattern.search(path.read_text(encoding="utf-8")):
+            found.add(path)
+    return found
+
+
+@pytest.mark.parametrize("entry", sorted(SHIM_COMMANDS))
+def test_a_mapped_shim_entry_reaches_only_its_rows(entry):
+    # A change to an entry another command imports reaches that command's
+    # rows too; the map may name it only if those rows are among its own.
+    for path in users(entry):
+        owner = entry_of(path)
+        assert owner in SHIM_COMMANDS, (entry, str(path.relative_to(ROOT)))
+        assert set(SHIM_COMMANDS[owner]) <= set(SHIM_COMMANDS[entry]), (entry, str(path.relative_to(ROOT)))
+
+
+@pytest.mark.parametrize("entry, user", [("hook_json.rs", "tunnel"), ("lease", "board_audit"),
+                                         ("pairing", "pyjson.rs"), ("doorbell_files.rs", "doorbell_seen.rs")])
+def test_the_import_scan_sees_the_shared_helpers(entry, user):
+    # The near misses the map leaves out: the scan must find their users.
+    assert user in {entry_of(path) for path in users(entry)}
 
 
 def test_every_mapped_shim_entry_exists():
