@@ -1794,8 +1794,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
                                             daemons.base_env(home, rust_env(env)))
         scn.configure_daemons(procs)
-        for d in procs.values():
-            d.start(240, stages=scn.start_stages)
+        daemons.start_all(procs, 240, stages=scn.start_stages)
         settle_before_cases(scn, [d.port for d in procs.values()])
         rows = []
         golden_name = scn.name

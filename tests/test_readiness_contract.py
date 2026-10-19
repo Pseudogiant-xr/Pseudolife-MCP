@@ -182,20 +182,20 @@ def test_wait_ready_stops_when_the_daemon_exits():
 # ---- end to end: a real daemon whose stored principals load late -----------
 
 TOKEN = "readiness-contract-token"
-DELAY_S = 6.0
 
-# The daemon, with its first stored-principal read held back by DELAY_S: the
-# window in which /health already answers but a bearer the environment does
-# not match is refused 503 principals_unavailable.
-_DELAYED_PRINCIPALS = f"""
-import sys, time
+# The daemon, with its first stored-principal read held until the test
+# creates the gate file: the window in which /health already answers, and
+# even init has finished, but a bearer the environment does not match is
+# refused 503 principals_unavailable.
+_GATED_PRINCIPALS = """
+import os, sys, time
 from pseudolife_memory import principal_store
 original = principal_store.PrincipalRefresher.refresh_once
-held = []
+gate = os.environ["PL_TEST_PRINCIPALS_GATE"]
 def refresh_once(self):
-    if not held:
-        held.append(True)
-        time.sleep({DELAY_S})
+    deadline = time.monotonic() + 600
+    while not os.path.exists(gate) and time.monotonic() < deadline:
+        time.sleep(0.05)
     return original(self)
 principal_store.PrincipalRefresher.refresh_once = refresh_once
 from pseudolife_memory.cli import main
@@ -214,24 +214,48 @@ def _unknown_bearer_status(url: str) -> tuple[int, dict]:
         return exc.code, json.loads(exc.read())
 
 
-def test_spawn_serve_waits_for_delayed_stored_principals(tmp_path):
+def test_spawn_serve_waits_for_the_stored_principals_after_init(tmp_path, monkeypatch):
+    from tests import helpers
     from tests.helpers import pg_reachable, private_bank, spawn_serve, stop_daemon
     from tests.pg_fixtures import resolve_test_db_url
 
     url = resolve_test_db_url()
     if not pg_reachable(url):
         pytest.skip("no test Postgres reachable")
+    port = helpers.free_port()
+    monkeypatch.setattr(helpers, "free_port", lambda: port)
+    gate = tmp_path / "principals-gate"
+    base = f"http://127.0.0.1:{port}"
     with private_bank(url, "readiness") as bank_url:
-        started = time.monotonic()
-        proc, health, port = spawn_serve(
-            tmp_path, bank_url, wait_s=240, argv=("-c", _DELAYED_PRINCIPALS),
-            env_extra={"PSEUDOLIFE_MCP_TOKEN": TOKEN})
+        result = {}
+
+        def spawn():
+            try:
+                result["started"] = spawn_serve(
+                    tmp_path, bank_url, wait_s=240, argv=("-c", _GATED_PRINCIPALS),
+                    env_extra={"PSEUDOLIFE_MCP_TOKEN": TOKEN, "PL_TEST_PRINCIPALS_GATE": str(gate)})
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                result["error"] = exc
+        worker = threading.Thread(target=spawn, daemon=True)
+        worker.start()
         try:
-            waited = time.monotonic() - started
-            status, body = _unknown_bearer_status(f"http://127.0.0.1:{port}")
-            assert (status, body.get("error")) == (401, "unauthorized"), (
-                f"spawn_serve returned {waited:.1f}s after start with the stored "
-                f"principals still loading: {status} {body}")
+            # Init finishes while the principals stay held: the helper must
+            # still be waiting, on that stage alone.
+            body = readiness.wait_ready(base, 240, stages=("init",))
+            assert body["pending"] == ["principals"], body
+            time.sleep(1.0)  # several of spawn_serve's 0.5 s polls
+            assert worker.is_alive() and not result, (
+                "spawn_serve returned while the stored principals were still loading")
+            assert _unknown_bearer_status(base)[0] == 503
+        finally:
+            gate.touch()
+            worker.join(timeout=240)
+        if "error" in result:
+            raise result["error"]
+        proc, health, _port = result["started"]
+        try:
             assert (health.get("ready"), health.get("pending")) == (True, [])
+            status, refused = _unknown_bearer_status(base)
+            assert (status, refused.get("error")) == (401, "unauthorized")
         finally:
             stop_daemon(proc)

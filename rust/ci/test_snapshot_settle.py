@@ -21,7 +21,8 @@ def snapshot_harness(monkeypatch, tmp_path):
 
     def daemon(side, home):
         return SimpleNamespace(port=ports[side], cwd=home,
-                               start=lambda timeout, stages=None: events.append(("start", side, stages)),
+                               launch=lambda: None,
+                               wait=lambda timeout, stages=None: events.append(("start", side, stages)),
                                stop=lambda: events.append(("stop", side)))
 
     def dump(dsn):
