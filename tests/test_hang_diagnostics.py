@@ -71,24 +71,3 @@ def test_the_timeout_clears_the_slowest_legitimate_test():
     # 71.6 s is the slowest test item across four green master runs
     # (2026-09-23/24). The 300 s floor keeps a false dump off a slow runner.
     assert _faulthandler_timeout() >= 300
-
-
-
-def test_the_windows_lane_names_failures_and_keeps_its_report():
-    # It ran `-q` alone, so most Windows-only failures printed no test names,
-    # and no job recorded the runner's vCPU count or image (2026-10-20 audit).
-    import yaml
-    workflow = yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    steps = workflow["jobs"]["test-lite-windows"]["steps"]
-    names = [step.get("name") for step in steps]
-    tests = next(step for step in steps if str(step.get("name", "")).startswith("Lite-surface tests"))
-    assert " -ra " in tests["run"] and "--durations=30" in tests["run"]
-    assert "--junitxml=ci-results/test-lite-windows.junit.xml" in tests["run"]
-    assert names.index("Record the runner image and CPU count") < steps.index(tests)
-    upload = steps[steps.index(tests) + 1]
-    assert upload["uses"] == "actions/upload-artifact@v4" and upload["if"] == "always()"
-    assert upload["with"]["path"] == "ci-results/"
-    rust = yaml.safe_load((REPO / ".github" / "workflows" / "rust.yml").read_text(encoding="utf-8"))
-    facts = next(step for step in rust["jobs"]["parity-checks"]["steps"]
-                 if step.get("name") == "Record the runner image and CPU count")
-    assert next(step for step in steps if step.get("name") == "Record the runner image and CPU count") == facts

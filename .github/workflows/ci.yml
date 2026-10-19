@@ -407,17 +407,6 @@ jobs:
           python -m pip install -U pip
           pip install -e .[dev,lite]
 
-      # The lane takes 18 of its 25 minutes serially; record the machine so
-      # a slow or flaky run can be tied to its vCPU count and image.
-      - name: Record the runner image and CPU count
-        shell: pwsh
-        run: |
-          $memory = [math]::Round([GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes / 1GB, 1)
-          $image = if ($env:ImageOS) { "$env:ImageOS $env:ImageVersion" } else { 'not a hosted image' }
-          $facts = "Runner: $env:RUNNER_OS $env:RUNNER_ARCH ($env:RUNNER_ENVIRONMENT), image $image, $([Environment]::ProcessorCount) logical CPUs, $memory GB memory"
-          Write-Output $facts
-          if ($env:GITHUB_STEP_SUMMARY) { $facts | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
-
       - name: Lite-surface tests (embedded provider, backup + restore rehearsal, shim, schema pins, suite lock)
         # These start their own embedded instances (including the crash /
         # attach / lock paths) — no pre-started server, no service
@@ -429,18 +418,7 @@ jobs:
         # lifecycle.ps1's delegate-brief paths, which only Codex on Windows uses.
         # test_delegate_watch.py runs the watcher's detach flags, its
         # GetProcessTimes start-time check and its lifetime lock on Windows.
-        run: python -m pytest tests/test_memory_changes_hook.py tests/test_coordination_turn_digest.py tests/test_delegate_watch.py tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_wait_mail_cli.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_update_cli.py tests/test_ops_update_wrappers.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_installer_plugin.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py tests/test_suite_lock.py tests/test_codex_doorbell.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py -q -ra --durations=30 --junitxml=ci-results/test-lite-windows.junit.xml
-        # -ra names every failed, errored and skipped test in the log;
-        # before it, most Windows-only failures printed no test names.
-
-      - name: Upload test diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-lite-windows-diagnostics
-          path: ci-results/
-          retention-days: 14
-          if-no-files-found: warn
+        run: python -m pytest tests/test_memory_changes_hook.py tests/test_coordination_turn_digest.py tests/test_delegate_watch.py tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_wait_mail_cli.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_update_cli.py tests/test_ops_update_wrappers.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_installer_plugin.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py tests/test_suite_lock.py tests/test_codex_doorbell.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py -q
 
   test-lite-macos:
     needs: scope
