@@ -1,0 +1,3 @@
+### Added (2026-10-19 — the Rust daemon serves the graph store's write tools)
+
+- The Rust daemon's MCP endpoint now answers `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias` and `memory_relation_define` as the Python daemon does, with the same database changes. Relating two names creates any missing entity (a name that is a fact's slot key resolves to that fact's entity), refuses an unknown relation with the closest matches, warns when a typed relation meets a node of another type, and bumps an existing edge's confidence. Unrelating keeps the edge for audit and hides it; relating it again revives it. Aliases bind alternative names to an entity, and new relations grow the vocabulary; builtin relations cannot be redefined.
