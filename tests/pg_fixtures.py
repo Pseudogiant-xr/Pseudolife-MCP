@@ -397,6 +397,45 @@ def pg_service(pg_url, pg_conn, tmp_path, monkeypatch):
     return svc
 
 
+# One round trip: which reset tables hold any row. The names are the schema's
+# own constants, not input. An empty table needs no TRUNCATE; BENCH_RESET_TABLES
+# names every declared table (tests/test_bench_reset_tables.py), so none is
+# missed, and CASCADE still reaches FK children of a truncated table.
+_HOLDS_ROWS_SQL = " UNION ALL ".join(
+    f"SELECT '{table}' WHERE EXISTS (SELECT 1 FROM {table})"
+    for table in _ALL_TABLES)
+
+# What TRUNCATE ... RESTART IDENTITY did for the tables now skipped: restart
+# their serial and identity sequences, but through setval, which updates the
+# sequence page in place, where RESTART mints a new file. Only sequences used
+# since their last restart (pg_sequence_last_value is NULL until then), so an
+# idle reset writes nothing.
+_RESTART_SKIPPED_SQL = """
+SELECT setval(s.oid, q.seqstart, false)
+FROM pg_depend d
+JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
+JOIN pg_sequence q ON q.seqrelid = s.oid
+JOIN pg_class t ON t.oid = d.refobjid
+WHERE d.classid = 'pg_class'::regclass
+  AND d.refclassid = 'pg_class'::regclass
+  AND d.deptype IN ('a', 'i')
+  AND t.relnamespace = 'public'::regnamespace
+  AND t.relname = ANY(%s) AND NOT t.relname = ANY(%s)
+  AND pg_sequence_last_value(s.oid) IS NOT NULL
+"""
+
+
+def _tables_holding_rows(conn) -> list[str]:
+    """The reset tables to truncate, in list order: those holding rows, and
+    always ``meta``, whose schema_version row the reset re-seeds."""
+    holding = {row[0] for row in conn.execute(_HOLDS_ROWS_SQL).fetchall()}
+    return [t for t in _ALL_TABLES if t == "meta" or t in holding]
+
+
+def _restart_skipped_sequences(conn, truncated: list[str]) -> None:
+    conn.execute(_RESTART_SKIPPED_SQL, (list(_ALL_TABLES), truncated))
+
+
 @pytest.fixture()
 def pg_conn(pg_url):
     """Per-test connection with schema ensured and all tables truncated."""
@@ -446,9 +485,18 @@ def _pg_conn_session(pg_url):
             )
         conn.commit()
         ensure_schema(conn)
+        # Only the tables holding rows, plus meta (re-seeded below):
+        # TRUNCATE mints a new file for every table, index, TOAST table and
+        # sequence it touches, and the next checkpoint fsyncs each one. A full
+        # reset minted 242 (measured 2026-10-19, PG 18.6); per test, that left
+        # ~354k files for a serial suite's checkpoints, one taking 112 s, and
+        # every DROP DATABASE waits for a checkpoint
+        # (tests/test_pg_conn_reset_files.py has the numbers).
+        held = _tables_holding_rows(conn)
+        _restart_skipped_sequences(conn, held)
         with conn.cursor() as cur:
             cur.execute(
-                "TRUNCATE " + ", ".join(_ALL_TABLES) + " RESTART IDENTITY CASCADE"
+                "TRUNCATE " + ", ".join(held) + " RESTART IDENTITY CASCADE"
             )
         conn.commit()
         # Re-seed the one meta row (schema_version) that the truncate wiped.

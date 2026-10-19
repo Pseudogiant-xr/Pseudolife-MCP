@@ -350,7 +350,12 @@ took 143 CUDA OOMs.
 - **On the maintainer's Windows host, full suites run in WSL** (maintainer
   decision 2026-10-02): `pwsh ops/wsl-suite.ps1` from the worktree, in the
   background, output redirected as below; any arguments go to pytest, none
-  means the full suite. Measured that day: a native Windows full suite's
+  means the full suite under pytest-xdist (`--dist loadfile`, up to 4
+  workers: one per two CPUs and per 6 GB of RAM or cgroup limit, so 4 in
+  this host's WSL and at most 2 under the box's 16 GB scope;
+  `PSEUDOLIFE_SUITE_WORKERS=1` runs one process). Measured 2026-10-19 in
+  WSL: 4 workers took 11 min against 28-31 single-process, peak 20 GB.
+  Measured 2026-10-02: a native Windows full suite's
   hook-script tests start Git Bash processes in bursts of 10-32 a second,
   and mouse input stalled 82-347 ms in exactly those seconds while CPU,
   memory, disk and the compositor stayed normal. A WSL run's lock lives in
