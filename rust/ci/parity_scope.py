@@ -17,11 +17,14 @@ Standard library only: the scope job runs it with the runner's own python3.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import re
 import subprocess
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+
+ROOT = Path(__file__).resolve().parents[2]
 
 # Every parity suite, in matrix order. Windows step medians on 2026-10-10,
 # 14 successful runs (eval, cli, judges): 317s/476s/552.5s.
@@ -89,10 +92,9 @@ ROW_SUITES = {
     "move": "w1c-connection", "tunnel": "w1c-connection",
     "audit": "h5-audit", "backup": "h5-backup",
 }
-CLI_HARNESS = ("cli", "cli-live", "w1c-doctor", "w1c-pairing", "w1c-connection", "h5-audit", "h5-backup")
 # The pseudolife-stdio binary: every CLI row, plus the differential judges,
 # which cover its whole argv, help and version surface.
-SHIM = CLI_HARNESS + ("judges",)
+SHIM = ("cli", "cli-live", "judges", "w1c-doctor", "w1c-pairing", "w1c-connection", "h5-audit", "h5-backup")
 # The pseudolife-daemon crate (and its graph and dream contract binaries).
 DAEMON = ("cli", "cli-daemon", "cli-live", "eval", "h5-w1a", "h5-background",
           "h5-daemon-mutants", "h5-graph-mutants")
@@ -147,7 +149,9 @@ def reached(path: str) -> tuple[str, ...]:
                 row = row_of(rest[1], rest[-1])
                 if row in ROW_SUITES:
                     return (ROW_SUITES[row],)
-            return CLI_HARNESS
+            # Shared harness code: the daemon harness's disposable banks and
+            # every shard's PostgreSQL prep import it too.
+            return ALL
         if area == "shim":
             if rest[1:3] == ("src", "cli") and len(rest) > 3 and rest[3] in SHIM_COMMANDS:
                 return tuple(ROW_SUITES[row] for row in SHIM_COMMANDS[rest[3]]) + ("judges",)
@@ -158,20 +162,62 @@ def reached(path: str) -> tuple[str, ...]:
         return ALL  # rust/ci, rust/shared and anything new
     if top == "evals" and len(parts) > 1:
         if parts[1] == "rust_port":
-            # Every shard binds its Python oracle through these two.
-            if parts[-1] in ("oracle_selection.py", "phase1_oracle.py", "provenance.py"):
+            # Every shard binds its Python oracle through these; the harness
+            # imports others.
+            if parts[-1] in ("oracle_selection.py", "phase1_oracle.py", "provenance.py") \
+                    or module_of(parts[2:]) in harness_imports("evals.rust_port"):
                 return ALL
             return ("eval", "judges")
         if parts[1] == "rust_baseline":
             return ("eval",)
     if top == ".github":
         return ALL if path == ".github/workflows/rust.yml" else ()
-    # Python tests and the Console bundle reach only floor suites: the MCP
-    # catalogue test and the static-serving rows both run there.
-    if top in ("tests", "frontend"):
+    if top == "tests":
+        # A test module the harness imports (rows seed banks with
+        # tests.test_transfer_cli, judges start fake embedders) reaches every
+        # suite; any other Python test only the floor's MCP catalogue step.
+        return ALL if module_of(parts[1:]) in harness_imports("tests") else ()
+    # The Console bundle: the floor's static-serving rows.
+    if top == "frontend":
         return ()
     # The Python oracle, the plugin, ops, packaging and anything else.
     return ALL
+
+
+def module_of(parts: tuple[str, ...]) -> str:
+    """The top-level module a file under a package belongs to."""
+    return parts[0].removesuffix(".py") if parts else ""
+
+
+@functools.lru_cache(maxsize=None)
+def harness_imports(package: str) -> frozenset[str]:
+    """The top-level modules of ``package`` (tests or evals.rust_port) that
+    the parity harnesses import, directly or through each other."""
+    sources = [ROOT / "rust"] + ([ROOT / "evals/rust_port"] if package == "tests" else [])
+    directory = ROOT / package.replace(".", "/")
+    escaped = re.escape(package)
+    pattern = re.compile(rf"\b(?:from|import)\s+{escaped}\.(\w+)|\bfrom\s+{escaped}\s+import\s+\(?([\w ,]+)")
+
+    def imported(text: str) -> set[str]:
+        found = set()
+        for dotted, listed in pattern.findall(text):
+            found.update([dotted] if dotted else (name.strip() for name in listed.split(",") if name.strip()))
+        return found
+
+    seen: set[str] = set()
+    pending = set()
+    for source in sources:
+        for path in source.rglob("*.py"):
+            pending |= imported(path.read_text(encoding="utf-8", errors="replace"))
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        for path in [directory / f"{name}.py", *(directory / name).rglob("*.py")]:
+            if path.is_file():
+                pending |= imported(path.read_text(encoding="utf-8", errors="replace"))
+    return frozenset(seen)
 
 
 def row_of(kind: str, name: str) -> str:

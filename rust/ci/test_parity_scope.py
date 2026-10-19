@@ -37,8 +37,8 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     (["rust/cli_harness/goldens/test_login.linux.json"], {"w1c-connection"}),
     (["rust/cli_harness/rows/invite.md", "rust/cli_harness/rows/audit.py"], {"w1c-pairing", "h5-audit"}),
     (["rust/cli_harness/rows/mail.py", "rust/cli_harness/specs/CLI-LEASE-core.md"], set()),
-    # Shared harness code reaches every CLI row's shard.
-    (["rust/cli_harness/runner.py"], {"w1c-doctor", "w1c-pairing", "w1c-connection", "h5-audit", "h5-backup"}),
+    # Python tests the harness never imports: the floor's MCP catalogue step.
+    (["tests/test_shim.py", "tests/conftest.py"], set()),
     # One command's shim code reaches its rows and the judges.
     (["rust/shim/src/cli/doctor/mod.rs"], {"w1c-doctor", "judges"}),
     (["rust/shim/src/cli/transfer/mod.rs"], {"w1c-pairing", "judges"}),
@@ -67,10 +67,37 @@ def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
     "evals/rust_port/oracle_selection.py", "evals/rust_port/phase1_oracle.py",
     "pseudolife_memory/cli/doctor.py", "plugin/hooks/session-start.sh", "ops/Dockerfile.pg",
     "pyproject.toml", "uv.lock", "examples/hooks.py", "something/new.rs", "Rust/daemon/src/x.rs",
+    # Shared CLI harness code: the daemon harness's disposable banks import
+    # it and every shard's PostgreSQL prep runs it (reviewer, 2026-10-20).
+    "rust/cli_harness/runner.py", "rust/cli_harness/pg_create.py", "rust/cli_harness/lease_ci.py",
+    "rust/cli_harness/rows/_bank.py", "rust/cli_harness/rows/lease_transport.py",
+    # Test modules the harness imports (rows seed banks from them).
+    "tests/test_transfer_cli.py", "tests/pg_defaults.py", "tests/maintainer_authenticator.py",
+    "tests/test_coordination_audit.py",
+    # evals/rust_port modules the harness imports.
+    "evals/rust_port/sent_http.py", "evals/rust_port/processes.py", "evals/rust_port/harness.py",
 ])
 def test_anything_it_cannot_place_runs_every_suite(path):
     assert reached(path) == ALL
     assert select("pull_request", ["tests/test_shim.py", path])[0] == SUITES
+
+
+def test_the_import_scan_follows_test_helpers_transitively(tmp_path, monkeypatch):
+    # rust/ imports tests.a, which imports tests.b; tests.c is unused.
+    (tmp_path / "rust").mkdir()
+    (tmp_path / "rust/row.py").write_text("from tests.a import seed\n", encoding="utf-8")
+    (tmp_path / "evals/rust_port").mkdir(parents=True)
+    (tmp_path / "evals/rust_port/judge.py").write_text("from tests import d, e\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/a.py").write_text("import tests.b as helper\n", encoding="utf-8")
+    (tmp_path / "tests/b.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "tests/c.py").write_text("from tests.a import seed\n", encoding="utf-8")
+    monkeypatch.setattr(parity_scope, "ROOT", tmp_path)
+    parity_scope.harness_imports.cache_clear()
+    try:
+        assert parity_scope.harness_imports("tests") == {"a", "b", "d", "e"}
+    finally:
+        parity_scope.harness_imports.cache_clear()
 
 
 def test_the_floor_is_cli_w1a_and_eval():
@@ -88,6 +115,28 @@ def test_documentation_matches_the_scope_job(files):
 @pytest.mark.parametrize("files", CODE_CHANGES)
 def test_code_matches_the_scope_job(files):
     assert not all(parity_scope.is_docs(path) for path in files)
+
+
+def test_is_docs_agrees_with_the_scope_jobs_regex_path_by_path():
+    # The same paths through PowerShell's -cnotmatch with the scope job's
+    # own rule, so a difference in meaning (not only in text) fails here.
+    import os
+    import subprocess
+    step = next(s for s in raw_workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
+    rule = re.search(r"\$docs = '([^']+)'", step["run"]).group(1)
+    paths = sorted({path for files in DOCS_ONLY_CHANGES + CODE_CHANGES for path in files} | {
+        "rust/README.md", "docs/a/b.md", "docs/x.PY", "llms.txt", "llms-full.txt", "llms2.txt",
+        "Docs/x.md", "TESTS/a.md", "a/b/c.md", "docs/sub/run.yaml"})
+    script = ("$rule = $env:PL_RULE; foreach ($p in ($env:PL_PATHS -split \"`n\")) "
+              "{ if ($p -cnotmatch $rule) { 'code' } else { 'docs' } }")
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", script],
+                            env=dict(os.environ, PL_RULE=rule, PL_PATHS="\n".join(paths)),
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    verdicts = result.stdout.split()
+    assert len(verdicts) == len(paths)
+    for path, verdict in zip(paths, verdicts):
+        assert parity_scope.is_docs(path) == (verdict == "docs"), path
 
 
 def test_the_documentation_rule_is_the_scope_jobs():

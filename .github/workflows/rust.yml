@@ -78,8 +78,11 @@ jobs:
     # parent; a merge group's master tip, fetched here, to its head): Markdown, llms.txt /
     # llms-full.txt, and non-script files under docs/ (CLAUDE.md "Docs-only
     # changes"), none of them under rust/, evals/, pseudolife_memory/,
-    # plugin/, ops/, tests/ or .github/. An empty or unreadable diff, and a
-    # failed scope job, run everything. On 2026-10-16 a CLAUDE.md-only PR
+    # plugin/, ops/, tests/ or .github/. An empty or unreadable diff runs
+    # everything. A failed scope job runs the Rust and candidate jobs, but
+    # the parity matrix comes from scope's parity output, so parity-checks
+    # and the Parity gate then fail (closed) and the run needs a rerun. On
+    # 2026-10-16 a CLAUDE.md-only PR
     # (#782) queued the whole ~33-job matrix behind the account's 20-job cap.
     # No hosted step here reads docs outside rust/: the producer census only
     # reports docs drift, and the W2-D docs seed runs locally, not in CI.
@@ -253,8 +256,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          # A cold run that times out still saves what it compiled, so the
-          # next run is not cold too (three cold cancellations, 2026-10-15).
+          # A cold run whose later steps fail still saves what it compiled,
+          # so the next run is not cold too. Three cold runs were cancelled
+          # by their timeout on 2026-10-15; whether rust-cache's save also
+          # runs after a timeout cancellation is not yet observed here.
           cache-on-failure: true
       - name: Install pinned nextest in the runner temporary directory
         shell: pwsh
@@ -891,6 +896,12 @@ jobs:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-principals-${{ runner.os }}
           path: ${{ runner.temp }}/principal-*.json
           if-no-files-found: error
+      # In the single cli job these steps ran after the MCP step had pinned
+      # pydantic for the Python oracle; keep the same pin now that they run
+      # in their own shard.
+      - name: Keep the oracle's pydantic pin for the startup steps
+        if: matrix.suite == 'cli-daemon'
+        run: python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
       - name: Daemon schema startup parity
         if: matrix.suite == 'cli-daemon'
         timeout-minutes: 10

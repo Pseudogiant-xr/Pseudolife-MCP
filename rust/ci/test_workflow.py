@@ -1185,7 +1185,14 @@ def test_no_cli_shard_is_an_hour_long_serial_job():
             if step.get("if") == f"matrix.suite == '{suite}'" and step.get("run"):
                 by_suite.setdefault(suite, []).append(step["name"])
     # Resident startup reads the storage test binary the schema step builds.
-    assert by_suite["cli-daemon"] == ["Daemon schema startup parity", "Daemon resident startup parity"]
+    # The startup steps keep the pydantic pin the MCP step gave them when
+    # they ran after it in the single cli job (reviewer, 2026-10-20).
+    assert by_suite["cli-daemon"] == ["Keep the oracle's pydantic pin for the startup steps",
+                                      "Daemon schema startup parity", "Daemon resident startup parity"]
+    pin = next(s for s in steps if s.get("name") == by_suite["cli-daemon"][0])
+    mcp = next(s for s in steps if s.get("name") == "Daemon MCP live parity and controls")
+    for package in ("pydantic==2.14.0", "pydantic-core==2.50.0"):
+        assert package in pin["run"] and package in mcp["run"]
     names = [step.get("name") for step in steps]
     assert names.index("Daemon schema startup parity") < names.index("Daemon resident startup parity")
     for upload in ("Retain daemon schema parity", "Retain daemon resident startup parity"):
