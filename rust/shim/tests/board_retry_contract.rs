@@ -809,7 +809,14 @@ async fn board_identity_refused_check_does_not_stop_background_delivery() {
     // A per-call check that the daemon (or a proxy in front of it) answers
     // with something that is not a bank identity refuses that call, but,
     // as in Python's validate_snapshot, records nothing: background
-    // delivery keeps running and later calls carry no "stopped" note.
+    // delivery is not reported stopped, and later calls carry no note.
+    if capture(
+        "board_identity_refused_check_does_not_stop_background_delivery",
+        &[],
+        &["background delivery stopped", "delivery unavailable"],
+    ) {
+        return;
+    }
     let fixture = Fixture::new(0);
     let home = Home::new();
     let runtime = runtime(&fixture, false);

@@ -267,7 +267,14 @@ async fn codex_startup_failures_name_the_attachment() {
         let home = Home::new();
         let runtime = codex_runtime(&fixture, None);
         let mut options = codex_options(&runtime, &home);
-        options.timing.startup = Duration::from_secs(1);
+        // Only the timeout case needs a short budget. The others must
+        // finish attaching (context, register, private state, attach),
+        // which took over 1 s on the Windows dev VM's slow disk.
+        options.timing.startup = if name == "timeout" {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_secs(10)
+        };
         fixture.answer(action, answer);
         let board = Board::attach_options(runtime.clone(), options).await;
         let error = ack(&board).await.err().unwrap();
