@@ -1030,7 +1030,7 @@ def test_a_gate_the_daemon_does_not_answer_is_open(tmp_path):
     server.server_close()
     _digest(tmp_path, 3, "", ring=False)
     _agent(tmp_path)
-    env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{port}",
+    env = _env(tmp_path, wait=1, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{port}",
                PSEUDOLIFE_MCP_TOKEN="fixture-token")
     result, _ = _run(env)
     assert (result.returncode, result.stderr) == (0, "")
@@ -1045,7 +1045,7 @@ def test_the_gate_reads_a_private_token_file(tmp_path):
         token_file.chmod(0o600)
         _digest(tmp_path, 3, "", ring=False)
         _agent(tmp_path)
-        env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+        env = _env(tmp_path, wait=1, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
                    PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
         env.pop("PSEUDOLIFE_MCP_TOKEN", None)
         result, _ = _run(env)
@@ -1278,7 +1278,7 @@ def test_a_token_file_others_can_read_is_refused(tmp_path):
         token_file.chmod(0o644)
         _digest(tmp_path, 3, "", ring=False)
         _agent(tmp_path)
-        env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+        env = _env(tmp_path, wait=1, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
                    PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
         env.pop("PSEUDOLIFE_MCP_TOKEN", None)
         result, _ = _run(env)
