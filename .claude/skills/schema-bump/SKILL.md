@@ -1,6 +1,6 @@
 ---
 name: schema-bump
-description: Use for any change to pseudolife_memory/storage/schema.py, and for every schema version bump (SCHEMA_META_VERSION). Covers the seven Python-side places a bump touches, the Rust daemon's embedded schema plan, the schema startup golden, and the Rust parity pins and harness goldens a bump moves.
+description: Use for any change to pseudolife_memory/storage/schema.py, and for every schema version bump (SCHEMA_META_VERSION). Covers the eight Python-side steps a bump touches, the Rust daemon's embedded schema plan, the schema startup golden, and the Rust parity pins and harness goldens a bump moves.
 ---
 
 # Schema change and schema bump checklist
@@ -8,7 +8,7 @@ description: Use for any change to pseudolife_memory/storage/schema.py, and for 
 A schema bump touches several files that each have a guard test, and the
 Rust port pins the schema in more places still. Missing one fails CI in a
 lane the master ruleset does not require, so it is easy to merge broken.
-The v30 bump found steps 6 and 7 the hard way; the v56 bump missed every
+The v30 bump found steps 7 and 8 the hard way; the v56 bump missed every
 Rust step below and four Parity jobs failed, and its CLI harness goldens
 failed a second round after the first re-record.
 

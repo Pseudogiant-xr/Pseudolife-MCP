@@ -80,14 +80,16 @@ are touched, with no retrofit sweep.
 
 - **Host setup a feature needs ships automated** (a config key, login,
   serve, port, file, one-time command) in the same PR or one before the
-  release; a manual step only in docs means unfinished, and the PR body
+  release; a manual step only in docs or release notes means unfinished, and the PR body
   says what install and update do about it.
 - **Detect, don't ask** (tier, local or remote daemon, Tailscale, checkout
   or release). Ask only when undetectable, or before a persistent change
   the user did not choose by running the installer (a Tailscale serve, a
-  firewall rule, an unrelated program; the existing client setup keeps its
-  flags): once, y/N with a stated default, answerable by a flag or
-  `--yes` / `-Yes`.
+  firewall rule, a program the install does not otherwise configure):
+  once, y/N with a stated default, answerable by a flag or `--yes` /
+  `-Yes`. The installers' existing client setup (plugin, Codex hooks,
+  instruction files, autostart) is what running them means and keeps its
+  per-decision flags.
 - **An unavoidable prompt is plain:** one sentence on what and why, then
   the question; a step only a person can do says where to click and what
   they will see, then waits and checks it happened.
@@ -113,7 +115,9 @@ instructions.
   sessions: fix it with a regression test in its own PR opened before the
   session ends, never folded into other work; a session that cannot open
   one (subagent, reviewer) reports the repro to its parent or the
-  maintainer. Host friction (Claude Code, Codex, the OS) is out of scope.
+  maintainer. Log the `memory_outcome` as usual; the lesson records the
+  friction, only the code change fixes it. Host friction (Claude Code,
+  Codex, the OS) is out of scope.
 - **A guard never blocks a legitimate path:** it decides on the exact
   signal it documents, never a text match something else can produce, and
   its tests include the near-miss legitimate call.
@@ -133,10 +137,10 @@ cached graph view, a memoized score):
 - **Enumerate every mutation path first**, grepping for the state, not the
   API (`hydrate_cms` / `load()` / legacy migration append to `band.entries`
   without `store()`).
-- **Fit the maintenance policy to the real interleave:** the daemon
-  alternates store and search, so extend in place for additions and
-  rebuild only on removals or replacement; invalidate-on-write rebuilds on
-  every read.
+- **State the real read/write interleave and check the maintenance policy
+  keeps the win under it:** the daemon alternates store and search, so
+  extend in place for additions and rebuild only on removals or
+  replacement; invalidate-on-write rebuilds on every read.
 - **List what the replaced code provided implicitly** (tie-break iteration
   order; `bands=` filtering on the holding band, not the stale
   `entry.bank`; live reads of supersession flags) and preserve each, or
@@ -155,12 +159,12 @@ python -m pytest tests/ > /tmp/pytest-last.log 2>&1; ec=$?; tail -60 /tmp/pytest
 **Dependent tests:** select the touched test files plus tests reached by
 reverse imports and fixtures and tests naming the changed paths, modules,
 commands and config keys, with the relevant guards and platform tests;
-`--lf` / `--co` never replace that analysis. Document dynamic-import,
+`--lf` / `--co` never replace that analysis or a passing run. Document dynamic-import,
 subprocess and fixture gaps, and take the local-full path if they cannot be
 bounded. Never split a broad selection to dodge the suite lock.
 
 **When a local full suite is required** (every case still needs CI on the
-current merge ref):
+current merge ref, except as the `merge-forward` skill allows):
 
 - Required for schema/DDL/migration changes, shared test infrastructure
   (conftest, fixtures, imported helpers, the suite lock) and changes whose
@@ -175,7 +179,7 @@ current merge ref):
   (`test-lite-windows` / `test-lite-macos`). Unbounded Windows changes take
   the Windows dev VM's native full suite; macOS has only CI. Daemon
   lifecycle changes count as ordinary code on Linux.
-- **Docs-only skips it.** Docs-only: `git diff --name-only
+- **Docs-only changes skip it.** Docs-only: `git diff --name-only
   origin/master...` lists only `*.md`, `llms.txt` / `llms-full.txt` and
   non-code files under `docs/`; any `.py`, `.ps1`, `.sh`, `.json` outside
   `docs/`, or anything under `tests/`, `ops/`, plugin hooks, workflows or
@@ -198,9 +202,8 @@ current merge ref):
   the overlap's tests (plus doc guards if docs overlap), and a batch PR says
   "local full suite: not required, clean integration batch". A
   hand-resolved code conflict always requires one.
-- Maintainer decision pending: the suite-gate trial (from 2026-09-28,
-  amended 2026-10-05) was due for reassessment on 2026-10-12 against the
-  maintainer's suite-gate memo; until decided, these rules stand.
+- These suite-gate rules (the 2026-09-28 trial with its 2026-10-05
+  amendments) are permanent by maintainer decision of 2026-10-19.
 
 **Running one:**
 
@@ -214,7 +217,8 @@ current merge ref):
 - A run the bench Postgres rejects refuses to start; the fix is the test
   login (`pseudolife-mcp test-login create`, once, on the daemon host, by
   the maintainer), whose `~/.pseudolife-mcp/test-pg.env` role cannot open
-  the bank; keep that authentication preflight. **Never copy `ops/.env`
+  the bank; keep that authentication preflight, so a fresh worktree has
+  the right bench configuration before it queues. **Never copy `ops/.env`
   into a worktree:** it holds the bank owner's password and operator
   tokens.
 - **One full suite per machine at a time, CPU-only,** every harness,
@@ -239,8 +243,9 @@ current merge ref):
 
 **Sharing the machine:**
 
-- The lock is mirrored on the board as the machine's `full-suite` lease
-  and notifies peers whose status shows `suite=` or `gpu=` (or parked with
+- The lock is mirrored on the board as the machine's lease (`full-suite`,
+  or `full-suite@<name>` on a dev machine) and notifies peers whose status
+  shows `suite=running|queued` or `gpu=` (or parked with
   `park_clear_by: full-suite`), so keep `suite=running|queued|idle` in your
   status and read `pseudolife-mcp lease check full-suite` rather than
   asking or sending hand-written SUITE-START/END messages; without a bearer the mirror says so once and the lock alone
@@ -253,19 +258,21 @@ current merge ref):
   an old timestamp: ask. Host dialect: `examples/hook-instructions.md`.
 - **CPU- or memory-saturating work never overlaps a full suite** (stress
   repros, benchmark sweeps, a model server, a large in-memory eval), since
-  it causes timing flakes and os error 1455. Gate it on `lease check
-  full-suite` for its machine and `lease check gpu` (0 free, 1 held,
-  anything else a failed check), also look for `suite=running` in
+  it causes timing flakes and os error 1455. Gate it on the lease of the
+  machine it runs on (`lease check full-suite` on the Windows host, `lease
+  check full-suite@<name>` on a dev machine) and on `lease check gpu` (0
+  free, 1 held, anything else a failed check), also look for `suite=running` in
   `memory_agents` list, announce the window with a fixed duration and a
   stop switch (a sentinel file), and stop at once if a suite starts.
-- **Broadcast a host-shaped symptom before debugging it** (a hung
-  interpreter, os error 1455, a database refusing its password, a silent
-  daemon): it is usually breaking peers' runs too.
+- **Broadcast a host-shaped symptom to every active peer before debugging
+  it** (a hung interpreter, os error 1455, a database refusing its
+  password, a silent daemon, or anything else failing in a way unrelated to
+  your change): it is usually breaking their runs too.
 - **A park record does not keep a wake listener alive; the host does.**
   The plugin's Stop hook listens while a Claude Code session is open.
   Without it, arm a main-session background `pseudolife-mcp wait-mail`
   (Bash tool's maximum timeout, `--timeout 7000`, re-armed after a ring or
-  timeout); in Codex use the doorbell. With no durable path, say
+  timeout); in Codex use the doorbell where the host supports it. With no durable path, say
   `next-turn-only` in the park or status and tell the maintainer when an
   urgent dependency cannot wait (the delegate especially: the Roles band
   and a grant show a role holder with no live listener). A `rung` receipt means an armed path, not
@@ -311,7 +318,9 @@ bank ("dev machines homelab"), never in the tree.
   download (`df -h /`, `Get-PSDrive`) and don't start below 8 GB, because a
   full disk kills runs mid-step.
 - **A Rust `target/` is a cache:** prefer one shared `CARGO_TARGET_DIR` per
-  machine, and `cargo clean` your own stale profiles before a big rebuild.
+  machine, and `cargo clean` your own stale profiles before a big rebuild
+  (on the Windows dev VM, whose disk is slow, keep the shared
+  `CARGO_TARGET_DIR` warm instead of cleaning it).
 - **Below the floor, stop starting heavy work**, free only your own caches
   and tell the maintainer or your launching session; others' worktrees,
   evidence and caches are not yours, and removing a merged branch's cache
@@ -369,7 +378,7 @@ prove are yours.
   any kind reviews the diff it was given, starts no other review, subagent
   or Codex run, and does not call its pass single-reviewer.
 - **Perf, cache and index changes get an independent review before
-  commit.**
+  commit** (`/code-review` medium or a reviewer subagent).
 - **Codex approves hooks by their `plugin/hooks/hooks.json` definition**
   (command, commandWindows, timeout, async, statusMessage, matcher), so
   changing those or adding a handler makes every Codex user re-approve: put
