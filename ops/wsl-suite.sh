@@ -4,7 +4,8 @@
 # ops/wsl-suite.ps1 calls this inside WSL, so a Windows host runs its full
 # suite where process creation never touches the Windows console subsystem
 # (tests/suite_lock.py carries the 2026-10-02 measurement). It works the same
-# from any Linux shell. With no arguments it runs the full suite; any
+# from any Linux shell. With no arguments it runs the full suite, under
+# pytest-xdist when the machine has room (see suite_workers below); any
 # arguments replace that and go to pytest unchanged.
 #
 # With PSEUDOLIFE_SUITE_COMMIT set (the wrapper sets it), the run does not
@@ -32,6 +33,9 @@
 #                                environments unused this many days (default 3)
 #   PSEUDOLIFE_SUITE_KEEP        and keep at most this many of each (default 8)
 #   PSEUDOLIFE_SUITE_PRUNE       off (or 0, false, no): remove nothing
+#   PSEUDOLIFE_SUITE_WORKERS     xdist workers for the default full run
+#                                (default: chosen from CPUs and memory;
+#                                0 or 1 runs it in one process)
 #
 # The run is offline (HF_HUB_OFFLINE=1) and WSL has its own Hugging Face
 # cache, so a fresh distribution needs the embedders CI warms
@@ -415,8 +419,58 @@ export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 # does not, and a test installs into a disposable user base through the base
 # interpreter. Scoped to this run.
 export PIP_BREAK_SYSTEM_PACKAGES=1
+# Workers for the default full run: up to 4, one per two CPUs, one per 6 GB
+# of memory, the memory being the smaller of RAM and this run's cgroup limit
+# (a dispatched run's systemd scope sets one, 16 GB by default). Measured
+# 2026-10-19 in WSL (8 CPUs, 40 GB) at -n 4 --dist loadfile: 10:59 against
+# 28-31 min single-process, peak 20.2 GB used, 1-minute load under 6.
+# --dist loadfile keeps each file on one worker, as CI's -n 2 does, so
+# module-scoped fixtures keep their meaning.
+suite_workers() {
+    if [[ -n "${PSEUDOLIFE_SUITE_WORKERS:-}" ]]; then
+        echo "$PSEUDOLIFE_SUITE_WORKERS"
+        return
+    fi
+    local cpus mem_kb limit n
+    # GNU nproc answers OMP_NUM_THREADS / OMP_THREAD_LIMIT when set (CI's
+    # Linux lanes export OMP_NUM_THREADS=2), which is a thread budget, not
+    # the CPUs here (Codex review, 2026-10-19).
+    cpus="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc 2>/dev/null || echo 1)"
+    mem_kb="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || true)"
+    [[ "$mem_kb" =~ ^[0-9]+$ ]] || mem_kb=0
+    # cgroup v2's memory.max, else v1's memory controller (a hybrid host
+    # mounts v2 at /sys/fs/cgroup/unified and keeps memory on v1).
+    for limit in \
+        "/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)/memory.max" \
+        "/sys/fs/cgroup/memory$(sed -n 's/^[0-9]*:\([^:]*,\)\{0,1\}memory\(,[^:]*\)\{0,1\}://p' /proc/self/cgroup 2>/dev/null || true)/memory.limit_in_bytes"; do
+        [[ -r "$limit" ]] || continue
+        limit="$(cat "$limit")"
+        if [[ "$limit" =~ ^[0-9]+$ ]] && (( limit / 1024 < mem_kb )); then
+            mem_kb=$(( limit / 1024 ))
+        fi
+        break
+    done
+    n=$(( cpus / 2 ))
+    (( mem_kb / (6 * 1024 * 1024) < n )) && n=$(( mem_kb / (6 * 1024 * 1024) ))
+    (( n > 4 )) && n=4
+    echo "$n"
+}
+
 if [[ $# -eq 0 ]]; then
     set -- tests/ -q -rs
+    workers="$(suite_workers)"
+    if ! [[ "$workers" =~ ^[0-9]+$ ]]; then
+        echo "wsl-suite: PSEUDOLIFE_SUITE_WORKERS must be a whole number, not '$workers'" >&2
+        exit 2
+    fi
+    workers=$(( 10#$workers ))  # "08" is 8, not an octal error
+    if (( workers >= 2 )); then
+        set -- "$@" -n "$workers" --dist loadfile --durations=30
+    fi
+    # stdout, beside "testing <sha>": through ops/wsl-suite.ps1 a redirected
+    # stdout and stderr can land in one file at separate offsets, and this
+    # line on stderr overwrote that one (2026-10-19).
+    echo "wsl-suite: full suite, $( (( workers >= 2 )) && echo "$workers xdist workers" || echo "one process")"
 fi
 
 # Every process the run starts inherits this marker, so whatever outlives

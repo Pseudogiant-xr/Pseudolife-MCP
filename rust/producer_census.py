@@ -1020,7 +1020,8 @@ def ci_currency_required(root: Path = ROOT, env: dict | None = None) -> bool:
     if not event_path:
         return False
     event = json.loads(Path(event_path).read_text(encoding="utf-8"))
-    base = event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before")
+    base = (event.get("pull_request", {}).get("base", {}).get("sha")
+            or event.get("merge_group", {}).get("base_sha") or event.get("before"))
     if not isinstance(base, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base) or not base.strip("0"):
         return False  # A manual dispatch has no changed-file range; still report currency.
     try:

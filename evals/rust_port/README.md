@@ -265,7 +265,8 @@ authorized only by the separately captured per-platform final-pair contract.
 
 New parity selects its Python source from immutable workflow event commits:
 `pull_request` normally uses `git merge-base(base.sha, head.sha)`, not the synthetic PR
-merge checkout; `push` uses `after`; manual master capture uses `frozen_head`,
+merge checkout; a `merge_group` (merge queue) uses `git merge-base(base_sha, head_sha)`,
+which is its `base_sha`, with the group head as the checkout; `push` uses `after`; manual master capture uses `frozen_head`,
 which must equal the dispatched checkout, with `GITHUB_REF` required to be
 `refs/heads/master`. Both manual `ci` and `wait-mail` modes require `frozen_head`.
 The selection JSON records the ref. No extra dispatch input is needed.

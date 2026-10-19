@@ -34,6 +34,7 @@ import shutil
 import socket
 import sys
 import time
+import traceback
 import urllib.parse
 from pathlib import Path
 
@@ -47,6 +48,7 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "embedding":
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
+from mcp_wire import send_while_reading  # noqa: E402
 
 GOLDENS = HERE / "goldens"
 HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-security-policy",
@@ -81,14 +83,20 @@ T_COLON = "tok:with:colons-0003"
 
 # ---- HTTP ---------------------------------------------------------------------------
 
-# A daemon that refuses before reading a request body closes with it unread,
-# so its stack answers the rest with RST, and Windows discards a received
-# response when that RST lands before the read: an immediate 403 to a 256 KiB
-# POST was lost to WinError 10053/10054 in 120 of 200 calls on an idle
-# Windows 11 host (2026-10-18); hosted runs 39033993990 and 39088038765 failed
-# security-open on it. Other hosts keep received data readable, so there a
-# reset without a response is the daemon's own fault and is never replayed.
+# Windows discards a received response when the daemon's reset lands before
+# it is read. _exchange keeps a receive waiting while it sends a body, which
+# catches nearly all of them, but an instant refusal and its reset can still
+# land before that receive is posted: under full CPU load on the Windows dev
+# VM, 68 of 3000 refusals decided on the headers were lost that way, against
+# 2 of 3000 decided after reading a 4 MiB body (2026-10-19, #830). Replaying
+# the request headers-only recovers the first kind; the second waits for a
+# body the replay never sends and fails. Hosted runs 39033993990 and
+# 39088038765 failed security-open on the first kind before any receive was
+# waiting. Other hosts keep received data readable, so there a reset without
+# a response is the daemon's own fault and is never replayed.
 HOST_DISCARDS_ON_RESET = os.name == "nt"
+# How a send ends when the daemon refuses before reading all of the body.
+CUT_OFF_BY_REFUSAL = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
@@ -127,17 +135,40 @@ def _exchange(port: int, method: str, path: str, headers, body: bytes | None, *,
                  skip_accept_encoding=True)
     for k, v in headers:
         c.putheader(k, v)
-    if body is not None:
-        c.putheader("Transfer-Encoding", "chunked") if chunked else c.putheader("Content-Length", str(len(body)))
+    data = body
+    if body is not None and chunked:
+        c.putheader("Transfer-Encoding", "chunked")
+        width = max(1, (len(body) + 3) // 4)
+        data = (body[i:i + width] for i in range(0, len(body), width))
+    elif body is not None:
+        c.putheader("Content-Length", str(len(body)))
+    if body and not headers_only:
+        # A daemon refusing a body closes with the rest of it unread, so its
+        # stack resets the connection, and Windows discards a received
+        # response the reset overtakes before it is read. Read after the send,
+        # 1024 of 2000 refusals were lost on a Windows 11 host (2026-10-19):
+        # 882 of 1000 decided on the headers, 142 of 1000 after reading a
+        # 4 MiB body, chunked or not. A receive already waiting before the
+        # body is sent, as mcp_wire posts it, lost 0 of 2000 (#830). A send
+        # cut off by the refusal is not an error when the response is
+        # complete; with no complete response the read's error is raised,
+        # for call() to judge. Any other send failure, such as a timeout
+        # because the daemon answered early but never read the body, still
+        # fails the case.
+        try:
+            r, raw, send_exc = send_while_reading(c, method, data, encode_chunked=chunked)
+            if send_exc is not None and not isinstance(send_exc, CUT_OFF_BY_REFUSAL):
+                raise send_exc
+        except Exception:
+            c.close()
+            raise
+        return _response(c, r, raw, path, started_at, compare_length, body_bytes)
     try:
         if headers_only:
             c.endheaders()
-        elif chunked and body is not None:
-            width = max(1, (len(body) + 3) // 4)
-            c.endheaders((body[i:i + width] for i in range(0, len(body), width)), encode_chunked=True)
         else:
-            c.endheaders(body)
-    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            c.endheaders(data, encode_chunked=chunked)
+    except CUT_OFF_BY_REFUSAL:
         # A server can send its refusal before the request finishes. Read
         # that response; a missing or failed response remains a case error.
         pass
@@ -163,6 +194,11 @@ def _exchange(port: int, method: str, path: str, headers, body: bytes | None, *,
     except Exception:
         c.close()
         raise
+    return _response(c, r, raw, path, started_at, compare_length, body_bytes)
+
+
+def _response(c, r, raw: bytes, path: str, started_at: float, compare_length: bool,
+              body_bytes: bool) -> dict:
     hdrs = {k.lower(): v for k, v in r.getheaders() if k.lower() in HEADERS_COMPARED
             or (compare_length and k.lower() == "content-length")}
     ctype = hdrs.get("content-type", "")
@@ -436,6 +472,7 @@ def diff_values(a, b, path="") -> list[str]:
 
 class Scenario:
     name = ""
+    case_in_flight: str | None = None  # named by a scenario error
     config_yaml: str | None = None
     env: dict[str, str] = {}
     seeds_principals = False
@@ -1668,6 +1705,19 @@ def wait_principals(ports: list[int], timeout: float = 60.0) -> None:
         raise RuntimeError(f"stored principals on {sorted(pending)} did not load within {timeout}s")
 
 
+def scenario_error(exc: BaseException, scn: Scenario) -> str:
+    """The exception, with the case in flight and the deepest harness line it passed through.
+
+    A Windows dev VM golden run failed once on a bare "TimeoutError: [WinError
+    10060]" that named neither (#830)."""
+    where = [f"case {scn.case_in_flight!r}"] if scn.case_in_flight else []
+    frames = [f for f in traceback.extract_tb(exc.__traceback__)
+              if Path(f.filename).is_absolute() and Path(f.filename).resolve().parent == HERE]
+    if frames:
+        where.append(f"at {Path(frames[-1].filename).name}:{frames[-1].lineno} in {frames[-1].name}")
+    return f"{type(exc).__name__}: {exc}" + (f" ({'; '.join(where)})" if where else "")
+
+
 def settle_before_cases(scn: Scenario, ports: list[int]) -> None:
     if scn.settle:
         wait_settled(ports, token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"), check_db=not scn.settle_with_search)
@@ -1833,6 +1883,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         golden = load_golden(golden_name) if mode == "golden" else None
         cases = scn.timeline(procs, holders) or scn.cases()
         for i, c in enumerate(cases):
+            scn.case_in_flight = c["name"]
             if c.get("_answers"):
                 py_r, rs_r = c["_answers"]
                 if py_r is None and mode == "golden":
@@ -1855,6 +1906,8 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
             rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
+            # A generator timeline runs its next steps before the next case.
+            scn.case_in_flight = None
         if not scn.settle and scn.snapshot_settle and not scn.unreachable_database:
             from pseudolife_memory.principals import env_auth
             mapped, singular = env_auth(scn.env)
@@ -2119,7 +2172,7 @@ def main() -> int:
             except Exception as exc:  # a scenario that cannot complete is a failure, never a pass
                 answered = [compare_case(c, *c["_answers"]) for c in getattr(scn, "partial", [])]
                 r = {"scenario": n, "cases": answered + [{"case": "scenario error",
-                                                          "diffs": [f"{type(exc).__name__}: {exc}"],
+                                                          "diffs": [scenario_error(exc, scn)],
                                                           "declared": None}],
                      "db_diffs": [], "declared_db_writes": {}}
                 for name in pg.existing():

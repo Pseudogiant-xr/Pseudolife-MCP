@@ -1009,14 +1009,20 @@ fn queue_environment_child() {
 #[tokio::test]
 async fn subscription_coalesces_mailbox_changes_and_timed_offer_reaches_queue() {
     let rig = Harness::new(true, Duration::from_millis(80)).await;
+    // The second update must replace the first wake before it is due. Each
+    // update waits for its digest to reach the disk, which took up to 3.1 s
+    // on the Windows dev VM (2026-10-19), so the first wake is 2.5 s out and
+    // the second lands just after it: a first timer left running would ring
+    // first, and the third update would then come before the second is due.
+    let first = now() + 2.5;
     let mut update = json!({"generation":1,"pending_count":2,"pending_preview":[
         {"message_id":"m1","sender_agent_id":"fixture-peer","sender_label":"peer","excerpt":"peer payload","created_at":1001.0},
         {"message_id":"m2","sender_agent_id":"fixture-peer","sender_label":"peer","excerpt":"peer payload","created_at":1002.0}],
-        "wake":{"decision":"rung","reason":"fixture","ring_at":now()+0.15,"message_expires_at":now()+3600.0}});
+        "wake":{"decision":"rung","reason":"fixture","ring_at":first,"message_expires_at":now()+3600.0}});
     rig.adapter.update_mailbox(&update).await;
     update["pending_count"] = json!(3);
     update["pending_preview"].as_array_mut().unwrap().push(json!({"message_id":"m3","sender_agent_id":"fixture-peer","sender_label":"peer","excerpt":"peer payload","created_at":1003.0}));
-    update["wake"]["ring_at"] = json!(now() + 0.18);
+    update["wake"]["ring_at"] = json!(first + 0.03);
     rig.adapter.update_mailbox(&update).await;
     assert!(!rig.pending.path.exists());
     wait_for(|| rig.home.0.join("digest.ring").exists()).await;

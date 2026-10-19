@@ -100,6 +100,7 @@ pub fn validate_record(
     }
     Ok((record, upgrade))
 }
+#[derive(Clone)]
 pub struct PendingNotice {
     pub thread: String,
     pub path: PathBuf,

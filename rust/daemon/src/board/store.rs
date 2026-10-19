@@ -28,6 +28,15 @@ pub const PARK_REASONS: [&str; 6] = [
     "needs_resource",
     "waiting_peer",
 ];
+/// What an update result says when a status without park fields cleared a
+/// standing park (`PARK_CLEARED_WARNING` in Python's storage).
+pub fn park_cleared_warning(reason: &str) -> String {
+    format!(
+        "This status cleared your park ({reason}): a status without park fields means \
+         you are working again. To stay parked, send park_reason (and park_needs, \
+         park_clear_by, park_resume) with the status; cleared_park holds what it had."
+    )
+}
 pub const MAX_PARK_NEEDS: usize = 120;
 pub const MAX_PARK_RESUME: usize = 240;
 pub const MAX_PARK_CLEAR_BY: usize = 120;
@@ -1101,6 +1110,7 @@ impl Store {
         };
         let has = |fields: &[(String, Value)], k: &str| fields.iter().any(|(key, _)| key == k);
         let park_update = PARK_FIELDS.iter().any(|k| has(&fields, k));
+        let mut warning = None;
         let tx = client.transaction().await?;
         let row = self
             .auth(&tx, principal, agent_id, credential, true)
@@ -1183,6 +1193,21 @@ impl Store {
             }
         } else if has(&fields, "status") && recorded {
             cleared(&mut fields);
+            if parked {
+                // The park is gone once this commits: return it, so
+                // re-parking is one call that resends these fields.
+                let park = json!({
+                    "park_reason": opt_str(row.park_reason.as_deref()),
+                    "park_needs": row.park_needs,
+                    "park_clear_by": row.park_clear_by,
+                    "park_resume": row.park_resume,
+                    "park_expires": opt_f64(row.park_expires),
+                });
+                warning = Some((
+                    park_cleared_warning(row.park_reason.as_deref().unwrap_or_default()),
+                    park,
+                ));
+            }
         }
         if let Some(slot) = fields.iter_mut().find(|(k, _)| k == "children") {
             let labels: Vec<String> = slot
@@ -1261,10 +1286,14 @@ impl Store {
             None,
         )
         .await?;
-        let out = self
+        let mut out = self
             .authenticate(&tx, principal, agent_id, credential)
             .await?;
         super::db::commit(tx).await?;
+        if let (Some((warning, park)), Some(map)) = (warning, out.as_object_mut()) {
+            map.insert("warning".into(), json!(warning));
+            map.insert("cleared_park".into(), park);
+        }
         Ok(out)
     }
 
