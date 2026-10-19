@@ -41,7 +41,7 @@ fn mcp_memory_graph<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFu
     Box::pin(async move {
         let a = call.args;
         let entity = opt_str(a, "entity").unwrap_or("");
-        let depth = a.get("depth").and_then(Value::as_i64).unwrap_or(1);
+        let depth = a.get("depth").map_or(1, int_saturating);
         let include_facts = a
             .get("include_facts")
             .and_then(Value::as_bool)
@@ -62,6 +62,18 @@ fn mcp_memory_graph<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFu
             });
         }
         Ok(out)
+    })
+}
+
+/// A bound integer as `i64`, saturating past its range: Python's
+/// `max(1, min(int(depth), 3))` clamps any integer the binder admits.
+fn int_saturating(v: &Value) -> i64 {
+    v.as_i64().unwrap_or_else(|| {
+        if v.to_string().starts_with('-') {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
     })
 }
 

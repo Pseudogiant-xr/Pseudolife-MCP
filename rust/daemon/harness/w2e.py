@@ -150,7 +150,7 @@ RECENT_CLOCK = {("world_facts", "retrieved_at")}
 RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
-                  "started_at", "ended_at", "created_at"}
+                  "started_at", "ended_at"}
 RESPONSE_RECENT_CLOCK = {"retrieved_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
@@ -1922,9 +1922,21 @@ SCENARIOS.update({
             relate("Spider", "related-to", "Crawler"),
             relate("Moth", "related-to", "Spider"),
             relate("Island", "related-to", "Atoll"),
+            # a transitive relation with an inverse: mirrors of asserted
+            # edges (hash order) and of a transitive one (exact)
+            define("inside", "src is inside dst", transitive=True),
+            define("encloses", "src encloses dst", inverse_of="inside"),
+            relate("Web App", "inside", "Pod"),
+            relate("Pod", "inside", "Node"),
             alias("Postgres", "pg"),
+            # a node without edges, and an alias that is another node's
+            # canonical (dropped from the alias map)
+            alias("Lonely", "lonely-one"),
+            alias("Disk", "web-app"),
             # a fact written under the alias lands on the node
             fact("pg", "version", "16"),
+            # an overwritten fact: only the current one is projected
+            fact("Web App", "framework", "Flask"),
             # what only the dream writes: communities and source attribution
             sql("INSERT INTO entity_communities (entity_id, community_id, computed_at) "
                 "SELECT id, CASE WHEN canonical IN ('island', 'atoll') THEN 2 ELSE 1 END, 0 "
@@ -1943,6 +1955,8 @@ SCENARIOS.update({
             graph_read("Web App", depth=3),
             graph_read("Web App", depth=0),
             graph_read("Web App", depth=9),
+            graph_read("Web App", depth=10 ** 20),
+            graph_read("Web App", depth=-(10 ** 20)),
             graph_read("Web App", include_facts=False),
             # through an alias, and from a leaf
             graph_read("pg", depth=2),
@@ -1954,6 +1968,8 @@ SCENARIOS.update({
             graph_read("Web App", to="Nobody"),
             graph_read("Web App", to=""),
             graph_read("Web App", to="Atoll"),
+            graph_read("Web App", to="Lonely"),
+            graph_read("Pod", to="Node", depth=2),
             # the relation filter: a case-folded substring, empty (no filter),
             # one that empties the edges
             graph_read("Web App", relation_filter="DEPENDS"),
@@ -2389,32 +2405,46 @@ def generic_titles(v):
     return v
 
 
-def inverse_derived_free(v) -> None:
-    """Python's ``derive_edges`` walks its inverse rule over a set of
-    ``(src, relation, dst)`` tuples, so the order of inverse-derived edges
-    follows the per-process string hash (divergences.md, Graph and review):
-    in a graph answer, those edges compare as a multiset in their slots."""
+def _hash_ordered_mirror(e, edges) -> bool:
+    """An inverse-derived edge mirroring an asserted one: Python's
+    ``derive_edges`` walks those over a set of ``(src, relation, dst)``
+    tuples, in per-process string-hash order. Mirrors of transitive edges
+    follow insertion order and stay exact. A mirror whose source edge a
+    relation filter removed is taken as hash-ordered."""
+    via = e.get("via") or [] if isinstance(e, dict) else []
+    if not e.get("derived") or len(via) != 1 or not str(via[0]).startswith("inverse:"):
+        return False
+    rel = str(via[0])[len("inverse:"):]
+    source = [x for x in edges if isinstance(x, dict) and x.get("src") == e.get("dst")
+              and x.get("relation") == rel and x.get("dst") == e.get("src")]
+    return not source or not source[0].get("derived")
+
+
+def graph_answer_free(v) -> None:
+    """In a graph answer: hash-ordered mirrors compare as a multiset in their
+    slots (divergences.md, memory_graph), and a node's ``created_at`` (a
+    float of wall-clock seconds) compares as present."""
     if isinstance(v, dict):
         edges = v.get("edges")
         if isinstance(edges, list):
-            slots = [i for i, e in enumerate(edges) if isinstance(e, dict) and e.get("derived")
-                     and any(str(x).startswith("inverse:") for x in e.get("via") or [])]
-            for i in slots:
-                edges[i]["via"] = sorted(edges[i]["via"])
+            slots = [i for i, e in enumerate(edges)
+                     if isinstance(e, dict) and _hash_ordered_mirror(e, edges)]
             for i, e in zip(slots, sorted((edges[i] for i in slots),
                                           key=lambda e: json.dumps(e, sort_keys=True))):
                 edges[i] = e
+        if "canonical" in v and isinstance(v.get("created_at"), float):
+            v["created_at"] = "<clock>"
         for x in v.values():
-            inverse_derived_free(x)
+            graph_answer_free(x)
     elif isinstance(v, list):
         for x in v:
-            inverse_derived_free(x)
+            graph_answer_free(x)
 
 
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     a, b = generic_titles(json.loads(json.dumps(py))), generic_titles(json.loads(json.dumps(rs)))
-    inverse_derived_free(a)
-    inverse_derived_free(b)
+    graph_answer_free(a)
+    graph_answer_free(b)
     normalize_records(a, b, stats)
     out = []
     va, vb = a.get("value"), b.get("value")

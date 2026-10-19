@@ -355,8 +355,7 @@ this increment does not claim the complete write boundary or cutover readiness.
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| The order of inverse-derived edges in an answer | `derive_edges` walks its inverse rule over a set of tuples, so their order follows the per-process string hash | sorted by relation, then source, then target (the read model's rule) | the "Colliding inverse provenance" row above: the harness compares them as a multiset in their slots; asserted and transitive edges keep their exact order |
-| A shortest path whose ties run through inverse-derived edges | NetworkX's bidirectional search over adjacency in edge order, which inherits that hash order | the same search over the sorted order | the same row; a path without such a tie is exact |
+| The order of the inverse-derived edges that mirror asserted edges | `derive_edges` walks its inverse rule over a set of `(src, relation, dst)` tuples, so their order follows the per-process string hash | ordered by their source edge's relation, source and target (the read model's rule) | the "Colliding inverse provenance" row above: the harness compares them as a multiset in their slots. Asserted edges, transitive edges and the mirrors of transitive edges keep their exact order; an inverse edge only mirrors a pair already in the adjacency, so paths do not depend on it |
 | `GET /api/graph` (the Console's whole graph with `scope` and the `max_nodes` hub cap) | served over `_whole_graph` | not served; the MCP tool's whole graph (no scope, no cap) is | the Console REST rows (PARITY.md) |
 
 ## Coordination board completion (W2-F)
