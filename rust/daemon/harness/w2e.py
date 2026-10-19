@@ -153,8 +153,8 @@ RECENT_CLOCK = {("world_facts", "retrieved_at")}
 RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
-                  "started_at", "ended_at", "decided_at"}
-RESPONSE_RECENT_CLOCK = {"retrieved_at"}
+                  "started_at", "ended_at"}
+RESPONSE_RECENT_CLOCK = {"retrieved_at", "decided_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
 SCORE_TOLERANCE = 1.5e-4
@@ -229,15 +229,16 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # memory_recall (spec RC1-RC16): caught by the recall-* scenarios.
            "mcp-recall-seed-any", "mcp-recall-no-hub-gate", "mcp-recall-no-requery",
            "mcp-recall-no-pin", "mcp-recall-no-annotate", "mcp-recall-flat-caps",
-           # memory_graph_review's list (spec RV1-RV12): caught by the
+           # memory_graph_review's list (spec RV2-RV5): caught by the
            # review-list scenarios.
            "mcp-review-dup-threshold", "mcp-review-no-merge-veto", "mcp-review-no-fold-swap",
            "mcp-review-terminal-as-pending",
-           # memory_graph_review's mutating actions (spec RV13-RV24): caught
+           # memory_graph_review's decision actions (spec RV6-RV14): caught
            # by review-actions.
            "mcp-review-accept-no-fold", "mcp-review-accept-no-floor",
            "mcp-review-dismiss-aliases", "mcp-review-reject-no-dismiss",
-           "mcp-review-propose-keep-violations", "mcp-review-pair-index-noop"]
+           "mcp-review-propose-keep-violations", "mcp-review-pair-index-noop",
+           "mcp-review-analyzer-no-dismiss", "mcp-review-relate-state-miss"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -2215,6 +2216,13 @@ REVIEW_SEED = [
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", after_stop=True),
     sql("UPDATE meta SET value = jsonb_set(value, '{recent_ids}', '[\"gone\", \"d1\"]') "
         "WHERE key = 'automatic_review_decisions_v1'", after_stop=True),
+    # an analyzer link proposal (its settlement closes the pair) and a filed
+    # relate proposal for the file/stem duplicate; explicit ids leave the
+    # sequence to the oracle's own proposals
+    sql("INSERT INTO edge_proposals (id, src_id, relation, dst_id, confidence, source, "
+        f"created_at) VALUES (500, {eid('red-green-blue')}, 'uses', {eid('harbor-crane-main')}, "
+        f"0.5, 'analyzer', 1), (501, {eid('tidecalc.py')}, 'implements', {eid('tidecalc')}, "
+        "0.7, 'deep-dream', 1)", after_stop=True),
     # an earlier human decision in the merge audit
     sql("INSERT INTO merge_decisions (proposal_id, entity_display, into_display, status, score, "
         "reason, decided_by, decided_at) VALUES (99, 'Old A', 'Old B', 'accepted', 0.8, 'x', "
@@ -2277,6 +2285,10 @@ REVIEW_OPS = [
     review("accept_merge", proposal_ids=[], proposal_id=None),
     external("DELETE FROM meta WHERE key = 'automatic_review_decisions_v1'"),
     review("dismiss_pair", src="harbor crane main", dst="tidecalc"),
+    # the analyzer row's settlement dismisses its pair; the filed relate
+    # proposal, decided, makes its duplicate terminal
+    review("accept_link", proposal_id=500),
+    review("reject_link", proposal_id=501),
     review(),
 ]
 

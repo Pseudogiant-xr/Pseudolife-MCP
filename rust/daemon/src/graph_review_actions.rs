@@ -204,8 +204,8 @@ fn int_value(digits: &str) -> Value {
     serde_json::from_str::<Number>(digits).map_or(Value::Null, Value::Number)
 }
 
-/// Python's `int(text)` for a `str`: surrounding whitespace, a sign, ASCII
-/// digits with single underscores between them.
+/// Python's `int(text)` for a `str`: surrounding whitespace, a sign, Unicode
+/// decimal digits with single underscores between them.
 fn py_int_str(s: &str) -> Option<Value> {
     let t = py_strip(s);
     let (neg, body) = match t.as_bytes().first() {
@@ -217,11 +217,16 @@ fn py_int_str(s: &str) -> Option<Value> {
         || body.starts_with('_')
         || body.ends_with('_')
         || body.contains("__")
-        || !body.chars().all(|c| c.is_ascii_digit() || c == '_')
+        || !body
+            .chars()
+            .all(|c| c == '_' || crate::graph_review::decimal_value(c).is_some())
     {
         return None;
     }
-    let digits: String = body.chars().filter(|c| *c != '_').collect();
+    let digits: String = body
+        .chars()
+        .filter_map(|c| crate::graph_review::decimal_value(c).and_then(|d| char::from_digit(d, 10)))
+        .collect();
     let digits = digits.trim_start_matches('0');
     let digits = if digits.is_empty() { "0" } else { digits };
     Some(int_value(&if neg {
@@ -749,6 +754,10 @@ fn real_param(v: Option<&Value>) -> Result<Option<f32>, ToolError> {
         Some(Value::String(s)) => {
             let t = s.trim_matches(|c: char| c.is_ascii_whitespace());
             let x: f32 = t.parse().map_err(internal)?;
+            let mantissa = t.split(['e', 'E']).next().unwrap_or("");
+            if x == 0.0 && mantissa.chars().any(|c| ('1'..='9').contains(&c)) {
+                return Err(internal("value out of range for type real"));
+            }
             let spelled_inf = t.trim_start_matches(['+', '-']).to_ascii_lowercase();
             if x.is_infinite() && !spelled_inf.starts_with("inf") {
                 return Err(internal("value out of range for type real"));
@@ -947,6 +956,7 @@ async fn set_proposal_status(
         let (source, a, b): (String, String, String) = (row.get(0), row.get(1), row.get(2));
         if n > 0
             && source == "analyzer"
+            && !crate::mutants::active("mcp-review-analyzer-no-dismiss")
             && matches!(status, "accepted" | "rejected" | "retyped")
             && !a.is_empty()
             && !b.is_empty()

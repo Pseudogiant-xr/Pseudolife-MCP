@@ -647,7 +647,9 @@ fn automation(
     let id = |i: usize| names.get(i).and_then(|n| by_display.get(n).copied());
     let status = match (id(0), id(1)) {
         (Some(left), Some(right)) => {
-            if f.get("action").and_then(Value::as_str) == Some("relate") {
+            if f.get("action").and_then(Value::as_str) == Some("relate")
+                && !crate::mutants::active("mcp-review-relate-state-miss")
+            {
                 let relation = f
                     .get("suggested_relation")
                     .and_then(Value::as_str)

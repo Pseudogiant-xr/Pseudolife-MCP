@@ -1237,8 +1237,8 @@ storage writes and the automatic-decision index), on the ported graph store
 (2290-2431, `_noted` and `_REVIEW_NOTES` 683-751); `service.py`
 `graph_review` (7812-7895), `graph_dismiss_duplicate` (7897-7942),
 `_fold_direction` (8787-8799), `graph_propose_links` (8809-8854),
-`graph_accept_link` (8867-8922), `graph_reject_link` (8930-8946),
-`graph_accept_entity_merge` (8965-8999), `graph_accept_junk` (9006-9032),
+`graph_accept_proposal` (8867-8922), `graph_reject_proposal` (8930-8946),
+`graph_accept_entity_merge` (8965-8999), `graph_accept_entity_junk` (9006-9032),
 `graph_reject_entity_proposal` (9039-9083); `memory/graph_review.py`;
 `memory/review_decisions.py` (`recent_decisions` 53-68,
 `confirm_human_pair` 598-611, `confirm_human_proposal` 614-626);
@@ -1277,10 +1277,12 @@ and a list after writes and a proposal filed behind the daemons' backs; the
 two `-gated` scenarios turn each switch off. `review-actions` runs every
 action, the batch form (a JSON-string list, duplicates and stale ids) and
 each refusal, with active automatic decisions in the index and its row
-deleted. The `mcp-review-dup-threshold`, `-no-merge-veto`, `-no-fold-swap`,
+deleted, an analyzer proposal whose settlement dismisses its pair, and a
+filed relate proposal decided. The `mcp-review-dup-threshold`, `-no-merge-veto`, `-no-fold-swap`,
 `-terminal-as-pending`, `-accept-no-fold`, `-accept-no-floor`,
 `-dismiss-aliases`, `-reject-no-dismiss`, `-propose-keep-violations` and
-`-pair-index-noop` mutants must be caught.
+`-pair-index-noop`, `-analyzer-no-dismiss` and `-relate-state-miss`
+mutants must be caught.
 
 ### Board tools over MCP (2026-10-16)
 

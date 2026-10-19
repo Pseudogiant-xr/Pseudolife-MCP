@@ -374,8 +374,11 @@ this increment does not claim the complete write boundary or cutover readiness.
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | `dismiss_slot_pair` and `restore_slot` | served | the `not_implemented` refusal | task O1c |
-| A batch (`proposal_ids`) | takes the service lock per call | holds the writer lock for the whole batch | no state differs; nothing else runs between the calls on either side |
-| A `proposals` entry whose `rationale` is a list or object | stored as its text form | refused (`invalid_argument`) | the binder's `list[dict]` admits it; no producer sends one |
+| A batch (`proposal_ids`) | takes the service lock per call, so another request can run between items | holds the writer lock for the whole batch | strictly more serialized; a single client sees the same results |
+| `list`'s analysis | between two locked blocks, so writes can land while it runs and `recent_merges` can follow a later state than the findings | under the writer lock throughout | writes wait for the analysis (quadratic in the entities); the answer is one consistent state |
+| A `proposals` entry whose `rationale` is a list | stored as its array text | refused (`internal_error`, after the entities are minted) | the binder's `list[dict]` admits it; no producer sends one. An object errors on both |
+| A `proposals` `similarity` spelled as a hexadecimal float (`"0x1p-3"`) | parsed by PostgreSQL's `strtof` | refused (`internal_error`) | no producer sends one |
+| A merge-group tie between keys of different types (merge rows with a NULL target) | `TypeError: '<' not supported between instances of …` | `invalid_argument` with Rust's own wording | merge rows always carry a target |
 | A corrupt automatic-decision index (`next_seq` not an integer, `cursors`/`active` not mappings) | `int()` / `dict()` raise | read leniently in `list` | corrupt persisted data only; the judges write the index |
 | A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
 | The judges (merge two- and three-vote, link, junk, curation, candidates), their freshness and the sweep tick that runs them | served by the background sweep | not run | task O2, with the dream (task P), behind a stub extractor |
