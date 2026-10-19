@@ -323,7 +323,7 @@ jobs:
         # parity-selfhosted reuses this suite list, the include list and the
         # steps below through YAML anchors, so both lanes run the same shards;
         # parity-live reuses the steps.
-        suite: &parity_suites [eval, cli, cli-live, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
+        suite: &parity_suites [eval, cli, cli-daemon, cli-live, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
         # The required gate holds only work hosted Windows runs
         # deterministically: builds, nextest, self-tests, goldens and
         # replays. cli-live holds the live Python-versus-Rust comparisons
@@ -340,10 +340,18 @@ jobs:
         # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice
         # the total. Connection also keeps the existing 20m record budget.
         include: &parity_shards
-          # Hosted Windows cli, master runs 39205533092 and 39236836263
-          # (2026-10-19): 70.4 and 61.5 min with the live comparisons inside.
+          # Hosted Windows cli was one serial job: 70.4 and 61.5 min on
+          # master runs 39205533092 and 39236836263 (2026-10-19; Linux 40.3
+          # and 42.7). Split three ways so no shard runs past about half an
+          # hour. cli keeps the CLI rows' self-tests and goldens, lease,
+          # dream cursor, static, graph store, principal and background
+          # steps: about 22 min of steps on Windows plus about 4 min setup.
           - suite: cli
-            job_timeout: 100
+            job_timeout: 55
+          # Schema startup 5.9-7.1 min, then resident startup 12.1-14.9 min
+          # on the binary the schema step builds; about 26 min with setup.
+          - suite: cli-daemon
+            job_timeout: 55
           # Same runs, the four live steps: Windows 22.4 min (body 2.5,
           # security 8.6, MCP 8.9, CLI live arms about 2.5) plus about 4 min
           # setup; Linux 14 min. About twice the Windows total.
@@ -827,14 +835,14 @@ jobs:
           path: ${{ runner.temp }}/principal-*.json
           if-no-files-found: error
       - name: Daemon schema startup parity
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-daemon'
         timeout-minutes: 10
         shell: pwsh
         run: |
           python rust/daemon/harness/schema_ci.py --test-bin-out (Join-Path $env:RUNNER_TEMP 'daemon-storage-test-path.txt') --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
           exit $LASTEXITCODE
       - name: Retain daemon schema parity
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-daemon'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-schema-parity-${{ runner.os }}
@@ -852,7 +860,7 @@ jobs:
             ${{ runner.temp }}/graph-read-golden.json
           if-no-files-found: error
       - name: Daemon resident startup parity
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-daemon'
         # Windows CI 2026-10-10: about 28s/cell x 25 cells plus clock/guard,
         # about 13 minutes in total; allow twice that validation duration.
         timeout-minutes: 26
@@ -864,7 +872,7 @@ jobs:
           python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'daemon-startup-parity.json')
           exit $LASTEXITCODE
       - name: Retain daemon resident startup parity
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-daemon'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-startup-parity-${{ runner.os }}

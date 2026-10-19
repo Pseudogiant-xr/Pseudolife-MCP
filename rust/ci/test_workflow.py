@@ -50,12 +50,12 @@ PARITY_CHECKS = {
     "Principal store differential and golden harness": "cli",
     "Daemon static HTTP parity": "cli",
 
-    "Daemon schema startup parity": "cli",
+    "Daemon schema startup parity": "cli-daemon",
     "Graph store differential and recorded oracle": "cli",
     "Daemon body admission parity": "cli-live",
     "Daemon security admission parity": "cli-live",
     "Daemon MCP live parity and controls": "cli-live",
-    "Daemon resident startup parity": "cli",
+    "Daemon resident startup parity": "cli-daemon",
     "Run unchanged candidates and differential judges": "judges",
 }
 # Parity uploads carry the lane prefix: empty on hosted, set by parity-selfhosted.
@@ -106,7 +106,8 @@ def row_commands(invocations, required_rows, golden):
 
 W1C_SUITES = ("w1c-doctor", "w1c-pairing", "w1c-connection")
 H5_SUITES = ("h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants")
-PARITY_SUITES = ["eval", "cli", "cli-live", "judges", *W1C_SUITES, *H5_SUITES]
+CLI_SUITES = ("cli", "cli-daemon", "cli-live")
+PARITY_SUITES = ["eval", *CLI_SUITES, "judges", *W1C_SUITES, *H5_SUITES]
 # The live Python-versus-Rust comparisons hosted Windows cannot run
 # deterministically (docs/specs/2026-10-19-merge-queue.md, "The required
 # Parity gate"): required on Linux, reported by parity-live on Windows.
@@ -1157,7 +1158,30 @@ def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():
                for shard in job["strategy"]["matrix"]["include"]}
     # Only eval and judges keep the old 210-minute fallback.
     assert set(PARITY_SUITES) - set(budgets) == {"eval", "judges"}
-    assert budgets["cli"] == 100 and 0 < budgets[LIVE_SUITE] <= 60
+
+
+def test_no_cli_shard_is_an_hour_long_serial_job():
+    # Hosted Windows ran cli as one 61-70 minute job (master runs
+    # 39205533092, 39236836263, 2026-10-19). Each shard now measures about
+    # 26 minutes there, and its budget stays about twice that.
+    job = workflow()["jobs"]["parity-checks"]
+    budgets = {shard["suite"]: shard.get("job_timeout")
+               for shard in job["strategy"]["matrix"]["include"]}
+    for suite in CLI_SUITES:
+        assert 0 < budgets[suite] <= 60, suite
+    steps = job["steps"]
+    by_suite = {}
+    for step in steps:
+        for suite in CLI_SUITES:
+            if step.get("if") == f"matrix.suite == '{suite}'" and step.get("run"):
+                by_suite.setdefault(suite, []).append(step["name"])
+    # Resident startup reads the storage test binary the schema step builds.
+    assert by_suite["cli-daemon"] == ["Daemon schema startup parity", "Daemon resident startup parity"]
+    names = [step.get("name") for step in steps]
+    assert names.index("Daemon schema startup parity") < names.index("Daemon resident startup parity")
+    for upload in ("Retain daemon schema parity", "Retain daemon resident startup parity"):
+        assert next(s for s in steps if s.get("name") == upload)["if"] == \
+            "always() && matrix.suite == 'cli-daemon'"
 
 
 @pytest.mark.parametrize("name", [
