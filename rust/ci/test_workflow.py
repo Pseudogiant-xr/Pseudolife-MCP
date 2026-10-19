@@ -1237,6 +1237,8 @@ def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, ove
                PSEUDOLIFE_PARITY_LEASE="full-suite@fixture",
                PSEUDOLIFE_PARITY_LOCK_DIR=str(tmp_path / "locks"),
                **workflow()["jobs"]["parity-selfhosted"]["env"])
+    # Only the low-disk case may depend on this machine's free space.
+    env["PARITY_MIN_FREE_GB"] = "0"
     env.pop("PSEUDOLIFE_SUITE_LEASE", None)
     env.pop("PSEUDOLIFE_SUITE_LOCK_DIR", None)
     env.update(overrides)

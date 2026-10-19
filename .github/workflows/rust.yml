@@ -398,8 +398,9 @@ jobs:
             $code = $LASTEXITCODE
             if ($code -ne 0 -and $code -ne 1) { throw "lease check $lease failed (exit $code); neither held nor free is known" }
             $state = ($report | Out-String | ConvertFrom-Json).local.state
-            # No lock file means the lock directory is wrong, and every probe would read free.
-            if ($null -eq $state) { throw "No full-suite lock file in PSEUDOLIFE_PARITY_LOCK_DIR; the check cannot see this machine's suites" }
+            # A missing or unreadable lock file means the directory or its grant is wrong,
+            # and every probe would read free.
+            if ($null -eq $state) { throw "No readable full-suite lock file in PSEUDOLIFE_PARITY_LOCK_DIR (wrong directory, or the runner account lacks read access); the check cannot see this machine's suites" }
             if ($code -eq 0) { Write-Output "$lease is free; running the shard."; break }
             if ((Get-Date) -ge $deadline) {
               "Yielded: $lease stayed held for $env:PARITY_YIELD_MINUTES minutes, so this shard did not run." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append

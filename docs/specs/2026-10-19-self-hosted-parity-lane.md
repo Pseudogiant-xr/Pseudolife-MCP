@@ -125,8 +125,9 @@ per machine, and no saturating work beside one). The gate step:
      (`PARITY_YIELD_MINUTES`). Then fail with "Yielded", with a line in
      the job summary saying the shard did not run.
    - Any other exit: fail. Neither held nor free is known.
-   - A report with no local lock file fails too. A wrong lock directory
-     would otherwise read free on every probe.
+   - A report with no readable local lock file fails too. A wrong lock
+     directory, or a missing read grant, would otherwise read free on every
+     probe.
 
 The runner holds no board credential, so the check reads the OS lock
 alone. That is the lease's own truth for a process-held suite: the board
@@ -197,12 +198,22 @@ Whatever trigger this job uses, a pull request from a fork can edit
 a PR could route a job of its own to `pseudolife-parity-*` and run code on
 a dev machine.
 
-The repository setting that stops this is
-**Settings → Actions → General → "Fork pull request workflows from outside
-collaborators" → "Require approval for all outside collaborators"**. A
-fork's workflow changes then run only after the maintainer approves them.
-The dedicated account and the absence of credentials limit what an
-approved run could reach. This setting is decision 1.
+The repository setting that stops this is under **Settings → Actions →
+General**: approval for fork pull request workflows set to **"Require
+approval for all external contributors"**. A fork's workflow changes then
+run only after the maintainer approves them. The REST endpoint
+`repos/Pseudogiant-xr/Pseudolife-MCP/actions/permissions/fork-pr-contributor-approval`
+should report `all_external_contributors`; the settings page is the
+authority if the endpoint differs.
+
+This setting is a **precondition for registering any runner**, not an
+option (decision 1). The stronger control, a runner group limited to
+selected workflows and refs (only `rust.yml` on master), is an
+organization feature; this repository belongs to a personal account, so it
+is not available. A guard job inside `rust.yml` would not help either: a
+fork that edits the workflow can delete the guard in the same edit. What
+limits an approved run's reach is the dedicated account and the absence of
+credentials on the machine.
 
 ## Commands for the maintainer
 
@@ -217,38 +228,43 @@ that page.
 gh api -X POST repos/Pseudogiant-xr/Pseudolife-MCP/actions/runners/registration-token --jq .token
 ```
 
-The token works once, within an hour, and lets a runner join this
-repository only.
+The token expires after an hour and lets a runner join this repository
+only. Create it just before registering.
 
 ### The sibling Linux dev box
 
-As root:
+First, as `<suite-user>`: name the machine's lease (this box had no lease
+file as of 2026-10-10) and make sure the lock file exists. The gate fails
+closed without it.
+
+```bash
+mkdir -p ~/.pseudolife-mcp/locks
+echo 'full-suite@<machine>' > ~/.pseudolife-mcp/locks/full-suite.lease
+touch ~/.pseudolife-mcp/locks/full-suite.lock
+```
+
+Then as root:
 
 ```bash
 useradd --create-home --shell /bin/bash <runner-user>
 # PowerShell 7 (the shards' steps use shell: pwsh) and the en_US.UTF-8
 # locale the Linux shards set; install pwsh from Microsoft's package feed.
 locale-gen en_US.UTF-8
-# Read-only access to the suite lock directory:
+# Read-only access to the suite lock directory (the default ACL covers
+# lock files created later):
 setfacl -m u:<runner-user>:x /home/<suite-user> /home/<suite-user>/.pseudolife-mcp
 setfacl -m u:<runner-user>:rx /home/<suite-user>/.pseudolife-mcp/locks
 setfacl -d -m u:<runner-user>:r /home/<suite-user>/.pseudolife-mcp/locks
 setfacl -m u:<runner-user>:r /home/<suite-user>/.pseudolife-mcp/locks/*
 ```
 
-As `<suite-user>`, once: name the machine's lease (this box had no lease
-file as of 2026-10-10) and make sure the lock file exists. The gate fails
-closed without it.
-
-```bash
-echo 'full-suite@<machine>' > ~/.pseudolife-mcp/locks/full-suite.lease
-touch ~/.pseudolife-mcp/locks/full-suite.lock
-```
-
 As `<runner-user>`:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
+# The installer only edits shell startup files. Put uv's bin directory on
+# PATH now, so config.sh records it for the service.
+source "$HOME/.local/bin/env"
 uv tool install pseudolife-mcp
 mkdir ~/actions-runner && cd ~/actions-runner
 curl -LO https://github.com/actions/runner/releases/download/v<version>/actions-runner-linux-x64-<version>.tar.gz
@@ -313,17 +329,21 @@ As `<suite-user>`, once: check that
 and that `full-suite.lock` exists beside it. Create either if missing, as
 on the Linux box.
 
-Install the runner, in an elevated PowerShell 7:
+Signed in as `<runner-user>`, install `uv`, then run
+`uv tool install pseudolife-mcp`.
+
+Install the runner, in an elevated PowerShell 7. Without `--unattended`,
+`config.cmd` asks for the account's password itself, so the password
+stays out of the command line and the shell history:
 
 ```powershell
 New-Item -ItemType Directory C:\actions-runner | Out-Null
 Set-Location C:\actions-runner
 Invoke-WebRequest https://github.com/actions/runner/releases/download/v<version>/actions-runner-win-x64-<version>.zip -OutFile runner.zip
 Expand-Archive runner.zip -DestinationPath .
-.\config.cmd --unattended --url https://github.com/Pseudogiant-xr/Pseudolife-MCP `
+.\config.cmd --url https://github.com/Pseudogiant-xr/Pseudolife-MCP `
   --token <registration token> --name parity-windows --labels pseudolife-parity-windows `
-  --work C:\actions-runner\_work --runasservice `
-  --windowslogonaccount ".\<runner-user>" --windowslogonpassword <the password above>
+  --work C:\actions-runner\_work --runasservice --windowslogonaccount ".\<runner-user>"
 @'
 PSEUDOLIFE_PARITY_LEASE=full-suite@<machine>
 PSEUDOLIFE_PARITY_LOCK_DIR=C:\Users\<suite-user>\.pseudolife-mcp\locks
@@ -332,9 +352,10 @@ ACTIONS_RUNNER_HOOK_JOB_STARTED=C:\actions-runner\job-started.ps1
 icacls C:\actions-runner /grant "<runner-user>:(OI)(CI)M"
 ```
 
-Once signed in as `<runner-user>`, install `uv` and then
-`uv tool install pseudolife-mcp`. Restart the runner service after editing
-`.env`.
+`config.cmd` records the elevated shell's `PATH` in
+`C:\actions-runner\.path`, which does not include the runner account's
+tools. Append `;C:\Users\<runner-user>\.local\bin` to the single line in
+that file, then restart the runner service so it reads `.env` and `.path`.
 
 `C:\actions-runner\job-started.ps1` does the same job as the Linux hook:
 
@@ -367,9 +388,18 @@ Enable one machine first and add the second after its first clean run:
 (`gh variable delete PARITY_SELFHOSTED_RUNNERS`). The job then skips, and
 no queued job is left waiting for a runner.
 
+**Take a machine out of the variable as soon as it goes offline.** A job
+routed to an offline runner queues for up to 24 hours. The nightly's
+concurrency group cancels the previous nightly when the next one starts.
+So while a listed machine is down, every nightly ends "cancelled" rather
+than "failure", and a real hosted nightly failure in `parity-checks` or
+`source-mutants` sends no failure notice.
+
 Check these on the first dispatched run. Each is an assumption this
 design could not test without a machine:
 
+- The Linux binaries, built on hosted `ubuntu-latest`, start on the
+  sibling box. An older glibc there fails them at exec.
 - `actions/setup-python` installs 3.11 into the runner's tool cache.
   - On a Linux distribution other than Ubuntu, pre-seed the tool cache.
   - On Windows, run the first install with enough rights to write it.
@@ -396,6 +426,13 @@ design could not test without a machine:
 
    The job names differ (`Parity self-hosted / <runner> / <suite>`), so
    `rust/ci/timings.py`'s run export separates the lanes.
+
+   Wall time is biased against the lane. Self-hosted jobs never save the
+   repository Rust cache, and checkout's `git clean` wipes `rust/target`
+   between jobs, so every shard whose harness calls `cargo` builds cold.
+   Hosted shards restore a warm cache. Compare the steps that do not
+   compile, or give the runner a persistent `CARGO_TARGET_DIR` (decision 10)
+   before reading too much into the totals.
 4. **The maintainer decides** whether the lane:
    - replaces some hosted shards;
    - stays a nightly comparison; or
@@ -421,16 +458,19 @@ should decide.
 
 ## Decisions the maintainer needs to make
 
-1. **Fork PR workflow approval**: require approval for all outside
-   collaborators before any runner is registered. Recommended: yes. It is
-   the control that keeps a fork's edited workflow off the dev machines.
+1. **Fork PR workflow approval**: "Require approval for all external
+   contributors", set and verified before any runner is registered. This
+   design treats it as a precondition: it is the only control that keeps a
+   fork's edited workflow off the dev machines.
 2. **Runner account**: a dedicated unprivileged account per machine
    (recommended), or the suite user's account, which is simpler but gives
    jobs that account's files.
 3. **Docker on the sibling box** for the Linux `w1c-connection` shard:
    - rootless Docker for the runner account (recommended);
    - membership of the `docker` group, which is root-equivalent on that
-     box; or
+     box. The shard also runs `docker build -t pseudolife-pg:18`, the tag
+     `ops/docker-compose.yml` uses. On a shared root engine, a CI build
+     would replace that image for any stack on the box that uses it; or
    - none, in which case that one shard fails at its image build and is
      left out of the comparison.
 4. **Runners per machine**: one each for the trial (recommended).
@@ -448,3 +488,11 @@ should decide.
    afternoon. The machines must be free then, or the lane mostly yields.
 9. **After the week**: replace, keep as comparison, or remove (see
    "Rollout").
+10. **A persistent Rust build cache on the runners** (a fixed
+    `CARGO_TARGET_DIR` per machine, as CLAUDE.md "Disk space" suggests), to
+    remove the cold-build bias from the comparison. Not in the first PR:
+    harness steps read `rust/target` paths directly, so it needs its own
+    check.
+11. **Offline-machine handling**: accept that an offline listed runner
+    turns nightlies "cancelled" until it is taken out of the variable (as
+    designed), or ask for a watcher that does that automatically.
