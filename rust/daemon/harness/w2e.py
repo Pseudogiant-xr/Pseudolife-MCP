@@ -1910,7 +1910,7 @@ SCENARIOS.update({
     "graph-read": {
         "config": None,
         "seed": [
-            fact("Postgres", "port", "5432", authority="user",
+            fact("Postgres", "port", "5432", authority="directive",
                  distortion_tolerance="constraint"),
             fact("Web App", "framework", "Django"),
             relate("Web App", "runs-on", "host-1", origin="user"),

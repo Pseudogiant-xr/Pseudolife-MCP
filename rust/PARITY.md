@@ -543,7 +543,7 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_graph_relate | core | 4 | ported |
 | memory_graph_unrelate | full | 4 | ported |
 | memory_alias | full | 4 | ported |
-| memory_graph | core | 3 | deferred |
+| memory_graph | core | 3 | ported |
 | memory_recall | core | 3 | deferred |
 | memory_relation_define | full | 4 | ported |
 | document_ingest | core | 4 | deferred |
