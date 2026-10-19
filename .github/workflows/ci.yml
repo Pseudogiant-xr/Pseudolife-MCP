@@ -20,7 +20,7 @@
 #                       macOS runner (bash 3.2, BSD stat/base64/ps, shasum),
 #                       plus the embedded provider on its macOS wheel. Their
 #                       BSD fallbacks run nowhere else (added 2026-09-27).
-# Kept lean: master-push + PR triggers only, cancel-in-progress,
+# Kept lean: master-push, PR and merge-queue triggers, cancel-in-progress,
 # pip + HuggingFace caches, diagnostic artifacts for the full Linux lanes.
 #
 # Rust-only pull requests (maintainer decision 2026-10-09): a PR that touches
@@ -31,12 +31,18 @@
 # instead (tracked-tree identifiers and control bytes, CHANGELOG and release
 # pins, committed eval evidence). The Rust workflow is that PR's gate. The
 # full suite still runs on every master push and nightly.
+#
+# Merge queue (docs/specs/2026-10-19-merge-queue.md): `merge_group` runs the
+# same jobs under the same check names, so the ruleset's required `test` check
+# reports for a queued group. A group is classified like a pull request, over
+# its own range (merge_group.base_sha to the group head).
 name: CI
 
 on:
   push:
     branches: [master]
   pull_request:
+  merge_group:
   schedule:
     # Nightly full run on master (02:17 AEDT), so a Rust-only day still
     # gets a full Python suite.
@@ -49,18 +55,23 @@ permissions:
   contents: read
 
 concurrency:
+  # A merge group's ref is its own queue branch
+  # (refs/heads/gh-readonly-queue/master/...), one per queue entry, so it
+  # never shares a group with a pull request or a master push.
   group: ci-${{ github.ref }}
   # Only pull requests cancel superseded runs: the nightly shares master's
-  # group and must not cancel a master push run (or the reverse).
+  # group and must not cancel a master push run (or the reverse), and a
+  # merge-group run is the queue's verdict, never cancelled by concurrency.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   scope:
     # Decides whether this run needs the Python suite lanes. Only a pull
-    # request whose net change (merge commit vs its base parent) is entirely
-    # under rust/, or is .github/workflows/rust.yml, CHANGELOG.md or a
-    # changelog.d/ fragment, skips them; an empty or unreadable diff runs
-    # everything.
+    # request or merge group whose net change is entirely under rust/, or is
+    # .github/workflows/rust.yml, CHANGELOG.md or a changelog.d/ fragment,
+    # skips them; an empty or unreadable diff runs everything. A pull
+    # request's change is its merge commit vs its base parent; a merge
+    # group's is merge_group.base_sha (fetched here) to the group head.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -74,12 +85,20 @@ jobs:
         id: scope
         env:
           EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         shell: bash
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "python=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          if ! files=$(git diff --no-renames --name-only HEAD^1 HEAD) || [ -z "$files" ]; then
+          case "$EVENT_NAME" in
+            pull_request) base=HEAD^1 ;;
+            merge_group)
+              # Only an immutable commit, fetched by itself; anything else runs everything.
+              base=$MERGE_GROUP_BASE_SHA
+              if ! [[ "$base" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]                  || ! git fetch --no-tags --depth=1 origin "$base"; then
+                echo "python=true" >> "$GITHUB_OUTPUT"; exit 0
+              fi ;;
+            *) echo "python=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          if ! files=$(git diff --no-renames --name-only "$base" HEAD) || [ -z "$files" ]; then
             echo "python=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           printf '%s\n' "$files"

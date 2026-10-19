@@ -543,7 +543,7 @@ def run_gate(needs, event):
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
 @pytest.mark.parametrize("dependency", ["parity-checks", "source-mutants"])
-@pytest.mark.parametrize("event", ["pull_request", "push", "schedule", "workflow_dispatch"])
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push", "schedule", "workflow_dispatch"])
 def test_required_parity_gate_fails_closed(result, dependency, event):
     gate = workflow()["jobs"]["parity"]
     assert gate["needs"] == GATE_NEEDS
@@ -556,8 +556,8 @@ def test_required_parity_gate_fails_closed(result, dependency, event):
     executed = subprocess.run(["pwsh", "-NoProfile", "-Command", step["run"]],
                               env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
                               capture_output=True, text=True)
-    accepted = result == "success" or (event in ("pull_request", "push") and dependency == "source-mutants"
-                                       and result == "skipped")
+    accepted = result == "success" or (event in ("pull_request", "merge_group", "push")
+                                       and dependency == "source-mutants" and result == "skipped")
     assert executed.returncode == (0 if accepted else 1), executed.stderr
 
 
@@ -566,8 +566,9 @@ DOCS_ONLY_SKIP = {"scope": {"result": "success", "outputs": {"rust": "false"}},
                   "parity-checks": {"result": "skipped"}, "source-mutants": {"result": "skipped"}}
 
 
-def test_parity_gate_accepts_a_documentation_only_pull_request():
-    executed = run_gate(DOCS_ONLY_SKIP, "pull_request")
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+def test_parity_gate_accepts_a_documentation_only_pull_request_or_merge_group(event):
+    executed = run_gate(DOCS_ONLY_SKIP, event)
     assert executed.returncode == 0, executed.stderr
 
 
@@ -583,10 +584,11 @@ def test_parity_gate_accepts_the_docs_skip_only_on_pull_requests(event):
     {"result": "skipped", "outputs": {}},
     {"result": "cancelled", "outputs": {"rust": "false"}},
 ])
-def test_parity_gate_rejects_skips_scope_did_not_choose(scope):
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+def test_parity_gate_rejects_skips_scope_did_not_choose(scope, event):
     needs = copy.deepcopy(DOCS_ONLY_SKIP)
     needs["scope"] = scope
-    assert run_gate(needs, "pull_request").returncode == 1
+    assert run_gate(needs, event).returncode == 1
 
 
 @pytest.mark.parametrize("job", ["rust", "candidate", "parity-checks"])
@@ -597,22 +599,36 @@ def test_parity_gate_still_fails_a_broken_job_on_a_docs_pull_request(job, result
     assert run_gate(needs, "pull_request").returncode == 1
 
 
-def run_scope(tmp_path, event, files, git_exit=0):
+GROUP_BASE = "e" * 40
+
+
+def run_scope(tmp_path, event, files, git_exit=0, base_sha=GROUP_BASE, fetch_exit=0):
     import os
     step = next(s for s in workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
+    assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}",
+                           "MERGE_GROUP_BASE_SHA": "${{ github.event.merge_group.base_sha }}"}
     output = tmp_path / "github_output"
     output.write_text("", encoding="utf-8")
-    # Stand in for `git diff`, the step's only external input.
+    # Stand in for `git fetch` and `git diff`, the step's only external inputs.
+    # A pull request diffs its merge commit against the base parent; a merge
+    # group fetches its base commit and diffs that against the group head.
     bootstrap = r'''
 function git {
+    $line = $args -join ' '
+    if ($env:EVENT_NAME -ceq 'merge_group' -and $line -ceq "fetch --no-tags --depth=1 origin $env:MERGE_GROUP_BASE_SHA") {
+        $global:LASTEXITCODE = [int]$env:PL_FIXTURE_FETCH_EXIT
+        return
+    }
+    $base = if ($env:EVENT_NAME -ceq 'merge_group') { $env:MERGE_GROUP_BASE_SHA } else { 'HEAD^1' }
     # Renames must list both paths, or rust/x.md -> docs/x.md reads as docs.
-    if (($args -join ' ') -cne 'diff --no-renames --name-only HEAD^1 HEAD') { throw "unexpected git $args" }
+    if ($line -cne "diff --no-renames --name-only $base HEAD") { throw "unexpected git $args" }
     $global:LASTEXITCODE = [int]$env:PL_FIXTURE_GIT_EXIT
     if ($env:PL_FIXTURE_FILES) { $env:PL_FIXTURE_FILES -split "`n" }
 }
 '''
     result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", bootstrap + step["run"]],
                             env=dict(os.environ, EVENT_NAME=event, GITHUB_OUTPUT=str(output),
+                                     MERGE_GROUP_BASE_SHA=base_sha, PL_FIXTURE_FETCH_EXIT=str(fetch_exit),
                                      PL_FIXTURE_FILES="\n".join(files), PL_FIXTURE_GIT_EXIT=str(git_exit)),
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -653,14 +669,29 @@ CODE_CHANGES = [
 ]
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", DOCS_ONLY_CHANGES)
-def test_scope_skips_a_documentation_only_pull_request(tmp_path, files):
-    assert run_scope(tmp_path, "pull_request", files) == ["rust=false"]
+def test_scope_skips_a_documentation_only_pull_request(tmp_path, files, event):
+    assert run_scope(tmp_path, event, files) == ["rust=false"]
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", CODE_CHANGES)
-def test_scope_runs_everything_for_any_other_change(tmp_path, files):
-    assert run_scope(tmp_path, "pull_request", files) == ["rust=true"]
+def test_scope_runs_everything_for_any_other_change(tmp_path, files, event):
+    assert run_scope(tmp_path, event, files) == ["rust=true"]
+
+
+def test_scope_runs_everything_for_a_mixed_merge_group(tmp_path):
+    # A docs PR and a code PR queued together: the group is not docs-only.
+    group = ["CLAUDE.md", "docs/guide/configuration.md", "rust/daemon/src/main.rs"]
+    assert run_scope(tmp_path, "merge_group", group) == ["rust=true"]
+
+
+@pytest.mark.parametrize("base_sha, fetch_exit", [
+    ("", 0), ("master", 0), ("E" * 40, 0), ("e" * 39, 0), ("e" * 40 + "; x", 0), (GROUP_BASE, 128)])
+def test_scope_runs_everything_without_a_fetched_merge_group_base(tmp_path, base_sha, fetch_exit):
+    assert run_scope(tmp_path, "merge_group", ["CLAUDE.md"], base_sha=base_sha,
+                     fetch_exit=fetch_exit) == ["rust=true"]
 
 
 @pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
@@ -668,9 +699,10 @@ def test_scope_never_skips_outside_pull_requests(tmp_path, event):
     assert run_scope(tmp_path, event, ["CLAUDE.md"]) == ["rust=true"]
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files, git_exit", [([], 0), (["CLAUDE.md"], 128)])
-def test_scope_runs_everything_on_an_empty_or_unreadable_diff(tmp_path, files, git_exit):
-    assert run_scope(tmp_path, "pull_request", files, git_exit) == ["rust=true"]
+def test_scope_runs_everything_on_an_empty_or_unreadable_diff(tmp_path, files, git_exit, event):
+    assert run_scope(tmp_path, event, files, git_exit) == ["rust=true"]
 
 
 def concurrency_group(event, ref="refs/heads/master", mode=None, run_id="101"):
@@ -712,7 +744,28 @@ def test_nightly_never_shares_a_group_with_master_pushes():
     assert workflow()["concurrency"]["cancel-in-progress"] is True
 
 
-@pytest.mark.parametrize("event, runs", [("pull_request", False), ("push", False),
+def test_merge_group_runs_share_no_group_with_pull_requests_or_pushes():
+    # Each queue entry has its own branch ref, so neither a PR's newer push nor
+    # a master push can cancel the queue's run, and it cancels neither.
+    queued = "refs/heads/gh-readonly-queue/master/pr-830-" + "a" * 40
+    group = concurrency_group("merge_group", queued)
+    assert group not in (concurrency_group("push"), concurrency_group("schedule"),
+                         concurrency_group("pull_request", "refs/pull/830/merge"),
+                         concurrency_group("workflow_dispatch", mode="ci"))
+    assert group != concurrency_group(
+        "merge_group", "refs/heads/gh-readonly-queue/master/pr-831-" + "b" * 40)
+
+
+def test_merge_queue_trigger_and_image_base():
+    events = workflow().get("on", workflow().get(True))
+    assert "merge_group" in events and "pull_request" in events
+    step = next(s for s in workflow()["jobs"]["daemon-image"]["steps"]
+                if s.get("id") == "image-inputs")
+    assert step["env"]["BASE_SHA"] == ("${{ github.event.pull_request.base.sha || "
+                                       "github.event.merge_group.base_sha || github.event.before }}")
+
+
+@pytest.mark.parametrize("event, runs", [("pull_request", False), ("merge_group", False), ("push", False),
                                          ("schedule", True), ("workflow_dispatch", True)])
 def test_source_mutants_run_nightly_and_on_manual_ci_only(event, runs):
     condition = workflow()["jobs"]["source-mutants"]["if"]
