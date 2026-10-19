@@ -306,7 +306,14 @@ async fn board_retry_registered_note_once_after_validated_call() {
     let home = Home::new();
     let runtime = runtime(&fixture, false);
     let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
-    fixture.wait("/attach", 1).await;
+    // The retry attaches only after the state file's durable write. On the
+    // Windows dev VM on 2026-10-19 that write took up to 3.1 s beside this
+    // binary's other tests, and the old 2 s observer failed 4 of 40 loops.
+    // Allow one production retry attempt, as `registered()` does.
+    let timing = pseudolife_stdio::board::Timing::default();
+    fixture
+        .wait_within("/attach", 1, timing.retry_attempt + timing.startup)
+        .await;
     *fixture.bank.lock().unwrap() = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".into();
     let call = forward(&board, false).await;
     assert!(!call.operation.headers.contains_key("x-pl-agent"));
