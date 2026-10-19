@@ -803,3 +803,34 @@ async fn board_identity_recovered_check_leaves_no_degraded_note() {
     );
     board.close().await;
 }
+
+#[tokio::test]
+async fn board_identity_refused_check_does_not_stop_background_delivery() {
+    // A per-call check that the daemon (or a proxy in front of it) answers
+    // with something that is not a bank identity refuses that call, but,
+    // as in Python's validate_snapshot, records nothing: background
+    // delivery keeps running and later calls carry no "stopped" note.
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let runtime = runtime(&fixture, false);
+    let board = Board::attach_options(runtime.clone(), checking(&runtime, &home)).await;
+    let call = registered(&board).await;
+    let mut result = rmcp::model::CallToolResult::success(vec![]);
+    board.finish_call(&call, &mut result).await;
+    fixture.answer("context", Answer::text(200, b"<html>proxy</html>"));
+    let error = board_call(&board, "memory_agents").await.err().unwrap();
+    assert_eq!(
+        error.message,
+        "Coordination identity is unavailable; reattach coordination and retry."
+    );
+    let Ok(Preparation::Forward(call)) = board_call(&board, "memory_search").await else {
+        panic!("an ordinary memory call was refused");
+    };
+    let mut result = rmcp::model::CallToolResult::success(vec![]);
+    let hint = board
+        .finish_call(&call, &mut result)
+        .await
+        .unwrap_or_default();
+    assert!(!hint.contains("stopped"), "{hint}");
+    board.close().await;
+}
