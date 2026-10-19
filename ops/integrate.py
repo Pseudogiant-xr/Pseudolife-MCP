@@ -92,6 +92,8 @@ class Dropped:
     member: Member
     reason: str
     comment: bool = True
+    commented: bool = False
+    unlabelled: bool = False
 
 
 @dataclass
@@ -200,11 +202,12 @@ def _changed(sha: str, base: str) -> set[str]:
     return set(_out("diff", "--name-only", f"{base}...{sha}").splitlines())
 
 
-def _open_batches() -> list[tuple[int, str]]:
-    """Every open pull request from an `integrate/` branch, however named."""
+def _open_batches() -> list[tuple[int, str, str]]:
+    """(number, branch, url) of every open pull request from an
+    `integrate/` branch, however named."""
     rows = json.loads(gh("pr", "list", "--state", "open", "--limit", "500",
-                         "--json", "number,headRefName") or "[]")
-    return [(r["number"], r["headRefName"]) for r in rows
+                         "--json", "number,headRefName,url") or "[]")
+    return [(r["number"], r["headRefName"], r.get("url", "")) for r in rows
             if r.get("headRefName", "").startswith(PREFIX)]
 
 
@@ -356,7 +359,7 @@ def build(args: argparse.Namespace) -> int:
     open_prs = _open_batches()
     if open_prs:
         raise Refusal("a batch is already open: " + ", ".join(
-            f"#{n} ({name})" for n, name in open_prs)
+            f"#{n} ({name})" for n, name, _ in open_prs)
             + "; merge or close it before building the next one")
     members = ready(args.label)
     waiting = [(m, _not_ready(m)) for m in members if _not_ready(m)]
@@ -422,6 +425,9 @@ def build(args: argparse.Namespace) -> int:
 def _suite_line(args: argparse.Namespace, head: str) -> str:
     """The "Local full suite" line, from a passing result for exactly `head`."""
     if args.suite_note:
+        if head[:8] not in args.suite_note:
+            raise Refusal(f"a --suite-note must name the batch head it ran on "
+                          f"(at least `{head[:8]}`) with its machine and result")
         return f"{args.suite_note} (stated by the operator, not checked)"
     if not args.suite:
         raise Refusal("give the local full suite's result for this head: "
@@ -437,6 +443,14 @@ def _suite_line(args: argparse.Namespace, head: str) -> str:
         raise Refusal(f"the suite result tested {str(result.get('commit'))[:12]}, "
                       f"not this batch head {head[:12]}; run the suite on this "
                       "checkout")
+    if "args" not in result:
+        raise Refusal("the suite result does not record its pytest arguments "
+                      "(written by an older ops/remote-suite.ps1), so it cannot "
+                      "show a full run; rerun it, or give `--suite-note`")
+    if result["args"]:
+        raise Refusal(f"the suite result is a selected run ({result['args']}), not "
+                      "the full suite; run `ops/remote-suite.ps1` with no pytest "
+                      "arguments")
     if result.get("exit_code") != 0:
         raise Refusal(f"the suite failed on this head (exit {result.get('exit_code')}: "
                       f"{result.get('summary')}); bisect locally and drop the culprit")
@@ -464,32 +478,48 @@ def open_(args: argparse.Namespace) -> int:
                       f"back with `git switch --detach {REMOTE}/{BASE}`, remove the "
                       "local branch and build again")
     open_prs = _open_batches()
-    if open_prs:
+    others = [(n, name) for n, name, _ in open_prs if name != plan.branch]
+    if others:
         raise Refusal("a batch is already open: " + ", ".join(
-            f"#{n} ({name})" for n, name in open_prs))
+            f"#{n} ({name})" for n, name in others))
     text = body(plan, _suite_line(args, head))
+    # A rerun after a failure past the push resumes: this branch's own pull
+    # request is the one to finish, not a second batch.
+    url = next((u for _, name, u in open_prs if name == plan.branch), None)
+    if url is None:
+        try:
+            git("push", "-q", "-u", REMOTE, plan.branch)
+        except Refusal as exc:
+            raise Refusal(f"{exc}\nNothing was pushed or commented on; fix the push "
+                          "and rerun `open`.") from None
+        try:
+            url = gh("pr", "create", "--base", BASE, "--head", plan.branch,
+                     "--title", plan.title, "--body-file", "-", input=text).strip()
+        except Refusal as exc:
+            raise Refusal(
+                f"{exc}\n{plan.branch} is pushed, and no dropped member was "
+                "commented on; rerun `open` with the same arguments once gh "
+                "works (it finds the pull request if this one was opened).") from None
+        print(f"opened {url}: {plan.title}")
+    else:
+        print(f"resuming {url}: {plan.title}")
     try:
-        git("push", "-q", "-u", REMOTE, plan.branch)
+        _report_drops(plan, url, False, persist=True)
     except Refusal as exc:
-        raise Refusal(f"{exc}\nNothing was pushed or commented on; fix the push "
-                      "and rerun `open`.") from None
-    try:
-        url = gh("pr", "create", "--base", BASE, "--head", plan.branch,
-                 "--title", plan.title, "--body-file", "-", input=text).strip()
-    except Refusal as exc:
-        raise Refusal(
-            f"{exc}\n{plan.branch} is pushed but has no pull request, and no "
-            "dropped member was commented on; rerun `open` with the same "
-            "arguments once gh works.") from None
-    print(f"opened {url}: {plan.title}")
-    _report_drops(plan, url, False)
+        raise Refusal(f"{exc}\nThe batch pull request is open at {url}; rerun "
+                      "`open` with the same arguments to finish reporting the "
+                      "dropped members.") from None
     Plan.path(plan.branch).unlink(missing_ok=True)
     return 0
 
 
-def _report_drops(plan: Plan, url: str | None, dry_run: bool) -> None:
+def _report_drops(plan: Plan, url: str | None, dry_run: bool, *,
+                  persist: bool = False) -> None:
+    """Comment on each conflicting member and remove its label. With
+    `persist`, each step done is saved to the plan, so a rerun of `open`
+    after a failure here repeats nothing."""
     for d in plan.dropped:
-        if not d.comment:
+        if not d.comment or (d.commented and d.unlabelled):
             continue
         if url or dry_run:
             where = f"Left out of integration batch `{plan.branch}`" + (
@@ -503,8 +533,15 @@ def _report_drops(plan: Plan, url: str | None, dry_run: bool) -> None:
             print(f"would comment on #{d.member.number} and remove `{plan.label}`:"
                   f"\n  {text}")
             continue
-        gh("pr", "comment", str(d.member.number), "--body-file", "-", input=text)
+        if not d.commented:
+            gh("pr", "comment", str(d.member.number), "--body-file", "-", input=text)
+            d.commented = True
+            if persist:
+                plan.save()
         gh("pr", "edit", str(d.member.number), "--remove-label", plan.label)
+        d.unlabelled = True
+        if persist:
+            plan.save()
 
 
 def status(args: argparse.Namespace) -> int:

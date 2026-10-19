@@ -45,8 +45,9 @@
 # there, e.g. full-suite@box).
 #
 # Output streams here and is kept as a log plus a JSON result (machine,
-# commit, exit code, pytest's summary line) under
-# ~/.pseudolife-mcp/suite-results. The exit code is pytest's.
+# commit, pytest arguments, exit code, pytest's summary line) under
+# ~/.pseudolife-mcp/suite-results. The exit code is pytest's. Empty `args`
+# means the full suite; ops/integrate.py open accepts only that.
 
 $ErrorActionPreference = 'Stop'
 # Refusals exit 2 (usage); Write-Error would throw under Stop and exit 1.
@@ -183,7 +184,8 @@ $summary = (Select-String -Path $log -Pattern '\d+ (passed|failed)|no tests ran|
     # The machine kind only: the SSH destination names a host and a user,
     # and results get cited in public PRs.
     machine = $(if ($target -eq 'remote') { 'remote' } else { 'local-wsl' })
-    commit = $sha; checkout = $name; started = $started.ToString('o'); ended = (Get-Date).ToString('o')
+    commit = $sha; checkout = $name; args = @($args)
+    started = $started.ToString('o'); ended = (Get-Date).ToString('o')
     exit_code = $code; summary = $summary; log = $log
 } | ConvertTo-Json | Set-Content -Path ($log -replace '\.log$', '.json') -Encoding utf8
 Write-Host "remote-suite: $target exit $code; $summary"

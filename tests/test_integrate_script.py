@@ -54,7 +54,9 @@ class FakeGh:
         self.labeled_at: dict[int, str] = {}
         self.history: list[dict] = []   # earlier PRs, for numbering and open batches
         self.calls: list[tuple[list[str], str | None]] = []
-        self.fail_create = False
+        self.fail_create: str | None = None   # "before" or "after" creating
+        self.fail_comments = 0
+        self.fail_edits = 0
 
     def add(self, number: int, sha: str, *, title: str | None = None,
             labeled_at: str | None = None, **extra) -> None:
@@ -90,9 +92,20 @@ class FakeGh:
             number = int(next(a for a in args if "/issues/" in a).split("/")[-2])
             return self.labeled_at.get(number, "") + "\n"
         if args[:2] == ["pr", "create"]:
-            if self.fail_create:
+            if self.fail_create == "before":
                 raise integrate.Refusal("`gh pr create` failed (1): HTTP 502")
-            return "https://github.example/pr/900\n"
+            url = "https://github.example/pr/900"
+            self.history.append({"number": 900, "state": "OPEN", "url": url,
+                                 "headRefName": args[args.index("--head") + 1]})
+            if self.fail_create == "after":  # created, but the reply was lost
+                raise integrate.Refusal("`gh pr create` failed (1): HTTP 504")
+            return url + "\n"
+        if args[:2] == ["pr", "comment"] and self.fail_comments:
+            self.fail_comments -= 1
+            raise integrate.Refusal("`gh pr comment` failed (1): HTTP 502")
+        if args[:2] == ["pr", "edit"] and self.fail_edits:
+            self.fail_edits -= 1
+            raise integrate.Refusal("`gh pr edit` failed (1): HTTP 502")
         if args[:2] in (["pr", "comment"], ["pr", "edit"]):
             return ""
         raise AssertionError(f"unexpected gh call: {args}")
@@ -157,12 +170,20 @@ def _build(*extra: str) -> int:
     return integrate.main(["build", "--date", DATE, *extra])
 
 
-def _suite_result(world, *, commit: str | None = None, exit_code: int = 0) -> Path:
+_UNSET = object()
+
+
+def _suite_result(world, *, commit: str | None = None, exit_code: int = 0,
+                  args=()) -> Path:
+    """A result as ops/remote-suite.ps1 writes it (with a BOM, as Windows
+    PowerShell 5 would); `args=_UNSET` mimics a launcher too old to record them."""
+    result = {"machine": "local-wsl", "exit_code": exit_code,
+              "commit": commit or _git(world.work, "rev-parse", "HEAD"),
+              "summary": "18868 passed, 81 skipped in 600s"}
+    if args is not _UNSET:
+        result["args"] = list(args)
     path = world.work.parent / "suite-result.json"
-    path.write_text(json.dumps({
-        "machine": "local-wsl", "exit_code": exit_code,
-        "commit": commit or _git(world.work, "rev-parse", "HEAD"),
-        "summary": "18868 passed, 81 skipped in 600s"}), encoding="utf-8-sig")
+    path.write_text(json.dumps(result), encoding="utf-8-sig")
     return path
 
 
@@ -489,7 +510,7 @@ def _three_with_a_collision(world) -> None:
 
 def test_a_failed_pr_create_can_be_finished_by_rerunning_open(world, capsys):
     _three_with_a_collision(world)
-    world.gh.fail_create = True
+    world.gh.fail_create = "before"
 
     assert _publish(world) == 2
     err = capsys.readouterr().err
@@ -499,10 +520,89 @@ def test_a_failed_pr_create_can_be_finished_by_rerunning_open(world, capsys):
     assert world.remote_branches() == [branch]
     assert world.gh.bodies("comment") == []  # nothing claims a batch that has no PR
 
-    world.gh.fail_create = False
+    world.gh.fail_create = None
     assert _open(world) == 0, capsys.readouterr()
     # The failed attempt and the one that opened it; the drop is reported once.
     assert len(world.gh.bodies("create")) == 2 and len(world.gh.bodies("comment")) == 1
+
+
+def test_a_lost_create_reply_resumes_on_its_own_pull_request(world, capsys):
+    _three_with_a_collision(world)
+    world.gh.fail_create = "after"
+
+    assert _publish(world) == 2
+    assert "HTTP 504" in capsys.readouterr().err
+
+    world.gh.fail_create = None
+    assert _open(world) == 0
+    out = capsys.readouterr().out
+
+    assert "resuming https://github.example/pr/900" in out
+    assert len(world.gh.bodies("create")) == 1   # no second batch pull request
+    (args, body), = world.gh.bodies("comment")
+    assert args[2] == "11" and "https://github.example/pr/900" in body
+
+
+def test_a_failed_drop_report_resumes_without_repeating_itself(world, capsys):
+    sha10 = world.pr(10, {"a.txt": "one\nTEN\nthree\n"})
+    sha11 = world.pr(11, {"a.txt": "one\nELEVEN\nthree\n"})
+    sha12 = world.pr(12, {"a.txt": "one\nTWELVE\nthree\n"})
+    sha13 = world.pr(13, {"d.txt": "d\n"})
+    for n, sha in ((10, sha10), (11, sha11), (12, sha12), (13, sha13)):
+        world.gh.add(n, sha)
+    assert _build() == 0
+    world.gh.fail_comments = 1     # #11's comment goes through, #12's fails
+    world.gh.calls.clear()
+    real = world.gh.__call__
+
+    first_ok = []
+
+    def flaky(*args, input=None):
+        if list(args[:2]) == ["pr", "comment"] and not first_ok:
+            first_ok.append(True)
+            world.gh.calls.append((list(args), input))
+            return ""
+        return real(*args, input=input)
+
+    integrate.gh = flaky
+    try:
+        assert _open(world) == 2
+        assert "rerun `open`" in capsys.readouterr().err
+        assert _open(world) == 0, capsys.readouterr()
+    finally:
+        integrate.gh = world.gh
+
+    comments = [args[2] for args, _ in world.gh.bodies("comment")]
+    edits = [args[2] for args, _ in world.gh.bodies("edit")]
+    # #12's failed attempt is recorded too; each member ends with one
+    # delivered comment and one label removal, and #11 is not repeated.
+    assert comments == ["11", "12", "12"] and edits == ["11", "12"]
+    assert len(world.gh.bodies("create")) == 1
+
+
+def test_a_failed_label_removal_resumes_without_a_second_comment(world, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    world.gh.fail_edits = 1
+
+    assert _open(world) == 2
+    assert "rerun `open`" in capsys.readouterr().err
+    assert _open(world) == 0, capsys.readouterr()
+
+    assert [args[2] for args, _ in world.gh.bodies("comment")] == ["11"]
+    assert [args[2] for args, _ in world.gh.bodies("edit")] == ["11", "11"]
+
+
+def test_open_accepts_only_a_full_suite_result(world, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+
+    assert _open(world, args=["tests/test_integrate_script.py"]) == 2
+    assert "selected run" in capsys.readouterr().err
+    assert _open(world, args=_UNSET) == 2
+    assert "does not record its pytest arguments" in capsys.readouterr().err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
 def test_build_alone_publishes_nothing_so_the_suite_runs_before_ci(world, capsys):
@@ -570,7 +670,13 @@ def test_open_takes_a_stated_suite_result_and_says_it_was_not_checked(world, cap
     _three_with_a_collision(world)
     assert _build() == 0
 
-    note = "passed on the Linux dev box, 18868 passed"
+    capsys.readouterr()
+    assert integrate.main(["open", "--suite-note", "passed, trust me"]) == 2
+    assert "must name the batch head" in capsys.readouterr().err
+    assert world.gh.mutations() == []
+
+    head = _git(world.work, "rev-parse", "HEAD")
+    note = f"passed at {head[:8]} on the Linux dev box, 18868 passed"
     assert integrate.main(["open", "--suite-note", note]) == 0, capsys.readouterr()
 
     (_, body), = world.gh.bodies("create")

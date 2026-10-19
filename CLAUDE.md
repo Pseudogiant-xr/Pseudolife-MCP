@@ -211,11 +211,11 @@ current merge ref, except as the `merge-forward` skill allows):
   own heads, when three or more are ready or about every 4 hours) passes
   the local WSL full suite on its head before `ops/integrate.py open`
   pushes it, because since #846 that costs less than one CI run; nothing
-  is fixed inside a batch (a conflicting or red member is dropped with a
-  comment, a red batch bisected locally), and the maintainer or the
-  delegated session merges it with a
-  merge commit, never squash, so GitHub marks its members merged.
-  Procedure: `docs/dev/merge-batches.md`.
+  is fixed inside a batch (a conflicting member, or the culprit a red
+  batch's local bisection finds, is dropped with a comment), and the
+  maintainer or the delegated session merges it with a merge commit, never
+  squash, so GitHub marks its members merged. Procedure:
+  `docs/dev/merge-batches.md`.
 - These suite-gate rules (the 2026-09-28 trial with its 2026-10-05
   amendments) are permanent by maintainer decision of 2026-10-19.
 

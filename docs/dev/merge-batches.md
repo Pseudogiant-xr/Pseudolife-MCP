@@ -48,8 +48,9 @@ python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json
   worktree). It creates the next free local `integrate/<date>-batch-N`
   branch, merges each labelled head with `git merge --no-ff` in the order
   the label was applied (pull request number when that is unknown), and
-  leaves the checkout on that branch. It pushes nothing and comments on
-  nothing, so no CI has started; its plan waits in the worktree's git
+  leaves the checkout on that branch. It pushes nothing, so no CI has
+  started, and leaves the drop comments to `open` (unless no batch forms,
+  below); its plan waits in the worktree's git
   directory for `open`.
 - **`--dry-run`** does the same merges on a detached HEAD, prints the plan,
   the body and the comments `open` would post, then switches back; it
@@ -58,7 +59,12 @@ python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json
   it. `--suite` takes the result JSON `ops/remote-suite.ps1` writes and
   refuses unless it tested exactly the batch head and exited 0;
   `--suite-note` takes the result in words for a run that wrote no JSON
-  (`ops/wsl-suite.ps1` alone), and the body says it was not checked. It
+  (`ops/wsl-suite.ps1` alone); the note must name the head's short sha,
+  and the body says it was not checked. A result for a selected run, or
+  one from a launcher too old to record its pytest arguments, is refused.
+  If any step after the push fails, rerunning `open` with the same
+  arguments resumes on the batch's own pull request without repeating a
+  comment. It
   refuses if the branch gained commits or master moved since `build`. It
   then pushes the branch, opens the batch pull request titled `integrate:
   <date> batch N (#a, #b)`, whose body lists each member's merged head,
