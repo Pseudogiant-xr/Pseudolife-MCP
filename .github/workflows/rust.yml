@@ -2,6 +2,9 @@ name: Rust shim
 
 on:
   pull_request:
+  # The merge queue (docs/specs/2026-10-19-merge-queue.md): a queued group runs
+  # the same jobs, so the required Parity checks report under the same names.
+  merge_group:
   push:
     branches: [master]
   schedule:
@@ -32,7 +35,10 @@ permissions:
 # started (2026-10-16), and push 38704856443 / nightly 38705376001 match the
 # same pattern (2026-10-15); a later push then cancelled each nightly. Manual
 # CI on master would do the same, so it gets its own group too. A push run is
-# now cancelled only by a newer push.
+# now cancelled only by a newer push. A merge group falls through to the
+# ref-keyed group: its ref is its own queue branch
+# (refs/heads/gh-readonly-queue/master/...), one per queue entry, so no pull
+# request or push shares it and nothing else cancels it.
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('rust-{0}-{1}-{2}', github.event_name, github.workflow, github.ref) || format('rust-{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
@@ -47,8 +53,9 @@ env:
 jobs:
   scope:
     # Decides whether this run needs the Rust, candidate, parity and image
-    # jobs. Only a pull request whose every changed file (merge commit vs its
-    # base parent) is documentation skips them: Markdown, llms.txt /
+    # jobs. Only a pull request or merge group whose every changed file is
+    # documentation skips them (a pull request's merge commit vs its base
+    # parent; a merge group's master tip, fetched here, to its head): Markdown, llms.txt /
     # llms-full.txt, and non-script files under docs/ (CLAUDE.md "Docs-only
     # changes"), none of them under rust/, evals/, pseudolife_memory/,
     # plugin/, ops/, tests/ or .github/. An empty or unreadable diff, and a
@@ -71,11 +78,22 @@ jobs:
         shell: pwsh
         env:
           EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
         run: |
           $docs = '^(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)))$'
           $rust = 'true'
+          $base = $null
           if ($env:EVENT_NAME -ceq 'pull_request') {
-            $files = @(git diff --no-renames --name-only HEAD^1 HEAD)
+            $base = 'HEAD^1'
+          } elseif ($env:EVENT_NAME -ceq 'merge_group' -and $env:MERGE_GROUP_BASE_REF -ceq 'refs/heads/master') {
+            # Master's current tip, not merge_group.base_sha: that may be the
+            # queue entry ahead, which need not pass on its own, so every
+            # unmerged entry must count. Anything else runs everything.
+            git fetch --no-tags --depth=1 origin refs/heads/master
+            if ($LASTEXITCODE -eq 0) { $base = 'FETCH_HEAD' }
+          }
+          if ($base) {
+            $files = @(git diff --no-renames --name-only $base HEAD)
             if ($LASTEXITCODE -eq 0 -and $files.Count -gt 0) {
               $files | Write-Output
               if (@($files | Where-Object { $_ -cnotmatch $docs }).Count -eq 0) { $rust = 'false' }
@@ -1102,7 +1120,7 @@ jobs:
       - name: Select changed image inputs
         id: image-inputs
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: python rust/daemon/container_inputs.py --base "$BASE_SHA" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
       - name: Check the opt-in container contract
         run: python rust/daemon/test_container.py
@@ -1127,10 +1145,11 @@ jobs:
           docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
           python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
-    # Only a PR or a master push may skip the CLI source matrix. The nightly
-    # (and ordinary manual CI) require its success, never a skip or failure.
-    # A PR that scope classified as documentation-only skips the Rust,
-    # candidate and parity jobs; any other skip still fails.
+    # Only a PR, a merge group or a master push may skip the CLI source
+    # matrix. The nightly (and ordinary manual CI) require its success, never
+    # a skip or failure. A PR or merge group that scope classified as
+    # documentation-only skips the Rust, candidate and parity jobs; any other
+    # skip still fails.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
     name: Parity / ${{ matrix.os }}
     needs: [scope, rust, candidate, parity-checks, source-mutants]
@@ -1148,7 +1167,7 @@ jobs:
           GATE_EVENT: ${{ github.event_name }}
         run: |
           $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
-          $docsOnly = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
+          $docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
           foreach ($job in @('rust', 'candidate', 'parity-checks')) {
             if ($results[$job].result -cne 'success' -and -not ($docsOnly -and $results[$job].result -ceq 'skipped')) {
               Write-Error "$job did not succeed"
@@ -1156,8 +1175,8 @@ jobs:
             }
           }
           $sourceResult = $results['source-mutants'].result
-          if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
-            Write-Error "source-mutants did not succeed outside the PR and push skip exception"
+          if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
+            Write-Error "source-mutants did not succeed outside the PR, merge-group and push skip exception"
             exit 1
           }
 

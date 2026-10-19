@@ -43,6 +43,12 @@ the memory bank; procedures belong in a skill or doc this file points to.
    wait for fresh CI, because rerunning an old job tests its old merge
    commit. The only exceptions are in the `merge-forward` skill.
    Independent review is still required, and the maintainer owns the merge.
+   **Merge queue: CI ready, queue off** (2026-10-19): both workflows run on
+   `merge_group`, but enabling GitHub's merge queue is a ruleset change only
+   the maintainer makes. Until then this item, the `merge-forward` skill and
+   integration batches stand unchanged; `docs/specs/2026-10-19-merge-queue.md`
+   lists the settings, the lanes to make required first, and which rules
+   retire once the queue is on.
 5. **Rust-only PRs skip the Python suite lanes:** a PR touching `rust/`
    whose other files are only `.github/workflows/rust.yml`, `CHANGELOG.md`
    or `changelog.d/` fragments is gated by the Rust workflow (Rust and
