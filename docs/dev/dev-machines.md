@@ -92,7 +92,7 @@ only the machine it dispatches to.
   and the run's cgroup limit: 4 in the Windows host's WSL (8 CPUs, 40 GB),
   at most 2 under a box run's 16 GB systemd scope. Below 2 it runs one
   process. `PSEUDOLIFE_SUITE_WORKERS` overrides it (`1` for one process).
-  Measured 2026-10-19 in WSL at 4 workers: about 11 min against 28-31
+  Measured 2026-10-19 in WSL at 4 workers: about 11 min against 28-31 min
   single-process, peak 20.2 GB used. Arguments still replace the default
   unchanged.
 - **Leases.** Each machine mirrors its suite on the board under its own

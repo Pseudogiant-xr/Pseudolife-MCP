@@ -828,3 +828,12 @@ def test_the_default_worker_count_follows_cpus_and_memory(tmp_path):
                         "--durations=30"]
     else:
         assert argv == _FULL
+
+
+@_LINUX_ONLY
+def test_a_zero_padded_worker_count_is_read_as_decimal(tmp_path):
+    """bash arithmetic reads "08" as bad octal and "010" as 8 (Claude
+    review, 2026-10-19); the launcher reads the count as decimal."""
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="08")
+    assert proc.returncode == 0, proc.stderr
+    assert argv == [*_FULL, "-n", "8", "--dist", "loadfile", "--durations=30"]

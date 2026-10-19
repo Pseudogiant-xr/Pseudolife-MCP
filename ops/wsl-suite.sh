@@ -431,20 +431,25 @@ suite_workers() {
         echo "$PSEUDOLIFE_SUITE_WORKERS"
         return
     fi
-    local cpus mem_kb limit group n
+    local cpus mem_kb limit n
     # GNU nproc answers OMP_NUM_THREADS / OMP_THREAD_LIMIT when set (CI's
     # Linux lanes export OMP_NUM_THREADS=2), which is a thread budget, not
     # the CPUs here (Codex review, 2026-10-19).
     cpus="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc 2>/dev/null || echo 1)"
     mem_kb="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || true)"
     [[ "$mem_kb" =~ ^[0-9]+$ ]] || mem_kb=0
-    group="$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)"
-    if [[ -n "$group" && -r "/sys/fs/cgroup$group/memory.max" ]]; then
-        limit="$(cat "/sys/fs/cgroup$group/memory.max")"
+    # cgroup v2's memory.max, else v1's memory controller (a hybrid host
+    # mounts v2 at /sys/fs/cgroup/unified and keeps memory on v1).
+    for limit in \
+        "/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)/memory.max" \
+        "/sys/fs/cgroup/memory$(sed -n 's/^[0-9]*:\([^:]*,\)\{0,1\}memory\(,[^:]*\)\{0,1\}://p' /proc/self/cgroup 2>/dev/null || true)/memory.limit_in_bytes"; do
+        [[ -r "$limit" ]] || continue
+        limit="$(cat "$limit")"
         if [[ "$limit" =~ ^[0-9]+$ ]] && (( limit / 1024 < mem_kb )); then
             mem_kb=$(( limit / 1024 ))
         fi
-    fi
+        break
+    done
     n=$(( cpus / 2 ))
     (( mem_kb / (6 * 1024 * 1024) < n )) && n=$(( mem_kb / (6 * 1024 * 1024) ))
     (( n > 4 )) && n=4
@@ -458,6 +463,7 @@ if [[ $# -eq 0 ]]; then
         echo "wsl-suite: PSEUDOLIFE_SUITE_WORKERS must be a whole number, not '$workers'" >&2
         exit 2
     fi
+    workers=$(( 10#$workers ))  # "08" is 8, not an octal error
     if (( workers >= 2 )); then
         set -- "$@" -n "$workers" --dist loadfile --durations=30
     fi
