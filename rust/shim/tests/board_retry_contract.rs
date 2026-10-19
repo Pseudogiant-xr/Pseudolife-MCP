@@ -625,9 +625,20 @@ async fn board_retry_close_wins_late_transport_failure_without_another_attempt()
     let runtime = runtime(&fixture, false);
     let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
     fixture.wait("context", 2).await;
+    // Held, the attempt can end by itself only through its 5 s request
+    // timeout, a tokio timer. On paused time that timer is the only thing
+    // that can move the clock, so a close that outwaited the attempt instead
+    // of cancelling it shows as five virtual seconds, whatever the runner did.
+    tokio::time::pause();
+    let closing = tokio::time::Instant::now();
     tokio::time::timeout(Duration::from_secs(10), board.close())
         .await
-        .expect("close waited for the held attempt instead of cancelling it");
+        .expect("close hung on the held attempt");
+    assert!(
+        closing.elapsed() < Duration::from_secs(1),
+        "close outwaited the held attempt instead of cancelling it"
+    );
+    tokio::time::resume();
     gate.release();
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(fixture.count("context"), 2);
