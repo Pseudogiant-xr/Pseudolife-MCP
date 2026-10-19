@@ -52,6 +52,18 @@
 #   attacker-controlled model/checkpoint; model configuration is an operator
 #   boundary, not MCP input. Bump once optimum-onnx supports patched
 #   transformers 5.x.
+#   2026-10-19: CVE-2026-80047 (GHSA-x9r9-c232-4q39, Dependabot #36) affects
+#   >=4.49.0,<=5.8.1: load_custom_generate() caches a repo's
+#   custom_generate/generate.py before the trust_remote_code check. In
+#   4.57.6 it runs only from from_pretrained() on a model whose
+#   can_generate() is true, or from generate(custom_generate=<repo>). The
+#   daemon loads only SentenceTransformer encoders (AutoModel base classes)
+#   and CrossEncoders (sequence classification), none of which can generate,
+#   never calls generate(), and its extractor sidecar is llama.cpp, not
+#   transformers. optimum-onnx 0.1.0 is still the latest release and its
+#   main branch still caps transformers<4.58; going below 4.49 would bring
+#   back the 4.50-4.53 fixes (CVE-2025-1194, -2099, -3263, -3264, -3777,
+#   -3933, -5197, -6051, -6638, -6921). Same hold as above.
 aiohappyeyeballs==2.6.2
 aiohttp==3.14.3
 aiosignal==1.4.0
