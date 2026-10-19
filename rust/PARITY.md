@@ -267,12 +267,13 @@ controls cover numeric-string, text, numeric-value and nested object cases.
 
 ## Graph traversal: deferred 2026-10-12, reversed 2026-10-19
 
-**Reversed.** Maintainer decision, 2026-10-19: graph and dream are ported
-after all. Both surfaces below return to scope, planned as the graph and
+**Reversed.** Maintainer decision, 2026-10-19: graph and dream are to be
+ported after all. Both surfaces below return to scope, planned as the graph and
 dream batch: graph store writes (task M), graph reads with recall's graph
 expansion (task N), graph review (task O), and the dream with the deep-dream
 edge pass and graph-insight refresh (task P). Recall's graph expansion is
-served since task N2 ("memory_recall over MCP" in `rust/daemon/spec.md`);
+served over MCP since task N2 ("memory_recall over MCP" in
+`rust/daemon/spec.md`; `GET /api/recall` is not yet served);
 the deep-dream edge pass stays `deferred` until task P lands. The decision
 of 2026-10-12 and its evidence follow as history.
 

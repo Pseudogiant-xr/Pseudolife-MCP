@@ -1,6 +1,6 @@
 //! `memory_recall` (spec RC1-RC16): the multi-hop walk search → graph
 //! expansion → re-query. `mcp_server.memory_recall` (2872-2951, with its
-//! caps 2739-2869) → `service.recall` (`service.py:9085-9294`) →
+//! caps 2729-2869) → `service.recall` (`service.py:9085-9294`) →
 //! `memory/recall.py` `run_recall` (226-382) and `recall_state_to_dict`
 //! (385-418).
 //!
@@ -28,7 +28,7 @@ fn internal(e: impl std::fmt::Display) -> ToolError {
 
 /// `_RECALL_MAX_ENTITIES`, `_RECALL_MAX_EDGES`, `_RECALL_MAX_TEXTS`,
 /// `_RECALL_MAX_FACTS_PER_ENTITY`, `_RECALL_SEED_TEXT_BUDGET` and
-/// `_RECALL_TEXT_CHARS` (`mcp_server.py:2720-2752`).
+/// `_RECALL_TEXT_CHARS` (`mcp_server.py:2729-2751`).
 const MAX_ENTITIES: usize = 10;
 const MAX_EDGES: usize = 15;
 const MAX_TEXTS: usize = 6;
@@ -388,7 +388,13 @@ fn hub_threshold(
     let len = vals.len() as i64;
     let raw = len as f64 * percentile / 100.0;
     if !raw.is_finite() {
-        return Err(format!("cannot convert float {raw} to integer"));
+        // `int(nan)` is a ValueError (invalid_argument), `int(inf)` an
+        // OverflowError (internal).
+        return Err(if raw.is_nan() {
+            "nan:cannot convert float NaN to integer".into()
+        } else {
+            "cannot convert float infinity to integer".into()
+        });
     }
     let idx = (len - 1).min(raw.trunc() as i64);
     let at = if idx < 0 { len + idx } else { idx };
@@ -923,7 +929,14 @@ async fn recall(
         ));
     }
     let threshold = if rc.hub_gate {
-        Some(hub_threshold(&degrees, rc.hub_percentile, rc.hub_floor).map_err(internal)?)
+        Some(
+            hub_threshold(&degrees, rc.hub_percentile, rc.hub_floor).map_err(|e| {
+                match e.strip_prefix("nan:") {
+                    Some(m) => ToolError::Invalid(m.to_string()),
+                    None => internal(e),
+                }
+            })?,
+        )
     } else {
         None
     };

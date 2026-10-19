@@ -2050,6 +2050,8 @@ SCENARIOS.update({
             recall("web app", hops=-3),
             recall("web app", top_k=1),
             recall("web app", top_k=10 ** 20),
+            # memory_search logs an over-range top_k as given too
+            search("web app", top_k=10 ** 20),
             # a seed's constraint fact pinned first; an alias seed
             recall("postgres settings", verbose=True),
             recall("tell me about pg", verbose=True),
@@ -2579,9 +2581,10 @@ def _float_pair_free(x, y) -> None:
 
 def events_diff(a: dict, b: dict) -> list[str]:
     """The retrieval events both daemons log for a search, compared row by
-    row and field by field (as w2d_search.py does): the served entries'
-    scores and fusion inputs within its tolerance, everything else exact.
-    """
+    row (matched by id) and field by field: the served entries' scores and
+    fusion inputs within w2d_search.py's tolerance, everything else exact.
+    Unlike w2d_search.py it aligns no score ties, so a declared tie swap
+    shows as a difference rather than passing."""
     ea = a.get("rows", {}).get("public.retrieval_events")
     eb = b.get("rows", {}).get("public.retrieval_events")
     cols = ea.get("columns") or []
