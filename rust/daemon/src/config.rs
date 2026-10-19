@@ -75,6 +75,44 @@ pub struct MemoryConfig {
     pub compaction_enabled: bool,
     pub compaction_keep_per_slot: i64,
     pub compaction_min_age_days: f64,
+    /// `memory.recall` (`utils/config.py` `RecallConfig`).
+    pub recall: RecallConfig,
+}
+
+/// `RecallConfig` (`utils/config.py:969-1029`): the `memory_recall` walk.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecallConfig {
+    pub driver: String,
+    pub default_hops: i64,
+    pub default_top_k: i64,
+    pub max_entities: i64,
+    pub hub_gate: bool,
+    pub hub_percentile: f64,
+    pub hub_floor: i64,
+    pub expand_budget: i64,
+    pub max_searches_per_hop: i64,
+    pub max_total_searches: i64,
+    pub time_budget_seconds: f64,
+    pub skip_part_of_expansion: bool,
+}
+
+impl Default for RecallConfig {
+    fn default() -> Self {
+        Self {
+            driver: "mechanical".into(),
+            default_hops: 3,
+            default_top_k: 5,
+            max_entities: 50,
+            hub_gate: true,
+            hub_percentile: 95.0,
+            hub_floor: 8,
+            expand_budget: 0,
+            max_searches_per_hop: 6,
+            max_total_searches: 31,
+            time_budget_seconds: 20.0,
+            skip_part_of_expansion: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -474,6 +512,7 @@ impl Default for MemoryConfig {
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
             compaction_min_age_days: 30.0,
+            recall: RecallConfig::default(),
         }
     }
 }
@@ -1401,6 +1440,39 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.compaction_keep_per_slot = want_int(r, "keep_per_slot", "memory.compaction", 3)?;
             memory.compaction_min_age_days =
                 want_float(r, "min_age_days", "memory.compaction", 30.0)?;
+        }
+        if let Some(r) = section(m, "recall", "memory.")? {
+            let p = "memory.recall";
+            let d = RecallConfig::default();
+            memory.recall = RecallConfig {
+                driver: want_str(r, "driver", p, &d.driver)?,
+                default_hops: want_int(r, "default_hops", p, d.default_hops)?,
+                default_top_k: want_int(r, "default_top_k", p, d.default_top_k)?,
+                max_entities: want_int(r, "max_entities", p, d.max_entities)?,
+                hub_gate: want_bool(r, "hub_gate", p, d.hub_gate)?,
+                hub_percentile: want_float(r, "hub_percentile", p, d.hub_percentile)?,
+                hub_floor: want_int(r, "hub_floor", p, d.hub_floor)?,
+                expand_budget: want_int(r, "expand_budget", p, d.expand_budget)?,
+                max_searches_per_hop: want_int(
+                    r,
+                    "max_searches_per_hop",
+                    p,
+                    d.max_searches_per_hop,
+                )?,
+                max_total_searches: want_int(r, "max_total_searches", p, d.max_total_searches)?,
+                time_budget_seconds: want_float(
+                    r,
+                    "time_budget_seconds",
+                    p,
+                    d.time_budget_seconds,
+                )?,
+                skip_part_of_expansion: want_bool(
+                    r,
+                    "skip_part_of_expansion",
+                    p,
+                    d.skip_part_of_expansion,
+                )?,
+            };
         }
         if let Some(r) = section(m, "reranker", "memory.")? {
             memory.reranker_enabled = want_bool(r, "enabled", "memory.reranker", false)?;

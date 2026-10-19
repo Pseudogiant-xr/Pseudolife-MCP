@@ -46,6 +46,8 @@ mod principal_probe;
 mod principals;
 mod pyjson;
 mod read;
+mod recall;
+mod recall_mentions;
 mod release_check;
 mod routes;
 mod search;

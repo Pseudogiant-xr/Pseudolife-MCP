@@ -36,7 +36,6 @@ tool's answers by value.
 
 | Tool | Body owner | Missing service prerequisite |
 |---|---|---|
-| `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred by decision (PARITY.md, "Graph traversal deferred by decision"). |
 | `document_search` | W2-D | No reference-pool search service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
@@ -53,7 +52,7 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_world_search`, `memory_lesson_search`, `memory_supersede`,
 `memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
 `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
-`memory_relation_define`, `memory_graph`, `memory_agents` and `memory_message`. The two board tools
+`memory_relation_define`, `memory_graph`, `memory_recall`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -219,7 +218,7 @@ existing gates. The route inventory is `harness/goldens/routes.json`.
 | `w2d-console-projections` | `/api/stats`, `/api/overview`, `/api/facts`, `/api/facts/history`, `/api/world`, `/api/lessons`, `/api/episodes`, `/api/episodes/summary`, `/api/recent`, `/api/trace`, `/api/chain`, `/api/entry`, `/api/sources`, `/api/consolidation`, `/api/config` | Their service projections, parameter/error contracts and read side effects have no differential coverage in this search increment. W2-D follow-up must port and prove them individually; shared hydration alone is not their implementation. |
 | `w2d-standalone-canonical-search` | The `/api` entry points for cortex lookup/candidates, world search and lesson search | Only the cortex block attached to `/api/search` is wired over `/api`. The MCP tools (`memory_fact_get`, `memory_world_search`, `memory_lesson_search` with its telemetry) are served; the `/api` return shapes remain W2-D follow-up work. |
 | `w2d-briefing-hooks` | `/api/briefing`, `/api/hook/session-start`, `/api/hook/memory-policy` | Briefing composition and session-start registration/policy logging are not implemented here; depend on W2-E session writes. W2-D owns the projections, W2-E the writes. |
-| `w2d-recall-graph` | `/api/recall`, `memory_recall`; `/api/graph`, `/api/graph/projects`, `/api/graph/digest`, `/api/graph/communities`, `/api/graph/path`, `/api/graph/review`, `/api/graph/proposal-evidence`, `/api/wiki`, `/api/graph/entity-provenance`, `/api/curation/duplicates`, `/api/curation/retired`, `/api/dream/status` | Recall consumes graph traversal and optional outbound model calls; the graph service, review/curation recovery and dream projections are deferred W3-H work. Existing graph-store helpers do not establish these route contracts. |
+| `w2d-recall-graph` | `/api/recall`; `/api/graph`, `/api/graph/projects`, `/api/graph/digest`, `/api/graph/communities`, `/api/graph/path`, `/api/graph/review`, `/api/graph/proposal-evidence`, `/api/wiki`, `/api/graph/entity-provenance`, `/api/curation/duplicates`, `/api/curation/retired`, `/api/dream/status` | The MCP tools `memory_recall` and `memory_graph` are served (spec "memory_recall over MCP", "memory_graph over MCP"); their REST routes, the review/curation recovery and the dream projections are later W3-H work. |
 | `w2d-board-projections` | `/api/agents` outside the coordination view, `/api/maintainer`, `/api/maintainer/sent`, `/api/maintainer/inbox` | Principal-scoped board/maintainer reads and their transaction boundaries belong to W2-F. The coordination view is supplied by W2-F in this batch; the other listed projections remain deferred. |
 | `w2d-tokenizer-runtime` | Other SentenceTransformers tokenization semantics | The inherited embedder follows the ST 5.3.0 / transformers 4.57.6 contract in `spec-embedding.md`. ST 5.7.0 changes padded-query cortex scores; supporting that runtime is deferred rather than changing the oracle output or score tolerance. Evidence records the actual runtime versions. |
 | `w2d-model-provisioning` | Default automatic embedding and reranker artifact provisioning | Existing local ONNX graphs are required. The embedding override must contain the configured Qwen/MiniLM layout; the reranker override must be the configured cross-encoder checkpoint. W3-J owns installation/provisioning. No claim is made for arbitrary exported checkpoints. |
@@ -357,6 +356,16 @@ this increment does not claim the complete write boundary or cutover readiness.
 |---|---|---|---|
 | The order of the inverse-derived edges that mirror asserted edges | `derive_edges` walks its inverse rule over a set of `(src, relation, dst)` tuples, so their order follows the per-process string hash | ordered by their source edge's relation, source and target (the read model's rule) | the "Colliding inverse provenance" row above: the harness compares them as a multiset in their slots. Asserted edges, transitive edges and the mirrors of transitive edges keep their exact order; an inverse edge only mirrors a pair already in the adjacency, so paths do not depend on it |
 | `GET /api/graph` (the Console's whole graph with `scope` and the `max_nodes` hub cap) | served over `_whole_graph` | not served; the MCP tool's whole graph (no scope, no cap) is | the Console REST rows (PARITY.md) |
+
+### memory_recall (2026-10-19)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `memory.recall.driver: llm` (or `PSEUDOLIFE_RECALL_DRIVER=llm`): seeds named by the dream's extraction model | served through an outbound model call | refused as `not_implemented` for a non-blank query | the model call joins the dream's extractor (task P); the default mechanical driver is served |
+| Locking across the walk | none of its own: each search and each graph read takes the service lock, so writes can land between them | the same: each search takes the search guard and each graph read the writer lock | exact in structure; a write landing mid-walk is visible to the later steps on both |
+| `time_budget_seconds` (20 s) | wall clock (`time.monotonic`) | wall clock (`Instant`) | a walk near the budget can stop at a different step; the harness's walks finish in well under a second |
+| The order of seed-search and re-query hits | `CMS.retrieve`'s ranking | `search::rank` | the search rows above: equal scores under `torch.topk` are free, and embeddings agree within the measured tolerance, so near-equal hits can swap and with them `texts` and the mention counts behind the re-query order |
+| `GET /api/recall` (the uncapped walk) | served | not served | the Console REST rows (PARITY.md) |
 
 ## Coordination board completion (W2-F)
 

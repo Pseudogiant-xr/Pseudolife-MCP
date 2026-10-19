@@ -1169,6 +1169,59 @@ multiset in their slots (the hash-order row in "Graph and review"). The
 `mcp-graph-facts-no-alias` and `mcp-graph-no-labels` mutants must be
 caught.
 
+### memory_recall over MCP (2026-10-19)
+
+`recall.rs` (the walk, the service steps, the caps and projection) and
+`recall_mentions.rs` (the mention matcher, over the Unicode 14 tables in
+`recall_unicode14.rs`), on `search_route::run` for each search and
+`graph_read_tools::graph_neighborhood` for each graph read; the
+`memory.recall` settings in `config.rs`; registered in
+`mcp::dispatch::registry`. Python: `mcp_server.py` caps and projection
+(2729-2869) and `memory_recall` (2873-2951); `service.py`
+`_recall_vocab` (9085-9096), `_graph_degrees` (9098-9107), `recall`
+(9109-9163), `_pin_recalled_constraints` (9166-9187),
+`_annotate_recalled_facts` (9189-9294), `_annotate_trace_invalidations`
+(4300-4328); `memory/recall.py` (20-418); `utils/config.py` `RecallConfig`
+(969-1029). This is the graph expansion PARITY.md deferred on 2026-10-12;
+the maintainer's 2026-10-19 decision returned it to scope.
+
+| # | Exact item | Source |
+|---|---|---|
+| RC1 | Bound arguments: `memory_recall(query, hops=3, top_k=5, verbose=False)` (`top_k` at least 1). `hops` clamps to 1..5 and `top_k` to at least 1, any integer the binder admits. | `mcp_server.py:2873-2899`; `service.py:9121-9125` |
+| RC2 | The `memory.recall` settings: `driver` ("mechanical"), `default_hops` (3), `default_top_k` (5), `max_entities` (50), `hub_gate` (true), `hub_percentile` (95.0), `hub_floor` (8), `expand_budget` (0), `max_searches_per_hop` (6), `max_total_searches` (31), `time_budget_seconds` (20.0), `skip_part_of_expansion` (false); `PSEUDOLIFE_RECALL_DRIVER` overrides the driver. | `utils/config.py:969-1029`; `service.py:9126` |
+| RC3 | A query blank after `strip()` answers `{query: "", seeds: [], entities: [], edges: [], paths: [], texts: [], iterations: 0, hops, low_confidence: true}` (plus the bookkeeping RC15 drops) with no search. | `service.py:9127-9132` |
+| RC4 | The vocabulary: entity display names by id, then each entity's aliases (grouped by first alias, `ORDER BY alias`), empty names dropped, first occurrence kept. With the hub gate, the asserted undirected degree by display name, and the threshold `max(floor, sorted(degrees)[min(len - 1, int(len × percentile / 100))])` (the floor alone for no edges). | `service.py:9085-9107,9139-9141`; `recall.py:200-206` |
+| RC5 | The seed search: `search(query, top_k)` as `memory_search`'s service body runs it (access accrual and the retrieval event included); its non-empty hit texts open `texts`, first occurrence kept, and their count is `seed_text_count`. | `recall.py:271-278` |
+| RC6 | Seeds (the mechanical driver): the vocabulary names the query mentions, else those the joined seed hits mention; none sets `low_confidence` and ends the walk with the seed texts. Seeds are deduplicated in order and cut to `max_entities`, each at hop 0. | `recall.py:144-161,279-290` |
+| RC7 | Mentions (`_mentions`): word-bounded and case-insensitive under Python 3.11's `re` (Unicode 14 `\w`, `\s` and `IGNORECASE` folding), the name's separator runs (`[\s_\-/]+`) matching any such run, a dot after the name bounding only when no word character follows, a dot before never, an apostrophe inside a word bounding only a possessive `s`, and a combining mark just outside a match counting as a word character. | `recall.py:20-103` |
+| RC8 | Each hop while the frontier is non-empty, fewer than `hops` hops have run and fewer than `max_entities` names are seen: the frontier selection (seeds always; other names below the hub threshold, by ascending degree then name, cut to a non-zero `expand_budget` as Python slices; unchanged with the gate off). | `recall.py:174-197,291-306` |
+| RC9 | Each selected name: its depth-1 neighborhood (`memory_graph`'s body with facts); a miss is skipped. Each node's display joins `entities` at this hop the first time it is seen, its facts kept from the first sight; each edge joins once per `(src, relation, dst)` as `{src, relation, dst, derived}` with its hop; paths join once. The hop stops once `max_entities` names are seen. | `recall.py:307-349`; `recall.py:164-171` |
+| RC10 | Re-queries: the hop's new names (less those reached only by `part-of` under `skip_part_of_expansion`), cut to `max_searches_per_hop` when larger by mentions in the seed hits (descending), degree (ascending) and name; each `search(f"{query} {name}", top_k)` adds its new texts. The total-search ceiling (seed search included) and the time budget, checked before each search and each expansion, stop the walk with `truncated`. | `recall.py:350-381,209-223` |
+| RC11 | On each seed, `constraint` facts move first, marked `pinned` (under `memory.cortex.pin_constraints`, default on). | `service.py:9153-9161,9166-9187` |
+| RC12 | With traces enabled, each served fact matched to its slot on (the record entity resolved through the alias table, attribute, value), the latest confirmation winning a tie, carries `re_verify` and `re_verify_reason` ("derived from N source memory/memories corrected since this fact was last confirmed") when a `source_superseded` invalidation of that slot is newer than its last confirmation (`last_confirmed or asserted_at`). | `service.py:9189-9294,4300-4328` |
+| RC13 | The service answer: `{query, seeds, entities: [{entity, facts}], edges, paths, texts, iterations, hops, low_confidence, entity_hop, edge_hop, seed_text_count}` plus `truncated` and `searches_issued` only when a ceiling cut the walk. | `recall.py:385-418` |
+| RC14 | The caps: entities to 10 and edges to 15, each by the per-hop quota (`cap // H` per hop, the remainder to the latest hops, unused slots granted latest-first, earliest items within a hop), edges between surviving entities first; each entity's facts to 5; texts to 6 with up to `min(3, top_k)` from the seed search and a short hop pool backfilled from the seed texts. | `mcp_server.py:2754-2833,2911-2928` |
+| RC15 | `entity_hop`, `edge_hop` and `seed_text_count` are dropped; `truncated` and `searches_issued` stay. | `mcp_server.py:2929-2938` |
+| RC16 | Without `verbose`: facts as `{attribute, value}` plus `re_verify`/`re_verify_reason` when set and `authority`, `distortion_tolerance`, `pinned` when truthy; edges as `{src, relation, dst}`; texts cut to 200 characters plus `…`. | `mcp_server.py:2836-2869,2939-2950` |
+
+`recall_mentions.rs` is checked against Python's `_mentions` over a
+generated corpus (`harness/goldens/recall-mentions.json`, written by
+`harness/gen_recall_mentions_goldens.py`), and its tables against their
+generator (`harness/gen_recall_unicode.py`). `harness/w2e.py live --only
+recall recall-caps recall-ungated` compares every answer and the full bank
+(retrieval events and access counts included) after each call, on templates
+the Python daemon's own tools wrote (memories, facts with a constraint, a
+graph with a part-of chain, an alias, a fact whose source memory a
+correction retired after it was traced): blank queries; the walk compact and
+verbose; hop and width clamps; a pinned seed constraint and an alias seed;
+`re_verify` verbose and compact; seeds from the hits and none; a walk after
+a write; under tight settings the hub gate, the expansion budget, the per-hop
+and total ceilings (`truncated`), part-of arrivals and the entity ceiling;
+and with the gate, the ceilings, pinning and trace annotation off. The
+`mcp-recall-seed-any`, `mcp-recall-no-hub-gate`, `mcp-recall-no-requery`,
+`mcp-recall-no-pin`, `mcp-recall-no-annotate` and `mcp-recall-flat-caps`
+mutants must be caught.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

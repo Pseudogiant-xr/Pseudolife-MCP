@@ -218,7 +218,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-graph-redefine-builtin", "mcp-graph-inverse-unchecked",
            # memory_graph (spec GR1-GR10): caught by graph-read.
            "mcp-graph-no-relation-filter", "mcp-graph-tag-no-ambiguous",
-           "mcp-graph-facts-no-alias", "mcp-graph-no-labels"]
+           "mcp-graph-facts-no-alias", "mcp-graph-no-labels",
+           # memory_recall (spec RC1-RC16): caught by the recall-* scenarios.
+           "mcp-recall-seed-any", "mcp-recall-no-hub-gate", "mcp-recall-no-requery",
+           "mcp-recall-no-pin", "mcp-recall-no-annotate", "mcp-recall-flat-caps"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1989,6 +1992,99 @@ SCENARIOS.update({
             alias("Web App", "frontend"),
             relate("Web App", "depends-on", "Postgres"),
             graph_read("frontend", to="Disk"),
+        ],
+    },
+})
+
+
+def recall(query, **kw) -> dict:
+    return tool("memory_recall", query=query, **kw)
+
+
+RECALL_SEED = [
+    store("The web app runs on host-1 in the main rack."),
+    store("Host-1 is a Dell server bought in 2021."),
+    store("Postgres stores the web app's sessions."),
+    store("The cache layer uses Redis on host-2."),
+    store("Disk failures on host-1 were fixed last spring."),
+    store("I like oat milk in my coffee."),
+    store("Host-1 vendor is Dell per the asset sheet."),
+    fact("Postgres", "port", "5432", distortion_tolerance="constraint"),
+    fact("Postgres", "version", "16"),
+    fact("Web App", "framework", "Django"),
+    fact("Host-1", "vendor", "Dell"),
+    relate("Web App", "runs-on", "host-1"),
+    relate("Web App", "depends-on", "Postgres"),
+    relate("Postgres", "runs-on", "host-1"),
+    relate("Web App", "uses", "Cache"),
+    relate("Cache", "uses", "Redis"),
+    relate("Redis", "runs-on", "host-2"),
+    relate("host-1", "part-of", "Rack A"),
+    relate("host-2", "part-of", "Rack A"),
+    relate("Rack A", "part-of", "Row 3"),
+    alias("Postgres", "pg"),
+    # the vendor fact rests on a memory corrected after it was confirmed
+    trace_sql("Host-1 vendor is Dell per the asset sheet.", "host-1", "vendor"),
+    supersede("Host-1 vendor is Lenovo per the new asset sheet.",
+              old_text="Host-1 vendor is Dell per the asset sheet."),
+]
+
+SCENARIOS.update({
+    "recall": {
+        "config": None,
+        "seed": RECALL_SEED,
+        "ops": [
+            # blank: the canned answer, no search
+            recall(""),
+            recall("   "),
+            # the walk from the query's own entities, compact and verbose
+            recall("What does the web app run on?"),
+            recall("What does the web app run on?", verbose=True),
+            # hop and seed-width clamps
+            recall("web app", hops=1),
+            recall("web app", hops=9),
+            recall("web app", hops=-3),
+            recall("web app", top_k=1),
+            recall("web app", top_k=10 ** 20),
+            # a seed's constraint fact pinned first; an alias seed
+            recall("postgres settings", verbose=True),
+            recall("tell me about pg", verbose=True),
+            # a fact whose source was corrected carries re_verify
+            recall("host-1 vendor", verbose=True),
+            recall("host-1 vendor"),
+            # no entity in the query: the seed hits name one, or none
+            recall("Which server was bought in 2021?"),
+            recall("oat milk"),
+            # the walk follows writes
+            relate("Redis", "depends-on", "Disk"),
+            recall("What does the cache use?", verbose=True),
+        ],
+    },
+    "recall-caps": {
+        "config": ("memory:\n  recall:\n    hub_floor: 2\n    hub_percentile: 50\n"
+                   "    expand_budget: 1\n    max_searches_per_hop: 1\n"
+                   "    max_total_searches: 3\n    skip_part_of_expansion: true\n"
+                   "    max_entities: 6\n"),
+        "seed": RECALL_SEED,
+        "ops": [
+            # the hub gate, the expansion budget, the per-hop and total
+            # search ceilings (truncated), part-of arrivals not re-queried,
+            # the entity ceiling
+            recall("What does the web app run on?", verbose=True),
+            recall("web app and host-1 and redis", hops=5),
+            recall("rack a", verbose=True),
+        ],
+    },
+    "recall-ungated": {
+        "config": ("memory:\n  recall:\n    hub_gate: false\n    max_searches_per_hop: 0\n"
+                   "    max_total_searches: 0\n    time_budget_seconds: 0\n"
+                   "  cortex:\n    pin_constraints: false\n  traces:\n    enabled: false\n"),
+        "seed": RECALL_SEED,
+        "ops": [
+            # no gate, no ceilings, no pin, no trace annotation
+            recall("What does the web app run on?", verbose=True),
+            recall("postgres settings", verbose=True),
+            recall("host-1 vendor", verbose=True),
         ],
     },
 })
