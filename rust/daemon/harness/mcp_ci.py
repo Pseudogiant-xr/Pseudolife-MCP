@@ -17,36 +17,15 @@ MUTANTS = ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-h
            "mcp-binding-open", "mcp-keep-failed-opening", "mcp-delete-keeps-session")
 
 
-# Declared differences (divergences.md), by name, as the strict corpus reports them.
-# MCP-REFUSAL-CLEANUP: Rust closes the connection after a 413.
-REFUSAL_CLEANUP = {f"body_limit[{index}]" for index in (0, 2, 3, 4, 5)}
-
-
-def _expected_pair(name):
-    """The exact (python, rust) pair declared for one difference."""
-    if name in REFUSAL_CLEANUP:
-        py = {"status": 413, "headers": {"mcp-session-id": None}, "body": {"raw": "Request body too large"}}
-        return py, {**py, "headers": {**py["headers"], "connection": "close"}}
-    raise AssertionError(f"undeclared difference: {name}")
-
-
 def check_baseline(report):
-    """Accept exactly the declared differences; the strict report stays red."""
+    """The strict corpus must be complete and match exactly: no difference is
+    declared. MCP-REFUSAL-CLEANUP's five 413 ``connection: close`` headers
+    closed when the Rust daemon began answering refusals at once and discarding
+    the body on the kept connection, as uvicorn does."""
     summary = report["summary"]
-    assert (summary["responses"], summary["cases"], summary["diffs"]) == (325, 18, 5)
+    assert (summary["responses"], summary["cases"], summary["diffs"]) == (325, 18, 0)
     assert set(summary["unserved_checked"]) == set(UNSERVED)
-    expected = REFUSAL_CLEANUP
-    seen = set()
-    for diff in report["diffs"]:
-        name, pair = diff.split(": python=", 1)
-        py, rs = pair.split("\n          rust  =", 1)
-        py, rs = json.loads(py), json.loads(rs)
-        assert name in expected and name not in seen, name
-        seen.add(name)
-        want_py, want_rs = _expected_pair(name)
-        assert py == want_py, name
-        assert rs == want_rs, name
-    assert seen == expected
+    assert report["diffs"] == [], report["diffs"]
 
 
 def check_coercion_report(report):
@@ -85,7 +64,7 @@ def main(argv=None):
         assert code == expected, f"{label}: expected exit {expected}, got {code}; see {out / (label + '.log')}"
         return target
 
-    baseline_dir = run("baseline", args.default_bin, ["--mount-probe", "--validation-coercions"], 1)
+    baseline_dir = run("baseline", args.default_bin, ["--mount-probe", "--validation-coercions"], 0)
     baseline_file = baseline_dir / "compare.json"
     baseline = json.loads(baseline_file.read_text(encoding="utf-8"))
     check_baseline(baseline)
@@ -93,13 +72,12 @@ def main(argv=None):
     print(f'SDK coercion gate: {2 * EXPECTED_COERCION_CASES} observations, zero differences', flush=True)
     mount = json.loads((baseline_dir / "foundation-mount.json").read_text(encoding="utf-8"))
     assert mount["case"] == "mcp path, auth" and not mount["diffs"]
-    print("strict baseline: 5 declared differences (the 413 close headers); foundation mount matches",
-          flush=True)
+    print("strict baseline: no differences; foundation mount matches", flush=True)
     for mutant in MUTANTS:
         target = run(mutant, args.mutant_bin, ["--mutant", mutant, "--baseline", str(baseline_file)], 0)
         report = json.loads((target / f"mutant-{mutant}.json").read_text(encoding="utf-8"))
         assert mutant_caught(1, report, baseline), mutant
-    # A production binary must not be credited for the baseline's declared diffs.
+    # A production binary must not be credited as a caught mutant.
     target = run("without-mutants", args.default_bin,
                  ["--mutant", "mcp-no-hint", "--baseline", str(baseline_file)], 1)
     report = json.loads((target / "mutant-mcp-no-hint.json").read_text(encoding="utf-8"))
