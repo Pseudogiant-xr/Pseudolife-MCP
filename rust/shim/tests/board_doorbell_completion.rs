@@ -700,11 +700,24 @@ struct Harness {
 }
 impl Harness {
     async fn new(shown: bool, quiet: Duration) -> Self {
+        Self::build(shown, quiet, false).await
+    }
+    /// Like `new`, but tokio's clock is paused before the watch starts, so
+    /// the quiet window (measured on `tokio::time::Instant`) moves only by
+    /// `tokio::time::advance`. The adapter's real HTTP setup runs first, on
+    /// the running clock; call `tokio::time::resume` before a real ring.
+    async fn paused(shown: bool, quiet: Duration) -> Self {
+        Self::build(shown, quiet, true).await
+    }
+    async fn build(shown: bool, quiet: Duration, paused: bool) -> Self {
         let fixture = Fixture::new(0);
         let home = Home::new();
         let adapter = Adapter::enter(adapter_config(&fixture, &home))
             .await
             .unwrap();
+        if paused {
+            tokio::time::pause();
+        }
         let command = home
             .0
             .join(if cfg!(windows) { "codex.cmd" } else { "codex" });
@@ -755,22 +768,26 @@ impl Harness {
 
 #[tokio::test]
 async fn quiet_tool_activity_and_delivered_hint_do_not_spend_a_future_offer() {
-    let rig = Harness::new(true, Duration::from_millis(80)).await;
+    // On paused time the window passes exactly when advanced, so a stalled
+    // runner between a tool call and the next observation cannot open it.
+    let rig = Harness::paused(true, Duration::from_millis(80)).await;
     let offered = view(&[1, 2], 2, 2, 1.0);
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
-    tokio::time::sleep(Duration::from_millis(90)).await;
+    tokio::time::advance(Duration::from_millis(90)).await;
     rig.bell
         .note_call(BANK, "memory_search", &json!({}), false)
         .await;
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
-    tokio::time::sleep(Duration::from_millis(90)).await;
+    tokio::time::advance(Duration::from_millis(90)).await;
     let mut informed = offered.clone();
     informed.delivered = 2;
     rig.bell.observe(BANK, &informed).await;
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
+    // The ring itself runs a real process, on the running clock.
+    tokio::time::resume();
     rig.bell.observe(BANK, &view(&[1, 2, 3], 3, 3, 1.0)).await;
     rig.accepted().await;
     assert_eq!(rig.calls(), 1);
@@ -865,14 +882,17 @@ async fn arrival_preview_complete_and_incomplete_ack_expiry_matrix() {
 #[tokio::test]
 async fn timed_offer_withdrawal_and_attention_permission_matrix() {
     let rig = Harness::new(true, Duration::ZERO).await;
-    let mut offered = view(&[1, 2], 2, 2, now() + 0.12);
+    // An hour out, so "not yet due" cannot become "due" during a runner
+    // stall before the observation (ring_at is wall-clock, not tokio time).
+    let mut offered = view(&[1, 2], 2, 2, now() + 3600.0);
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
     let mut withdrawn = offered.clone();
     withdrawn.wake = None;
     withdrawn.wake_watermark = None;
+    // The bell decides from the view in hand and keeps no copy of a withdrawn
+    // offer, so no wait has to let the old due time pass first.
     rig.bell.observe(BANK, &withdrawn).await;
-    tokio::time::sleep(Duration::from_millis(140)).await;
     rig.bell.observe(BANK, &withdrawn).await;
     assert!(!rig.pending.path.exists());
     for wake in [

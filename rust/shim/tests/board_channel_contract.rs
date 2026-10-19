@@ -324,17 +324,22 @@ async fn board_channel_fixed_state_refusal_and_missing_reused_bridge_fall_back_p
 #[tokio::test]
 async fn board_channel_bounded_probe_and_explicit_codex_checkin() {
     let fixture = Fixture::new(0);
-    fixture.answer(
-        "coordination-start",
-        Answer::text(200, b"ready").delayed(Duration::from_millis(150)),
-    );
+    // The fixture holds the board check's answer until attach has returned,
+    // so attach can only return through the probe budget: an ordering check
+    // a stalled runner cannot fail, where an elapsed-time bound could.
+    let (held, gate) = Answer::text(200, b"ready").gated();
+    fixture.answer("coordination-start", held);
     let home = Home::new();
     let runtime = board_fixture::runtime(&fixture, false);
     let mut options = board_fixture::options(&runtime, &home, "");
     options.timing.probe = Duration::from_millis(40);
-    let start = tokio::time::Instant::now();
-    let board = Board::attach_options(runtime, options).await;
-    assert!(start.elapsed() < Duration::from_millis(120));
+    let board = tokio::time::timeout(
+        Duration::from_secs(10),
+        Board::attach_options(runtime, options),
+    )
+    .await
+    .expect("attach waited for the held board check instead of its probe budget");
+    gate.release();
     assert!(!board.board_checkin().await);
     assert_eq!(fixture.count("/register"), 0);
     board.close().await;
