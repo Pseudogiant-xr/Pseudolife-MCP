@@ -6,6 +6,27 @@ use std::time::Duration;
 fn write(home: &Home, name: &str, text: &str) {
     state::atomic_write(&home.0.join(name), text.as_bytes(), None).unwrap();
 }
+/// The ring marker is written off the runtime, on the digest's queue behind
+/// any digest sync, so it can land after its due time on a slow disk.
+async fn ring_written(home: &Home) -> String {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(bytes) = state::read(&home.0.join("digest.ring"), 256) {
+                return String::from_utf8(bytes).unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("ring marker not written")
+}
+/// Let the ring worker finish what it has queued, so a check for the absence
+/// of a marker, or for a recorded failed write, is not just early.
+async fn ring_settled(home: &Home) {
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    state::drain(&home.0.join("digest.txt")).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
+}
 #[test]
 fn board_ring_reason_uses_python_unicode14_predicates() {
     assert!(liveness::whitespace('\u{1c}'));
@@ -183,22 +204,22 @@ async fn board_ring_marker_staggers_sanitizes_deduplicates_and_withdraws() {
         .await
         .unwrap();
     assert_eq!(adapter.view().await.watermark, 10);
-    let at = liveness::now() + 0.08;
+    // Far enough out that a slow digest write inside update_mailbox cannot
+    // reach it, so the marker's absence right after the update means "not yet
+    // due", not "not yet written".
+    let at = liveness::now() + 1.0;
     let wake = json!({"generation":1,"pending_count":2,"pending_preview":[],"wake":{"decision":"rung","reason":"  peer\n sent<> mail! ","ring_at":at}});
     adapter.update_mailbox(&wake).await;
     assert!(!home.0.join("digest.ring").exists());
-    tokio::time::sleep(Duration::from_millis(110)).await;
-    assert_eq!(
-        String::from_utf8(state::read(&home.0.join("digest.ring"), 256).unwrap()).unwrap(),
-        "11\nrung peer sent mail\n"
-    );
+    assert_eq!(ring_written(&home).await, "11\nrung peer sent mail\n");
     std::fs::remove_file(home.0.join("digest.ring")).unwrap();
     adapter.update_mailbox(&wake).await;
-    tokio::time::sleep(Duration::from_millis(15)).await;
+    ring_settled(&home).await;
     assert!(!home.0.join("digest.ring").exists());
     adapter.update_mailbox(&json!({"pending_count":3,"wake":{"decision":"rung","reason":"new","ring_at":liveness::now()+0.1}})).await;
     adapter.update_mailbox(&json!({"pending_count":0})).await;
     tokio::time::sleep(Duration::from_millis(130)).await;
+    ring_settled(&home).await;
     assert!(!home.0.join("digest.ring").exists());
     assert!(adapter.view().await.wake.is_none());
     adapter.close().await;
@@ -214,7 +235,8 @@ async fn board_ring_failed_replace_retries_original_watermark_unless_seen() {
     state::private_dir(&home.0.join("digest.ring")).unwrap();
     let wake = json!({"pending_count":1,"wake":{"decision":"rung","reason":"peer","ring_at":liveness::now()}});
     adapter.update_mailbox(&wake).await;
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    // The failed write must have been recorded for retry before the next update.
+    ring_settled(&home).await;
     std::fs::remove_dir(home.0.join("digest.ring")).unwrap();
     adapter
         .update_mailbox(&json!({"pending_count":2,"wake":wake["wake"]}))
@@ -228,7 +250,7 @@ async fn board_ring_failed_replace_retries_original_watermark_unless_seen() {
     state::private_dir(&home.0.join("digest.ring")).unwrap();
     let wake = json!({"pending_count":2,"wake":{"decision":"rung","reason":"later","ring_at":liveness::now()}});
     adapter.update_mailbox(&wake).await;
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    ring_settled(&home).await;
     write(&home, "digest.seen", "2\n");
     std::fs::remove_dir(home.0.join("digest.ring")).unwrap();
     adapter.update_mailbox(&wake).await;
