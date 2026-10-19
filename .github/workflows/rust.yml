@@ -320,12 +320,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
-        suite: [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
+        # parity-selfhosted reuses this suite list, the include list and the
+        # steps below through YAML anchors, so both lanes run the same shards.
+        suite: &parity_suites [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
         # W1-C row sums: master run 38076979343, 2026-10-10, Windows.
         # Live + golden: doctor 15.3m; pairing 17.6m; connection 20.1m.
         # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice
         # the total. Connection also keeps the existing 20m record budget.
-        include:
+        include: &parity_shards
           - suite: w1c-doctor
             w1c_rows: "'doctor'"
             w1c_timeout: 32
@@ -379,15 +381,74 @@ jobs:
     # 38076979343 (2026-10-10, Windows) confirms ~46m remaining.
     # W1-C now runs in parallel; allow twice the conservative 50m remainder.
     timeout-minutes: ${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}
-    steps:
+    env:
+      # Artifact names must be unique within a run; parity-selfhosted sets
+      # its own prefix so both lanes can upload the same outcomes.
+      PARITY_ARTIFACT_PREFIX: ''
+    steps: &parity_steps
+      # Self-hosted only (docs/specs/2026-10-19-self-hosted-parity-lane.md):
+      # the runner's own configuration names this machine's full-suite lease
+      # and lock directory; the tree never names a machine. Runs before
+      # checkout so a yielding shard loads nothing.
+      - name: Yield to this machine's full suite
+        if: runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $lease = $env:PSEUDOLIFE_PARITY_LEASE
+          $lockDir = $env:PSEUDOLIFE_PARITY_LOCK_DIR
+          if ($lease -cnotmatch '^full-suite@[A-Za-z0-9._-]{1,40}$' -or -not $lockDir) {
+            throw "The runner's .env must set PSEUDOLIFE_PARITY_LEASE (full-suite@<machine>) and PSEUDOLIFE_PARITY_LOCK_DIR (the suite user's lock directory); see docs/specs/2026-10-19-self-hosted-parity-lane.md"
+          }
+          if (-not (Get-Command pseudolife-mcp -ErrorAction SilentlyContinue)) {
+            throw 'pseudolife-mcp is not on the runner PATH; install it for the runner user with: uv tool install pseudolife-mcp'
+          }
+          # CLAUDE.md "Disk space": no heavy work below 8 GB free.
+          $freeGb = [math]::Floor([IO.DriveInfo]::new($env:GITHUB_WORKSPACE).AvailableFreeSpace / 1GB)
+          if ($freeGb -lt [int]$env:PARITY_MIN_FREE_GB) {
+            throw "Only $freeGb GB free on the runner's work drive; the floor is $env:PARITY_MIN_FREE_GB GB"
+          }
+          # The lease check reads these two for this process only, never the shard's tests.
+          $env:PSEUDOLIFE_SUITE_LEASE = $lease
+          $env:PSEUDOLIFE_SUITE_LOCK_DIR = $lockDir
+          $deadline = (Get-Date).AddMinutes([int]$env:PARITY_YIELD_MINUTES)
+          while ($true) {
+            $report = pseudolife-mcp lease check --json $lease
+            $code = $LASTEXITCODE
+            if ($code -ne 0 -and $code -ne 1) { throw "lease check $lease failed (exit $code); neither held nor free is known" }
+            $state = ($report | Out-String | ConvertFrom-Json).local.state
+            # A missing or unreadable lock file means the directory or its grant is wrong,
+            # and every probe would read free.
+            if ($null -eq $state) { throw "No readable full-suite lock file in PSEUDOLIFE_PARITY_LOCK_DIR (wrong directory, or the runner account lacks read access); the check cannot see this machine's suites" }
+            if ($code -eq 0) { Write-Output "$lease is free; running the shard."; break }
+            if ((Get-Date) -ge $deadline) {
+              "Yielded: $lease stayed held for $env:PARITY_YIELD_MINUTES minutes, so this shard did not run." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              throw "Yielded to the full suite holding $lease"
+            }
+            Write-Output "$lease is held by a full suite; checking again in 60 seconds."
+            Start-Sleep -Seconds 60
+          }
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
+          # A self-hosted runner keeps its own pip cache; saving one to the
+          # repository cache could evict the hosted Rust caches.
+          cache: ${{ runner.environment != 'self-hosted' && 'pip' || '' }}
           cache-dependency-path: pyproject.toml
+      # A persistent runner shares one tool-cache Python between jobs; a venv
+      # in the job's temporary directory starts each shard as clean as hosted.
+      - name: Give the shard its own Python environment
+        if: runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $venv = Join-Path $env:RUNNER_TEMP 'parity-venv'
+          python -m venv $venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bin = if ($IsWindows) { Join-Path $venv 'Scripts' } else { Join-Path $venv 'bin' }
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "VIRTUAL_ENV=$venv" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - uses: dtolnay/rust-toolchain@stable
         if: "!startsWith(matrix.suite, 'w1c-')"
         with:
@@ -396,6 +457,7 @@ jobs:
         if: "!startsWith(matrix.suite, 'w1c-')"
         with:
           workspaces: rust
+          save-if: ${{ runner.environment != 'self-hosted' }}
       - name: Install checkout and test dependencies
         timeout-minutes: 10
         run: |
@@ -570,7 +632,7 @@ jobs:
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-static-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-static-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-static-*.json
           if-no-files-found: warn
       - name: Restore graph store executable permission
@@ -632,7 +694,7 @@ jobs:
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-body-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-body-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-body-*.json
           if-no-files-found: warn
       - name: Daemon security admission parity
@@ -697,7 +759,7 @@ jobs:
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-mcp-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-mcp-${{ runner.os }}
           path: |
             ${{ runner.temp }}/daemon-mcp/**/*.json
             ${{ runner.temp }}/daemon-mcp/*.log
@@ -706,14 +768,14 @@ jobs:
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-security-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-security-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-security-*.json
           if-no-files-found: warn
       - name: Retain additive executable node outcomes
         if: always() && matrix.suite == 'eval'
         uses: actions/upload-artifact@v4
         with:
-          name: rust-eval-harness-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
       - name: Principal store differential and golden harness
@@ -731,7 +793,7 @@ jobs:
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: rust-principals-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-principals-${{ runner.os }}
           path: ${{ runner.temp }}/principal-*.json
           if-no-files-found: error
       - name: Daemon schema startup parity
@@ -745,14 +807,14 @@ jobs:
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-schema-parity-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-schema-parity-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-schema-parity.json
           if-no-files-found: error
       - name: Retain graph store outcomes
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: rust-graph-store-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-graph-store-${{ runner.os }}
           path: |
             ${{ runner.temp }}/graph-store-live.json
             ${{ runner.temp }}/graph-store-golden.json
@@ -775,7 +837,7 @@ jobs:
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-startup-parity-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-startup-parity-${{ runner.os }}
           path: |
             ${{ runner.temp }}/daemon-startup-parity.json
             ${{ runner.temp }}/daemon-startup-parity-clock-retry.json
@@ -855,7 +917,7 @@ jobs:
         if: "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
         uses: actions/upload-artifact@v4
         with:
-          name: test_login-linux-golden
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}test_login-linux-golden
           path: |
             rust/cli_harness/goldens/test_login.linux.json
             ${{ runner.temp }}/test-login-linux-record.json
@@ -864,7 +926,7 @@ jobs:
         if: always() && (matrix.suite == 'cli' || startsWith(matrix.suite, 'w1c-'))
         uses: actions/upload-artifact@v4
         with:
-          name: cli-harness-${{ runner.os }}-${{ matrix.suite }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}cli-harness-${{ runner.os }}-${{ matrix.suite }}
           path: ${{ runner.temp }}/cli-harness*.json
           if-no-files-found: warn
       - name: Prepare disposable PostgreSQL for H5
@@ -906,7 +968,7 @@ jobs:
         if: always() && startsWith(matrix.suite, 'h5-')
         uses: actions/upload-artifact@v4
         with:
-          name: h5-${{ runner.os }}-${{ matrix.suite }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}h5-${{ runner.os }}-${{ matrix.suite }}
           # Static-path witnesses leave deliberate symlink loops in scratch.
           # Upload only receipts and oracle captures, without walking scratch.
           path: |
@@ -998,7 +1060,7 @@ jobs:
         if: always() && matrix.suite == 'judges'
         uses: actions/upload-artifact@v4
         with:
-          name: rust-parity-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-parity-${{ runner.os }}
           path: |
             evals/results/rust-phase1-ci-*.json
             evals/results/rust-phase2-ci-*.json
@@ -1007,6 +1069,39 @@ jobs:
             ${{ runner.temp }}/lease-header-policy.json
             ${{ runner.temp }}/oracle-selection.json
           if-no-files-found: warn
+
+  parity-selfhosted:
+    # A comparison lane, not a gate (docs/specs/2026-10-19-self-hosted-parity-lane.md):
+    # the same shards and steps as parity-checks, on the maintainer's dev
+    # machines. continue-on-error and no place in the Parity gate's needs
+    # keep its outcome out of every required check. It runs only on the
+    # nightly and manual CI, which have their own concurrency groups: on a
+    # pull request its pending jobs would hold the PR's checks open, and on
+    # a master push a newer push would cancel the whole run while its
+    # self-hosted jobs queue, turning finished hosted results into a
+    # cancelled run. It stays off until the repository variable
+    # PARITY_SELFHOSTED_RUNNERS lists the registered runners (JSON, such as
+    # ["linux", "windows"]); a job for an unregistered label would queue for
+    # a day.
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && vars.PARITY_SELFHOSTED_RUNNERS != '' && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
+    name: Parity self-hosted / ${{ matrix.runner }} / ${{ matrix.suite }}
+    needs: [candidate, rust]
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '["off"]') }}
+        suite: *parity_suites
+        include: *parity_shards
+    runs-on: [self-hosted, "pseudolife-parity-${{ matrix.runner }}"]
+    # The slowest hosted shard budget (210m) plus the hour a shard may wait
+    # for this machine's full suite before it yields.
+    timeout-minutes: 270
+    env:
+      PARITY_ARTIFACT_PREFIX: self-hosted-
+      PARITY_YIELD_MINUTES: '60'
+      PARITY_MIN_FREE_GB: '8'
+    steps: *parity_steps
 
   source-mutants:
     # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs
