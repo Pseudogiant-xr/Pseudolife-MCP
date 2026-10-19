@@ -8,9 +8,12 @@ calls on the VM, then failed 3 of 5 hosted runs. Each iteration is its own
 job on a fresh runner, so first-hit cold-start stalls count.
 
 A selection is one of:
-  row:<row>[/<case>]     one live arm of a CLI harness row against the oracle
-  scenario:<name>        one live daemon comparison (run.py live --only)
-  <node id> [<node id>]  pytest node ids, run with -ra and a junit report
+  row:<row>[/<case>]     one live arm of a CLI harness row against this
+                         checkout's Python, with the offline embedder fixture
+  scenario:<name>        one live daemon comparison (run.py live --only), on
+                         the binary the scenario's required lane uses
+  <node id> [<node id>]  pytest node ids, run with -ra and a junit report; an
+                         iteration where no selected test ran is a failure
 
 Subcommands: ``plan`` checks the inputs and lists the iterations, ``run`` runs
 one iteration and writes its row, ``report`` joins the rows into
@@ -46,6 +49,9 @@ def parse(selection: str) -> tuple[str, list[str]]:
         name = selection[9:]
         if not NAME.fullmatch(name):
             raise ValueError(f"scenario selection {selection!r}: expected scenario:<run.py scenario>")
+        if name in REMOTE_BIND:
+            raise ValueError(f"scenario:{name} needs the debug loopback-bind build, which a stress loop "
+                             "does not build; dispatch manual CI (mode=ci) for it, or pick another scenario:")
         return "scenario", [name]
     nodes = selection.split()
     if not nodes or not all(NODE.fullmatch(node) and ".." not in node for node in nodes):
@@ -61,6 +67,24 @@ def iterations(value: str) -> int:
     return count
 
 
+# Scenarios the cli-live steps run on the default (static) build without the
+# embedder fixture; every other scenario runs as the H5 shards run it
+# (rust/ci/run_coverage.py), on the mutants-feature build with --fixture.
+STATIC_PREFIXES = ("body-", "security-", "static-")
+# These need the debug build's loopback-bind override, which only the rust
+# job builds, and a stress loop runs no rust job.
+REMOTE_BIND = {"trust-bind", "security-remote-open", "security-remote-auth"}
+
+
+def daemon(name: str, candidates: Path) -> tuple[Path, bool]:
+    """The daemon binary a scenario's required lane uses, and whether it
+    passes the offline embedder fixture."""
+    suffix = ".exe" if os.name == "nt" else ""
+    if name.startswith(STATIC_PREFIXES):
+        return candidates / f"pseudolife-daemon-static{suffix}", False
+    return candidates / f"pseudolife-daemon{suffix}", True
+
+
 def command(kind: str, names: list[str], candidates: Path, scratch: Path) -> list[str]:
     """The argv one iteration runs, from the repository root."""
     suffix = ".exe" if os.name == "nt" else ""
@@ -68,12 +92,13 @@ def command(kind: str, names: list[str], candidates: Path, scratch: Path) -> lis
         argv = [sys.executable, "rust/cli_harness", "--row", names[0]]
         if len(names) > 1:
             argv += ["--case", names[1]]
-        return argv + ["--candidate", str(candidates / f"pseudolife-stdio{suffix}"), "-v",
+        return argv + ["--candidate", str(candidates / f"pseudolife-stdio{suffix}"), "--fixture", "-v",
                        "--out", str(scratch / "harness.json")]
     if kind == "scenario":
-        return [sys.executable, "rust/daemon/harness/run.py", "live",
-                "--rust-bin", str(candidates / f"pseudolife-daemon-static{suffix}"),
-                "--only", names[0], "--out", str(scratch / "harness.json")]
+        binary, fixture = daemon(names[0], candidates)
+        return [sys.executable, "rust/daemon/harness/run.py", "live", "--rust-bin", str(binary),
+                *(["--fixture"] if fixture else []), "--only", names[0],
+                "--out", str(scratch / "harness.json")]
     return [sys.executable, "-m", "pytest", *names, "-ra", "--durations=30",
             "--junitxml", str(scratch / "junit.xml")]
 
@@ -82,6 +107,19 @@ def runner() -> dict:
     return {"os": os.environ.get("RUNNER_OS", ""), "image": " ".join(
         filter(None, (os.environ.get("ImageOS"), os.environ.get("ImageVersion")))) or "unknown",
             "cpus": os.cpu_count()}
+
+
+def tests_ran(report: Path) -> bool:
+    """Whether pytest's junit report shows at least one selected test that ran."""
+    try:
+        text = report.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    total = skipped = 0
+    for tag in re.findall(r"<testsuite\b[^>]*>", text):
+        total += int((re.search(r'\btests="(\d+)"', tag) or [0, 0])[1])
+        skipped += int((re.search(r'\bskipped="(\d+)"', tag) or [0, 0])[1])
+    return total > skipped
 
 
 def plan(options) -> int:
@@ -106,14 +144,20 @@ def run(options) -> int:
     stdio = Path(options.candidates) / ("pseudolife-stdio.exe" if os.name == "nt" else "pseudolife-stdio")
     env = dict(os.environ, PSEUDOLIFE_RUST_BINARY=str(stdio))
     started, code = time.monotonic(), None
+    note = ""
     try:
         print("stress: " + " ".join(argv), flush=True)
         code = subprocess.run(argv, env=env).returncode
+        # pytest exits 0 when every selected test skipped: no evidence.
+        if code == 0 and kind == "pytest" and not tests_ran(scratch / "junit.xml"):
+            code, note = 1, "no selected test ran (all skipped or none collected)"
+            print(f"stress: {note}", flush=True)
     finally:
         row = {"iteration": options.iteration, "selection": options.selection.strip(),
                "runner": runner(), "exit_code": code,
                "outcome": "pass" if code == 0 else "fail",
-               "seconds": round(time.monotonic() - started, 1)}
+               "seconds": round(time.monotonic() - started, 1),
+               **({"note": note} if note else {})}
         Path(options.out).write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
     return code
 

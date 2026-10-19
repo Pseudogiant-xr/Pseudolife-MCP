@@ -1422,8 +1422,10 @@ jobs:
           }
 
   # A stress loop (mode=stress): run one selection on N fresh hosted runners
-  # and report every iteration (rust/ci/stress.py). Inputs reach the scripts
-  # only through env, never inlined into a script.
+  # and report every iteration (rust/ci/stress.py). It compares against this
+  # checkout's Python on any branch, so it binds no event oracle (that
+  # binding takes only master dispatches). Inputs reach the scripts only through env,
+  # never inlined into a script.
   stress-plan:
     name: Stress / plan
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'stress'
@@ -1491,13 +1493,6 @@ jobs:
       - name: Restore executable permission
         if: runner.os == 'Linux'
         run: chmod +x rust/target/release/*
-      - name: Bind the event-selected Python oracle
-        shell: pwsh
-        env:
-          GITHUB_REF: ${{ github.ref }}
-        run: |
-          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
-          exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL
         timeout-minutes: 10
         shell: pwsh

@@ -53,15 +53,64 @@ def test_iterations_are_bounded(value, ok):
 
 def test_each_kind_runs_the_existing_harness(tmp_path):
     candidates = tmp_path / "bin"
-    row = stress.command("row", ["hook", "briefing"], candidates, tmp_path)
-    assert row[1:4] == ["rust/cli_harness", "--row", "hook"] and row[4:6] == ["--case", "briefing"]
+    row = stress.command("row", ["episode", "bank-start-git"], candidates, tmp_path)
+    assert row[1:4] == ["rust/cli_harness", "--row", "episode"] and row[4:6] == ["--case", "bank-start-git"]
     assert "--golden" not in row and "--skip-bank" not in row and "--out" in row
-    scenario = stress.command("scenario", ["security-open"], candidates, tmp_path)
-    assert scenario[1:3] == ["rust/daemon/harness/run.py", "live"]
-    assert scenario[scenario.index("--only") + 1] == "security-open"
-    assert Path(scenario[scenario.index("--rust-bin") + 1]).name.startswith("pseudolife-daemon-static")
+    # A fresh runner has no model cache: bank-backed cases need the offline
+    # embedder fixture (Codex review of e56fe0f6).
+    assert "--fixture" in row
     tests = stress.command("pytest", ["tests/test_a.py"], candidates, tmp_path)
     assert tests[1:4] == ["-m", "pytest", "tests/test_a.py"] and "-ra" in tests and "--junitxml" in tests
+
+
+@pytest.mark.parametrize("scenario, binary, fixture", [
+    # cli-live's steps: the default static build, no embedder fixture.
+    ("security-open", "pseudolife-daemon-static", False),
+    ("body-limits", "pseudolife-daemon-static", False),
+    ("static-build", "pseudolife-daemon-static", False),
+    # The H5 shards (rust/ci/run_coverage.py): the mutants build with --fixture.
+    ("tokenless", "pseudolife-daemon", True),
+    ("session-reap", "pseudolife-daemon", True),
+])
+def test_a_scenario_runs_on_its_required_lanes_binary(tmp_path, scenario, binary, fixture):
+    argv = stress.command("scenario", [scenario], tmp_path / "bin", tmp_path)
+    assert argv[1:3] == ["rust/daemon/harness/run.py", "live"]
+    assert argv[argv.index("--only") + 1] == scenario
+    assert Path(argv[argv.index("--rust-bin") + 1]).stem == binary
+    assert ("--fixture" in argv) == fixture
+
+
+@pytest.mark.parametrize("scenario", sorted(stress.REMOTE_BIND))
+def test_remote_bind_scenarios_are_refused_before_anything_starts(scenario):
+    # They need the debug loopback-bind build, which only the rust job makes.
+    with pytest.raises(ValueError, match="debug loopback-bind build"):
+        stress.parse(f"scenario:{scenario}")
+
+
+JUNIT = '<?xml version="1.0"?><testsuites><testsuite name="pytest" errors="0" failures="0" skipped="{skipped}" tests="{tests}"></testsuite></testsuites>'
+
+
+@pytest.mark.parametrize("tests, skipped, ran", [(2, 0, True), (2, 1, True), (2, 2, False), (0, 0, False)])
+def test_a_report_counts_only_tests_that_ran(tmp_path, tests, skipped, ran):
+    report = tmp_path / "junit.xml"
+    report.write_text(JUNIT.format(tests=tests, skipped=skipped), encoding="utf-8")
+    assert stress.tests_ran(report) == ran
+    assert not stress.tests_ran(tmp_path / "missing.xml")
+
+
+def test_an_all_skipped_pytest_iteration_fails(tmp_path, monkeypatch):
+    # pytest exits 0 when every selected test skips; that is no evidence
+    # (Codex review of e56fe0f6: test_fork.py on Windows, 2 skipped, "pass").
+    out = tmp_path / "stress" / "stress-row-1.json"
+
+    def skipped(argv, env):
+        Path(argv[argv.index("--junitxml") + 1]).write_text(JUNIT.format(tests=2, skipped=2), encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(stress.subprocess, "run", skipped)
+    assert stress.main(["run", "--selection", "rust/cli_harness/test_fork.py", "--iteration", "1",
+                        "--candidates", str(tmp_path), "--out", str(out)]) == 1
+    row = json.loads(out.read_text(encoding="utf-8"))
+    assert row["outcome"] == "fail" and "no selected test ran" in row["note"]
 
 
 def test_plan_lists_the_iterations(tmp_path):
@@ -158,6 +207,9 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     download = next(step for step in loop["steps"] if step.get("uses") == "actions/download-artifact@v4")
     assert download["with"] == {"name": "rust-shim-${{ runner.os }}", "path": "rust/target/release"}
     assert not any("cargo" in step.get("run", "") for step in loop["steps"])
+    # The event oracle binding accepts only master dispatches; a stress loop
+    # runs on any branch against its own checkout (Codex review of e56fe0f6).
+    assert not any("oracle_selection" in step.get("run", "") for step in loop["steps"])
     assert report["needs"] == ["stress-plan", "stress"]
     assert report["if"] == "${{ always() && needs.stress-plan.result == 'success' }}"
     upload = next(step for step in report["steps"] if step.get("name") == "Retain the stress report")
