@@ -803,11 +803,12 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
                                 "parity": "${{ steps.parity.outputs.parity }}"}
     checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["fetch-depth"] == 2
-    gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') "
+    gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode %s) "
              "&& needs.scope.outputs.rust != 'false' }}")
-    for name in ("rust", "candidate", "daemon-image"):
+    # The candidate build also serves a stress loop; the rest is ordinary CI.
+    for name, mode in (("rust", "== 'ci'"), ("candidate", "!= 'wait-mail'"), ("daemon-image", "== 'ci'")):
         assert jobs[name]["needs"] == "scope", name
-        assert jobs[name]["if"] == gated, name
+        assert jobs[name]["if"] == gated % mode, name
     # Parity checks and source mutants inherit the skip through their needs.
     # Their success checks name rust and candidate: the implicit success()
     # would also cover scope. Parity checks need scope for their matrix, so a
