@@ -139,13 +139,22 @@
     },
     {
      "name": "park_reason",
-     "literal_text": true,
+     "literal_text": false,
      "default": null,
      "schema": {
       "kind": "nullable",
       "inner": {
-       "kind": "str",
-       "max_length": 20
+       "kind": "literal",
+       "expected": [
+        "done",
+        "blocked",
+        "needs_approval",
+        "needs_info",
+        "needs_resource",
+        "waiting_peer",
+        ""
+       ],
+       "message": "Input should be 'done', 'blocked', 'needs_approval', 'needs_info', 'needs_resource', 'waiting_peer' or ''"
       }
      }
     },
