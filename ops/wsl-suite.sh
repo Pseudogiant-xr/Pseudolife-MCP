@@ -458,7 +458,10 @@ if [[ $# -eq 0 ]]; then
     if (( workers >= 2 )); then
         set -- "$@" -n "$workers" --dist loadfile --durations=30
     fi
-    echo "wsl-suite: full suite, $( (( workers >= 2 )) && echo "$workers xdist workers" || echo "one process")" >&2
+    # stdout, beside "testing <sha>": through ops/wsl-suite.ps1 a redirected
+    # stdout and stderr can land in one file at separate offsets, and this
+    # line on stderr overwrote that one (2026-10-19).
+    echo "wsl-suite: full suite, $( (( workers >= 2 )) && echo "$workers xdist workers" || echo "one process")"
 fi
 
 # Every process the run starts inherits this marker, so whatever outlives

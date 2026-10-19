@@ -765,7 +765,7 @@ def test_the_default_full_run_takes_the_workers_asked_for(tmp_path):
     proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="3")
     assert proc.returncode == 0, proc.stderr
     assert argv == [*_FULL, "-n", "3", "--dist", "loadfile", "--durations=30"]
-    assert "full suite, 3 xdist workers" in proc.stderr
+    assert "full suite, 3 xdist workers" in proc.stdout
 
 
 @pytest.mark.parametrize("workers", ["0", "1"])
@@ -774,7 +774,7 @@ def test_one_worker_or_none_runs_the_suite_in_one_process(tmp_path, workers):
     proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS=workers)
     assert proc.returncode == 0, proc.stderr
     assert argv == _FULL
-    assert "full suite, one process" in proc.stderr
+    assert "full suite, one process" in proc.stdout
 
 
 @_LINUX_ONLY
