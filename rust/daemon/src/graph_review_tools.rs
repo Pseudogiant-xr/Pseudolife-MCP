@@ -1,13 +1,16 @@
 //! `memory_graph_review` on the MCP surface. `action="list"` (the default)
 //! is served: `mcp_server.memory_graph_review` (2309-2431) →
 //! `service.graph_review(scope)` (`service.py:7812-7895`) over the analyzer
-//! in `graph_review.rs`. Every other action answers the declared
+//! in `graph_review.rs`. The mutating actions (`propose`, `relate`,
+//! `dismiss_pair` and the five id actions) live in `graph_review_actions.rs`.
+//! `dismiss_slot_pair` and `restore_slot` answer the declared
 //! `not_implemented` stub, byte for byte what an unregistered tool answers.
 //!
-//! Read-only. Python takes the service lock in two blocks (the loads, then
-//! the decision audit) and runs the analyzer between them; this holds the
-//! writer lock across the whole list body instead, so it never answers from
-//! two different graph states. Inside it, the two blocks keep Python's order.
+//! The list is read-only. Python takes the service lock in two blocks (the
+//! loads, then the decision audit) and runs the analyzer between them; this
+//! holds the writer lock across the whole list body instead, so it never
+//! answers from two different graph states. Inside it, the two blocks keep
+//! Python's order.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -21,6 +24,9 @@ use crate::graph_review::{
 use crate::mcp::dispatch::{ToolCall, ToolError, ToolFuture};
 use crate::service::Ready;
 use crate::storage::graph;
+
+#[path = "graph_review_actions.rs"]
+mod actions;
 
 const TOOL: &str = "memory_graph_review";
 /// `review_decisions._INDEX_KEY`.
@@ -50,16 +56,25 @@ fn unserved() -> ToolError {
 }
 
 fn mcp_memory_graph_review<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
-    Box::pin(async move {
-        let a = call.args;
-        if a.get("action").and_then(Value::as_str).unwrap_or("list") != "list" {
-            return Err(unserved());
-        }
-        let scope = a.get("scope").and_then(Value::as_str);
-        let ready = app.service.ensure_init().await.map_err(internal)?;
-        let _ws = ready.write.lock().await;
-        graph_review(&ready, &app.service.config.memory.deep_dream, scope).await
-    })
+    let a = call.args;
+    match a.get("action").and_then(Value::as_str).unwrap_or("list") {
+        "list" => Box::pin(async move {
+            let scope = a.get("scope").and_then(Value::as_str);
+            let ready = app.service.ensure_init().await.map_err(internal)?;
+            let _ws = ready.write.lock().await;
+            graph_review(&ready, &app.service.config.memory.deep_dream, scope).await
+        }),
+        "dismiss_slot_pair" | "restore_slot" => Box::pin(async { Err(unserved()) }),
+        action => match actions::plan(action, a) {
+            // The argument refusals `mcp_server` answers before any service call.
+            Err(answer) => Box::pin(async move { Ok(answer) }),
+            Ok(plan) => {
+                crate::graph_write_tools::spawn_locked(app, a, move |ready, _| async move {
+                    actions::run(&ready, plan).await
+                })
+            }
+        },
+    }
 }
 
 // ── storage readers (storage/postgres.py) ────────────────────────────────
@@ -212,18 +227,7 @@ async fn load_block(c: &Client) -> anyhow::Result<Loaded> {
         .iter()
         .map(|r| r.get(0))
         .collect();
-    // `entity_fact_counts` (4240-4247).
-    let fact_counts = c
-        .query(
-            "SELECT entity_id, COUNT(*) FROM facts \
-             WHERE status = 'current' AND entity_id IS NOT NULL \
-             GROUP BY entity_id",
-            &[],
-        )
-        .await?
-        .iter()
-        .map(|r| (r.get(0), r.get(1)))
-        .collect();
+    let fact_counts = entity_fact_counts(c).await?;
     Ok(Loaded {
         src_map,
         proposals,
@@ -234,6 +238,20 @@ async fn load_block(c: &Client) -> anyhow::Result<Loaded> {
         lesson_ids,
         fact_counts,
     })
+}
+
+/// `entity_fact_counts` (4240-4247).
+async fn entity_fact_counts(c: &Client) -> Result<HashMap<i64, i64>, tokio_postgres::Error> {
+    Ok(c.query(
+        "SELECT entity_id, COUNT(*) FROM facts \
+         WHERE status = 'current' AND entity_id IS NOT NULL \
+         GROUP BY entity_id",
+        &[],
+    )
+    .await?
+    .iter()
+    .map(|r| (r.get(0), r.get(1)))
+    .collect())
 }
 
 /// `recent_entity_decisions(limit=20)` (4070-4082).
@@ -346,6 +364,15 @@ fn py_json(v: Value) -> Value {
     }
 }
 
+/// `value.get("version") == 1`: `1.0` and `true` pass.
+fn version_is_one(v: Option<&Value>) -> bool {
+    match v {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_f64() == Some(1.0),
+        _ => false,
+    }
+}
+
 /// `_index(storage)["recent_ids"]` (`memory/review_decisions.py:26-36`): the
 /// stored index at version 1 (`== 1`, so `1.0` and `true` pass), its
 /// `recent_ids` through `list(... or [])`, last 100 kept.
@@ -353,12 +380,7 @@ fn recent_ids(index: Option<Value>) -> Result<Vec<Value>, String> {
     let Some(Value::Object(m)) = index else {
         return Ok(vec![]);
     };
-    let version_ok = match m.get("version") {
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => n.as_f64() == Some(1.0),
-        _ => false,
-    };
-    if !version_ok {
+    if !version_is_one(m.get("version")) {
         return Ok(vec![]);
     }
     let ids: Vec<Value> = match m.get("recent_ids") {
@@ -456,22 +478,41 @@ fn parse_graph(g: &Value) -> (Vec<Entity>, Vec<Edge>) {
 /// full graph plus current-fact count) than its target is presented
 /// swapped; ties keep the stored direction.
 fn fold_merge_rows(rows: &mut [EntityProposal], edges: &[Edge], fact_counts: &HashMap<i64, i64>) {
-    let deg = gr::degree_counts(edges);
-    // `_deg.get(eid, 0) + fact_counts.get(eid, 0)`; a NULL id reads 0.
-    let evidence = |id: Option<i64>| -> i64 {
-        id.map_or(0, |i| {
-            deg.get(&i).copied().unwrap_or(0) as i64 + fact_counts.get(&i).copied().unwrap_or(0)
-        })
-    };
+    let evidence = merge_evidence(edges, fact_counts);
     for p in rows.iter_mut() {
         if p.kind == "merge"
-            && evidence(p.entity_id) > evidence(p.into_id)
+            && should_fold(p.entity_id, p.into_id, &evidence)
             && !crate::mutants::active("mcp-review-no-fold-swap")
         {
             std::mem::swap(&mut p.entity_id, &mut p.into_id);
             std::mem::swap(&mut p.entity, &mut p.into);
         }
     }
+}
+
+/// The evidence `_fold_direction` weighs: degree over the given (live)
+/// edges plus the current-fact count, `deg.get(eid, 0) + facts.get(eid, 0)`;
+/// a NULL id reads 0.
+fn merge_evidence<'a>(
+    edges: &[Edge],
+    fact_counts: &'a HashMap<i64, i64>,
+) -> impl Fn(Option<i64>) -> i64 + 'a {
+    let deg = gr::degree_counts(edges);
+    move |id: Option<i64>| {
+        id.map_or(0, |i| {
+            deg.get(&i).copied().unwrap_or(0) as i64 + fact_counts.get(&i).copied().unwrap_or(0)
+        })
+    }
+}
+
+/// `_fold_direction`'s test: swap when the stored from-side strictly
+/// outweighs the target; ties keep the stored direction.
+fn should_fold(
+    frm: Option<i64>,
+    into: Option<i64>,
+    evidence: &impl Fn(Option<i64>) -> i64,
+) -> bool {
+    evidence(frm) > evidence(into)
 }
 
 /// `MemoryService.graph_review(scope)` (`service.py:7812-7895`).

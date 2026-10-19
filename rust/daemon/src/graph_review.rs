@@ -336,7 +336,7 @@ fn stem_key(name: &str) -> String {
 }
 
 /// Shell-command prefixes `relation_quality.infer_type` types as concepts.
-const CMD_PREFIXES: &[&str] = &[
+pub(crate) const CMD_PREFIXES: &[&str] = &[
     "docker compose",
     "docker ",
     "git ",
@@ -349,12 +349,12 @@ const CMD_PREFIXES: &[&str] = &[
     "wsl ",
 ];
 /// `relation_quality._FILE_EXT`.
-const FILE_EXT: &[&str] = &[
+pub(crate) const FILE_EXT: &[&str] = &[
     ".py", ".yaml", ".yml", ".json", ".md", ".txt", ".sql", ".ps1", ".sh", ".gguf", ".toml",
     ".ini", ".cfg", ".fx",
 ];
 /// `relation_quality._BRANCH_PREFIX` alternatives.
-const BRANCH_PREFIXES: &[&str] = &[
+pub(crate) const BRANCH_PREFIXES: &[&str] = &[
     "feat", "feature", "fix", "hotfix", "bugfix", "chore", "ci", "build", "perf", "refactor",
     "style", "release", "revert", "eval", "spike", "exp",
 ];
