@@ -269,11 +269,13 @@ fn fifo_replacement_is_interruptible_and_listener_permissions_override_umask() {
         rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
     )
     .unwrap();
-    // Interrupt only once the waiter holds the FIFO for reading, which is past
-    // its interrupt guard: a nonblocking writer can open a FIFO only while a
-    // reader has it open. This replaces a fixed 150 ms wait a stalled runner
-    // could outlast. The writer stays open until the waiter has exited.
+    // Linux: interrupt only once the waiter holds the FIFO for reading, past
+    // its interrupt guard (a nonblocking writer can open a FIFO only while a
+    // reader has it open); its read polls the interrupt flag, so the held
+    // writer cannot hide the signal. The writer stays open until it exits.
+    #[cfg(target_os = "linux")]
     let reader_by = Instant::now() + Duration::from_secs(5);
+    #[cfg(target_os = "linux")]
     let _writer = loop {
         match rustix::fs::open(
             &digest,
@@ -287,6 +289,12 @@ fn fifo_replacement_is_interruptible_and_listener_permissions_override_umask() {
             Err(error) => panic!("wait-mail never opened the replaced digest FIFO: {error}"),
         }
     };
+    // Elsewhere the waiter blocks in open() until a writer appears and then
+    // reads without rechecking the flag, so a held writer could lose the
+    // signal. There a signal any time after the guard exits 130 (blocked in
+    // open, or caught by the flag before it); the wait only aims it at open.
+    #[cfg(not(target_os = "linux"))]
+    std::thread::sleep(Duration::from_millis(150));
     rustix::process::kill_process(
         rustix::process::Pid::from_raw(child.id() as i32).unwrap(),
         rustix::process::Signal::INT,

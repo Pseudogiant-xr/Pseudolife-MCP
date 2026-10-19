@@ -325,20 +325,30 @@ async fn board_channel_fixed_state_refusal_and_missing_reused_bridge_fall_back_p
 async fn board_channel_bounded_probe_and_explicit_codex_checkin() {
     let fixture = Fixture::new(0);
     // The fixture holds the board check's answer until attach has returned,
-    // so attach can only return through the probe budget: an ordering check
-    // a stalled runner cannot fail, where an elapsed-time bound could.
+    // so attach can only return through a probe budget. On paused time the
+    // probe's own timers are the only thing that moves the clock: honouring
+    // the 40 ms budget takes no measurable virtual time, while ignoring it
+    // for the 2 s default (or no bound) shows as seconds, whatever the
+    // runner did meanwhile.
     let (held, gate) = Answer::text(200, b"ready").gated();
     fixture.answer("coordination-start", held);
     let home = Home::new();
     let runtime = board_fixture::runtime(&fixture, false);
     let mut options = board_fixture::options(&runtime, &home, "");
     options.timing.probe = Duration::from_millis(40);
+    tokio::time::pause();
+    let attaching = tokio::time::Instant::now();
     let board = tokio::time::timeout(
         Duration::from_secs(10),
         Board::attach_options(runtime, options),
     )
     .await
     .expect("attach waited for the held board check instead of its probe budget");
+    assert!(
+        attaching.elapsed() < Duration::from_secs(1),
+        "attach ignored its probe budget"
+    );
+    tokio::time::resume();
     gate.release();
     assert!(!board.board_checkin().await);
     assert_eq!(fixture.count("/register"), 0);
@@ -351,11 +361,13 @@ async fn board_channel_bounded_probe_and_explicit_codex_checkin() {
         );
         let home = Home::new();
         let runtime = board_fixture::runtime(&fixture, true);
-        let board = Board::attach_options(
-            runtime.clone(),
-            board_fixture::options(&runtime, &home, "1"),
-        )
-        .await;
+        // Registration is the subject here, not its budgets: give the check
+        // and the thread registration room for a loaded runner (200x on the
+        // Windows dev VM under CPU load missed the 3 s default 6 times).
+        let mut options = board_fixture::options(&runtime, &home, "1");
+        options.timing.startup = Duration::from_secs(30);
+        options.timing.probe = Duration::from_secs(30);
+        let board = Board::attach_options(runtime.clone(), options).await;
         assert_eq!(board.board_checkin().await, ready);
         assert_eq!(fixture.count("coordination-start"), 1);
         assert_eq!(fixture.count("/register"), 0);

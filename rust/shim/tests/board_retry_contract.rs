@@ -629,6 +629,8 @@ async fn board_retry_close_wins_late_transport_failure_without_another_attempt()
     // timeout, a tokio timer. On paused time that timer is the only thing
     // that can move the clock, so a close that outwaited the attempt instead
     // of cancelling it shows as five virtual seconds, whatever the runner did.
+    // (close's state drain runs on spawn_blocking, which holds auto-advance
+    // off; were it moved to a plain thread, this check would need revisiting.)
     tokio::time::pause();
     let closing = tokio::time::Instant::now();
     tokio::time::timeout(Duration::from_secs(10), board.close())

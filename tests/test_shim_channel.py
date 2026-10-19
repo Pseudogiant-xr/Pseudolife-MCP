@@ -130,7 +130,9 @@ def test_slow_adapter_startup_falls_back_to_a_background_retry(monkeypatch):
     monkeypatch.setattr(shim, "_proxy", proxy)
     monkeypatch.setattr(shim, "_ADAPTER_STARTUP_SECONDS", 0.01, raising=False)
     monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", "1")
-    asyncio.run(asyncio.wait_for(shim._run_session_proxy("http://fixture", "token", "s"), 0.2))
+    # A hang guard: the fallback itself is asserted below (the fake proxy
+    # returns at once, so only a startup that never gave up would hang).
+    asyncio.run(asyncio.wait_for(shim._run_session_proxy("http://fixture", "token", "s"), 10))
     assert len(called) == 1
     assert repr(called[0].pop("provider")) == "CredentialProvider(source='static')"
     late = called[0].pop("coordination_adapter")

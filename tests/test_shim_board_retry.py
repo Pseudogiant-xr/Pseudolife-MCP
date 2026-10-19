@@ -609,7 +609,12 @@ def test_codex_session_end_stops_an_unanswered_board_check(monkeypatch):
     probe = _scripted_probe(None)
 
     async def driver(handler, calls, inbox):
-        await asyncio.sleep(0.2)
+        # End the session once the check has been retried, not after a fixed
+        # 0.2 s: the retry asks from a worker thread a stalled runner delays.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while len(probe.asked) < 2 and loop.time() < deadline:
+            await asyncio.sleep(0.01)
 
     _board_session(monkeypatch, Daemon(), driver=driver, coordination=None,
                    probe=probe, codex_registry=Registry)

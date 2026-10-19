@@ -241,7 +241,10 @@ fn test_file_claim_preparation_uses_total_deadline_and_next_call_recovers() {
     let mut shim = Shim::start_with_env(
         &fixture.url,
         &[
-            ("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "0.15"),
+            // Long enough that git starts and the recovering call completes on
+            // a loaded runner (0.15 s missed git's start 7 times in 200 on the
+            // Windows dev VM under CPU load); git is held past it regardless.
+            ("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "2"),
             ("PSEUDOLIFE_MCP_SHARED_HOST", "0"),
             ("PATH", &path),
             ("CLAIMS_PREPARATION_MARKER", marker.to_str().unwrap()),

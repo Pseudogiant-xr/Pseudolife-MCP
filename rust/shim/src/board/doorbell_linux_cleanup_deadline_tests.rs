@@ -114,10 +114,12 @@ async fn stalled_metadata_cutoff_retains_owned_leader_and_allows_ordinary_retry(
         // counterfactual instead of hanging it.
         let _ = receive.recv_timeout(Duration::from_secs(10));
         let fields = std::iter::repeat_n("0", 15).collect::<Vec<_>>().join(" ");
+        // Marked before the write, so a reader released by it can never be
+        // seen returning before the mark (a preempted writer would hide it).
+        writer_wrote.store(true, Ordering::Release);
         output
             .write_all(format!("99999999 (slow metadata) Z 0 0 0 {fields} 1\n").as_bytes())
             .unwrap();
-        writer_wrote.store(true, Ordering::Release);
     });
     let timer = Arc::new(AtomicBool::new(false));
     let progress = timer.clone();

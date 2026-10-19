@@ -386,8 +386,11 @@ impl Drop for StopWorker {
     }
 }
 
+/// Poll for a real process's effect; the bound only stops a hang (a ring's
+/// queue process outlasted 5 s twice in 200 on the Windows dev VM under CPU
+/// load). Never call it while the clock is paused.
 async fn wait_for(mut condition: impl FnMut() -> bool) {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         while !condition() {
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
@@ -882,17 +885,22 @@ async fn arrival_preview_complete_and_incomplete_ack_expiry_matrix() {
 #[tokio::test]
 async fn timed_offer_withdrawal_and_attention_permission_matrix() {
     let rig = Harness::new(true, Duration::ZERO).await;
-    // An hour out, so "not yet due" cannot become "due" during a runner
-    // stall before the observation (ring_at is wall-clock, not tokio time).
-    let mut offered = view(&[1, 2], 2, 2, now() + 3600.0);
+    // Due 2 s out on the wall clock the bell reads (not tokio time), so the
+    // first observation lands before it even on a stalled runner (0.12 s
+    // did not).
+    let ring_at = now() + 2.0;
+    let mut offered = view(&[1, 2], 2, 2, ring_at);
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
     let mut withdrawn = offered.clone();
     withdrawn.wake = None;
     withdrawn.wake_watermark = None;
-    // The bell decides from the view in hand and keeps no copy of a withdrawn
-    // offer, so no wait has to let the old due time pass first.
     rig.bell.observe(BANK, &withdrawn).await;
+    // Let the withdrawn offer come due, polling the bell's own clock: a bell
+    // that kept a copy of it would ring it now.
+    while now() <= ring_at {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     rig.bell.observe(BANK, &withdrawn).await;
     assert!(!rig.pending.path.exists());
     for wake in [

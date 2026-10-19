@@ -397,10 +397,12 @@ def test_health_stale_cache_served_while_revalidating(monkeypatch):
     monkeypatch.setattr(cli, "chat", _boom)
     cli._health_at = time.monotonic() - 301  # expire the cache
 
-    ok, _ = cli.health()
-    assert ok is True                        # stale verdict, served instantly
-    assert not finished.is_set()             # ... before the refresh finished
-    release.set()
+    try:
+        ok, _ = cli.health()
+        assert ok is True                    # stale verdict, served instantly
+        assert not finished.is_set()         # ... before the refresh finished
+    finally:
+        release.set()
 
     deadline = time.monotonic() + 5.0        # background refresh lands
     while calls["n"] == 0 and time.monotonic() < deadline:

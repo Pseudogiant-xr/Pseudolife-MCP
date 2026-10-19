@@ -13,16 +13,21 @@ This guard reads source only. It scans ``tests/``, every Rust ``tests``
 directory and ``*_tests.rs`` / ``tests.rs`` module under ``rust/``, and the
 parity harnesses (``rust/cli_harness/``, ``rust/daemon/harness/``) for:
 
-* a sleep shorter than one second outside a loop (a sleep inside a
-  ``while``, a ``loop`` or a counted ``for`` is a poll, and a poll only
-  delays the verdict; a ``for`` over a literal list of cases is not a loop
-  here);
+* a sleep shorter than one second outside a poll loop (a ``while``, a Rust
+  ``loop``, or a counted ``for _ in range(n)`` / ``for _ in 0..n``: a poll
+  only delays the verdict; a ``for`` over a list of cases is not a poll);
 * a ``timeout`` shorter than one second that the test waits on, outside a
-  loop (Python ``timeout=<1`` keywords; Rust ``timeout(..)``,
+  poll loop (Python ``timeout=<1`` keywords and positional ``wait_for``,
+  ``wait``, ``join``, ``result`` timeouts; Rust ``timeout(..)``,
   ``recv_timeout(..)`` and ``wait_timeout(..)`` with a sub-second
   ``Duration`` whose result is not checked as an error);
-* a deadline ``Instant::now() + <sub-second Duration>`` outside a loop;
-* an assertion comparing an elapsed time with a sub-second bound.
+* a deadline ``Instant::now() + <sub-second Duration>`` outside a poll loop;
+* an assertion comparing an elapsed time with a sub-second bound (Python
+  ``<``, the reversed ``>`` and ``assertLess``; Rust ``elapsed() <`` and a
+  measured ``elapsed`` variable).
+
+Not covered: budgets held in a named constant or a parameter default, and
+``#[cfg(test)]`` modules inside Rust source files other than ``*_tests.rs``.
 
 A hit that is a negative check (it asserts nothing happened in the interval,
 which a slower machine only makes easier to pass), a minimum (the interval
@@ -153,10 +158,11 @@ class _PythonScanner(ast.NodeVisitor):
         self.hits.append(Hit(self.path, function, line, kind, self.lines[line - 1].strip()))
 
     def _loop(self, node: ast.AST) -> None:
-        # ``for mode in ("a", "b"):`` walks test cases, it does not poll.
-        cases = isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(
-            node.iter, (ast.Tuple, ast.List, ast.Set))
-        step = 0 if cases else 1
+        # A poll repeats until a condition holds: a ``while``, or a counted
+        # ``for _ in range(n)``. ``for mode in MODES:`` walks test cases.
+        polls = isinstance(node, ast.While) or (
+            isinstance(node.iter, ast.Call) and _call_name(node.iter) == "range")
+        step = 1 if polls else 0
         self.loops += step
         self.generic_visit(node)
         self.loops -= step
@@ -184,21 +190,47 @@ class _PythonScanner(ast.NodeVisitor):
         self.functions.pop()
 
     def visit_Call(self, node: ast.Call) -> None:
+        name = _call_name(node)
         if not self.loops:
-            if _call_name(node) == "sleep" and node.args and _sub_second(_number(node.args[0])):
+            if name == "sleep" and node.args and _sub_second(_number(node.args[0])):
                 self._hit(node, "sleep")
-            if any(keyword.arg == "timeout" and _sub_second(_number(keyword.value))
-                   for keyword in node.keywords):
+            elif any(keyword.arg == "timeout" and _sub_second(_number(keyword.value))
+                     for keyword in node.keywords):
                 self._hit(node, "timeout")
+            elif _positional_timeout(node):
+                self._hit(node, "timeout")
+        if name in {"assertLess", "assertLessEqual"} and len(node.args) >= 2 and (
+                _mentions_elapsed(node.args[0]) and _sub_second(_number(node.args[1]))):
+            self._hit(node, "elapsed-assert")
         self.generic_visit(node)
 
     def visit_Assert(self, node: ast.Assert) -> None:
         test = node.test
-        if isinstance(test, ast.Compare) and _mentions_elapsed(test.left) and any(
-                isinstance(op, (ast.Lt, ast.LtE)) and _sub_second(_number(right))
-                for op, right in zip(test.ops, test.comparators)):
+        if isinstance(test, ast.Compare) and _bounds_elapsed(test):
             self._hit(node, "elapsed-assert")
         self.generic_visit(node)
+
+
+# Positional timeouts: asyncio.wait_for(aw, 0.5); event.wait(0.5),
+# thread.join(0.5), future.result(0.5). (Not ``get``: ``dict.get(k, 0.3)``.)
+_POSITIONAL_TIMEOUT = {"wait_for": 1, "wait": 0, "join": 0, "result": 0}
+
+
+def _positional_timeout(node: ast.Call) -> bool:
+    index = _POSITIONAL_TIMEOUT.get(_call_name(node))
+    return index is not None and len(node.args) > index and _sub_second(_number(node.args[index]))
+
+
+def _bounds_elapsed(test: ast.Compare) -> bool:
+    """``elapsed < 0.5`` or the reversed ``0.5 > elapsed``."""
+    left = test.left
+    for op, right in zip(test.ops, test.comparators):
+        if isinstance(op, (ast.Lt, ast.LtE)) and _mentions_elapsed(left) and _sub_second(_number(right)):
+            return True
+        if isinstance(op, (ast.Gt, ast.GtE)) and _sub_second(_number(left)) and _mentions_elapsed(right):
+            return True
+        left = right
+    return False
 
 
 def scan_python_text(path: str, text: str) -> list[Hit]:
@@ -216,10 +248,14 @@ def scan_python_text(path: str, text: str) -> list[Hit]:
 # --------------------------------------------------------------------------
 
 _MILLIS = re.compile(r"Duration::from_millis\(\s*([0-9_]+)\s*\)")
+_MICROS = re.compile(r"Duration::from_micros\(\s*([0-9_]+)\s*\)")
 _SECS_F = re.compile(r"Duration::from_secs_f(?:32|64)\(\s*(0?\.[0-9]+)\s*\)")
+_SUB_SECOND_CTOR = r"(?:std::time::)?Duration::from_(?:millis|micros|secs_f(?:32|64))"
+# A poll repeats until a condition holds: ``loop``, ``while``, or a counted
+# ``for _ in 0..n``; ``for mode in MODES`` walks test cases.
 _LOOP_HEADER = re.compile(
-    r"^\s*(?:'?[A-Za-z_]+:\s*)?(?:loop\b|while\b|for\b)|=>\s*loop\b|\bloop\s*\{\s*$")
-_CASE_LOOP = re.compile(r"^\s*for\b.*\bin\s+(?:\[|&\[|\()")
+    r"^\s*(?:'?[A-Za-z_]+:\s*)?(?:loop\b|while\b|for\s+_\s+in\b|for\s+\w+\s+in\s+\d[\d_]*\s*\.\.)"
+    r"|=>\s*loop\b|\bloop\s*\{\s*$")
 _ONE_LINE_POLL = re.compile(r"\b(?:while|loop)\b[^;]*\{")
 _FN_HEADER = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+(\w+)")
 _ERROR_CHECK = re.compile(r"\.is_err\(\)|\bErr\(_\)\s*=>|\.expect_err\(|\.unwrap_err\(\)")
@@ -228,6 +264,9 @@ _ERROR_CHECK = re.compile(r"\.is_err\(\)|\bErr\(_\)\s*=>|\.expect_err\(|\.unwrap
 def _sub_second_literal(line: str) -> bool:
     for match in _MILLIS.finditer(line):
         if 0 < int(match.group(1).replace("_", "")) < 1000:
+            return True
+    for match in _MICROS.finditer(line):
+        if 0 < int(match.group(1).replace("_", "")) < 1_000_000:
             return True
     return any(_sub_second(float(match.group(1))) for match in _SECS_F.finditer(line))
 
@@ -252,7 +291,7 @@ def _enclosing(lines: list[str], index: int) -> tuple[bool, str]:
         function = _FN_HEADER.search(line)
         if function:
             return in_loop, function.group(1)
-        if not _CASE_LOOP.search(line) and _LOOP_HEADER.search(line):
+        if _LOOP_HEADER.search(line):
             in_loop = True
     return in_loop, "<module>"
 
@@ -278,15 +317,16 @@ def _rust_kind(lines: list[str], index: int, in_loop: bool) -> str | None:
         return None
     line = lines[index]
     statement = _statement(lines, index)
-    if re.search(r"Instant::now\(\)\s*\+\s*(?:std::time::)?Duration::from_(?:millis|secs_f)", statement):
+    if re.search(r"Instant::now\(\)\s*\+\s*" + _SUB_SECOND_CTOR, statement):
         return "deadline"
-    if "elapsed()" in statement and re.search(
-            r"<=?\s*(?:std::time::)?Duration::from_(?:millis|secs_f)", statement):
+    # ``start.elapsed() < ..`` and a measured ``elapsed`` / ``resumed_elapsed``.
+    if re.search(r"elapsed\w*(?:\(\))?\s*<=?\s*" + _SUB_SECOND_CTOR, statement):
         return "elapsed-assert"
     if re.search(r"\b(?:recv_|wait_)?timeout\s*\(", statement) and not re.search(
             r"set_(?:read|write)_timeout", line):
         return None if _ERROR_CHECK.search(statement) else "timeout"
-    if re.search(r"\bsleep\s*\(", line):
+    # The statement, so a rustfmt-wrapped ``sleep(\n Duration::..,\n)`` counts.
+    if re.search(r"\bsleep\s*\(", statement):
         return "sleep"
     return None
 
@@ -328,12 +368,15 @@ def load_allowlist(path: Path = ALLOWLIST) -> tuple[Counter, list[str]]:
     for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
+        # The source line may itself hold " | ": path and function come
+        # first, the reason last, and the source line is what lies between.
         parts = [part.strip() for part in raw.split(" | ")]
-        if len(parts) != 4 or not all(parts):
+        source = " | ".join(parts[2:-1])
+        if len(parts) < 4 or not (parts[0] and parts[1] and source and parts[-1]):
             problems.append(f"{path.name}:{number}: expected "
                             f"'<path> | <function> | <source line> | <reason>', got {raw!r}")
             continue
-        entries[tuple(parts[:3])] += 1
+        entries[(parts[0], parts[1], source)] += 1
     return entries, problems
 
 
@@ -379,8 +422,14 @@ PY_FLAGGED = [
     ("timeout keyword", "def t():\n    thread.join(timeout=0.5)\n", "timeout"),
     ("elapsed bound", "def t():\n    assert time.monotonic() - t0 < 0.5\n", "elapsed-assert"),
     ("named elapsed", "def t():\n    assert elapsed <= 0.3\n", "elapsed-assert"),
+    ("reversed elapsed", "def t():\n    assert 0.5 > elapsed\n", "elapsed-assert"),
+    ("assertLess", "def t(self):\n    self.assertLess(elapsed, 0.5)\n", "elapsed-assert"),
+    ("positional wait_for", "async def t():\n    await asyncio.wait_for(task, 0.5)\n", "timeout"),
+    ("positional event wait", "def t():\n    assert done.wait(0.2)\n", "timeout"),
     ("case loop is not a poll",
      "def t():\n    for mode in ('a', 'b'):\n        time.sleep(0.1)\n", "sleep"),
+    ("loop over a named case list",
+     "def t():\n    for case in CASES:\n        time.sleep(0.1)\n", "sleep"),
 ]
 PY_CLEAN = [
     ("poll in while", "def t():\n    while not ready():\n        time.sleep(0.02)\n"),
@@ -389,6 +438,7 @@ PY_CLEAN = [
     ("yield", "async def t():\n    await asyncio.sleep(0)\n"),
     ("variable budget", "def t():\n    time.sleep(delay)\n"),
     ("generous elapsed bound", "def t():\n    assert time.monotonic() - t0 < 2.0\n"),
+    ("a dict default is not a timeout", "def t():\n    x = d.get('k', 0.3)\n"),
 ]
 
 RS_FLAGGED = [
@@ -401,6 +451,16 @@ RS_FLAGGED = [
     ("elapsed bound",
      "fn t() {\n    assert!(start.elapsed() < Duration::from_millis(120));\n}\n", "elapsed-assert"),
     ("deadline", "fn t() {\n    let d = Instant::now() + Duration::from_millis(100);\n}\n", "deadline"),
+    ("measured elapsed variable",
+     "fn t() {\n    let elapsed = started.elapsed();\n"
+     "    assert!(elapsed < Duration::from_millis(250));\n}\n", "elapsed-assert"),
+    ("wrapped sleep",
+     "fn t() {\n    std::thread::sleep(\n        Duration::from_millis(350),\n    );\n}\n", "sleep"),
+    ("micros",
+     "async fn t() {\n    tokio::time::sleep(Duration::from_micros(500_000)).await;\n}\n", "sleep"),
+    ("loop over a named case list",
+     "fn t() {\n    for case in CASES {\n"
+     "        std::thread::sleep(Duration::from_millis(50));\n    }\n}\n", "sleep"),
     ("case loop is not a poll",
      "fn t() {\n    for mode in [\"a\", \"b\"] {\n"
      "        std::thread::sleep(Duration::from_millis(50));\n    }\n}\n", "sleep"),
@@ -412,6 +472,8 @@ RS_CLEAN = [
     ("poll in wrapped while",
      "fn t() {\n    while read_stat()\n        .is_none()\n    {\n"
      "        std::thread::sleep(Duration::from_millis(1));\n    }\n}\n"),
+    ("counted poll",
+     "fn t() {\n    for _ in 0..50 {\n        std::thread::sleep(Duration::from_millis(5));\n    }\n}\n"),
     ("one-line poll",
      "fn t() {\n    while !done() { thread::sleep(Duration::from_millis(2)); }\n}\n"),
     ("negative wait",
@@ -459,6 +521,15 @@ def test_an_allowlisted_line_copied_into_another_function_is_still_flagged(tmp_p
     found = Counter(hit.key for hit in scan_python_text("x.py", source))
     assert [key for key in found if found[key] > allowed[key]] == [
         ("x.py", "second", "time.sleep(0.05)")]
+
+
+def test_a_source_line_holding_a_bar_can_be_allowlisted(tmp_path):
+    allow = tmp_path / "allow.txt"
+    allow.write_text("x.py | t | f(a | b, timeout=0.1) | product input: never answers\n",
+                     encoding="utf-8")
+    allowed, problems = load_allowlist(allow)
+    assert not problems
+    assert allowed[("x.py", "t", "f(a | b, timeout=0.1)")] == 1
 
 
 def test_an_entry_without_a_reason_is_refused(tmp_path):
