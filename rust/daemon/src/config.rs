@@ -77,6 +77,26 @@ pub struct MemoryConfig {
     pub compaction_min_age_days: f64,
     /// `memory.recall` (`utils/config.py` `RecallConfig`).
     pub recall: RecallConfig,
+    /// `memory.deep_dream` (`utils/config.py` `DeepDreamConfig`): the keys
+    /// the daemon reads.
+    pub deep_dream: DeepDreamConfig,
+}
+
+/// `DeepDreamConfig` (`utils/config.py:513-712`), the switches
+/// `graph_review`'s automation accounting reads (`service.py:7880-7884`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeepDreamConfig {
+    pub judges_enabled: bool,
+    pub analyzer_file_duplicates: bool,
+}
+
+impl Default for DeepDreamConfig {
+    fn default() -> Self {
+        Self {
+            judges_enabled: true,
+            analyzer_file_duplicates: true,
+        }
+    }
 }
 
 /// `RecallConfig` (`utils/config.py:969-1029`): the `memory_recall` walk.
@@ -513,6 +533,7 @@ impl Default for MemoryConfig {
             compaction_keep_per_slot: 3,
             compaction_min_age_days: 30.0,
             recall: RecallConfig::default(),
+            deep_dream: DeepDreamConfig::default(),
         }
     }
 }
@@ -1474,6 +1495,19 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 )?,
             };
         }
+        if let Some(r) = section(m, "deep_dream", "memory.")? {
+            let p = "memory.deep_dream";
+            let d = DeepDreamConfig::default();
+            memory.deep_dream = DeepDreamConfig {
+                judges_enabled: want_bool(r, "judges_enabled", p, d.judges_enabled)?,
+                analyzer_file_duplicates: want_bool(
+                    r,
+                    "analyzer_file_duplicates",
+                    p,
+                    d.analyzer_file_duplicates,
+                )?,
+            };
+        }
         if let Some(r) = section(m, "reranker", "memory.")? {
             memory.reranker_enabled = want_bool(r, "enabled", "memory.reranker", false)?;
             let p = "memory.reranker";
@@ -1988,6 +2022,38 @@ mod tests {
         assert!(!cfg("time:\n  relative_age: false\n").time.relative_age);
         assert!(!cfg("time:\n  relative_age: null\n").time.relative_age);
         assert!(cfg("time:\n  relative_age: yes please\n").time.relative_age);
+    }
+
+    #[test]
+    fn deep_dream_switches_default_on_and_type_check() {
+        let d = cfg("").memory.deep_dream;
+        assert!(d.judges_enabled && d.analyzer_file_duplicates);
+        let d = cfg("memory:
+  deep_dream:
+    judges_enabled: false
+    min_similarity: 0.5
+")
+        .memory
+        .deep_dream;
+        assert!(!d.judges_enabled && d.analyzer_file_duplicates);
+        let d = cfg("memory:
+  deep_dream:
+    analyzer_file_duplicates: false
+")
+        .memory
+        .deep_dream;
+        assert!(d.judges_enabled && !d.analyzer_file_duplicates);
+        assert!(refused(
+            "memory:
+  deep_dream:
+    judges_enabled: 1
+"
+        ));
+        assert!(refused(
+            "memory:
+  deep_dream: 5
+"
+        ));
     }
 
     fn cfg(text: &str) -> Config {
