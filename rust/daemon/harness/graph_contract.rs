@@ -6,6 +6,8 @@ mod graph_read;
 
 #[path = "../src/mutants.rs"]
 mod mutants;
+#[path = "../src/py_repr_unicode14.rs"]
+mod py_repr_unicode14;
 #[path = "../src/storage/mod.rs"]
 mod storage;
 #[path = "../src/txn.rs"]

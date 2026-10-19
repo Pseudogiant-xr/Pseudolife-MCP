@@ -13,6 +13,8 @@ mod graph_read;
 #[allow(dead_code)]
 #[path = "../mutants.rs"]
 mod mutants;
+#[path = "../py_repr_unicode14.rs"]
+mod py_repr_unicode14;
 #[allow(dead_code)]
 #[path = "../pyjson.rs"]
 mod pyjson;
