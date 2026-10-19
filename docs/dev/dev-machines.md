@@ -86,6 +86,15 @@ only the machine it dispatches to.
   (see `ops/wsl-suite.sh`), and forwards the bearer, so the run still shows
   as the `full-suite` lease. From Windows, `lease check full-suite` sees a
   WSL run through the board only; its local-lock line stays free.
+- **Workers.** With no arguments, `ops/wsl-suite.sh` (which both launchers
+  run) adds `-n N --dist loadfile --durations=30`. N is at most 4, one per
+  two CPUs and one per 6 GB of memory, the memory being the smaller of RAM
+  and the run's cgroup limit: 4 in the Windows host's WSL (8 CPUs, 40 GB),
+  at most 2 under a box run's 16 GB systemd scope. Below 2 it runs one
+  process. `PSEUDOLIFE_SUITE_WORKERS` overrides it (`1` for one process).
+  Measured 2026-10-19 in WSL at 4 workers: about 11 min against 28-31 min
+  single-process, peak 20.2 GB used. Arguments still replace the default
+  unchanged.
 - **Leases.** Each machine mirrors its suite on the board under its own
   lease: `full-suite` on the Windows host, `full-suite@<name>` on a dev
   machine, set in its private `full-suite.lease` (`PSEUDOLIFE_SUITE_LEASE`

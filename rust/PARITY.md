@@ -538,7 +538,7 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_episode_end | core | 4 | ported |
 | memory_session_title | minimal | 4 | ported |
 | memory_episode_summary | full | 3 | ported |
-| memory_consolidation_candidates | full | 3 | deferred |
+| memory_consolidation_candidates | full | 3 | ported |
 | memory_consolidate | full | 4 | deferred |
 | memory_graph_relate | core | 4 | deferred |
 | memory_graph_unrelate | full | 4 | deferred |
