@@ -300,3 +300,302 @@ fn retired_slots_keep_the_newest_hundred_retires() {
     assert_eq!(out.len(), 100);
     assert_eq!((out[0].id, out[1].id, out[2].id), (3, 1, 119));
 }
+
+// ── the lesson snapshot-fallback prediction ──────────────────────────────
+
+/// A lesson at `t|aspect`, as the oracle's `LessonRecord(entity="t",
+/// attribute=aspect, status=..., superseded_at=..., asserted_at=1.0)`.
+fn bare(aspect: &str, status: &str, superseded_at: Option<f64>) -> LessonRecord {
+    LessonRecord {
+        entity: "t".into(),
+        attribute: aspect.into(),
+        value: format!("t/{aspect}"),
+        status: status.into(),
+        superseded_at,
+        asserted_at: 1.0,
+        last_confirmed: 0.0,
+        embedding: None,
+        key: slot_key("t", aspect),
+        ..lesson()
+    }
+}
+
+fn store_of(records: Vec<LessonRecord>) -> LessonStore {
+    LessonStore {
+        records,
+        dirty_slots: Default::default(),
+    }
+}
+
+/// The latest decision at `t|aspect`, a retire; `record` false is NULL.
+fn decided(id: i64, aspect: &str, at: f64, record: bool) -> Decision {
+    Decision {
+        id,
+        entity_norm: "t".into(),
+        attribute_norm: aspect.into(),
+        action: "retire".into(),
+        record: record.then(|| json!({"task": "t", "aspect": aspect})),
+        decided_at: at,
+    }
+}
+
+const NOW: f64 = 1000.0;
+
+/// 99 retires without a record (never a fallback slot), the newest at 400.
+fn recordless_retires() -> Vec<Decision> {
+    (0..99)
+        .map(|i| decided(10 + i, &format!("n{i:02}"), 400.0 - i as f64, false))
+        .collect()
+}
+
+/// Expected values: `o1c_fallback_oracle.py`, which runs Python's own
+/// `LessonStore.restore`, appends the restore rows `lesson_restore` writes
+/// (`decided_at=now`, fresh ids), takes the latest decision per slot (the
+/// `DISTINCT ON`), then `PostgresStorage.retired_slots`'s filter, sort and
+/// cut and `lesson_restore`'s `snaps` comprehension; refusing is
+/// `bool(snaps)`.
+#[test]
+fn lesson_fallback_prediction_matches_python() {
+    let predict = |records: Vec<LessonRecord>, latest: Vec<Decision>, aspect: Option<&str>| {
+        lesson_fallback_predicted(&store_of(records), latest, "t", aspect, NOW)
+    };
+    // A whole-task restore whose one retire row's slot was purged.
+    assert!(predict(vec![], vec![decided(1, "a", 10.0, true)], None));
+    // A future-dated retire row on the slot being restored stays its
+    // latest decision, but the slot is live again: no fallback.
+    assert!(!predict(
+        vec![bare("x", "retired", Some(5.0))],
+        vec![decided(1, "x", NOW + 500.0, true)],
+        Some("x"),
+    ));
+    // ... and it keeps its place in the hundred, pushing a purged slot out.
+    let mut rows = vec![decided(1, "x", NOW + 500.0, true)];
+    rows.extend(recordless_retires());
+    rows.push(decided(200, "p", 1.0, true));
+    assert!(!predict(vec![bare("x", "retired", Some(5.0))], rows, None));
+    // Large: the restored slot's (past) retire row turns into a restore row
+    // before the cut, which lets the purged slot into the hundred.
+    let mut rows = vec![decided(1, "x", 500.0, true)];
+    rows.extend(recordless_retires());
+    rows.push(decided(200, "p", 1.0, true));
+    assert_eq!(rows.len(), 101);
+    assert!(predict(vec![bare("x", "retired", Some(5.0))], rows, None));
+    // Every retire row covered by a retired record: no refusal.
+    assert!(!predict(
+        vec![
+            bare("x", "retired", Some(5.0)),
+            bare("y", "retired", Some(6.0))
+        ],
+        vec![decided(1, "x", 10.0, true), decided(2, "y", 11.0, true)],
+        None,
+    ));
+    // An aspect restore never sees another slot's purged row.
+    assert!(!predict(
+        vec![bare("x", "retired", Some(5.0))],
+        vec![decided(1, "x", 10.0, true), decided(2, "y", 11.0, true)],
+        Some("x"),
+    ));
+    // A decision dated exactly `now` loses to the restore row's newer id.
+    assert!(!predict(
+        vec![bare("x", "retired", Some(5.0))],
+        vec![decided(1, "x", NOW, true)],
+        Some("x"),
+    ));
+}
+
+/// Mixed: one retired record and one purged slot. Python restores the first
+/// and rewrites the second through `lesson_write`; the daemon refuses the
+/// whole call, and the prediction only borrows the store, so nothing has
+/// changed when it answers.
+#[test]
+fn mixed_lesson_restore_refuses_before_any_change() {
+    let store = store_of(vec![bare("x", "retired", Some(5.0))]);
+    let before = store.clone();
+    let latest = vec![decided(1, "x", 10.0, true), decided(2, "y", 11.0, true)];
+    assert!(lesson_fallback_predicted(&store, latest, "t", None, NOW));
+    assert_eq!(store.records, before.records);
+    assert_eq!(store.dirty_slots, before.dirty_slots);
+    assert_eq!(store.records[0].status, "retired");
+}
+
+// ── the reconciliation of a failed curated restore ───────────────────────
+
+/// The oracle's `rec(aspect, value, ...)` (`o1c_recovery_oracle.py`).
+fn curated(aspect: &str, value: &str, status: &str, superseded_at: Option<f64>) -> LessonRecord {
+    LessonRecord {
+        entity: "Curate Keys".into(),
+        attribute: aspect.into(),
+        value: value.into(),
+        about: Some("vault".into()),
+        polarity: "+".into(),
+        outcome: "success".into(),
+        confidence: 0.8,
+        status: status.into(),
+        origin: Some("agent".into()),
+        support: vec![],
+        provenance: vec!["signal:1".into()],
+        asserted_at: 100.0,
+        last_confirmed: 100.0,
+        supersedes_value: None,
+        superseded_by_value: None,
+        superseded_at,
+        unit: None,
+        embedding: None,
+        tx_time: Some(100.0),
+        valid_time: Some(100.0),
+        hlc_phys: Some(100000),
+        hlc_logical: Some(0),
+        writer_id: Some("seed".into()),
+        session_id: None,
+        version: 1,
+        key: slot_key("Curate Keys", aspect),
+    }
+}
+
+const RETIRE_ID: i64 = 7;
+
+fn survivor() -> LessonRecord {
+    curated("Approach", "Rotate keys quarterly.", "current", None)
+}
+
+fn loser() -> LessonRecord {
+    curated("Method", "Rotate keys every quarter.", "current", None)
+}
+
+fn snap_of(r: &LessonRecord) -> Map<String, Value> {
+    snapshot_record(Store::Lesson, &lesson_dict(r), None).unwrap()
+}
+
+fn pair() -> Curated {
+    Curated {
+        a: snap_of(&survivor()),
+        b: snap_of(&loser()),
+        keep_a: true,
+        curation: Map::new(),
+    }
+}
+
+fn loser_decision(id: i64, action: &str, record: Option<Value>) -> Decision {
+    Decision {
+        id,
+        entity_norm: "curate-keys".into(),
+        attribute_norm: "method".into(),
+        action: action.into(),
+        record,
+        decided_at: 600.0,
+    }
+}
+
+fn restore_row(undo_of: Value) -> Decision {
+    loser_decision(9, "restore", Some(json!({"_curation_undo_of": undo_of})))
+}
+
+fn retire_row(id: i64) -> Decision {
+    loser_decision(id, "retire", Some(json!({"_curation_duplicate": {}})))
+}
+
+/// Expected values: `curation_safety._restore_recovery_state` itself
+/// (`o1c_recovery_oracle.py`), over the same records and decision rows.
+#[test]
+fn restore_recovery_state_matches_python() {
+    // The records are the oracle's: their evidence fingerprints agree.
+    assert_eq!(
+        fingerprint(&snap_of(&survivor())),
+        "cfd60354527ff1950e8ef529b9d607fcd3200217c6faa14297f51a01605364d6"
+    );
+    assert_eq!(
+        fingerprint(&snap_of(&loser())),
+        "ffbdb3413159e83409abc23f5c2184526b78939d760deb3a4e19482bed983e20"
+    );
+    let classify =
+        |records: Vec<LessonRecord>, latest: Option<Decision>| match restore_recovery_state(
+            &Staged::Lesson(store_of(records)),
+            &pair(),
+            RETIRE_ID,
+            latest.as_ref(),
+        ) {
+            Ok(Recovery::Committed) => "committed".to_string(),
+            Ok(Recovery::RolledBack) => "rolled_back".to_string(),
+            Err(e) => format!("error: {}", error_text(&e)),
+        };
+    let changed = "error: durable curation restore changed the survivor";
+    let neither = "error: durable curation restore is neither before nor after the decision";
+    let retired_loser = curated(
+        "Method",
+        "Rotate keys every quarter.",
+        "retired",
+        Some(500.0),
+    );
+    let other_survivor = curated("Approach", "Rotate keys yearly.", "current", None);
+    let other_loser = curated("Method", "other", "current", None);
+    let both = || vec![survivor(), loser()];
+    let undo = |id: Value| Some(restore_row(id));
+    let cases: Vec<(&str, Vec<LessonRecord>, Option<Decision>, &str)> = vec![
+        ("committed", both(), undo(json!(RETIRE_ID)), "committed"),
+        (
+            "committed_float_undo_of",
+            both(),
+            undo(json!(7.0)),
+            "committed",
+        ),
+        (
+            "rolled_back",
+            vec![survivor(), retired_loser],
+            Some(retire_row(RETIRE_ID)),
+            "rolled_back",
+        ),
+        (
+            "rolled_back_purged_loser",
+            vec![survivor()],
+            Some(retire_row(RETIRE_ID)),
+            "rolled_back",
+        ),
+        (
+            "survivor_changed",
+            vec![other_survivor, loser()],
+            undo(json!(RETIRE_ID)),
+            changed,
+        ),
+        (
+            "survivor_missing",
+            vec![loser()],
+            undo(json!(RETIRE_ID)),
+            changed,
+        ),
+        (
+            "loser_back_latest_retire",
+            both(),
+            Some(retire_row(RETIRE_ID)),
+            neither,
+        ),
+        ("loser_back_other_undo", both(), undo(json!(8)), neither),
+        (
+            "loser_back_changed",
+            vec![survivor(), other_loser],
+            undo(json!(RETIRE_ID)),
+            neither,
+        ),
+        (
+            "loser_gone_latest_restore",
+            vec![survivor()],
+            undo(json!(RETIRE_ID)),
+            neither,
+        ),
+        (
+            "loser_gone_other_retire",
+            vec![survivor()],
+            Some(retire_row(8)),
+            neither,
+        ),
+        ("loser_gone_no_decision", vec![survivor()], None, neither),
+        (
+            "loser_back_null_record",
+            both(),
+            Some(loser_decision(9, "restore", None)),
+            neither,
+        ),
+    ];
+    for (name, records, latest, want) in cases {
+        assert_eq!(classify(records, latest), want, "{name}");
+    }
+}

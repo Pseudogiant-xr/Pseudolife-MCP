@@ -108,6 +108,7 @@ import json
 import math
 import os
 import re
+import struct
 import sys
 import tempfile
 import time
@@ -2342,10 +2343,11 @@ SCENARIOS.update({
 # memory_world_set; the seeding daemon's own memory_forget retires the ones
 # a compaction purge (an after-stop DELETE of the retired row) leaves only
 # as an audit snapshot. Lessons are SQL seeds (only the dream writes
-# lessons), with fixed stamps and no embedding, and so are the curated
-# duplicate retirements (only the dream's curation writes them): their
-# evidence is curation_safety.snapshot_record's shape over those rows,
-# fingerprinted as evidence_fingerprint fingerprints a plain dict.
+# lessons), with fixed stamps and, but for one pair, no embedding, and so
+# are the curated duplicate retirements (only the dream's curation writes
+# them): their evidence is curation_safety.snapshot_record's shape over
+# those rows (an embedding as its float32 digest), fingerprinted as
+# evidence_fingerprint fingerprints a plain dict.
 def slot_norm(s: str) -> str:
     """``cortex._norm_key`` for the ASCII names below."""
     return re.sub(r"[\s._\-/]+", "-", s.strip().casefold()).strip("-")
@@ -2375,10 +2377,27 @@ _SLOT_COMMON = ("entity", "attribute", "value", "polarity", "status", "confidenc
                 "hlc_logical", "writer_id", "session_id", "version")
 
 
+def slot_embedding(seed: int) -> list[float]:
+    """A 1024-dim vector (the schema's ``vector(1024)``) whose components
+    are sixteenths, exact in float32, so pgvector, numpy and the daemon all
+    hold the same bytes."""
+    return [float(((i * seed) % 17) - 8) / 16 for i in range(1024)]
+
+
+def embedding_digest(values: list[float] | None) -> dict | None:
+    """``curation_safety._embedding_snapshot`` of a float32 vector."""
+    if values is None:
+        return None
+    return {"dtype": "float32", "shape": [len(values)],
+            "sha256": hashlib.sha256(struct.pack(f"<{len(values)}f", *values)).hexdigest()}
+
+
 def slot_lesson(task, aspect, lesson, *, status="current", about=None, polarity="+",
-                asserted=SLOT_STAMP, superseded_at=None, hlc_logical=0) -> dict:
-    """A lessons row (its columns, no embedding)."""
-    return {"entity": task, "attribute": aspect, "value": lesson, "polarity": polarity,
+                asserted=SLOT_STAMP, superseded_at=None, hlc_logical=0,
+                embedding=None) -> dict:
+    """A lessons row (its columns; ``embedding`` only when given)."""
+    extra = {} if embedding is None else {"embedding": embedding}
+    return {**extra, "entity": task, "attribute": aspect, "value": lesson, "polarity": polarity,
             "status": status, "confidence": 0.8, "origin": "agent", "support": [],
             "provenance": ["signal:1"], "asserted_at": asserted, "last_confirmed": asserted,
             "supersedes_value": None, "superseded_by_value": None,
@@ -2388,9 +2407,10 @@ def slot_lesson(task, aspect, lesson, *, status="current", about=None, polarity=
 
 
 def slot_world(entity, attribute, value, *, status="current", asserted=SLOT_STAMP,
-               superseded_at=None, hlc_logical=0) -> dict:
-    """A world_facts row (its columns, no embedding)."""
-    return {"entity": entity, "attribute": attribute, "value": value, "polarity": "+",
+               superseded_at=None, hlc_logical=0, embedding=None) -> dict:
+    """A world_facts row (its columns; ``embedding`` only when given)."""
+    extra = {} if embedding is None else {"embedding": embedding}
+    return {**extra, "entity": entity, "attribute": attribute, "value": value, "polarity": "+",
             "status": status, "confidence": 0.9, "origin": "source", "support": ["source"],
             "provenance": [], "asserted_at": asserted, "last_confirmed": asserted,
             "supersedes_value": None, "superseded_by_value": None,
@@ -2407,8 +2427,10 @@ def slot_row_sql(store: str, row: dict) -> dict:
     table = "lessons" if store == "lesson" else "world_facts"
     cols = dict(row, entity_norm=slot_norm(row["entity"]),
                 attribute_norm=slot_norm(row["attribute"]))
+    values = [("'[" + ",".join(repr(x) for x in v) + "]'::vector") if k == "embedding"
+              else _lit(v) for k, v in cols.items()]
     return sql(f"INSERT INTO {table} ({', '.join(cols)}) "
-               f"VALUES ({', '.join(_lit(v) for v in cols.values())})", after_stop=True)
+               f"VALUES ({', '.join(values)})", after_stop=True)
 
 
 def slot_snapshot(store: str, row: dict, **changes) -> dict:
@@ -2420,16 +2442,17 @@ def slot_snapshot(store: str, row: dict, **changes) -> dict:
     snap.update({k: row[k] for k in (("about", "outcome") if store == "lesson" else
                                      ("source_url", "source_quote", "retrieved_at",
                                       "freshness_class", "content_hash", "source_doc_id"))})
-    snap["embedding"] = None
+    snap["embedding"] = embedding_digest(row.get("embedding"))
     return snap
 
 
 def curated_retire(store: str, survivor: dict, loser: dict, *, keep="a", slot=None,
-                   decided_at=SLOT_STAMP + 500) -> dict:
+                   decided_at=SLOT_STAMP + 500, loser_embedding=None) -> dict:
     """Seed-only: a curated duplicate retirement's audit row
     (``curation_safety._audit_snapshot``): the loser retired at
-    ``decided_at``, the pair's evidence, which side was kept. ``slot`` names
-    the row (by default the loser's)."""
+    ``decided_at``, the pair's evidence, which side was kept, the loser's
+    vector (``_embedding_values``). ``slot`` names the row (by default the
+    loser's)."""
     a, b = (survivor, loser) if keep == "a" else (loser, survivor)
     retired = dict(loser, status="retired", superseded_at=decided_at)
     record = dict(retired)
@@ -2438,7 +2461,8 @@ def curated_retire(store: str, survivor: dict, loser: dict, *, keep="a", slot=No
         "_curation_retired_fingerprint": evidence_fp(retired),
         "_curation_duplicate": {"version": 1, "keep": keep, "a": a, "b": b,
                                 "a_fingerprint": evidence_fp(a),
-                                "b_fingerprint": evidence_fp(b), "loser_embedding": None},
+                                "b_fingerprint": evidence_fp(b),
+                                "loser_embedding": loser_embedding},
     })
     record.pop("embedding")
     if store == "lesson":
@@ -2469,6 +2493,20 @@ CURATE_WINDOW = slot_lesson("Curate Keys", "Window", "Rotate keys in the window.
 CURATE_HOST = slot_world("Curate Host", "OS", "Debian 12")
 CURATE_HOST_LOSER = slot_world("Curate Host", "Operating System", "Debian 12 (bookworm)",
                                asserted=SLOT_STAMP + 50, hlc_logical=1)
+# a world loser compaction purged, rebuilt from its evidence and vector
+CURATE_HOST_DISTRO = slot_world("Curate Host", "Distro", "Debian bookworm",
+                                asserted=SLOT_STAMP + 60, hlc_logical=2,
+                                embedding=slot_embedding(5))
+# a world pair whose retired row is edited behind the daemons' backs
+EDIT_HOST = slot_world("Edit Host", "OS", "Ubuntu 24.04")
+EDIT_HOST_LOSER = slot_world("Edit Host", "Operating System", "Ubuntu 24.04 LTS",
+                             asserted=SLOT_STAMP + 50, hlc_logical=1)
+# a lesson pair with vectors: the digests take part in every fingerprint
+EMBED_SURVIVOR = slot_lesson("Embed Keys", "Approach", "Pin the signing key id.",
+                             embedding=slot_embedding(3))
+EMBED_LOSER = slot_lesson("Embed Keys", "Method", "Pin the signing key identifier.",
+                          about="vault", asserted=SLOT_STAMP + 100, hlc_logical=1,
+                          embedding=slot_embedding(7))
 _L, _W = (lambda row, **kw: slot_snapshot("lesson", row, **kw),
           lambda row, **kw: slot_snapshot("world", row, **kw))
 
@@ -2533,6 +2571,16 @@ REVIEW_SLOTS_SEED = [
     slot_row_sql("world", dict(CURATE_HOST_LOSER, status="retired",
                                superseded_at=SLOT_STAMP + 500)),
     curated_retire("world", _W(CURATE_HOST), _W(CURATE_HOST_LOSER)),
+    curated_retire("world", _W(CURATE_HOST), _W(CURATE_HOST_DISTRO), decided_at=SLOT_STAMP + 540,
+                   loser_embedding=CURATE_HOST_DISTRO["embedding"]),
+    slot_row_sql("world", EDIT_HOST),
+    slot_row_sql("world", dict(EDIT_HOST_LOSER, status="retired",
+                               superseded_at=SLOT_STAMP + 500)),
+    curated_retire("world", _W(EDIT_HOST), _W(EDIT_HOST_LOSER)),
+    slot_row_sql("lesson", EMBED_SURVIVOR),
+    slot_row_sql("lesson", dict(EMBED_LOSER, status="retired", superseded_at=SLOT_STAMP + 500)),
+    curated_retire("lesson", _L(EMBED_SURVIVOR), _L(EMBED_LOSER),
+                   loser_embedding=EMBED_LOSER["embedding"]),
 ]
 
 AUTO_MARKERS = (
@@ -2601,6 +2649,17 @@ REVIEW_SLOTS_OPS = [
     review("restore_slot", store="lesson", src="curate keys|schedule"),
     review("restore_slot", store="lesson", src="curate keys|method"),
     review("restore_slot", store="world", src="curate host|operating system"),
+    # a purged world loser rebuilt from its evidence, its vector with it
+    review("restore_slot", store="world", src="curate host|distro"),
+    # the retired row edited after the curated retire: the resident copy
+    # still matches, the locked row no longer carries the retired
+    # fingerprint
+    external("UPDATE world_facts SET source_quote = 'edited out of band' "
+             "WHERE entity_norm = 'edit-host' AND attribute_norm = 'operating-system' "
+             "AND status = 'retired'"),
+    review("restore_slot", store="world", src="edit host|operating system"),
+    # vectors on both sides: the digests are part of each fingerprint
+    review("restore_slot", store="lesson", src="embed keys|method"),
     review(),
 ]
 

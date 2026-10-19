@@ -12,7 +12,11 @@
 //!   restore on a copy of the resident store, validates the locked rows
 //!   against the retire row's evidence, rewrites the slots and records the
 //!   restore in one transaction, and publishes the copy only after the
-//!   commit. Otherwise the legacy path: the resident store's `restore`, one
+//!   commit. When that transaction fails, the store is reloaded from the
+//!   database and classified (`_restore_recovery_state`): a commit that
+//!   landed publishes the reload and answers `source: "reconciled"`; a
+//!   rollback raises `CurationReconciliationError` (`internal_error`).
+//!   Otherwise the legacy path: the resident store's `restore`, one
 //!   `store_decisions` row per restored record (each its own transaction),
 //!   the lesson graph link, then the slot save; the resident store changes
 //!   before its writes commit, as Python's does.
@@ -515,6 +519,45 @@ struct Restored {
     entry: Value,
 }
 
+/// Whether `lesson_restore`'s audit-snapshot fallback would see a slot,
+/// predicted before the legacy restore over the resident store and the
+/// entity's latest decision per slot (`latest`, any action). The restore
+/// turns the picked slots live and writes each a restore row at `now`,
+/// which becomes the slot's latest decision unless a decision there is
+/// dated after `now` (an equal date loses to the restore row's newer id).
+/// `retired_slots` then keeps the remaining retires, newest first, cut to
+/// a hundred, and the fallback takes those of the entity (or the aspect)
+/// with a record whose slot is not live (`service.py:5476-5520`).
+fn lesson_fallback_predicted(
+    store: &LessonStore,
+    latest: Vec<Decision>,
+    task: &str,
+    aspect: Option<&str>,
+    now: f64,
+) -> bool {
+    let ne = norm_key(task);
+    let na = aspect.map(norm_key);
+    let restored: HashSet<SlotKey> = store
+        .restore_picks(task, aspect)
+        .into_iter()
+        .map(|i| store.records[i].key.clone())
+        .collect();
+    let mut live: HashSet<SlotKey> = store
+        .current_records()
+        .filter(|r| r.key.0 == ne && na.as_ref().is_none_or(|a| r.key.1 == *a))
+        .map(|r| r.key.clone())
+        .collect();
+    live.extend(restored.iter().cloned());
+    let after: Vec<Decision> = latest
+        .into_iter()
+        .filter(|d| {
+            !(restored.contains(&(d.entity_norm.clone(), d.attribute_norm.clone()))
+                && now >= d.decided_at)
+        })
+        .collect();
+    !fallback_snaps(retired_only(after), na.as_deref(), &live).is_empty()
+}
+
 /// The lesson legacy path. The snapshot fallback is not served: when the
 /// slots it would rewrite exist, the call is refused before any write.
 async fn restore_lessons(
@@ -527,33 +570,11 @@ async fn restore_lessons(
     let ne = norm_key(task);
     let na = aspect.map(norm_key);
     let now = crate::episodes::now();
-    {
-        // Which slots Python's fallback would see, predicted before the
-        // restore: the restored slots turn live, and each gets a restore
-        // row that is its latest decision unless a retire row is dated
-        // after `now`.
-        let snap = ready.lessons.snapshot();
-        let picks = snap.restore_picks(task, aspect);
-        let restored: HashSet<SlotKey> =
-            picks.iter().map(|&i| snap.records[i].key.clone()).collect();
-        let mut live: HashSet<SlotKey> = snap
-            .current_records()
-            .filter(|r| r.key.0 == ne && na.as_ref().is_none_or(|a| r.key.1 == *a))
-            .map(|r| r.key.clone())
-            .collect();
-        live.extend(restored.iter().cloned());
-        drop(snap);
-        let latest: Vec<Decision> = latest_slot_decisions(client, Store::Lesson, &ne)
-            .await?
-            .into_iter()
-            .filter(|d| {
-                !(restored.contains(&(d.entity_norm.clone(), d.attribute_norm.clone()))
-                    && now >= d.decided_at)
-            })
-            .collect();
-        if !fallback_snaps(retired_only(latest), na.as_deref(), &live).is_empty() {
-            return Err(super::unserved());
-        }
+    // Refused before any write: the decisions are read, the resident store
+    // only borrowed.
+    let latest = latest_slot_decisions(client, Store::Lesson, &ne).await?;
+    if lesson_fallback_predicted(&ready.lessons.snapshot(), latest, task, aspect, now) {
+        return Err(super::unserved());
     }
     let recs: Vec<Restored> = ready.lessons.write(|l| {
         l.restore(task, aspect)
@@ -1676,6 +1697,154 @@ async fn validate_restore_locked(
     Ok(curated)
 }
 
+/// What a failed curated restore's transaction left durable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Recovery {
+    Committed,
+    RolledBack,
+}
+
+/// A failure's text, as `str(exc)` would carry it into a message.
+fn error_text(e: &ToolError) -> String {
+    match e {
+        ToolError::Internal(e) => format!("{e:#}"),
+        ToolError::Invalid(t) | ToolError::FileNotFound(t) => t.clone(),
+        ToolError::Refused { code, detail, .. } => match detail {
+            Some(d) => format!("{code}: {d}"),
+            None => code.clone(),
+        },
+    }
+}
+
+/// `_restore_recovery_state`: the reloaded store (`resident`) and the loser
+/// slot's latest decision (`latest`) classified. The survivor must still be
+/// current and unchanged; then a loser that is not current under its own
+/// retire row is the state before, and a loser current as its evidence
+/// under a restore row undoing that retire is the state after. Anything
+/// else raises `CurationReconciliationError`.
+fn restore_recovery_state(
+    resident: &Staged,
+    cur: &Curated,
+    retire_decision_id: i64,
+    latest: Option<&Decision>,
+) -> Result<Recovery, ToolError> {
+    let current = resident.current_index();
+    let (survivor_snap, loser_snap) = cur.sides();
+    let survivor_matches = match current.get(&snap_slot(survivor_snap)?) {
+        Some(&i) => fingerprint(&resident.snapshot(i)?) == fingerprint(survivor_snap),
+        None => false,
+    };
+    if !survivor_matches {
+        return Err(internal("durable curation restore changed the survivor"));
+    }
+    match current.get(&snap_slot(loser_snap)?) {
+        None => {
+            if latest.is_some_and(|d| d.id == retire_decision_id && d.action == "retire") {
+                return Ok(Recovery::RolledBack);
+            }
+        }
+        Some(&i) => {
+            if fingerprint(&resident.snapshot(i)?) == fingerprint(loser_snap) {
+                // `(latest or {}).get("record") or {}`, then `.get`.
+                let undo_of = match latest.and_then(|d| d.record.as_ref()) {
+                    Some(Value::Object(m)) => m.get("_curation_undo_of"),
+                    Some(v) if py_truthy(v) => {
+                        return Err(internal(format!(
+                            "AttributeError: '{}' object has no attribute 'get'",
+                            py_type(v)
+                        )));
+                    }
+                    _ => None,
+                };
+                if latest.is_some_and(|d| d.action == "restore")
+                    && undo_of.is_some_and(|v| py_eq_int(v, retire_decision_id))
+                {
+                    return Ok(Recovery::Committed);
+                }
+            }
+        }
+    }
+    Err(internal(
+        "durable curation restore is neither before nor after the decision",
+    ))
+}
+
+/// Python's `v == n` for a decoded JSON value and an int.
+fn py_eq_int(v: &Value, n: i64) -> bool {
+    match v {
+        Value::Bool(b) => i64::from(*b) == n,
+        Value::Number(x) => x.as_i64() == Some(n) || x.as_f64().is_some_and(|f| f == n as f64),
+        _ => false,
+    }
+}
+
+/// `store_decisions(store, entity_norm, attribute_norm, limit=1)`: the
+/// slot's newest decision.
+async fn latest_decision(
+    client: &Client,
+    store: Store,
+    slot: &SlotKey,
+) -> Result<Option<Decision>, ToolError> {
+    let row = reads(client, |c| async move {
+        c.query_opt(
+            "SELECT id, entity_norm, attribute_norm, action, record, decided_at \
+             FROM store_decisions WHERE store = $1 AND entity_norm = $2 \
+             AND attribute_norm = $3 ORDER BY decided_at DESC, id DESC LIMIT 1",
+            &[&store.name(), &slot.0, &slot.1],
+        )
+        .await
+        .map_err(internal)
+    })
+    .await?;
+    Ok(row.map(|r| Decision {
+        id: r.get(0),
+        entity_norm: r.get(1),
+        attribute_norm: r.get(2),
+        action: r.get(3),
+        record: r.get::<_, Option<Value>>(4).map(py_json),
+        decided_at: r.get(5),
+    }))
+}
+
+/// `_recover_slot_curation_locked` for a curated restore whose transaction
+/// failed: the store reloaded from the database (`_hydrate_store`) and
+/// classified; a commit that landed publishes the reload. A rollback leaves
+/// the resident store as it was (Python publishes its pre-stage copy, the
+/// same store: the staged one was a copy). A failure to reload or classify
+/// is a `CurationReconciliationError`.
+async fn reconcile_restore(
+    ready: &Ready,
+    store: Store,
+    cur: &Curated,
+    retire_decision_id: i64,
+) -> Result<Recovery, ToolError> {
+    let client = ready.storage.client();
+    let required =
+        |e: String| internal(format!("slot curation commit reconciliation required: {e}"));
+    let resident = match store {
+        Store::Lesson => crate::stores::lessons::hydrate(client)
+            .await
+            .map(Staged::Lesson),
+        Store::World => crate::stores::world::hydrate(client)
+            .await
+            .map(Staged::World),
+    }
+    .map_err(|e| required(format!("{e:#}")))?;
+    let loser_slot = snap_slot(cur.sides().1)?;
+    let latest = latest_decision(client, store, &loser_slot)
+        .await
+        .map_err(|e| required(error_text(&e)))?;
+    let state = restore_recovery_state(&resident, cur, retire_decision_id, latest.as_ref())
+        .map_err(|e| match e {
+            ToolError::Internal(_) => e,
+            other => required(error_text(&other)),
+        })?;
+    if state == Recovery::Committed {
+        resident.publish(ready);
+    }
+    Ok(state)
+}
+
 /// `curation_safety.restore_curated_duplicate`: None unless the target's
 /// retire row is a curated duplicate retirement.
 async fn restore_curated(
@@ -1794,7 +1963,7 @@ async fn restore_curated(
     };
     let stamp = crate::episodes::now();
     let undo = restore_decision_snapshot(store, staged.snapshot(idx)?, decision.id);
-    let committed = {
+    let outcome = {
         let (staged, cur, undo, ne, na) = (&staged, &cur, &undo, &ne, &na);
         in_txn(client, |c| async move {
             if !validate_restore_locked(c, store, cur, decision).await? {
@@ -1815,20 +1984,50 @@ async fn restore_curated(
             .map_err(internal)?;
             Ok(true)
         })
-        .await?
+        .await
     };
-    if !committed {
-        return changed();
-    }
+    let reconciled = match outcome {
+        Ok(true) => {
+            let entry = staged.entry(idx, &svc.config.memory.search.stale_policy);
+            debug_assert_eq!(staged.store(), store);
+            staged.publish(ready);
+            return Ok(Some(curated_answer(
+                store, entity, attribute, source, entry,
+            )));
+        }
+        Ok(false) => return changed(),
+        // The commit may have landed with its reply lost: the database
+        // decides (`_recover_slot_curation_locked`).
+        Err(exc) => match reconcile_restore(ready, store, &cur, decision.id).await? {
+            Recovery::Committed => "reconciled",
+            Recovery::RolledBack => {
+                return Err(internal(format!(
+                    "curation restore rolled back: {}",
+                    error_text(&exc)
+                )));
+            }
+        },
+    };
     let entry = staged.entry(idx, &svc.config.memory.search.stale_policy);
-    debug_assert_eq!(staged.store(), store);
-    staged.publish(ready);
+    Ok(Some(curated_answer(
+        store, entity, attribute, reconciled, entry,
+    )))
+}
+
+/// `{"restored": 1, "source", **label, "entries": [entry]}`.
+fn curated_answer(
+    store: Store,
+    entity: &str,
+    attribute: Option<&str>,
+    source: &str,
+    entry: Value,
+) -> Value {
     let mut out = Map::new();
     out.insert("restored".into(), json!(1));
     out.insert("source".into(), json!(source));
     out.extend(label(store, entity, attribute).map(|(k, v)| (k.to_string(), v)));
     out.insert("entries".into(), json!([entry]));
-    Ok(Some(Value::Object(out)))
+    Value::Object(out)
 }
 
 #[cfg(test)]
