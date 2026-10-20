@@ -330,7 +330,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | CLI-TRANSFER-DSN | 2 | Explicit-DSN export (one read-only REPEATABLE READ snapshot, JSONL members byte-equal to Python json.dumps of psycopg values, manifest) and import into a bank already at this build's schema with the full roster, owned by the importing role and holding no NULL v11 stamps, so Python's ensure_schema would change nothing: refusals and their order, row loading, inverse relations, legacy entry states, backfill, sequence advance. `transfer_cli.py` | `rust/cli_harness/rows/transfer.py` live differential (export and import, post-import DB-state equality of rows, sequences and catalog) with caught mutants; spec `rust/cli_harness/rows/transfer.md`; `shim/tests/cli_transfer_contract.rs` in CI | ported |
 | CLI-TRANSFER-LITE | 2/3 | Export and import through the lite tier's embedded pg0 instance. `transfer_cli.py`, `storage/embedded_pg.py` | Native defers by name before any effect. Blocker: needs native embedded_pg (W1-A/W3) | deferred |
 | CLI-TRANSFER-SCHEMA | 4 | Import into a bank that needs `ensure_schema` work (another schema version, missing tables, NULL v11 stamps, another owner). `transfer_cli.py`, `storage/schema.py` | Native defers by name before any effect. Blocker: needs native ensure_schema (W1-A) | deferred |
-| CLI-MODE-OWNERSHIP | 1/2/3/4/5 | All 26 modes have explicit ownership in the CLI checklist: help/version/shim phase 1; tunnel and coordination-recovery phase 2; channel phase 1/2; doorbell-prompt-seen phase 1/2; serve phase 3/4; embedded phase 3/5; update phase 5. `cli.py`, `tunnel_*.py`, `channel.py`, `coordination_recovery.py` | `test_tunnel_cli.py`, `test_tunnel_service.py`, `test_tunnel_bridge.py`, `test_tunnel_profiles.py`, `test_tunnel_runtime.py`, `test_coordination_recovery.py`, `test_channel.py` I/mixed; no supported mode disappears by implication | deferred |
+| CLI-MODE-OWNERSHIP | 1/2/3/4/5 | All 29 current modes (the original 26, upstream maintainer and test-login, and delegate-watch since #755) have explicit ownership in the CLI checklist: help/version/shim phase 1; tunnel and coordination-recovery phase 2; channel phase 1/2; doorbell-prompt-seen phase 1/2; serve phase 3/4; embedded phase 3/5; update phase 5. `cli.py`, `tunnel_*.py`, `channel.py`, `coordination_recovery.py` | `test_tunnel_cli.py`, `test_tunnel_service.py`, `test_tunnel_bridge.py`, `test_tunnel_profiles.py`, `test_tunnel_runtime.py`, `test_coordination_recovery.py`, `test_channel.py` I/mixed; no supported mode disappears by implication | deferred |
 | HTTP-SECURITY | 3 | Health public/degraded semantics; MCP/REST bearer gates on UTF-8/Latin-1 bytes, fail-closed map, remote bind/trust policy, DNS/Origin/rebinding, JSON/body limits, error status, redirect refusal. `daemon.py`, `web/api.py`, `principals.py`, `utils/no_redirect.py` | `test_daemon_http.py` P/I; `test_web.py`, `test_principals.py`, `test_extractor_no_redirect.py`, `test_shim_transport_recovery.py`, `test_dim_mismatch_health.py` I/mixed | deferred |
 | HTTP-SECURITY-ADMISSION | 3 | Front-layer REST/MCP bearer refusals, UTF-8/Latin-1 candidates, duplicate headers, tokenless browser gates, fail-closed maps and guarded remote-bind policy. `web/api.py`, `principals.py`, `daemon.py` | [Admission spec](daemon/spec-http-security.md); 75 ordinary corpus cases, four startup refusals, two debug-only remote scenarios and six named source controls. Both OSes: 79 live/startup and 75 golden cases, 65 guarded live-only remote cases, seven unchanged fixture states and six real controls caught with named status witnesses and no scenario errors. MCP SDK rebinding/bound identity and outbound credential redirect refusal remain HTTP-SECURITY/MCP-MOUNT deferrals. | ported |
 | HTTP-STATIC | 3 | Root redirect, Console v3 assets at /ui/; /ui/next/ is absent at this pin, traversal/security/content types. `web/api.py`, `web/static/`, `frontend/` | [Static spec](daemon/spec-http-static.md), daemon harness `static-build`, `static-paths`, `static-missing`, `static-root-link`: live/golden 69 Windows and 82 Linux cases, committed assets by bytes, isolated startup with unreachable storage, six source mutants caught. Named `lexical-outside-root` and `parent-space-refusal` refusal policies cover noncanonical escapes; linked directory and SPA fallback indexes compare both arms directly without substitution. Package static-directory selection remains W3-J; non-build MIME extensions remain declared. | ported-with-substitution |
@@ -507,7 +507,7 @@ Phase 5: artifact/static guards can run unchanged because they inspect files; di
 
 ## Complete MCP registration checklist
 
-All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`test_mcp_string_arguments.py` oracle pools; the differential harness must freeze tool inputSchema, descriptions, annotations, defaults, response and invalid-argument semantics for each. These registrations are source-derived, not an imported server introspection result. `ported` means the Rust daemon serves the tool's body and the differential harnesses compare its answers and bank effects with Python's; each tool's declared divergences are in `rust/daemon/divergences.md`, and `deferred` tools answer the declared `not_implemented` stub.
+All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`test_mcp_string_arguments.py` oracle pools; the differential harness must freeze tool inputSchema, descriptions, annotations, defaults, response and invalid-argument semantics for each. These registrations are source-derived, not an imported server introspection result. `ported` means the Rust daemon serves the tool's body and the differential harnesses compare its answers and bank effects with Python's; each tool's declared divergences are in `rust/daemon/divergences.md`, and `deferred` tools answer the declared `not_implemented` stub. The body comparisons behind each `ported` row are recorded runs of `daemon/harness/w2d_search.py`, `daemon/harness/w2e.py` and `daemon/harness/board/run.py` on Linux dev lanes, cited in the PR that served the tool. Hosted CI (`daemon/harness/mcp_ci.py` in both Parity jobs) compares the `tools/list` bytes at every tier, the argument-binding sweep, the wire corpus and every unserved tool's stub; it compares no served body by value other than `memory_toolset`'s. `memory_search` refuses `explain=true` (MCP-SEARCH-EXPLAIN).
 
 | Tool | Assigned tier | Port phase | Status |
 |---|---|---:|---|
@@ -553,73 +553,85 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 
 ## Complete Console registration checklist
 
-Shared source: pseudolife_memory/web/routes.py; Python oracle pools: test_web.py and test_web_hardening.py. Every registration needs additive real HTTP normal/error/parameter/default/identity probes; POST rows also compare durable effects. GET rows that depend on later mutable subsystems still require their response contract in phase 3; writes are phase 4.
+Shared source: pseudolife_memory/web/routes.py (`ConsoleRoutes`: the 72 registrations that `rust/daemon/harness/goldens/routes.json` records and `rust/daemon/src/routes.rs` embeds), plus `POST /api/pair`, which web/api.py serves ahead of the bearer gate. Python oracle pools: test_web.py and test_web_hardening.py. Every registration needs additive real HTTP normal/error/parameter/default/identity probes; POST rows also compare durable effects. GET rows that depend on later mutable subsystems still require their response contract in phase 3; writes are phase 4.
 
-| Method | Path | Phase | Status |
-|---|---|---:|---|
-| GET | /api/stats | 3 | deferred |
-| GET | /api/overview | 3 | deferred |
-| GET | /api/facts | 3 | deferred |
-| GET | /api/facts/history | 3 | deferred |
-| POST | /api/facts/resolve | 4 | deferred |
-| POST | /api/facts/set | 4 | deferred |
-| POST | /api/facts/forget | 4 | deferred |
-| GET | /api/world | 3 | deferred |
-| GET | /api/lessons | 3 | deferred |
-| GET | /api/briefing | 3 | deferred |
-| GET | /api/agents | 3 | deferred |
-| GET | /api/episodes | 3 | deferred |
-| GET | /api/episodes/summary | 3 | deferred |
-| POST | /api/episode/start | 4 | deferred |
-| POST | /api/episode/end | 4 | deferred |
-| POST | /api/episodes/prune | 4 | deferred |
-| POST | /api/episodes/rename | 4 | deferred |
-| POST | /api/episodes/merge | 4 | deferred |
-| GET | /api/recent | 3 | deferred |
-| GET | /api/search | 3 | deferred |
-| GET | /api/trace | 3 | deferred |
-| GET | /api/recall | 3 | deferred |
-| GET | /api/chain | 3 | deferred |
-| GET | /api/entry | 3 | deferred |
-| POST | /api/reinforce | 4 | deferred |
-| GET | /api/sources | 3 | deferred |
-| GET | /api/graph | 3 | deferred |
-| GET | /api/graph/projects | 3 | deferred |
-| GET | /api/graph/digest | 3 | deferred |
-| GET | /api/graph/communities | 3 | deferred |
-| GET | /api/graph/path | 3 | deferred |
-| GET | /api/graph/review | 3 | deferred |
-| GET | /api/graph/proposal-evidence | 3 | deferred |
-| POST | /api/graph/rejudge | 4 | deferred |
-| GET | /api/wiki | 3 | deferred |
-| GET | /api/graph/entity-provenance | 3 | deferred |
-| POST | /api/graph/assign-scope | 4 | deferred |
-| POST | /api/graph/unrelate | 4 | deferred |
-| POST | /api/graph/relate | 4 | deferred |
-| POST | /api/graph/bless-edge | 4 | deferred |
-| POST | /api/graph/dismiss-duplicate | 4 | deferred |
-| GET | /api/curation/duplicates | 3 | deferred |
-| POST | /api/curation/dismiss-duplicate | 4 | deferred |
-| GET | /api/curation/retired | 3 | deferred |
-| POST | /api/lessons/restore | 4 | deferred |
-| POST | /api/world/restore | 4 | deferred |
-| POST | /api/graph/delete-entity | 4 | deferred |
-| POST | /api/graph/merge | 4 | deferred |
-| POST | /api/graph/accept-proposal | 4 | deferred |
-| POST | /api/graph/reject-proposal | 4 | deferred |
-| POST | /api/graph/accept-entity-merge | 4 | deferred |
-| POST | /api/graph/accept-entity-junk | 4 | deferred |
-| POST | /api/graph/reject-entity-proposal | 4 | deferred |
-| GET | /api/dream/status | 3 | deferred |
-| POST | /api/dream/run | 4 | deferred |
-| GET | /api/consolidation | 3 | deferred |
-| POST | /api/consolidate | 4 | deferred |
-| POST | /api/delete | 4 | deferred |
-| POST | /api/supersede | 4 | deferred |
-| POST | /api/daemon-notice | 4 | deferred |
-| GET | /api/config | 3 | deferred |
-| POST | /api/config | 4 | deferred |
-| POST | /api/pair | 3/4 | deferred |
+The Rust column, after Status, says what the Rust daemon answers on master after the shared gates: `served` (a Rust handler), `partly` (the named part is served, the rest answers 501) or `501` (the declared `not_implemented` refusal; `daemon/divergences.md`, "Routes whose handlers belong to later slices" and "W2-D completion boundary"). Status keeps the register's evidence rule, the one the MCP checklist above uses: `ported` needs the Rust body and a recorded differential run that compared its answers and bank effects with Python's. The Evidence cell says where that run happened. A `served` row still `deferred` would mean "served, evidence pending"; none is today. Audited at `98c5d6bf` (2026-10-19): of the 72 `ConsoleRoutes`, 2 are served, 1 partly and 69 answer 501, and `POST /api/pair` is partly served.
+
+| Method | Path | Phase | Status | Rust | Evidence |
+|---|---|---:|---|---|---|
+| GET | /api/stats | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D); declared case in `daemon/harness/run.py`; CLI, shim and eval callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal A (D9) moves it to the CLI batches |
+| GET | /api/overview | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/facts | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/facts/history | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| POST | /api/facts/resolve | 4 | deferred | 501 | 501 (writes, W2-E) |
+| POST | /api/facts/set | 4 | deferred | 501 | 501 (writes, W2-E); declared case in `daemon/harness/run.py` |
+| POST | /api/facts/forget | 4 | deferred | 501 | 501 (writes, W2-E) |
+| GET | /api/world | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/lessons | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/briefing | 3 | deferred | 501 | 501 (`w2d-briefing-hooks`, W2-D); CLI, shim and eval callers only, no Console caller on master `2092e7b1`: already batch B3's, CUTOVER.md proposal A (D9) leaves it there |
+| GET | /api/agents | 3 | deferred | partly | The coordination view (`?view=coordination`, `board/http.rs`) is served and compared by the board harness's `console` scenario (recorded run as for the coordination actions below); the default view answers 501 (`w2d-board-projections`, W2-F) |
+| GET | /api/episodes | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/episodes/summary | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| POST | /api/episode/start | 4 | deferred | 501 | 501 (writes, W2-E); CLI, shim and eval callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal A (D9) moves it to the CLI batches |
+| POST | /api/episode/end | 4 | deferred | 501 | 501 (writes, W2-E); CLI, shim and eval callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal A (D9) moves it to the CLI batches |
+| POST | /api/episodes/prune | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal A (D9) lists it to retire |
+| POST | /api/episodes/rename | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal A (D9) lists it to retire |
+| POST | /api/episodes/merge | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal A (D9) lists it to retire |
+| GET | /api/recent | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/search | 3 | ported | served | `read/search_route.rs`; `daemon/harness/w2d_search.py live`: recorded Linux run, 11 scenarios, 118 cases, zero response and bank-state differences ([W2-D evidence](daemon/FORWARD-w2d.md)); hosted CI runs only the offline controls. Declared: no reference pool (cutover blocker), `explain` refused (MCP-SEARCH-EXPLAIN), resident-only access counts |
+| GET | /api/trace | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/recall | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/chain | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/entry | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| POST | /api/reinforce | 4 | deferred | 501 | 501 (writes, W2-E) |
+| GET | /api/sources | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| GET | /api/graph | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/graph/projects | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/graph/digest | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/graph/communities | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal A (D9) lists it to retire |
+| GET | /api/graph/path | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/graph/review | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/graph/proposal-evidence | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal A (D9) lists it to retire |
+| POST | /api/graph/rejudge | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| GET | /api/wiki | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/graph/entity-provenance | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| POST | /api/graph/assign-scope | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/unrelate | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/relate | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/bless-edge | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/dismiss-duplicate | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| GET | /api/curation/duplicates | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| POST | /api/curation/dismiss-duplicate | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| GET | /api/curation/retired | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal A (D9) lists it to retire |
+| POST | /api/lessons/restore | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal A (D9) lists it to retire |
+| POST | /api/world/restore | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal A (D9) lists it to retire |
+| POST | /api/graph/delete-entity | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/merge | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/accept-proposal | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/reject-proposal | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/accept-entity-merge | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/accept-entity-junk | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| POST | /api/graph/reject-entity-proposal | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
+| GET | /api/dream/status | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| POST | /api/dream/run | 4 | deferred | 501 | 501 (dream, W3-H) |
+| GET | /api/consolidation | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
+| POST | /api/consolidate | 4 | deferred | 501 | 501 (writes, W2-E) |
+| POST | /api/delete | 4 | deferred | 501 | 501 (writes, W2-E) |
+| POST | /api/supersede | 4 | deferred | 501 | 501 (writes, W2-E) |
+| POST | /api/daemon-notice | 4 | ported | served | `board/http.rs`; the board harness's `console` scenario, recorded run as for the coordination actions below; the stored-principal 403 is also a `daemon/harness/run.py` case |
+| GET | /api/config | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D); declared case in `daemon/harness/run.py` |
+| POST | /api/config | 4 | deferred | 501 | 501 after the operator gate (403 `operator_principal_required`, HTTP-SECURITY) |
+| GET | /api/maintainer | 3 | deferred | 501 | 501 (`w2d-board-projections`, W2-F); declared case in `daemon/harness/run.py` |
+| GET | /api/maintainer/sent | 3 | deferred | 501 | 501 (`w2d-board-projections`, W2-F); the native `serve` candidate's sent route is separate (Maintainer sent native candidate) |
+| GET | /api/maintainer/inbox | 3 | deferred | 501 | 501 (`w2d-board-projections`, W2-F) |
+| POST | /api/maintainer/challenge | 4 | deferred | 501 | 501 (W2-F) |
+| POST | /api/maintainer/enrol | 4 | deferred | 501 | 501 (W2-F) |
+| POST | /api/maintainer/send | 4 | deferred | 501 | 501 (W2-F) |
+| POST | /api/maintainer/role | 4 | deferred | 501 | 501 (W2-F) |
+| POST | /api/maintainer/cancel | 4 | deferred | 501 | 501 (W2-F) |
+| POST | /api/maintainer/revoke | 4 | deferred | 501 | 501 (W2-F) |
+| POST | /api/maintainer/repudiate | 4 | deferred | 501 | 501 (W2-F) |
+| POST | /api/pair | 3/4 | deferred | partly | Not a `ConsoleRoutes` entry (`web/api.py` serves it before the bearer gate), so `routes.json` omits it. Rust serves the refusals (405, 403 `forbidden_origin`, 415, 429, 413, 400 `pairing_refused`), which hosted CI compares (`body-pair-budget`, `body-limits`, security cases); a valid body on an authenticated install answers 501 (W2F-PAIRING-HTTP, cutover blocker) |
 
 Hook paths (web/api.py; phase 4; oracle test_web.py/test_session_identity.py; cross-reference HOOKS and the methods in the hook acceptance checklist): session-start, memory-policy, memory-changes, session-end, coordination-start, park-gate, woke, subagent, all under /api/hook/.
 
@@ -627,40 +639,40 @@ Coordination action rows (coordination.py; phase 4 with phase-1 shim clients): c
 
 ## Hook endpoints acceptance checklist
 
-Source: `pseudolife_memory/web/api.py`; cross-reference HOOKS and the Console checklist hook summary. The gate checks Host and Origin in tokenless mode only and is skipped with configured authentication. Each item requires normal, invalid-input, authentication and durable-effect evidence as applicable.
+Source: `pseudolife_memory/web/api.py`; cross-reference HOOKS and the Console checklist hook summary. The gate checks Host and Origin in tokenless mode only and is skipped with configured authentication. Each item requires normal, invalid-input, authentication and durable-effect evidence as applicable. The Rust and Status columns follow the Console checklist's rule. Audited at `98c5d6bf` (2026-10-19): the four board hooks are served; session-start and memory-policy answer 501; memory-changes and session-end serve their gates and refusals but not the authorized body. The board hooks inherit W2F-SHARED-HLC through the board's writes.
 
-| Item | Phase | Status | Evidence |
-|---|---|---|---|
-| GET /api/hook/session-start | 4 | deferred | No accepted Rust evidence |
-| GET /api/hook/memory-policy | 4 | deferred | No accepted Rust evidence |
-| GET /api/hook/memory-changes | 4 | deferred | No accepted Rust evidence |
-| POST /api/hook/session-end | 4 | deferred | No accepted Rust evidence |
-| GET /api/hook/coordination-start | 4 | deferred | No accepted Rust evidence |
-| GET /api/hook/park-gate | 4 | deferred | No accepted Rust evidence |
-| POST /api/hook/woke | 4 | deferred | No accepted Rust evidence |
-| POST /api/hook/subagent | 4 | deferred | No accepted Rust evidence |
+| Item | Phase | Status | Rust | Evidence |
+|---|---|---|---|---|
+| GET /api/hook/session-start | 4 | deferred | 501 | 501 for any caller (`w2d-briefing-hooks`: briefing composition and session-start registration are W2-D/W2-E); `daemon/harness/run.py` checks the stub |
+| GET /api/hook/memory-policy | 4 | deferred | 501 | As session-start |
+| GET /api/hook/memory-changes | 4 | deferred | partly | An unauthorized or unavailable caller gets Python's empty text, compared in hosted CI (`security-closed`, `body-limits`); an authorized caller gets 501 (the change note, W2-E) |
+| POST /api/hook/session-end | 4 | deferred | partly | The gates, the 16 KiB cap and the no-session `{"ok": true}` are served and compared in hosted CI (HTTP-BODY-LIMITS, security cases); a truthy `session_id` gets 501 (the close, W2-E). Malformed bodies answer 400 `invalid_json` (declared, "Request parsing edges" in `daemon/divergences.md`) |
+| GET /api/hook/coordination-start | 4 | ported | served | `board/http.rs`; board harness scenarios `hooks`, `tokenless`, `disabled`. `daemon/harness/board/run.py live` compares every step's status, headers and body, the board tables after each write and the audit chain. Recorded runs: the W2-F completion run on a Linux dev lane, 263 steps in 11 scenarios with zero differences ([W2-F evidence](daemon/FORWARD-w2f.md)), and the runs #777 (`mcp-tools`) and #829 (`identity`) recorded for the scenarios they added. #754's three REST `ack` steps have no recorded live run. Hosted CI runs only the harness's own unit tests; no Windows runtime run; hosted CI compares its admission only (`security-encodings`, `body-limits`) |
+| GET /api/hook/park-gate | 4 | ported | served | `board/http.rs`; board harness scenarios `wake` (and `hooks` for the no-bearer reply). `daemon/harness/board/run.py live` compares every step's status, headers and body, the board tables after each write and the audit chain. Recorded runs: the W2-F completion run on a Linux dev lane, 263 steps in 11 scenarios with zero differences ([W2-F evidence](daemon/FORWARD-w2f.md)), and the runs #777 (`mcp-tools`) and #829 (`identity`) recorded for the scenarios they added. #754's three REST `ack` steps have no recorded live run. Hosted CI runs only the harness's own unit tests; no Windows runtime run; hosted CI compares the unauthorized reply only |
+| POST /api/hook/woke | 4 | ported | served | `board/http.rs`; board harness scenarios `wake` (and `hooks` for the no-bearer reply). `daemon/harness/board/run.py live` compares every step's status, headers and body, the board tables after each write and the audit chain. Recorded runs: the W2-F completion run on a Linux dev lane, 263 steps in 11 scenarios with zero differences ([W2-F evidence](daemon/FORWARD-w2f.md)), and the runs #777 (`mcp-tools`) and #829 (`identity`) recorded for the scenarios they added. #754's three REST `ack` steps have no recorded live run. Hosted CI runs only the harness's own unit tests; no Windows runtime run; hosted CI compares the unauthorized reply only |
+| POST /api/hook/subagent | 4 | ported | served | `board/http.rs`; board harness scenarios `identity` (and `hooks` for the no-bearer reply). `daemon/harness/board/run.py live` compares every step's status, headers and body, the board tables after each write and the audit chain. Recorded runs: the W2-F completion run on a Linux dev lane, 263 steps in 11 scenarios with zero differences ([W2-F evidence](daemon/FORWARD-w2f.md)), and the runs #777 (`mcp-tools`) and #829 (`identity`) recorded for the scenarios they added. #754's three REST `ack` steps have no recorded live run. Hosted CI runs only the harness's own unit tests; no Windows runtime run; hosted CI compares the unauthorized reply only |
 
 ## Coordination actions acceptance checklist
 
-Source: `pseudolife_memory/coordination.py`. Each item requires normal, invalid-input, authentication and durable-effect evidence as applicable.
+Source: `pseudolife_memory/coordination.py`. Each item requires normal, invalid-input, authentication and durable-effect evidence as applicable. The Rust and Status columns follow the Console checklist's rule. Audited at `98c5d6bf` (2026-10-19): all 15 actions are served by `rust/daemon/src/board/dispatch.rs` (landed with integration batch 7, #753), none answers 501, and every one is compared by the board harness: `daemon/harness/board/run.py live` compares every step's status, headers and body, the board tables after each write and the audit chain. Recorded runs: the W2-F completion run on a Linux dev lane, 263 steps in 11 scenarios with zero differences ([W2-F evidence](daemon/FORWARD-w2f.md)), and the runs #777 (`mcp-tools`) and #829 (`identity`) recorded for the scenarios they added. #754's three REST `ack` steps have no recorded live run. Hosted CI runs only the harness's own unit tests; no Windows runtime run. The scenario lists below are approximate (from the scenario steps). Every action that stamps a board write inherits W2F-SHARED-HLC (`daemon/divergences.md`, "Coordination board completion (W2-F)").
 
-| Item | Phase | Status | Evidence |
-|---|---|---|---|
-| context | 1/4 | deferred | No accepted Rust evidence |
-| register | 1/4 | deferred | No accepted Rust evidence |
-| update | 1/4 | deferred | No accepted Rust evidence |
-| agents | 1/4 | deferred | No accepted Rust evidence |
-| lease | 1/4 | deferred | No accepted Rust evidence |
-| release | 1/4 | deferred | No accepted Rust evidence |
-| leases | 1/4 | deferred | No accepted Rust evidence |
-| attach | 1/4 | deferred | No accepted Rust evidence |
-| heartbeat | 1/4 | deferred | No accepted Rust evidence |
-| detach | 1/4 | deferred | No accepted Rust evidence |
-| send | 1/4 | deferred | No accepted Rust evidence |
-| receive | 1/4 | deferred | No accepted Rust evidence |
-| history | 1/4 | deferred | No accepted Rust evidence |
-| ack | 1/4 | deferred | No accepted Rust evidence |
-| attempt | 1/4 | deferred | No accepted Rust evidence |
+| Item | Phase | Status | Rust | Evidence |
+|---|---|---|---|---|
+| context | 1/4 | ported | served | Board harness scenarios: identity |
+| register | 1/4 | ported | served | Board harness scenarios: identity, mail, wake, leases, prune, tokenless, disabled, console, mixed |
+| update | 1/4 | ported | served | Board harness scenarios: identity, wake, mixed, mcp-tools |
+| agents | 1/4 | ported | served | Board harness scenarios: identity, mail, leases, prune, console |
+| lease | 1/4 | ported | served | Board harness scenarios: leases, prune, console, mixed |
+| release | 1/4 | ported | served | Board harness scenarios: leases, prune, mixed, mcp-tools |
+| leases | 1/4 | ported | served | Board harness scenarios: leases |
+| attach | 1/4 | ported | served | Board harness scenarios: identity, mail, wake, console, mixed |
+| heartbeat | 1/4 | ported | served | Board harness scenarios: identity, mail, wake |
+| detach | 1/4 | ported | served | Board harness scenarios: identity, mixed |
+| send | 1/4 | ported | served | Board harness scenarios: mail, wake, prune, console, mixed, mcp-tools; declared: W2F-CLOCK-RETRY, W2F-SHARED-HLC (cutover blockers) and W2F-MAIL-PACING |
+| receive | 1/4 | ported | served | Board harness scenarios: mail, console, mixed; includes `wait_seconds` (W2-F). The `ack` flag (#754) is compared over MCP by #777's `mcp-tools` run; its REST steps await a live run. W2F-MAIL-PACING applies |
+| history | 1/4 | ported | served | Board harness scenarios: mail |
+| ack | 1/4 | ported | served | Board harness scenarios: mail, console |
+| attempt | 1/4 | ported | served | Board harness scenarios: mail; W2F-MAIL-PACING applies |
 
 ## CLI mode acceptance checklist
 
@@ -672,8 +684,9 @@ validation. Subcommands remain part of each mode's contract.
 
 The requested 19 Phase 2 modes are ten Tier A leaves, six Tier B modes and three
 Tier C modes. Help/version are two carried Phase 1 gaps; channel is the shared
-Phase 1/2 remainder. The original 26 plus upstream maintainer/test-login make the
-current 28. Tier labels record the requested scope, not a claim of HTTP-only
+Phase 1/2 remainder. The original 26 plus upstream maintainer/test-login made 28
+at the `f709abb5` pin; `delegate-watch` (#755, 2026-10-15) makes 29 on master
+(`cli.py` at `98c5d6bf`). Tier labels record the requested scope, not a claim of HTTP-only
 dependencies: recovery, audit and lease operator actions reach PostgreSQL directly.
 They remain deferred without introducing a database client into this binary.
 
@@ -696,36 +709,46 @@ All nine reported PR checks passed at `779c588c`. The five existing
 name concrete oracle nodes or internal test-function pools awaiting a process
 adapter; a function name without parameter suffixes is not a routed node claim.
 
-| Mode | Phase | Status | Evidence |
-|---|---|---|---|
-| help | 1 | ported | Implementation in `shim/src/cli.rs`; `test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]`, `[-h]`, `[help]`, `test_help_lists_version`; current 779c588c UTF-8 stream/scalar argv Windows/native Linux receipts and help pairs linked in PORT-STATE.md; all four Rust/Parity jobs and actual five-node outcomes verified in run 37245992895 at same-tree merge checkout b5f485c9; historical 6e936887 evidence retained |
-| version | 1 | ported | Scoped installer-manifest and named-console file admission in the executable's own `Scripts`/`bin` runtime; UTF-8 stdout/stderr with platform newlines. [Final merged-master proof at `df2dbf8a`](../evals/results/rust-phase2d-version-df2dbf8a/README.md) passes 28 exact cases/112 rejecting controls per OS, missing-console fallback, actual non-ASCII homes, native argv and eight unchanged original CLI nodes once/non-skipped per arm. All four warm 3x10 pairs and serial version contracts 8/8 per feature on both OSes pass. Executed tree `28823784` and fresh image identities remain separate from this evidence carrier; its review/checks remain required. Source ratio 184/125 = 1.472 is reporting, with no hard target. Manifest NaN/Infinity/lone-surrogate/beyond-u64, locale/default encodings and non-UTF-8/surrogate argv remain deferred; candidate not installed. Historical `5220b5ee`/cold-copy failures and unresolved Linux parallel ETXTBSY remain retained |
-| shim | 1 | deferred | No accepted Rust evidence |
-| serve | 3/4 | deferred | Outside client leaves; `daemon.py`, storage/model ownership; `test_daemon_http.py` oracle pool |
-| embedded | 3/5 | deferred | Outside client leaves; in-process `mcp_server.py` with storage/models/install behavior; `test_mcp_server.py` internal pool |
-| channel | 1/2 | deferred | Phase 1 process boundary; internal remainder `test_channel.py::test_channel_serializes_simultaneous_writes`, `test_channel_startup_failure_closes_output_without_opening_inbox`; inherited Phase 1 equivalents and receipts remain separately governed |
-| coordination-recovery | 2 | deferred | Requested A, actual direct PostgreSQL via `coordination_recovery.py`/CoordinationStore; Phase 4 recovery transaction; `test_coordination_recovery.py::test_recovery_revokes_and_rebinds_private_state_without_exposing_key`, `test_rebind_state_failure_rolls_back_credential_issuance` |
-| board-audit | 2 | deferred | Canonical verify, export and redact over an explicit DSN ported as CLI-AUDIT (harness row `audit`); stats (CLI-AUDIT-STATS) and the embedded/container transports (CLI-AUDIT-TRANSPORT) defer; Requested A, direct PostgreSQL/container operator path in `board_audit_cli.py`; Phase 3 reads/4 redact; `test_board_audit_cli.py::test_export_writes_json_lines_filtered_by_task_agent_and_time`, `test_verify_prints_the_head_and_fails_on_tampering_but_an_archive_still_verifies` |
-| briefing | 2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09) |
-| prompt-hook | 2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09) |
-| doctor | 2 | deferred | Read-only diagnostics ported as CLI-DOCTOR (harness row `doctor`, runtime-identity substitution); `--disposable-proof` with a database (CLI-DOCTOR-PROOF) defers; A offline/HTTP/MCP subprocess checks in `doctor_cli.py`; public `test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`; `test_doctor_cli.py::test_doctor_hands_the_registration_credential_to_the_handshake` internal; adapter and corpus pending |
-| connect | 2 | deferred | JSON-file clients ported as CLI-CONNECT (harness row `connect`, own-shim handshake substitution); Codex (CLI-CONNECT-CODEX) and pairing codes (CLI-CONNECT-PAIR) defer; B installed-shim handshake/config transaction (`connect_cli.py`); `test_connect.py::test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_directory`, `test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved`; process seam audit pending |
-| tunnel | 2 | deferred | The read-only status, pending-only update and pre-effect refusals ported as CLI-TUNNEL-STATUS (harness row `tunnel`); the runtime (CLI-TUNNEL-RUNTIME) defers before any effect; B operator/runtime/bridge/network consent (`tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_runtime.py`, `tunnel_bridge.py`); internal `test_tunnel_cli.py::test_setup_resumes_without_erasing_key_consent_or_local_config`, `test_handshake_failure_redacts_transport_output_and_does_not_write`; additive process fixtures pending |
-| update | 5 | deferred | Outside client leaves; release/install/runtime transactions in `update_cli.py`; `test_update_cli.py`/`test_client_install_ux.py` pools |
-| backup | 2 | deferred | Explicit-DSN and file mode ported as CLI-BACKUP-DSN (harness row `backup`); the lite tier (CLI-BACKUP-LITE) defers by name until native embedded_pg; `test_backup_cli.py::test_backup_roundtrip_embedded` remains its oracle node |
-| export | 2 | deferred | Explicit-DSN export ported as CLI-TRANSFER-DSN (harness row `transfer`); the lite tier (CLI-TRANSFER-LITE) defers by name; C Phase 3; `transfer_cli.py` direct psycopg/schema/vector text, torch-free at CLI module; `test_transfer_cli.py::test_export_import_roundtrip_preserves_every_table`, `test_export_skips_transient_meta_and_telemetry` |
-| import | 2 | deferred | Explicit-DSN import into a current-schema bank ported as CLI-TRANSFER-DSN; the lite tier and banks needing ensure_schema work (CLI-TRANSFER-LITE, CLI-TRANSFER-SCHEMA) defer by name; C Phase 4 direct psycopg durable writes; `test_transfer_cli.py::test_import_refuses_a_nonempty_bank`, `test_import_refuses_while_other_connections_hold_the_bank`, `test_import_refuses_embedding_dim_mismatch`, `test_import_leaves_the_curation_spelling_flag_to_the_export` |
-| episode-start | 2 | ported-with-substitution | See the CLI-EPISODE row and [CLI-EPISODE closure](#cli-episode-closure-2026-10-09) |
-| episode-end | 2 | ported-with-substitution | See the CLI-EPISODE row and [CLI-EPISODE closure](#cli-episode-closure-2026-10-09) |
-| wait-mail | 2 | ported-with-substitution | See the CLI-MAIL row and [CLI-MAIL closure](#cli-mail-closure-2026-10-09); original `test_wait_mail_cli.py` nodes remain Python oracle tests |
-| doorbell-prompt-seen | 1/2 | ported-with-substitution | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09); the internal queue-race nodes remain Python oracle tests |
-| lease | 2/4 | ported-with-substitution | CLI-LEASE-core and CLI-LEASE cover canonical check/list/run/hold/break/delegate/designate producer shapes. Embedded PG and native diagnostic/signal policies retain their named substitutions. The original in-process lease/coordination tests remain Python baselines; daemon coordination actions keep separate gates. |
-| invite | 2 | deferred | Create, list and revoke over an explicit DSN ported as CLI-PAIRING (harness row `invite`); the no-DSN embedded, container and psql paths (CLI-PAIRING-CONTAINER) defer; B direct operator SQL/psql/container (`invite_cli.py`); internal `test_invite_cli.py::test_an_invite_prints_the_code_once_and_stores_only_its_hash`, `test_a_malformed_name_is_a_usage_error` |
-| pair | 2 | deferred | Canonical http pairing ported as CLI-PAIRING (harness row `pair`); https, proxied and terminal-prompt shapes (CLI-PAIRING-CONTAINER) defer; B HTTP pairing/owner-only token/retry (`pair_cli.py`); `test_pair_cli.py::test_read_code_takes_the_code_from_stdin`, `test_an_unknown_outcome_keeps_the_file_and_names_it` |
-| expose | 2 | deferred | B Tailscale status/subprocess/HTTP (`expose_cli.py`); internal `test_expose_cli.py::test_success_runs_the_exact_command_and_prints_the_url`, `test_a_foreign_serve_on_the_port_is_never_replaced`; disposable executable equivalents pending |
-| move | 2 | deferred | The refusals before any effect ported as CLI-MOVE-REFUSALS (harness row `move`); the move itself (CLI-EXPOSE-MOVE) defers before any effect; B Docker/ssh pg_dump/restore/fence/operator transaction (`move_cli.py`); `test_move_cli.py::test_declining_exits_2_and_changes_nothing`; process seam and disposable operator state pending; no live-bank work |
-| maintainer | 4/5 | deferred | enrol-code, confirm, revoke, reset and list over an explicit DSN ported as CLI-MAINTAINER (harness row `maintainer`); `setup`, help, `--poll` and the embedded/container transports (CLI-MAINTAINER-TRANSPORT) defer; added upstream at the schema-54 close-out pin; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
-| test-login | 5 | deferred | `create` ported as CLI-TEST-LOGIN (harness row `test_login`); help and non-canonical spellings defer; Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_test_login_cli.py` |
+The Native column, after Status, says what the Rust binary (`rust/shim`) does with the mode on
+master: `native` (every shape the row claims), `partly` (the ported sub-rows the
+Evidence cell names run natively, other shapes defer by name before any effect)
+or `defers` (every invocation prints the deferral and exits 1: the mode is in
+`DEFERRED_MODES` in `shim/src/cli.rs` and has no native leaf). A mode's Status stays `deferred` until every sub-row closes; the
+sub-rows' own status is in Parity rows. Audited at `98c5d6bf` (2026-10-19): 9
+modes native, 15 partly and 5 defer; `delegate-watch` has no native leaf and no
+scoped sub-row yet.
+
+| Mode | Phase | Status | Native | Evidence |
+|---|---|---|---|---|
+| help | 1 | ported | native | Implementation in `shim/src/cli.rs`; `test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]`, `[-h]`, `[help]`, `test_help_lists_version`; current 779c588c UTF-8 stream/scalar argv Windows/native Linux receipts and help pairs linked in PORT-STATE.md; all four Rust/Parity jobs and actual five-node outcomes verified in run 37245992895 at same-tree merge checkout b5f485c9; historical 6e936887 evidence retained |
+| version | 1 | ported | native | Scoped installer-manifest and named-console file admission in the executable's own `Scripts`/`bin` runtime; UTF-8 stdout/stderr with platform newlines. [Final merged-master proof at `df2dbf8a`](../evals/results/rust-phase2d-version-df2dbf8a/README.md) passes 28 exact cases/112 rejecting controls per OS, missing-console fallback, actual non-ASCII homes, native argv and eight unchanged original CLI nodes once/non-skipped per arm. All four warm 3x10 pairs and serial version contracts 8/8 per feature on both OSes pass. Executed tree `28823784` and fresh image identities remain separate from this evidence carrier; its review/checks remain required. Source ratio 184/125 = 1.472 is reporting, with no hard target. Manifest NaN/Infinity/lone-surrogate/beyond-u64, locale/default encodings and non-UTF-8/surrogate argv remain deferred; candidate not installed. Historical `5220b5ee`/cold-copy failures and unresolved Linux parallel ETXTBSY remain retained |
+| shim | 1 | deferred | partly | The stdio proxy is native: MCP-WIRE, MCP-TIER, SHIM-AUTH and SHIM-WAKE-REASON are `ported`; SHIM-LIFECYCLE, SHIM-DAEMON-LAUNCH, SHIM-UPDATE-SCHEDULING and SHIM-BOARD are `ported-with-substitution` (Parity rows); SHIM-CLIENT-UPDATES (installer-backed unattended updates) is deferred |
+| serve | 3/4 | deferred | partly | The native binary runs only the maintainer-sent candidate (`GET /api/maintainer/sent`; every other route answers `route_deferred`; Maintainer sent native candidate); the Rust daemon is the separate `pseudolife-daemon` binary, tracked by the MCP, Console, hook and coordination checklists. Outside client leaves; `daemon.py`, storage/model ownership; `test_daemon_http.py` oracle pool |
+| embedded | 3/5 | deferred | defers | Outside client leaves; in-process `mcp_server.py` with storage/models/install behavior; `test_mcp_server.py` internal pool |
+| channel | 1/2 | deferred | partly | Phase 1 process boundary; internal remainder `test_channel.py::test_channel_serializes_simultaneous_writes`, `test_channel_startup_failure_closes_output_without_opening_inbox`; inherited Phase 1 equivalents and receipts remain separately governed |
+| coordination-recovery | 2 | deferred | defers | Requested A, actual direct PostgreSQL via `coordination_recovery.py`/CoordinationStore; Phase 4 recovery transaction; `test_coordination_recovery.py::test_recovery_revokes_and_rebinds_private_state_without_exposing_key`, `test_rebind_state_failure_rolls_back_credential_issuance` |
+| board-audit | 2 | deferred | partly | Canonical verify, export and redact over an explicit DSN ported as CLI-AUDIT (harness row `audit`); stats (CLI-AUDIT-STATS) and the embedded/container transports (CLI-AUDIT-TRANSPORT) defer; Requested A, direct PostgreSQL/container operator path in `board_audit_cli.py`; Phase 3 reads/4 redact; `test_board_audit_cli.py::test_export_writes_json_lines_filtered_by_task_agent_and_time`, `test_verify_prints_the_head_and_fails_on_tampering_but_an_archive_still_verifies` |
+| briefing | 2 | ported-with-substitution | native | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09) |
+| prompt-hook | 2 | ported-with-substitution | native | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09) |
+| doctor | 2 | deferred | partly | Read-only diagnostics ported as CLI-DOCTOR (harness row `doctor`, runtime-identity substitution); `--disposable-proof` with a database (CLI-DOCTOR-PROOF) defers; A offline/HTTP/MCP subprocess checks in `doctor_cli.py`; public `test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`; `test_doctor_cli.py::test_doctor_hands_the_registration_credential_to_the_handshake` internal; adapter and corpus pending |
+| connect | 2 | deferred | partly | JSON-file clients ported as CLI-CONNECT (harness row `connect`, own-shim handshake substitution); Codex (CLI-CONNECT-CODEX) and pairing codes (CLI-CONNECT-PAIR) defer; B installed-shim handshake/config transaction (`connect_cli.py`); `test_connect.py::test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_directory`, `test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved`; process seam audit pending |
+| tunnel | 2 | deferred | partly | The read-only status, pending-only update and pre-effect refusals ported as CLI-TUNNEL-STATUS (harness row `tunnel`); the runtime (CLI-TUNNEL-RUNTIME) defers before any effect; B operator/runtime/bridge/network consent (`tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_runtime.py`, `tunnel_bridge.py`); internal `test_tunnel_cli.py::test_setup_resumes_without_erasing_key_consent_or_local_config`, `test_handshake_failure_redacts_transport_output_and_does_not_write`; additive process fixtures pending |
+| update | 5 | deferred | defers | Outside client leaves; release/install/runtime transactions in `update_cli.py`; `test_update_cli.py`/`test_client_install_ux.py` pools |
+| backup | 2 | deferred | partly | Explicit-DSN and file mode ported as CLI-BACKUP-DSN (harness row `backup`); the lite tier (CLI-BACKUP-LITE) defers by name until native embedded_pg; `test_backup_cli.py::test_backup_roundtrip_embedded` remains its oracle node |
+| export | 2 | deferred | partly | Explicit-DSN export ported as CLI-TRANSFER-DSN (harness row `transfer`); the lite tier (CLI-TRANSFER-LITE) defers by name; C Phase 3; `transfer_cli.py` direct psycopg/schema/vector text, torch-free at CLI module; `test_transfer_cli.py::test_export_import_roundtrip_preserves_every_table`, `test_export_skips_transient_meta_and_telemetry` |
+| import | 2 | deferred | partly | Explicit-DSN import into a current-schema bank ported as CLI-TRANSFER-DSN; the lite tier and banks needing ensure_schema work (CLI-TRANSFER-LITE, CLI-TRANSFER-SCHEMA) defer by name; C Phase 4 direct psycopg durable writes; `test_transfer_cli.py::test_import_refuses_a_nonempty_bank`, `test_import_refuses_while_other_connections_hold_the_bank`, `test_import_refuses_embedding_dim_mismatch`, `test_import_leaves_the_curation_spelling_flag_to_the_export` |
+| episode-start | 2 | ported-with-substitution | native | See the CLI-EPISODE row and [CLI-EPISODE closure](#cli-episode-closure-2026-10-09) |
+| episode-end | 2 | ported-with-substitution | native | See the CLI-EPISODE row and [CLI-EPISODE closure](#cli-episode-closure-2026-10-09) |
+| wait-mail | 2 | ported-with-substitution | native | See the CLI-MAIL row and [CLI-MAIL closure](#cli-mail-closure-2026-10-09); original `test_wait_mail_cli.py` nodes remain Python oracle tests |
+| doorbell-prompt-seen | 1/2 | ported-with-substitution | native | See the CLI-HOOK row and [CLI-HOOK closure](#cli-hook-closure-2026-10-09); the internal queue-race nodes remain Python oracle tests |
+| lease | 2/4 | ported-with-substitution | native | CLI-LEASE-core and CLI-LEASE cover canonical check/list/run/hold/break/delegate/designate producer shapes. Embedded PG and native diagnostic/signal policies retain their named substitutions. The original in-process lease/coordination tests remain Python baselines; daemon coordination actions keep separate gates. |
+| invite | 2 | deferred | partly | Create, list and revoke over an explicit DSN ported as CLI-PAIRING (harness row `invite`); the no-DSN embedded, container and psql paths (CLI-PAIRING-CONTAINER) defer; B direct operator SQL/psql/container (`invite_cli.py`); internal `test_invite_cli.py::test_an_invite_prints_the_code_once_and_stores_only_its_hash`, `test_a_malformed_name_is_a_usage_error` |
+| pair | 2 | deferred | partly | Canonical http pairing ported as CLI-PAIRING (harness row `pair`); https, proxied and terminal-prompt shapes (CLI-PAIRING-CONTAINER) defer; B HTTP pairing/owner-only token/retry (`pair_cli.py`); `test_pair_cli.py::test_read_code_takes_the_code_from_stdin`, `test_an_unknown_outcome_keeps_the_file_and_names_it` |
+| expose | 2 | deferred | defers | B Tailscale status/subprocess/HTTP (`expose_cli.py`); internal `test_expose_cli.py::test_success_runs_the_exact_command_and_prints_the_url`, `test_a_foreign_serve_on_the_port_is_never_replaced`; disposable executable equivalents pending |
+| move | 2 | deferred | partly | The refusals before any effect ported as CLI-MOVE-REFUSALS (harness row `move`); the move itself (CLI-EXPOSE-MOVE) defers before any effect; B Docker/ssh pg_dump/restore/fence/operator transaction (`move_cli.py`); `test_move_cli.py::test_declining_exits_2_and_changes_nothing`; process seam and disposable operator state pending; no live-bank work |
+| maintainer | 4/5 | deferred | partly | enrol-code, confirm, revoke, reset and list over an explicit DSN ported as CLI-MAINTAINER (harness row `maintainer`); `setup`, help, `--poll` and the embedded/container transports (CLI-MAINTAINER-TRANSPORT) defer; added upstream at the schema-54 close-out pin; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
+| test-login | 5 | deferred | partly | `create` ported as CLI-TEST-LOGIN (harness row `test_login`); help and non-canonical spellings defer; Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_test_login_cli.py` |
+| delegate-watch | 2 | deferred | defers | Added upstream by #755 (2026-10-15), after the `f709abb5` pin; `delegate_watch_cli.py`; listed in `DEFERRED_MODES`; no harness row, native leaf or scoped sub-row yet |
 
 ## Retained wait-mail evidence boundary (2026-10-09)
 
