@@ -40,6 +40,12 @@ tool tier: if your client does not list them, call
      reasons}`. When `attention.needed` is true, tell the user the reason
      before triaging: a judge left in `shadow`/`off`, or one configured
      but not running, keeps refilling the queue this session clears.
+     Its `judge_agreement` block scores every recorded judge vote
+     against the human or agent decision that followed (per queue and
+     opinion: `voted`, `agree`, `precision`; `agreed_two` and
+     `majority_three` for what the two-vote and tiebreak gates would
+     have applied). When a judge mode is in `shadow`, report that
+     number with the queue counts: it is what a promotion rests on.
 2. ONLY when no extractor endpoint is configured (primary and fallback
    both null) or both are unreachable: you are this deployment's only
    cortex writer — run the manual extraction pass:
@@ -114,13 +120,24 @@ tool tier: if your client does not list them, call
    near-duplicate slots in the lesson / world stores; listing-only — the
    dream never deletes them). Judge from the per-side values:
    - **Duplicate**: keep the better-keyed slot and drop the other via
-     `memory_forget(scope="lesson"|"world", ...)`, folding anything the
-     dropped slot added into the survivor first. This now RETIRES the
+     `memory_forget(scope="lesson"|"world", ...)`. This RETIRES the
      slot rather than deleting it (row kept, `store_decisions` audit
      row) — a wrong call is undoable with
      `memory_graph_review(action="restore_slot", store="lesson"|"world",
      src="<entity>|<attribute>")`, so lean toward acting rather than
-     leaving a genuine duplicate pending.
+     leaving a genuine duplicate pending. When the dropped slot says
+     something the survivor does not:
+     - **world**: the listing truncates values, and a rewrite keeps only
+       what the new call passes. Read both slots in full with
+       `memory_world_search` first. Rewrite the survivor with
+       `memory_world_set` only when one record's source backs the whole
+       merged value, re-passing that record's `source_url`,
+       `source_quote`, `freshness_class` and `retrieved_at`, then drop
+       the other. Otherwise leave the pair listed and report it.
+     - **lesson**: no tool writes lesson text (lessons are distilled from
+       outcomes), so retire the dropped lesson only when the survivor
+       already says everything it does. Otherwise leave the pair listed
+       and name the missing point in your report.
    - **Distinct**: `memory_graph_review(action="dismiss_slot_pair",
      store="lesson"|"world", src=<a_key>, dst=<b_key>)` so the pair
      never re-lists.

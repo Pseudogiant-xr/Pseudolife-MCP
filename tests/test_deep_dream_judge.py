@@ -640,6 +640,22 @@ def test_relate_note_round_trips_both_opinions():
     assert merge_verdict_token("reject", None) == "reject"
 
 
+def test_relate_note_keeps_the_third_opinions_relation_apart():
+    """v56: the tiebreak's ``| 3rd (...)`` tail follows the second's; each
+    opinion's relation is read from its own tail only."""
+    from pseudolife_memory.memory.graph_review import (
+        relate_relations, third_relate_relation)
+    note = ("relate:implements | n | 2nd (m2): reject 0.80 [split] "
+            "| 3rd (m3): relate:uses 0.90 [2-1 reject]")
+    assert relate_relations(note) == ("implements", None)
+    assert third_relate_relation(note) == "uses"
+    both = ("n | 2nd (m2): relate:part-of 0.80 [split] "
+            "| 3rd (m3): relate:uses 0.90 [2-1 reject]")
+    assert relate_relations(both) == (None, "part-of")
+    assert third_relate_relation("n | 2nd (m2): relate:part-of 0.80 [split]") is None
+    assert third_relate_relation(None) is None
+
+
 def _note(svc, pid):
     return svc._storage.conn.execute(
         "SELECT judge_note FROM entity_proposals WHERE id=%s", (pid,)).fetchone()[0]
@@ -800,6 +816,25 @@ def test_an_unregistered_vocabulary_relation_files_no_link(svc):
     assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 0
     assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
     assert _pending_links(svc) == []
+
+
+def test_an_untyped_related_to_relate_files_no_link(svc):
+    """``related-to`` names no relationship: on the live bank (2026-10-17)
+    274 of the 381 links the relate path had filed were related-to, and the
+    link judge reached its 0.8 gate on none of them, so they only piled up
+    in the review queue. The merge is still rejected, and a typed relation
+    on another proposal still files (the two-opinion mixed case is in
+    test_queue_judges_service.py)."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    plain = _propose(svc, "phi a", "phi b")
+    typed = _propose(svc, "chi module", "chi concept")
+    judge = _StubJudge({("phi a", "phi b"): ("relate", 0.9, "related-to"),
+                        ("chi module", "chi concept"): ("relate", 0.9, "implements")})
+    out = svc.deep_dream_judge(judge)
+    assert out["auto_rejected"] == 2 and out["relate_links_filed"] == 1
+    assert svc._storage.get_entity_proposal(plain)["status"] == "rejected"
+    assert _pending_links(svc) == [
+        ("chi module", "implements", "chi concept", "merge-judge-relate")]
 
 
 def test_public_link_proposals_resolve_by_name_not_id(svc):

@@ -509,6 +509,7 @@ _USERNAME_PAT = re.compile(rb"c:\\+users\\+(?!<|o'brien)[a-z0-9]")
 # Every match of _USERNAME_PAT starts with this literal, so it is an exact
 # superset prescreen (same for the two below).
 _USERNAME_PRESCREEN = (b"c:\\",)
+_DEV_BOX_PAT = re.compile(rb"\b(?:dev-" + rb"playground(?:-[0-9]+)?|play" + rb"ground-[0-9]+)\b")
 _RFC1918_PAT = re.compile(
     rb"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
     rb"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
@@ -578,6 +579,9 @@ def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
     """Record at most one identifier hit for ``low`` (lowercased bytes)."""
     if any(n in low for n in _IDENT_NEEDLES):
         hits.append((rel, "needle"))
+        return
+    if _DEV_BOX_PAT.search(low):
+        hits.append((rel, "dev-machine label"))
         return
     if b"s-1-" in low and any(m.group(0) not in (*_ALLOWED_ACCOUNT_SIDS,
                                               *_WELL_KNOWN_ACCOUNT_SHAPED_SIDS)
@@ -677,6 +681,21 @@ def test_tracked_tree_carries_no_maintainer_identifiers(
     (b"S-1-5-21-100-200-300-1001" + b"-999", True),
 ])
 def test_identifier_scan_rejects_account_sids_except_exact_synthetic_fixtures(value, rejected):
+    hits = []
+    _scan_identifiers("fixture.txt", value.lower(), hits)
+    assert bool(hits) is rejected
+
+
+@pytest.mark.parametrize("value,rejected", [
+    (b"dev-" + b"playground", True),
+    (b"dev-" + b"playground" + b"-2", True),
+    (b"play" + b"ground-1", True),
+    (b"play" + b"ground-23", True),
+    (b"a playground", False),
+    (b"a Linux dev box", False),
+    (b"<machine>", False),
+])
+def test_identifier_scan_rejects_dev_machine_labels(value, rejected):
     hits = []
     _scan_identifiers("fixture.txt", value.lower(), hits)
     assert bool(hits) is rejected

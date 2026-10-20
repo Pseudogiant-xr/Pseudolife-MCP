@@ -95,7 +95,7 @@ services:
         BUILD_SOURCE: checkout
     # Keep this tag in step with the package version in pyproject.toml; the
     # update scripts read it from here (single source of truth for deploys).
-    image: pseudolife-daemon:0.18.1
+    image: pseudolife-daemon:0.19.0
     container_name: pseudolife-mcp-daemon
     restart: unless-stopped
     logging: *default-logging
@@ -221,6 +221,7 @@ services:
       # host-side CLI shim needs none).
       PSEUDOLIFE_JUDGE_API_KEY: ${PSEUDOLIFE_JUDGE_API_KEY:-}
       PSEUDOLIFE_JUDGE_SECOND_API_KEY: ${PSEUDOLIFE_JUDGE_SECOND_API_KEY:-}
+      PSEUDOLIFE_JUDGE_THIRD_API_KEY: ${PSEUDOLIFE_JUDGE_THIRD_API_KEY:-}
       # How often the daemon returns heap memory glibc keeps after encode
       # bursts (malloc_trim). Empty = the 60 s default; 0 disables. See
       # docs/guide/configuration.md.

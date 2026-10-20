@@ -142,6 +142,411 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   search and status filters, immutable hashes, structured addresses, source
   paths, and evidence links without copying proof records into ordinary
   memory, cortex, the graph, or dream consolidation.
+
+## [0.19.0] - 2026-10-18 — The review-queue judges can settle their own disagreements and report how often they agree with you, the merge judge stops filling the link queue with untyped proposals, and lease break says when a COMMIT's answer was lost
+
+### Added (2026-10-18 — a judge-agreement report, the number a shadow judge mode is promoted on)
+- A judge mode in `shadow` records votes and applies nothing, and nothing scored those votes against the decisions that followed: the v56 link second opinion and merge tiebreak shipped in shadow with no path out of it, and the merge second opinion before them was promoted on a ladder panel from another month. `dream_status` (`memory_dream(action="status")`, `GET /api/dream/status`) now carries `review_queue.judge_agreement`: every recorded vote scored against the decision a human (Console) or agent (`memory_graph_review`) later took on the same row, over the last 90 days. Per queue (`merge`, `junk`, `link`) and opinion (`judge`, `judge2`, `judge3`): `voted`, `agree`, `abstain`, `precision` and `by_verdict`; `agreed_two` (merge and link) scores the rows whose first two opinions agreed from distinct models at the two-vote gates, and `majority_three` the rows whose 2-of-3 majority cleared its gate — what `auto` would have applied. `scored` counts the decisions read and `labels` who took them; decisions the judges applied themselves (`dream-judge`, `dream-auto`) are not labels. "Distinct models" follows the live gates: a pair's two votes carry the model each endpoint reported serving (its `<opinion>_served_model` column; rows judged before v56 stamped the first opinion's have none and are not paired, though the live gate may still apply them from the judging memo until `review_rejudge` re-asks them), the names differ and so do the configured stamps; a majority needs both earlier served names known and a third served by a model other than every name heard. The accept side also replays the live accept path's row-shaped refusals from the audit row (an analyzer-filed proposal, a name veto, a variant conflict: left for a human whatever the votes say). Not replayed: the `low_differential` exclusion (computed from the evidence at judging time), so the accept side of `agreed_two` and `majority_three` counts a few rows `auto` would skip; the dismissed-pair check (`auto` closes such a row as a reject, and a human reject dismisses the pair itself, so it cannot be told apart afterwards); and a decided link row goes with either endpoint when a later merge or junk delete takes it, so links are scored while both endpoints exist. The block never fails the status call (a failure is an `error` field); `MemoryService.judge_agreement(days=...)` widens or narrows the window.
+- Every merge and junk decision — accept, reject, keep, the dream's unattended junk delete — now copies the proposal's judge votes onto its FK-free audit row first, into the `merge_decisions.votes` column schema v56 added for it: per opinion the verdict, confidence, model, served model (when the endpoint reported one) and the relation a relate vote named. An accepted merge CASCADE-deletes its proposal row with the votes on it, which is why the audit row holds them. NULL = a decision from before this release, or one on a row no judge had seen; neither is scored. Link decisions leave their votes on the `edge_proposals` row and are scored from there (links decided before this build carry no `decided_by` and are counted as `unattributed_links`, not scored).
+- Link decisions are attributed. The Console's `accept-proposal` / `reject-proposal` routes and `memory_graph_review`'s `accept_link` / `reject_link` settled a link with no `decided_by` (so the report could score none of them); they now record `human` (the Console's default, or the `decided_by` it sends) and `agent`, and the dream's untyped-edge retype pass names its rejects `dream-auto`. Rows decided before this build keep NULL and are reported as `unattributed_links`, not read as a human's.
+- The `/dream` command reports the number beside the queue counts while a judge mode is in `shadow`; the deep-dream runbook names it as the promotion step.
+
+### Added (2026-10-17 — the Rust daemon serves memory_stats)
+
+- The Rust daemon's MCP endpoint now answers `memory_stats` as the Python daemon does: band sizes, capacities and hit rates, the capacity warning, capacity drops, retrieval-log health, the read audit and graduation candidates. Swallowed telemetry failures are now counted for it instead of only logged.
+
+### Added (2026-10-17 — the Rust daemon serves memory_set_add and memory_set_remove)
+
+- The Rust daemon's MCP endpoint now answers `memory_set_add` and `memory_set_remove` as the Python daemon does, with the same database changes: a member is added, or confirmed when it repeats one (same text or a near-identical embedding); a scalar at the slot converts to a set once, recording the labels and freshness class the conversion drops, unless it is a number-led total, which is kept and the add parked as a contender (or the total confirmed); a slot holding 100 members refuses further adds; a removal retracts a member and keeps its row for audit. Refusals carry the same notes, and the subject gets its graph node unless the name looks like an extraction artifact.
+
+### Added (2026-10-17 — the Rust daemon serves memory_recent)
+
+- The Rust daemon's MCP endpoint now answers `memory_recent` as the Python daemon does: the newest stored memories first, with the same filters, compact entries by default and full records with `verbose`.
+
+### Added (2026-10-17 — the Rust daemon serves memory_get)
+
+- The Rust daemon's MCP endpoint now answers `memory_get` as the Python daemon does: the stored memory with the facts it formed, a gentle reinforcement (its access count rises), credit to the search that served it in the same session, and `replaced_by` for a superseded memory.
+
+### Added (2026-10-17 — the Rust daemon serves memory_fact_set)
+
+- The Rust daemon's MCP endpoint now answers `memory_fact_set` as the Python daemon does, with the same database changes: a new value inserts, a restatement confirms and reinforces, a shorter echo of the standing value confirms it, a newer equal-or-stronger value supersedes (a user correction also records a correction signal), and a weaker or less confident one is parked as a contender. The subject gets its graph node unless the name looks like an extraction artifact, and `"auto"` freshness follows the entity's kind. `memory.cortex.protect_provenance`, `supersede_confidence_margin`, `reinforce_rate` and `memory.lessons.enabled` are read.
+
+### Added (2026-10-17 — the Rust daemon serves memory_fact_resolve)
+
+- The Rust daemon's MCP endpoint now answers `memory_fact_resolve` as the Python daemon does, with the same database changes: accepting a parked contender makes it the slot's current value (the old value kept as superseded history, the contender gaining the user tier and a fresh ordering stamp), and rejecting it retires the contender and keeps the current value. A slot with nothing parked answers `no_contender`; accepting at a slot that has since become a set answers `slot_holds_set`, while rejecting there is still allowed.
+
+### Added (2026-10-17 — the Rust daemon serves memory_fact_get)
+
+- The Rust daemon's MCP endpoint now answers `memory_fact_get` as the Python daemon does: the current value at an (entity, attribute) slot, found through the entity's graph aliases when the name misses, set-valued slots with their removed members, contenders, nearby slots for an empty one, the correction hint and the re-verify warning, compact unless `verbose`.
+
+### Fixed (2026-10-17 — the native lease break and lease delegate no longer claim nothing changed when COMMIT's answer was lost)
+
+- The Rust shim's native `pseudolife-mcp lease break` and `lease delegate` (and the deprecated `lease designate`) now match the Python fix: when COMMIT is answered with a FATAL or PANIC, or not at all, they print ``<verb> lost the answer to its COMMIT (PostgreSQL session ended); it may have been committed: run `pseudolife-mcp lease list` before retrying`` and exit 1, instead of `<verb> failed (PostgreSQL transaction failed); nothing was changed`. Errors before COMMIT, and an ERROR the server returned at COMMIT, keep the certain line. The CLI differential harness's `break-commit-lost` and `delegate-commit-lost` cases expect the new line, a new `delegate-commit-refused` case pins the certain line for an ERROR at COMMIT, and two new source mutants guard each side of the boundary.
+
+### Fixed (2026-10-17 — the merge judge stops filling the link queue with untyped related-to proposals)
+- Since 2026-09-30 an automatic merge reject whose vote names a relation
+  files that relation as a link proposal. On the live bank on 2026-10-17,
+  381 of the 435 pending link proposals came from that path, 274 of them the
+  untyped `related-to`, and the link judge reached its 0.8 gate on none of
+  the 435, so they only accumulated in the review queue. The path now files
+  typed relations only (`part-of`, `implements`, `uses` and the rest);
+  a `related-to` vote still rejects the merge but files nothing, and
+  when the other opinion named a typed relation, that one is filed.
+
+### Fixed (2026-10-17 — mutant controls no longer fail on a reused target dir)
+
+- The CLI harness's mutant control (`python rust/cli_harness --mutants`) now keeps its copy of `rust/` under `$CARGO_TARGET_DIR/mutant-src` exact: files and directories the checkout no longer has are removed before each sync. A target dir reused across master moves had kept a stale `shim/src/cli/doctor.rs` beside the new `doctor/mod.rs`, so every mutant build failed with rustc E0761 and was reported as "mutant build failed".
+
+### Added (2026-10-17 — a second opinion for the link judge and a tiebreak for split merge votes, both in shadow)
+- The review queue kept growing because two judge results never settled anything: the link judge applies a single vote only at confidence 0.8, which none of the 435 pending link proposals on the live bank reached, and a merge proposal whose two opinions disagreed (67 rows that day) waited for a human. Both now get one more vote. Both new modes default to `shadow`: the votes are recorded on the row and shown in the review payloads, and nothing is applied until a maintainer sets `auto`.
+- **Link second opinion** (`memory.deep_dream.link_judge_two_vote: off | shadow | auto`, default `shadow`; gate `link_two_vote_min_confidence`, default 0.7). A link row whose first accept or reject sat below its single-vote gate is judged once more in a fresh batch by the merge judge's second model and endpoint (`judge_second_model` / `judge_second_url`, asked only while `judge_second_opinion` is on; a configuration that makes it the first model again is skipped with no call). In `auto`, and only while `link_judge_mode` is `auto`, two agreeing accepts or rejects from different models at mean >= 0.7 apply. A retype is never applied. Rescoring the 2026-09-29 ladder (`evals/results/queue-judge-ladder-20260929-{opus55,sonnet55}.json`, 37 link rows) at that gate gave 7/7 and 8/8 correct accepts and 6/6 and 7/7 correct rejects per replicate, against 3 accepts and 5 rejects at the single 0.8 gate; the panel is small and predates the current inflow, hence shadow. The link judge result reports `second_opinions`, `two_vote_applied`, `two_vote_refused_same_model` and `second_opinion_skipped_same_model`, and the `proposed_link` listing shows a `judge2` block.
+- **Merge tiebreak** (`memory.deep_dream.judge_tiebreak_mode: off | shadow | auto`, default `shadow`; `judge_third_model`, `judge_third_url`, the latter's bearer key env-only as `PSEUDOLIFE_JUDGE_THIRD_API_KEY`, forwarded by both compose files). A split merge row gets one third opinion in a fresh batch, only when a third model is configured (else `third_opinion_skipped_unconfigured`) and it is neither the first nor the second model (else `third_opinion_skipped_same_model`, no call). In `auto` a 2-of-3 majority applies through the two-vote gates: two reject-class votes at mean >= `judge_reject_min_confidence_2` reject (a relate vote's link is filed as on the two-vote path), and two accepts at mean >= `judge_accept_min_confidence` fold only under `judge_mode: auto` on a non-low-differential row, behind the same name, analyzer-row and snapshot guards. Both need the third vote served by a model other than both earlier ones. The note gains a `| 3rd (<model>): <verdict> <conf> [2-1 reject|2-1 accept|no majority]` tail, and both merge review payloads show a `judge3` block. The result reports `third_opinions`, `tiebreak_applied` (also counted in `auto_rejected` / `auto_accepted`) and `tiebreak_refused_same_model`. No ladder has measured the third vote yet.
+- **Schema v56** (additive, `ADD COLUMN IF NOT EXISTS`): `edge_proposals.judge2_verdict / judge2_confidence / judge2_model / judged2_at / judge2_relation / judge2_served_model / judge2_policy` and `entity_proposals.judge2_served_model / judge2_policy / judge3_verdict / judge3_confidence / judge3_model / judged3_at / judge3_served_model / judge3_policy`, all nullable (NULL = not asked). `judgeN_served_model` is the model the endpoint reported serving (NULL when it named none) and `judgeN_policy` the fingerprint of that endpoint's judging policy, so a decision taken on a later tick than a vote can check and record where the vote came from. `judge_served_model` (both proposal tables, nullable) stamps the model the first opinion's endpoint reported serving — `judge_model` is the configured name, and the served name lived only in the judging memo, which every refresh prunes to pending rows, so a decided row lost it; a stale or requeued first verdict, and a reopened automatic decision, clear it with the verdict. `merge_decisions.votes` (JSONB, nullable) is added in the same bump for the judge-agreement report that follows: the votes a merge or junk proposal carried when it was decided belong on the FK-free audit row, because an accepted merge CASCADE-deletes the proposal row with them; the judge-agreement report entry above describes what writes it.
+- The new votes follow their first verdict: a stale or requeued first verdict, and a reopened automatic decision, clear them too; a vote is recorded only while the earlier votes it pairs with are unchanged. The 3rd note tail is never cut by the 400-character note cap (only the free text is), so its relation survives long model ids. A tiebreak or link two-vote decision records the endpoint policy and served model of each later vote it rests on, read from the row, and reconsideration reopens it when one of those endpoints later reports serving another model under the same policy.
+- An automatic tiebreak is refused, with the vote recorded, when the second vote's served model is unknown (`tiebreak_refused_unknown_second`, note tail `tiebreak needs the second vote's served model`): its stamp then holds only the configured name. Split rows whose second vote was recorded before this build carry no served model, so `auto` refuses them until `review_rejudge` re-asks them. A third model named as the configured `judge_second_model` (other than a launch alias) is skipped with no call.
+- **What re-judges, and what does not.** Setting `judge_third_model` or `judge_third_url`, or changing `link_two_vote_min_confidence`, changes the judging policy: every queue's recorded verdicts are re-judged once and automatic decisions are reconsidered (at their shipped defaults the three are left out of the policy, so the upgrade itself re-judges nothing). The two modes, `link_judge_two_vote` and `judge_tiebreak_mode`, are never part of the policy: promoting either from `shadow` to `auto` keeps the recorded votes and the next tick applies the gates to them with no model call. A row the gate refused (no distinct model, an unknown second served model, a name veto, a variant conflict or an analyzer-filed row) is left for a human, not refused again each tick; a refusal because the graph snapshot failed instead sends the row back to its first opinion on the next tick. A recorded second or third vote whose endpoint has since reported serving another model is cleared and asked again, never applied; a cleared second vote takes the merge third with it. Going back from `auto` to `shadow` reopens none of the decisions `auto` took.
+- While first opinions wait, the link judge's second opinions take at most half the batch, so a backlog of below-gate links cannot hold new links' first opinions back. The merge judge's budget is unchanged. The sweep logs a tick that only took second or third opinions, or refused one. All five knobs are live Console settings.
+
+### Fixed (2026-10-17 — lease break and lease delegate no longer claim nothing changed when COMMIT's answer was lost)
+
+- `pseudolife-mcp lease break` and `lease delegate` (and the deprecated `lease designate`) printed `<verb> failed (<error>); nothing was changed` for any failure, including a connection lost or a session ended by a FATAL after COMMIT was sent, when the change may in fact have been committed. They now say in that case that the verb lost the answer to its COMMIT and may have been committed, and to run `pseudolife-mcp lease list` before retrying. Errors before COMMIT, and an ERROR the server returned at COMMIT (which rolls the transaction back), keep the old line. The board store's transaction raises `CommitOutcomeUnknown`, an `OperationalError` subclass, for the uncertain case.
+
+### Fixed (2026-10-17 — `pseudolife-mcp --help` lists delegate-watch)
+
+- `pseudolife-mcp --help` now lists `delegate-watch`, which shipped in v0.18.2 without a help line. The native shim names it as deferred instead of answering "unknown mode". Two guards keep this from recurring: every mode the CLI dispatches is listed in `--help` or named as deliberately unlisted (`shim`, the no-argument mode by name, and `doorbell-prompt-seen`, the doorbell helper the plugin's prompt hook runs), and every mode the CLI dispatches is served or deferred by the native shim.
+
+### Performance (2026-10-12 — keep light CLI paths free of model imports)
+
+- Configuration loading uses the MIRAS preset registry without importing the
+  embedding stack. Recovery loads its client adapter only for rebind, and
+  tunnel result validation loads the MCP SDK only when validating a response,
+  keeping recovery/tunnel help and offline doctor checks light.
+- Vector adapters load when a storage connection registers them, so board
+  commands stay free of NumPy with the pinned pgvector 0.4.2 as well as newer
+  releases.
+
+### Added (2026-10-09 — native lease operator parity)
+
+- Verify native `lease hold`, `break`, `delegate` and the deprecated
+  `designate` alias through disposable process/database and container
+  comparisons, including the shipped Windows lease launcher.
+  Embedded PostgreSQL retains its declared native refusal; external DSNs
+  and container transport are covered.
+- Prove that a failed `lease break` or `lease delegate` leaves the bank
+  untouched in both implementations: an audit write the server refuses, a
+  refused COMMIT and a session the server ends at COMMIT all roll back.
+  (The 2026-10-17 fixes above correct the last case: a session ended at
+  COMMIT may have committed, and both implementations now say so.)
+
+## [0.18.2] - 2026-10-17 — Shim and daemon move to the MCP SDK 2.2 line together, board mail is read and acknowledged in one call, and the maintainer's delegate gets a decision watcher
+
+### Fixed (2026-10-17 — the shim stays correct on an mcp 2.1 runtime, and the next client step moves it to 2.2)
+- A host updating from 0.18.1 may run the 0.18.2 shim on mcp 2.1 until its next client step. Release-mode `pseudolife-mcp update` builds the new shim runtime with the code already installed, and 0.18.1's code installs the new package with `--no-deps` and then its own shim requirements, `mcp>=2.1,<2.2`; pip only warns that the package wants `mcp>=2.2`. Reproduced from a built 0.18.2 wheel.
+- The shim stays correct there. It chooses its SDK-specific paths by what the installed SDK exposes, not by its version: on 2.1 it again widens the http client's own `sse` method to the 16 MiB event limit (2.1 reads the listen stream and resumed responses through it, so they had fallen back to the 1 MiB default) and again classifies a failure while the SDK reads a POST's response body through the client's `stream` method. On 2.2 neither wrapper is installed, and the 2.2 rebinding of `sse_within_origin` is unchanged. Tests cover both lines: the installed SDK's real functions, and a faithful fake of the other line's surface.
+- The next `pseudolife-mcp update --clients-only`, or the update to the next release, rebuilds that runtime onto mcp 2.2. (A plain `update` whose daemon already runs 0.18.2 stops at "nothing to do" before the client step.) A runtime installed from the pinned release no longer counts as current when one of its installed requirements falls outside the range its own `pseudolife-mcp` declares (`importlib.metadata.requires`, read inside the runtime), and the update says why it installs it again. Before, `--clients-only` saw a runtime built from `pseudolife-mcp==0.18.2` and installed nothing, and only `--reinstall` repaired it. A probe that cannot answer leaves the runtime current, as before.
+- A newly installed release runtime is checked the same way. When the code running the update is older than the release and installs an older dependency range, the update says what is still wrong and names the launcher command that finishes it, instead of reading as a repair.
+
+### Fixed (2026-10-17 — the Rust daemon's MCP sessions follow mcp 2.2)
+
+- A session whose opening request is refused or fails is discarded, so its id answers `Session not found`, as mcp 2.2 does.
+- A session ended with DELETE is forgotten: a later request with its id answers `Session not found` without the id header, not `Session has been terminated`. The daemon keeps no history of ended sessions.
+
+### Changed (2026-10-17 — the Rust workflow queues fewer jobs)
+- A pull request that changes only documentation (Markdown, `llms.txt`, non-script files under `docs/`, none under `rust/`, `evals/`, `pseudolife_memory/`, `plugin/`, `ops/`, `tests/` or `.github/`) no longer runs the Rust, candidate, parity and image jobs. A new `Scope` job decides, and anything it cannot classify runs everything. The `Parity / <os>` checks still report, and pass for such a PR only when `Scope` chose the skip.
+- The nightly and manual Rust runs have their own concurrency groups, so they no longer cancel the master push run a merge relies on; a push run is cancelled only by a newer push. On 2026-10-16 the nightly started two seconds before push run 38870639548 was cancelled, and a later push then cancelled the nightly, leaving that commit with no finished run.
+- The 72 CLI Source-mutant shards (36 per OS) run nightly and on manual CI, no longer on every master push, which cuts a push run from 104 jobs to 32. They were about 550 of a push run's 920 runner-minutes, and all 1,170 shard jobs in the readable master and nightly runs from 2026-10-12 to 2026-10-16 passed. A source-control survivor now surfaces at the next nightly rather than after the merge that caused it.
+
+### Fixed (2026-10-16 — Windows parity checks stop failing on timing alone)
+- The Windows daemon MCP live parity step gets fourteen minutes instead of seven; master already took 6m49s of the seven.
+- The CLI mail row's mid-wait digest removal and digest advance wait out a Windows reader's open handle instead of failing with WinError 32 or 5.
+- The CLI harness's https fixtures finish one TLS exchange before an arm connects, so a cold machine's first server handshake no longer outruns the CLI's 0.25 s health probe (`briefing-https-hook-json` on Windows).
+
+### Fixed (2026-10-16 — Rust search keeps the legacy transport-session attribution)
+
+- The Rust daemon's `memory_search` and `GET /api/search` now attribute their retrieval events to the MCP transport session when `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` is set and there is no `X-PL-Session` header or live active-session pointer, as Python does (an empty `mcp-session-id` is kept as given). Before, the event's session and episode were left empty in that case.
+
+### Added (2026-10-16 — Native memory_store over MCP)
+
+- The experimental Rust daemon serves `memory_store` on its MCP endpoint, the first bank tool it answers there: arguments bind as Python's do, the caller's session header attributes the entry, and a store whose client disconnects still lands. The write-path differential harness now compares both daemons' MCP answers and bank state step by step.
+
+### Added (2026-10-16 — Native memory_search over MCP)
+
+- The experimental Rust daemon serves `memory_search` on its MCP endpoint with the Python daemon's payload: compact entries with write dates, truncation and replacement pointers, the cortex-first block sized to the caller's `top_k` with correction calls for aged or contested facts, restated entries dropped, and the episode, source, tag and band filters. `explain` is not served yet and says so.
+- The Rust `/api/search` route's unknown-band refusal now quotes band names the way Python does.
+
+### Added (2026-10-16 — Native MCP bound-identity check)
+
+- The experimental Rust daemon checks an MCP request's `X-PL-Bank` and `X-PL-Principal` headers against the caller's coordination board context before the MCP layer, as the Python daemon does, and answers the same coordination refusal on a mismatch. Bank tool bodies can now be registered behind it.
+
+### Added (2026-10-16 — Native memory_agents and memory_message over MCP)
+
+- The experimental Rust daemon serves the coordination board's two MCP tools: `memory_message` sends, receives, acknowledges and lists mail, and `memory_agents` lists peers (or, without an agent identity, the open sessions it can see), updates status and parks, and claims or releases leases and repository file claims, with the Python daemon's parameter checks and refusals.
+- The shim and the daemon now compile one shared implementation of repository file-claim names.
+
+### Added (2026-10-16 — Native MCP tool argument binding)
+
+- The experimental Rust daemon binds every MCP tool's arguments as the Python daemon does before any tool body runs: unknown names are refused with the same hint and accepted list, text stays literal, JSON-encoded lists and objects are decoded, and values are checked and coerced with pydantic's lax rules and its exact refusal sentences. The per-tool table is generated from each tool's pydantic schema, so a changed signature fails CI until the table is regenerated.
+- A new in-process differential sweep compares the two binders on 36,880 generated argument sets per run, with no database or model, and requires 14 deliberate binder breaks to be caught. A tool body that panics now answers `internal_error`, as a Python exception does.
+
+### Fixed (2026-10-16 — reject unaccepted Python oracle bytes in the originating PR)
+- CI now checks byte-pinned Python modules in the candidate and integrated checkout before exporting the selected oracle, so a production change cannot pass against its merge base and break the next PR's parity judges. The preflight and wait-mail judge share one accepted Git blob registry; the event's oracle selection is unchanged.
+
+### Changed (2026-10-16 — shim and daemon move to the MCP SDK 2.2 line together)
+- The `mcp` dependency moves from `>=2.1,<2.2` to `>=2.2,<2.3` in `pyproject.toml` and the shim runtime's requirements, and the daemon image's lock moves `mcp` and `mcp-types` to 2.2.0 (mcp 2.2.0 requires `mcp-types==2.2.0`, which the dependabot bumps left at 2.1.0). Both sides move in one release because each release pins one SDK line for shim and daemon; the floor rises too, so an in-place `pip install -U` cannot keep a 2.1 SDK. The Rust parity oracle moves from 2.1.1 to 2.2.0 with them: the workflow's SDK installs, the validation-schema and binding-table generators' version asserts, and `rust/daemon/src/mcp/validation-schema.json` and `binding.json`, regenerated (the binding table changes only its recorded SDK version). The regenerated schema accepts and rejects the same inputs: 2.2.0 inlines the `RequestId`, `ProgressToken` and `LoggingLevel` definitions that 2.1.1 referenced. The daemon keeps 2.1's session lifetime, with no idle close and no session cap: it overrides 2.2's defaults (closing a session after 30 idle minutes, and answering 503 to a new one while 10,000 are open) with `session_idle_timeout=None, max_sessions=None`, so the Rust parity row `MCP-LIVE-SESSIONS` still holds. Two other 2.2.0 session changes are declared as Rust parity divergences until the Rust daemon ports them in a follow-up: Python now drops a session whose first request failed (`MCP-SESSION-FAILED-FIRST-REQUEST`) and answers `Session not found` for a DELETEd session id (`MCP-TERMINATED-SESSION-ID`), so the strict MCP corpus's declared differences rise from 5 to 16.
+- `pseudolife-mcp update` moves both: the daemon first, then a new shim runtime. Sessions that keep their old shim until they restart still work: a shim on mcp 2.1.1 against a daemon on 2.2.0 passed initialize, `tools/list` (38 tools, the same catalogue byte for byte as from a 2.1.0 daemon), `memory_stats`, `memory_store` and `memory_search` through a real stdio shim with a bearer on loopback (2026-10-16). The reverse mix, a 2.2.0 shim against a 2.1.0 daemon, passed the same check; its 2026-09-28 tailnet failure still has not reproduced on loopback.
+- On mcp 2.2 the SDK reads its listen stream and resumed responses through `sse_within_origin`, which the shim's 16 MiB SSE event limit no longer reached, leaving those paths at the 1 MiB default. The shim now widens that function as well, and the test drives the SDK's own function rather than a wrapper.
+
+### Fixed (2026-10-16 — the encodings parity scenario stops racing the principal refresher)
+- The Rust daemon parity harness waits for the stored-principal view to load before the `encodings` scenario's cases. A bearer that matches no configured token reaches that view, and before its first read either daemon answers `principals_unavailable`. That is correct startup behaviour, but a slow CI runner sometimes caught the Rust arm in that window, and the scenario reported a false difference.
+
+### Fixed (2026-10-16 — /dream no longer asks for a lesson fold no tool can do)
+- Step 6 of the `/dream` judgment session told an agent to fold anything a
+  dropped duplicate lesson added into the surviving lesson before retiring
+  it. No tool writes lesson text: lessons are distilled from outcomes, and
+  the curation judge may pick a survivor but never author replacement
+  text. An agent following the step could only retire the lesson and lose
+  its point, or stall. The step now retires a duplicate lesson only when
+  the survivor already says everything it does, and otherwise leaves the
+  pair listed with the missing point named in the report. A world fact can
+  still be folded with `memory_world_set`, but a rewrite keeps only what the
+  new call passes and the listing truncates values. So the step now reads
+  both slots in full with `memory_world_search` first, rewrites only when one
+  record's source backs the whole merged value (re-passing its
+  `source_url`, `source_quote`, `freshness_class` and `retrieved_at`), and
+  otherwise leaves the pair listed.
+- The command ships in the plugin, so existing installs pick it up with
+  `pseudolife-mcp update` (release mode) or `ops/update.ps1 -All` /
+  `ops/update_clients.py` (checkout mode).
+
+### Fixed (2026-10-16 — delegate-watch no longer calls a head green while a workflow run is still queued)
+
+- `pseudolife-mcp delegate-watch` decided a pull request was green from its
+  check runs alone. A workflow run still waiting in its queue or concurrency
+  group has no check runs yet, so "PR #781 green at 941539fb, merge state
+  blocked" went out while that head's Rust shim run had not started. Before
+  reporting a head green or cancelled, the watcher now lists the head's
+  workflow runs (`gh run list --commit`) and keeps it pending while the
+  newest run of any workflow has not completed. A run that then ends failed,
+  timed out, failing to start, or cancelled without creating a check makes
+  the head failing or cancelled, naming the workflow, instead of green. The
+  lookup is made only for a head about to be reported green or cancelled,
+  then once a poll while it is held.
+
+### Fixed (2026-10-16 — delegate-watch no longer reports cancelled CI as failing, once per job)
+
+- `pseudolife-mcp delegate-watch` counted a cancelled check as a failure, and
+  each further job of the same cancelled run that concluded woke the delegate
+  again with a new "PR #N failing at <head>" line: after the delegate
+  cancelled the CI of two dependabot PRs on purpose, one head was reported
+  three times in 15 minutes. A cancelled check is no longer a failure. Once
+  every check on a head has finished with some cancelled, the watcher sends
+  one `PR #N cancelled at <head>: <names>` line, and no more as further jobs
+  of that run conclude. A re-run is reported again when it finishes: green,
+  failing, or cancelled when some checks are still cancelled. A real failure
+  beside cancelled checks is still reported as failing, and the cancelled
+  siblings of a fail-fast matrix no longer add their names to that failure or
+  report it again.
+
+### Fixed (2026-10-16 — CI failures report their cause and wait for observable state)
+- Rust CI allows a cold Windows build to finish, bounds the override-build step, and timestamps each override configuration.
+- Parity checks wait for a mismatched bank's initialization refusal, name failed coverage selections, and retry transient local socket-resource errors before sending a request.
+- Cancellation, wait-mail, and suite-lock regression tests synchronize on observable state instead of short wall-clock assumptions.
+
+### Fixed (2026-10-15 — The subagent board guard no longer refuses a main session that passes an agent_id)
+
+- The Claude Code plugin's subagent board guard took any `"agent_id"` key
+in its input as the mark of a subagent, including one inside the tool's
+arguments. A main session that guessed an `agent_id` argument for
+`memory_agents(action="update")` was refused as a subagent and told to ask
+its parent, which sent it chasing the wrong cause and left its board status
+stale (seen 2026-10-15). The guard now reads the hook input as JSON in
+bash: `agent_id`, `session_id` and `tool_name` count only as keys of the
+payload itself, and `action` and `ack` only as keys of its `tool_input`
+object, in any key order. That parent call now reaches the daemon, which
+refuses the unknown argument by name. An `action` or `ack` nested deeper
+in an argument no longer counts as the call's, and a payload cut off
+mid-object is let through like any other it cannot read. A payload with
+more values than any board call can carry (the widest valid one takes 102
+of the walker's 512 steps) is let through to the daemon's unknown-argument
+refusal instead of running into the hook's 5 s timeout. Measured on
+Windows Git Bash the same day: an 8 KB subagent send takes 57 ms against
+43 ms before, a small call is unchanged at about 28 ms, and still no
+process is spawned. `hooks.json` is unchanged, so Codex users approve
+nothing new; the plugin reaches clients with `pseudolife-mcp update`.
+
+### Added (2026-10-14 — `pseudolife-mcp delegate-watch` wakes a delegate session with board mail, only for decisions)
+
+- `pseudolife-mcp delegate-watch` waits, without a model, for the events a
+long-running delegate session acts on, and sends that session one board
+message per batch. The events are a pull request opened, merged or closed,
+turning green, failing or newly conflicting; a master workflow failing or
+recovering; a new suite result; and a full-suite lease freeing up. The
+watcher registers its own board agent; each message carries
+`clears="decision events"`, so an owner parked `waiting_peer` with
+`park_needs="decision events"` and `park_clear_by=<watcher id>` is rung by
+the daemon. After 55 quiet minutes it sends one quiet line, which keeps the
+prompt cache warm, unless the owner is parked `done`. `--detach` starts it
+as a detached process (one per session) and prints its board id; it exits
+when the owner leaves the board, when `--until-lease` names a lease the
+owner no longer holds, after 14 days, or on `--stop`. When `gh` is missing
+or fails five polls in a row it tells the owner, then exits 2. Each event is
+reported once, and each message and exit appends one ledger line. The
+board client gains `update`, and `clears` and `urgent` on `send`. This
+replaces the contributor script `ops/delegate_watch.py`. Measured on
+2026-10-14 over six delegate sessions: about a third of their turns took no
+action, and 2,504 began with a background-task notification.
+
+### Added (2026-10-14 — Brief the maintainer's delegate at session start and remind it each turn)
+
+- The session holding an operator-granted `delegate:<project>` lease now gets
+a short brief after the board check-in at session start (start the decision
+watcher, park on its events, hand raw output to a subagent, answer a quiet
+wake in one line) and one reminder line after the per-prompt memory note.
+Other sessions see no change, and the check-in text itself is unchanged.
+
+- The plugin's hook scripts (`coordination-start.sh`, `session-start.sh` and
+`lifecycle.ps1`) pass the session's board address from its `.agent` file as
+`agent=` on the requests they already make; there is no new request per
+prompt. The daemon answers only for an address the bearer's principal owns,
+with the same operator-or-maintainer grant proof as delegate mail, and caches
+each answer for 60 seconds (never past the delegate lease's own expiry), so a
+grant or a revoke shows within a minute. The lookup waits at most half a
+second; past that the hook gets its usual text and the answer arrives on the
+next call, so a slow lookup never costs a session its check-in or memory
+note.
+Sessions pick the scripts up after the client update (`pseudolife-mcp update
+--all`, or `python ops/update_clients.py`) and a restart. `hooks.json` did
+not change, so Codex users do not approve the hooks again.
+
+### Added (2026-10-14 — Receive and acknowledge board mail in one call)
+
+- `memory_message(action="receive", ack=true)` returns pending mail and
+acknowledges it in the same call. A session that reads mail now makes one
+request where it made two. The result is compact: each message drops the
+reader's own address, its sequence, HLC and expiry, and an empty `reply_to`.
+The continuity block appears only when it reports expired mail or a gap.
+`acknowledged` gives the count, and `ack_missing` lists any message that left
+the mailbox between the two steps. Measured on 2026-10-14 over the week's
+transcripts: 1,438 receives and 1,361 acks, with board results 25% of what
+filled long-running delegate sessions' context. Without `ack`, receive is
+unchanged. Both the Python and the Rust daemon implement it.
+
+- The plugin's subagent guard refuses `receive` with `ack=true` from a Claude
+Code subagent, as it already refused `ack`: a subagent shares its parent's
+board address, so acknowledging would mark the parent's mail read. Existing
+sessions pick this up after a plugin update.
+
+### Added (2026-10-13 — Native store and shared episode ownership)
+
+- The experimental Rust daemon implements memory storage, surprise admission,
+label normalization, slot extraction and contradiction detection. Store-driven
+session creation and handle resume share the background reaper's episode,
+activity and tombstone state, so an idle session created by a store can close
+without a stale cache later undoing that close.
+
+- Admitted stores finish before graceful shutdown even when their callers
+disconnect. Store session durations accept underscore-separated numbers and
+preserve invalid-setting errors instead of silently reopening old sessions.
+
+- Canonical fact writes, outcomes, standalone episode/title APIs and tensor
+persistence remain deferred. This does not enable the Rust daemon for cutover.
+
+### Fixed (2026-10-13 — preserve drained MCP refusal connections)
+
+- The experimental Rust MCP mount now uses its 4 MiB budget when discarding
+  refused request bodies, and keeps a fully drained in-budget connection
+  reusable. Incomplete, over-budget and Expect refusals retain bounded
+  cleanup and close the connection.
+- The MCP divergence ledger names the missing service prerequisite for each
+  unserved tool, the retained tokenless 501 boundary and the pending board
+  identity check. No bank tool is enabled by this change.
+- Initialization now validates known nested client capabilities while allowing
+  unknown capability fields, matching the pinned SDK.
+- Standalone SSE notifications use bounded delivery; DELETE and disconnect
+  release blocked producers. Mutation controls now require differences beyond
+  an explicit ordinary baseline report.
+- JSON-RPC preserves arbitrary-width integer IDs and real object keys that
+  resemble serde's internal number marker. Fixture runs use separate homes,
+  resolve binary paths before launch and fail on execution or cleanup errors.
+- Toolset transitions are atomic. SDK-derived request and notification schemas
+  validate metadata, task parameters, client information and nested fields
+  before readiness or tier changes. A generated live sweep checks response
+  codes and state before and after initialization.
+- The MCP CI gate pins the scalar-validation runtime and exercises integer,
+  float and URL coercions against the live oracle, including overflowing JSON
+  number literals. Failed or incomplete oracle recordings cannot produce
+  new golden fixtures.
+
+### Fixed (2026-10-13 — Rust keep-alive response latency)
+
+- The Rust daemon disables Nagle's algorithm on accepted TCP connections to
+  avoid delayed-acknowledgment stalls for small streamed responses over
+  keep-alive connections.
+
+### Added (2026-10-13 — Rust coordination board)
+
+- Port the coordination board to the Rust daemon, including addressed mail,
+  resource leases, wake decisions, audit chains and the read-only Console view.
+  Board transactions use a dedicated client and reject aborted commits; the
+  ready board calls bypass embedding initialization, and PostgreSQL startup
+  has a ten-second deadline. The parity runner waits for storage readiness before taking Console snapshots.
+  Pairing over HTTP remains disabled, and timing-sensitive mail replay remains
+  an explicit parity limitation pending the Rust cutover.
+
+### Security (2026-10-13 — Native Console static path validation)
+
+- The native daemon candidate now validates Console static paths before filesystem access, matching the Python daemon’s lexical containment and Windows path checks while preserving in-root navigation.
+
+### Added (2026-10-09 — the Rust daemon serves the MCP mount, tool catalogue and tiers)
+
+- The contract-first Rust daemon (`rust/daemon/`, not installed by anything
+  yet) now serves bearer-authenticated `/mcp`: the streamable-HTTP handshake the shims use
+  (initialize, sessions, SSE responses, DELETE), the transport-security rules
+  (Content-Type), and the tool catalogue byte-for-byte as the Python daemon lists
+  it at each tier (minimal 10, core 24, full 38).
+- Tier resolution matches the Python daemon: per-principal `memory_toolset`
+  overrides (12 h), `PSEUDOLIFE_MCP_TIER_MAP`, stored principals' tiers and
+  `PSEUDOLIFE_MCP_TOOLSET`, with `tools/list_changed` pushed to the session's
+  open stream. `memory_toolset` is served in full; every other tool answers a
+  declared `not_implemented` refusal until its body lands
+  (`rust/daemon/divergences.md`).
+- `rust/daemon/src/mcp/dispatch.rs` is the interface the read, write and
+  board slices plug their tool bodies into. `tests/test_rust_mcp_catalogue.py`
+  fails when a tool's description, schema, annotations or tier changes in
+  `mcp_server.py` without re-recording the Rust catalogue.
+
+- Tokenless MCP remains unserved (501) pending acceptance of the Host/Origin
+  policy and bound-identity checks.
+
+### Added (2026-10-09 — Rust daemon: the rest of GET /api/search)
+
+- The contract-first Rust daemon (`rust/daemon/`) now serves every search
+  channel the Python daemon does except the Chroma reference pool: the
+  cortex facts block, chronicle events (temporal, aggregation and date
+  cues), the timeline channel, contiguity neighbours, the cross-encoder
+  rerank (an ONNX export of `cross-encoder/ms-marco-MiniLM-L-6-v2`), RRF
+  fusion, the candidate-pool multiplier, depth recency and the query
+  embedding cache. Search writes the same telemetry: one `retrieval_events`
+  row per search (served list, fusion components and knob snapshot), the
+  served facts, slot reads and resident access counts, and the startup
+  warmup probe.
+- Proven by `rust/daemon/harness/w2d_search.py`, a live differential run
+  against the Python daemon on disposable banks that compares responses by
+  value and both banks' state after every scenario, with a mutant control;
+  declared divergences are listed in `rust/daemon/divergences.md`.
+- Cortex hydration checks the live embedding dimension instead of a fixed
+  1024. Other Console reads, standalone canonical-store searches, briefing,
+  recall and document retrieval remain explicitly deferred; this increment
+  does not establish full read-path parity or a cutover-ready daemon.
+- Cortex confidence preserves PostgreSQL's decimal decoding before rounding.
+  Search fixture entry points enforce disposable database admission, and
+  mutant controls require covered, clean baselines before crediting a kill.
+- Search pool sizing saturates on large requests, and failed or panicking
+  reranker initialization stays disabled. Offline search harness regressions
+  run in CI; live model/database proofs remain named coverage exceptions.
+- Same-tick timeline and neighbor ordering retain insertion order across
+  bands; the harness keeps timeline order exact even for dense-only hits.
+
 ## [0.18.1] - 2026-10-13 — Facts the dream consolidates keep the tier of the note they came from, and a dream can no longer replace a value a person set directly
 
 ### Changed (2026-10-13 — native shim reports the 0.18.0 package version)

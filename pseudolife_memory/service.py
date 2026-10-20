@@ -5542,7 +5542,11 @@ class MemoryService(DreamOps, MaintainerOps):
                         f"retyped from related-to on {len(texts)} shared note(s)",
                         "dream-retyped", _t.time())
                     retyped += 1
-                self._storage.set_proposal_status(p["id"], "rejected")
+                # The dream's own decision, named so the judge-agreement
+                # report never reads it as a human's.
+                self._storage.set_proposal_status(
+                    p["id"], "rejected", decided_by="dream-auto",
+                    decided_at=_t.time())
             settled += 1
         return {"considered": len(pending), "retyped": retyped, "settled": settled}
 
@@ -9184,11 +9188,13 @@ class MemoryService(DreamOps, MaintainerOps):
             lambda eid: deg.get(eid, 0) + facts.get(eid, 0))
         now = _t.time()
         # Audit BEFORE the merge: the accepted proposal row CASCADEs away
-        # with the folded entity, so merge_decisions is the durable record.
+        # with the folded entity, so merge_decisions is the durable record,
+        # of the judge votes too (v56).
         self._storage.record_merge_decision(
             proposal_id, disp.get(frm, "?"),
             disp.get(into, "?"), "accepted", prop.get("score"),
-            prop.get("reason"), decided_by, now)
+            prop.get("reason"), decided_by, now,
+            votes=self._storage.entity_proposal_votes(proposal_id))
         ok = self._storage.merge_entity(frm, into)
         self._storage.set_entity_proposal_status(
             proposal_id, "accepted", decided_by=decided_by, decided_at=now)
@@ -9220,7 +9226,8 @@ class MemoryService(DreamOps, MaintainerOps):
         self._storage.record_merge_decision(
             proposal_id, disp.get(prop["entity_id"], "?"), None,
             "accepted", prop.get("score"),
-            f"junk: {prop.get('reason')}", decided_by, _t.time())
+            f"junk: {prop.get('reason')}", decided_by, _t.time(),
+            votes=self._storage.entity_proposal_votes(proposal_id))
         ok = self._storage.delete_entity(prop["entity_id"])
         self._storage.set_entity_proposal_status(
             proposal_id, "accepted", decided_by=decided_by,
@@ -9248,6 +9255,7 @@ class MemoryService(DreamOps, MaintainerOps):
         if prop is None or prop.get("status") != "pending":
             return {"rejected": False, "reason": "not_pending", "id": proposal_id}
         with self._storage.transaction():
+            votes = self._storage.entity_proposal_votes(proposal_id)
             ok = self._storage.set_entity_proposal_status(
                 proposal_id, "rejected", decided_by=decided_by, decided_at=now)
             if ok:
@@ -9259,7 +9267,8 @@ class MemoryService(DreamOps, MaintainerOps):
                     self._storage.record_merge_decision(
                         proposal_id, disp.get(prop["entity_id"], "?"),
                         disp.get(prop["into_id"], "?"), "rejected",
-                        prop.get("score"), prop.get("reason"), decided_by, now)
+                        prop.get("score"), prop.get("reason"), decided_by, now,
+                        votes=votes)
                     a = canon.get(prop["entity_id"])
                     b = canon.get(prop["into_id"])
                     if a and b and a != b:
@@ -9268,7 +9277,8 @@ class MemoryService(DreamOps, MaintainerOps):
                     self._storage.record_merge_decision(
                         proposal_id, disp.get(prop["entity_id"], "?"), None,
                         "rejected", prop.get("score"),
-                        f"junk keep: {prop.get('reason')}", decided_by, now)
+                        f"junk keep: {prop.get('reason')}", decided_by, now,
+                        votes=votes)
                     c = canon.get(prop["entity_id"])
                     if c:
                         self._storage.dismiss_pair(_junk_keep_key(c),

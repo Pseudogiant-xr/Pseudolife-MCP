@@ -198,12 +198,15 @@ def test_graph_review_actions_route_to_the_right_service_calls(
                         lambda scope=None: calls.append(("list", scope)) or {"findings": []})
     monkeypatch.setattr(mod.service, "graph_propose_links",
                         lambda proposals: calls.append(("propose", len(proposals))) or {"proposed": len(proposals)})
+    # Every decision action is attributed: the MCP layer stamps
+    # decided_by="agent" so the audit trail (and the judge-agreement
+    # report) tells model-driven decisions from a human's.
     monkeypatch.setattr(mod.service, "graph_accept_proposal",
-                        lambda pid: calls.append(("accept_link", pid)) or {"accepted": True})
+                        lambda pid, decided_by=None: calls.append(
+                            ("accept_link", pid, decided_by)) or {"accepted": True})
     monkeypatch.setattr(mod.service, "graph_reject_proposal",
-                        lambda pid: calls.append(("reject_link", pid)) or {"rejected": True})
-    # accept_merge / reject_entity are decision actions: the MCP layer stamps
-    # decided_by="agent" so the audit trail attributes model-driven folds.
+                        lambda pid, decided_by=None: calls.append(
+                            ("reject_link", pid, decided_by)) or {"rejected": True})
     monkeypatch.setattr(mod.service, "graph_accept_entity_merge",
                         lambda pid, decided_by=None: calls.append(
                             ("accept_merge", pid, decided_by)) or {"accepted": True})
@@ -222,9 +225,10 @@ def test_graph_review_actions_route_to_the_right_service_calls(
                    "accept_junk", "reject_entity"):
         _invoke("memory_graph_review", {"action": action, "proposal_id": 7})
 
-    assert calls == [("list", None), ("propose", 1), ("accept_link", 7),
-                     ("reject_link", 7), ("accept_merge", 7, "agent"),
-                     ("accept_junk", 7, "agent"), ("reject_entity", 7, "agent")]
+    assert calls == [("list", None), ("propose", 1),
+                     ("accept_link", 7, "agent"), ("reject_link", 7, "agent"),
+                     ("accept_merge", 7, "agent"), ("accept_junk", 7, "agent"),
+                     ("reject_entity", 7, "agent")]
 
 
 def test_graph_review_validates_inputs(tmp_path: Path, monkeypatch) -> None:
@@ -313,7 +317,7 @@ def test_graph_review_batch_verdicts(tmp_path: Path, monkeypatch) -> None:
     mod = _reload(tmp_path, monkeypatch)
     seen: list[int] = []
 
-    def _accept(pid):
+    def _accept(pid, decided_by=None):
         seen.append(pid)
         if pid == 13:
             return {"accepted": False, "reason": "not_pending", "id": pid}
@@ -332,7 +336,7 @@ def test_graph_review_batch_verdicts(tmp_path: Path, monkeypatch) -> None:
     # error/reason keys — that must not count as settled.
     monkeypatch.setattr(
         mod.service, "graph_reject_proposal",
-        lambda pid: {"rejected": pid != 30, "id": pid})
+        lambda pid, decided_by=None: {"rejected": pid != 30, "id": pid})
     out = mod.memory_graph_review("reject_link", proposal_ids=[30, 31])
     assert out["settled"] == 1
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pseudolife-mcp"
-version = "0.18.1"
+version = "0.19.0"
 description = "Pseudolife persistent long-term memory for MCP-compatible coding agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,18 +21,19 @@ dependencies = [
     "pyyaml>=6.0",
     "chromadb>=0.5.0",
     # Migrated to SDK v2 (2026-08-25, spec 2026-08-25-mcp-v2-session-identity):
-    # serves protocol 2026-07-28 plus every earlier revision. Floor 2.1 —
-    # 2.0.x shipped with the ping regression (#3273) fixed only in 2.1.0.
-    # Ceiling 2.2 (2026-09-28): a shim on mcp 2.2.0 fails every tools/list
-    # against a daemon on 2.1.x ("unhandled errors in a TaskGroup": its
-    # upstream initialize gets an error response), while the same bearer
-    # over curl succeeds. A fresh pipx install resolved to 2.2.0 and hit
-    # exactly that on the first remote client; the lock pins 2.1.0. Raise
-    # both sides together, never the shim alone.
-    "mcp>=2.1,<2.2",
+    # serves protocol 2026-07-28 plus every earlier revision. The range is
+    # one minor line, the one ops/requirements.lock.txt pins for the daemon
+    # image, so shim and daemon move together (2026-09-28: a fresh pipx shim
+    # on mcp 2.2.0 failed every tools/list against a 2.1.x daemon over the
+    # tailnet, "unhandled errors in a TaskGroup", while curl with the same
+    # bearer succeeded; it never reproduced on loopback). Moved to 2.2 on
+    # 2026-10-16 with the floor raised too, so an in-place `pip install -U`
+    # of an older install cannot keep its 2.1 SDK. Raise both sides
+    # together, never the shim alone.
+    "mcp>=2.2,<2.3",
     # First-party imports of the client side (2026-09-29): the coordination
     # adapter imports httpx and anyio itself, so they are declared here and
-    # in SHIM_REQUIREMENTS (pseudolife_memory/runtimes.py); mcp 2.1 depends
+    # in SHIM_REQUIREMENTS (pseudolife_memory/runtimes.py); the mcp SDK depends
     # on httpx2, not httpx, and a shim runtime is built with --no-deps, so a
     # transitive httpx from the daemon's dependencies never reached it.
     "httpx>=0.27",

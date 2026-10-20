@@ -1,14 +1,19 @@
-//! GET /api/search ranking over the resident bank (spec S1-S6).
+//! GET /api/search ranking over the resident bank (spec S1-S19):
+//! `ContinuumMemorySystem.retrieve` (`memory/cms.py:740-1760`).
 
 #[cfg(test)]
 use crate::bank::DIM;
 use crate::bank::{Bank, Entry};
 use serde_json::{Map, Value, json};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering;
 
 pub const ROUTE_TOP_K: i64 = 12; // web/routes.py:358
 const ASSISTANT_MULT: f64 = 0.85; // cms.py:813
 const SUPERSEDED_MULT: f64 = 0.55; // cms.py:825
+const RRF_K: f64 = 60.0; // cms.py:866
+const TIMELINE_TOP_N: usize = 6; // cms.py:1325
+const TIMELINE_WEIGHT: f64 = 0.3; // cms.py:1326
 
 /// `memory.bm25` (`BM25Config`, utils/config.py:188-204).
 #[derive(Clone, Copy)]
@@ -20,26 +25,75 @@ pub struct Bm25Knobs {
     pub min_norm: f64,
 }
 
+/// `memory.reranker` (`RerankerConfig`, utils/config.py:208-252).
+#[derive(Clone)]
+pub struct RerankKnobs {
+    pub top_n: i64,
+    pub fusion_weight: f64,
+    pub skip_margin: f64,
+    pub model_name: String,
+}
+
+/// The cross-encoder as `retrieve` sees it: `None` scores mean the call
+/// failed or the model is unavailable (`reranker.py:rerank` returns `[]`).
+pub trait CrossEncoder {
+    /// `is_available()`: false once a load has failed.
+    fn available(&self) -> bool;
+    fn scores(&self, query: &str, texts: &[&str]) -> Vec<f64>;
+}
+
 pub struct Params {
     pub query: String,
     pub k: usize,
     pub sources: Option<HashSet<String>>,
     pub tags: Option<HashSet<String>>,
+    pub episodes: Option<HashSet<String>>,
     pub min_score: Option<f64>,
     /// `memory.search.min_score`: the floor when no explicit one is given.
     pub default_floor: f64,
-    /// BM25 knobs when the `bm25` tribool resolves on (config default on).
-    pub bm25: Option<Bm25Knobs>,
+    /// BM25 knobs (scorer parameters); `bm25_enabled` says whether the
+    /// channel runs. The timeline channel reuses k1 and b either way.
+    pub bm25: Bm25Knobs,
+    pub bm25_enabled: bool,
     /// `memory.hide_superseded`.
     pub hide_superseded: bool,
-    /// Bands to search (validated by the caller); None searches all.
+    /// Band-name filter (validated by the caller); None searches all.
     pub bands: Option<HashSet<String>>,
+    /// The preset's band names in depth order.
+    pub band_order: Vec<String>,
+    pub disable_recency_boost: bool,
+    pub recency_boost_enabled: bool,
+    pub recency_base_half_life_s: f64,
+    pub pool_multiplier: i64,
+    pub fusion_rrf: bool,
+    pub fusion_name: String,
+    pub timeline_enabled: bool,
+    /// The rerank tribool resolved against config.
+    pub rerank_enabled: bool,
+    pub rerank: RerankKnobs,
+    /// False for the warmup probe (S17): no access accrual.
+    pub count_access: bool,
+    /// Wall clock for recency (`time.time()`).
+    pub now: f64,
+    /// `params.filters` as the caller passed them (S8b): band and source
+    /// lists in caller order, episodes sorted, tags normalised.
+    pub filters_json: Value,
 }
 
-/// One served hit: entry index and its ranking score.
+/// One served hit: entry index, score, channel marker and the fusion inputs
+/// logged with the retrieval event (S8a).
 pub struct Hit {
     pub idx: usize,
     pub score: f64,
+    pub via: Option<&'static str>,
+}
+
+pub struct Ranked {
+    pub hits: Vec<Hit>,
+    /// Per served text, the components dict (cms.py `comps`).
+    pub comps: HashMap<String, Map<String, Value>>,
+    /// `RetrievalResult.params` (S8b), without `contiguity_neighbors`.
+    pub params: Value,
 }
 
 /// Superseded digests never surface (cms.py:899-904, 1913).
@@ -47,11 +101,50 @@ fn not_superseded_digest(e: &Entry) -> bool {
     !(e.source == "digest" && e.superseded_at.is_some())
 }
 
-pub fn rank(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
-    let filtered = |e: &Entry| {
-        not_superseded_digest(e)
-            && p.bands.as_ref().is_none_or(|b| b.contains(&e.band))
-            && p.sources.as_ref().is_none_or(|s| s.contains(&e.source))
+/// A `REAL` column as psycopg hands it to Python: the float of its shortest
+/// decimal text (`0.42048538`), not the exact widening of the f32.
+pub fn py_real(x: f32) -> f64 {
+    format!("{x}").parse().unwrap_or(x as f64)
+}
+
+/// `_recency_weight` (cms.py:2878).
+fn recency_weight(now: f64, ts: f64, half_life: f64) -> f64 {
+    let age = (now - ts).max(0.0);
+    2f64.powf(-age / half_life)
+}
+
+fn cosine(bank: &Bank, idx: usize, q: &[f32]) -> f32 {
+    bank.matrix[idx * bank.dim..(idx + 1) * bank.dim]
+        .iter()
+        .zip(q)
+        .map(|(a, b)| a * b)
+        .sum::<f32>()
+}
+
+/// `torch.topk` over a candidate list: descending by score, ties keep the
+/// list order (torch makes no promise there; ties are free).
+fn top_k(mut cand: Vec<(usize, f32)>, k: usize) -> Vec<(usize, f32)> {
+    cand.sort_by(|a, b| b.1.total_cmp(&a.1));
+    cand.truncate(k);
+    cand
+}
+
+pub fn rank(bank: &Bank, q: &[f32], p: &Params, ce: Option<&dyn CrossEncoder>) -> Ranked {
+    let explicit_floor = p.min_score.is_some();
+    let floor = p.min_score.unwrap_or(p.default_floor);
+    let k = p.k;
+    let pool_mult = p.pool_multiplier.max(1) as usize;
+    let pool_k = k.saturating_mul(pool_mult);
+    let rerank_before_cut = pool_mult > 1 && p.rerank_enabled;
+    let n = p.band_order.len();
+
+    let keep =
+        |e: &Entry| not_superseded_digest(e) && !(p.hide_superseded && e.superseded_at.is_some());
+    let meta_ok = |e: &Entry| {
+        p.sources.as_ref().is_none_or(|s| s.contains(&e.source))
+            && p.episodes
+                .as_ref()
+                .is_none_or(|s| e.episode_id.as_ref().is_some_and(|x| s.contains(x)))
             && p.tags.as_ref().is_none_or(|t| {
                 e.tags
                     .iter()
@@ -59,87 +152,518 @@ pub fn rank(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
                     .any(|x| t.contains(x))
             })
     };
-    // `_dense_eligible` adds hide_superseded; the slot pool does not.
-    let eligible = |e: &Entry| filtered(e) && !(p.hide_superseded && e.superseded_at.is_some());
-    let filter_active =
-        p.hide_superseded || p.sources.is_some() || p.tags.is_some() || p.bands.is_some();
-    let mut cand: Vec<(usize, f32)> = bank
-        .matrix
-        .chunks_exact(bank.dim)
-        .enumerate()
-        .filter(|(i, _)| !filter_active || eligible(&bank.entries[*i]))
-        .map(|(i, row)| (i, row.iter().zip(q).map(|(a, b)| a * b).sum::<f32>()))
-        .collect();
-    // top-k by cosine; ties keep resident (id) order.
-    cand.sort_by(|a, b| b.1.total_cmp(&a.1));
-    cand.truncate(p.k);
+    let dense_eligible = |e: &Entry| keep(e) && meta_ok(e);
+    let dense_filter_active =
+        p.hide_superseded || p.sources.is_some() || p.episodes.is_some() || p.tags.is_some();
+    let band_ok = |name: &str| p.bands.as_ref().is_none_or(|b| b.contains(name));
 
-    let floor = p.min_score.unwrap_or(p.default_floor);
+    // Resident entries per band in hydration (id) order: the band walk.
+    let mut by_band: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, e) in bank.entries.iter().enumerate() {
+        if let Some(d) = p.band_order.iter().position(|b| *b == e.band) {
+            by_band[d].push(i);
+        }
+    }
+
+    // (idx, score, surprise) in insertion order, as `neural`.
+    let mut neural: Vec<(usize, f64)> = Vec::new();
     let mut seen: HashSet<&str> = HashSet::new();
-    let mut hits = Vec::new();
-    for (idx, cos) in cand {
-        let e = &bank.entries[idx];
-        if seen.contains(e.text.as_str()) || !eligible(e) {
+    let mut comps: HashMap<String, Map<String, Value>> = HashMap::new();
+    let mut dense_rank_src: Vec<(&str, f64)> = Vec::new();
+    let mut slot_rank: Vec<&str> = Vec::new();
+    let mut bm25_rank: Vec<&str> = Vec::new();
+    let mut timeline_rank: Vec<&str> = Vec::new();
+    let mut via_map: HashMap<&str, &'static str> = HashMap::new();
+    let mut pool_size = 0usize;
+    // `hit_band_names` (cms.py:1096-1366): bands with a pool candidate.
+    let mut hit_bands: HashSet<&str> = HashSet::new();
+
+    // ── Pool 1: dense, per band, recency-weighted by depth ──
+    for (depth, members) in by_band.iter().enumerate() {
+        let name = p.band_order[depth].as_str();
+        if !band_ok(name) {
             continue;
         }
-        let relevance = cos as f64; // recency boost is 0 on the flat preset
-        let src = if e.source == "assistant" {
-            ASSISTANT_MULT
+        let (boost, half_life) = if n == 1
+            || p.disable_recency_boost
+            || !p.recency_boost_enabled
+            || crate::mutants::active("search-recency-off")
+        {
+            (0.0, f64::INFINITY)
         } else {
-            1.0
+            let frac = depth as f64 / (n - 1) as f64;
+            (
+                0.4 * (1.0 - frac),
+                p.recency_base_half_life_s * 2f64.powi(depth as i32),
+            )
         };
-        let sup = if e.superseded_at.is_some() {
-            SUPERSEDED_MULT
-        } else {
-            1.0
-        };
-        if relevance >= floor {
-            seen.insert(&e.text);
-            hits.push(Hit {
-                idx,
-                score: relevance * src * sup,
-            });
+        let cand: Vec<(usize, f32)> = members
+            .iter()
+            .copied()
+            .filter(|&i| !dense_filter_active || dense_eligible(&bank.entries[i]))
+            .map(|i| (i, cosine(bank, i, q)))
+            .collect();
+        let got = top_k(cand, pool_k);
+        pool_size = pool_size.max(got.len());
+        for (idx, cos) in got {
+            let e = &bank.entries[idx];
+            if seen.contains(e.text.as_str()) || !dense_eligible(e) {
+                continue;
+            }
+            let score = cos as f64;
+            let src = if e.source == "assistant" {
+                ASSISTANT_MULT
+            } else {
+                1.0
+            };
+            let sup = if e.superseded_at.is_some() {
+                SUPERSEDED_MULT
+            } else {
+                1.0
+            };
+            let (recency, relevance) = if boost > 0.0 {
+                let r = recency_weight(p.now, e.ts, half_life);
+                (r, score * (1.0 + boost * r))
+            } else {
+                (0.0, score)
+            };
+            if relevance >= floor {
+                neural.push((idx, relevance * src * sup));
+                dense_rank_src.push((&e.text, relevance));
+                seen.insert(&e.text);
+                hit_bands.insert(name);
+                comps.insert(
+                    e.text.clone(),
+                    obj(json!({
+                        "channel": "dense", "dense": score, "recency": recency,
+                        "recency_boost": boost, "source_mult": src,
+                        "supersession_mult": sup, "surprise": py_real(e.surprise),
+                        "band": name, "band_depth": depth,
+                    })),
+                );
+            }
         }
     }
-    // Slot pool (cms.py:1135, 1851): entries whose slot (entity, value)
-    // tokens overlap the query's content tokens.
+
+    // ── Pool 1.5: slot channel (cms.py:1133-1160, 1851-1951) ──
     let qtok = content_tokens(&p.query);
-    if !qtok.is_empty() {
-        let mut slot_hits: Vec<Hit> = Vec::new();
-        for (idx, e) in bank.entries.iter().enumerate() {
-            if e.slots.is_empty() || seen.contains(e.text.as_str()) || !filtered(e) {
-                continue;
+    if !p.query.is_empty() && !qtok.is_empty() {
+        let mut slot_hits: Vec<(usize, f64)> = Vec::new();
+        for members in &by_band {
+            for &idx in members {
+                let e = &bank.entries[idx];
+                if e.slots.is_empty() || seen.contains(e.text.as_str()) {
+                    continue;
+                }
+                if !not_superseded_digest(e) || !band_ok(&e.band) || !meta_ok(e) {
+                    continue;
+                }
+                let stok = slot_tokens(e);
+                if stok.is_empty() {
+                    continue;
+                }
+                let overlap = qtok.intersection(&stok).count();
+                if overlap == 0 {
+                    continue;
+                }
+                let conf = overlap as f64 / stok.len().max(1) as f64;
+                let mut score = (0.55 + 0.35 * conf).min(0.95);
+                if e.superseded_at.is_some() {
+                    score *= SUPERSEDED_MULT;
+                }
+                slot_hits.push((idx, score));
             }
-            let stok = slot_tokens(e);
-            let overlap = qtok.intersection(&stok).count();
-            if overlap == 0 {
-                continue;
-            }
-            let conf = overlap as f64 / stok.len().max(1) as f64;
-            let mut score = (0.55 + 0.35 * conf).min(0.95);
-            if e.superseded_at.is_some() {
-                score *= SUPERSEDED_MULT;
-            }
-            slot_hits.push(Hit { idx, score });
         }
-        slot_hits.sort_by(|a, b| b.score.total_cmp(&a.score));
-        slot_hits.truncate(p.k);
-        for h in slot_hits {
-            if p.min_score.is_some_and(|m| h.score < m) {
+        slot_hits.sort_by(|a, b| b.1.total_cmp(&a.1));
+        slot_hits.truncate(k);
+        for (idx, score) in slot_hits {
+            if explicit_floor && score < floor {
                 continue;
             }
-            seen.insert(&bank.entries[h.idx].text);
-            hits.push(h);
+            let e = &bank.entries[idx];
+            neural.push((idx, score));
+            slot_rank.push(&e.text);
+            seen.insert(&e.text);
+            if !e.band.is_empty() {
+                hit_bands.insert(&e.band);
+            }
+            comps.insert(
+                e.text.clone(),
+                obj(json!({"channel": "slot", "slot": score, "surprise": 0.0, "band": e.band})),
+            );
         }
     }
-    if let Some(knobs) = p.bm25
+
+    // ── Pools 1.75 / 1.9: BM25 and timeline over one lexical candidate pool ──
+    let timeline_fired = p.timeline_enabled && !p.query.is_empty() && has_temporal_cue(&p.query);
+    let mut candidates: Vec<usize> = Vec::new();
+    if !p.query.is_empty() && (p.bm25_enabled || timeline_fired) {
+        for (depth, members) in by_band.iter().enumerate() {
+            if !band_ok(&p.band_order[depth]) {
+                continue;
+            }
+            candidates.extend(
+                members
+                    .iter()
+                    .copied()
+                    .filter(|&i| dense_eligible(&bank.entries[i])),
+            );
+        }
+    }
+    if p.bm25_enabled && !p.query.is_empty() && !candidates.is_empty() {
+        let knobs = p.bm25;
+        let norm = normalize_scores(bm25_score(
+            bank,
+            &candidates,
+            &p.query,
+            knobs.k1,
+            knobs.b,
+            knobs.top_n,
+        ));
+        let mut lookup: HashMap<&str, f64> = HashMap::new();
+        for &(i, s) in &norm {
+            if s >= knobs.min_norm {
+                lookup.insert(bank.entries[i].text.as_str(), s);
+                bm25_rank.push(bank.entries[i].text.as_str());
+            }
+        }
+        for (idx, score) in neural.iter_mut() {
+            let text = bank.entries[*idx].text.as_str();
+            let boost = *lookup.get(text).unwrap_or(&0.0);
+            if boost > 0.0 && !p.fusion_rrf {
+                *score += knobs.weight * boost;
+            }
+            if let Some(c) = comps.get_mut(text) {
+                c.insert("bm25".into(), json!(boost));
+            }
+        }
+        for (i, s) in norm {
+            let e = &bank.entries[i];
+            if seen.contains(e.text.as_str()) || s < knobs.min_norm {
+                continue;
+            }
+            let injected = knobs.weight * s;
+            if explicit_floor && injected < floor {
+                continue;
+            }
+            neural.push((i, injected));
+            seen.insert(&e.text);
+            if !e.band.is_empty() {
+                hit_bands.insert(&e.band);
+            }
+            comps.insert(
+                e.text.clone(),
+                obj(json!({"channel": "bm25", "bm25": s, "surprise": 0.0, "band": e.band})),
+            );
+        }
+    }
+    if timeline_fired && !candidates.is_empty() {
+        let norm = normalize_scores(bm25_score(
+            bank,
+            &candidates,
+            &p.query,
+            p.bm25.k1,
+            p.bm25.b,
+            TIMELINE_TOP_N,
+        ));
+        for (i, s) in norm {
+            let e = &bank.entries[i];
+            if seen.contains(e.text.as_str()) || s <= 0.0 {
+                continue;
+            }
+            let injected = TIMELINE_WEIGHT * s;
+            if explicit_floor && injected < floor {
+                continue;
+            }
+            neural.push((i, injected));
+            seen.insert(&e.text);
+            comps.insert(
+                e.text.clone(),
+                obj(json!({"channel": "timeline", "bm25": s, "surprise": 0.0, "band": e.band})),
+            );
+            via_map.insert(&e.text, "timeline");
+            timeline_rank.push(&e.text);
+            if !e.band.is_empty() {
+                hit_bands.insert(&e.band);
+            }
+        }
+    }
+
+    if p.fusion_rrf && !crate::mutants::active("search-rrf-off") {
+        // Stable sort of the dense list by relevance, then 1/(60 + rank).
+        let mut dense_sorted = dense_rank_src.clone();
+        dense_sorted.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let mut fused: HashMap<&str, f64> = HashMap::new();
+        let dense_texts: Vec<&str> = dense_sorted.iter().map(|(t, _)| *t).collect();
+        for order in [&dense_texts, &slot_rank, &bm25_rank, &timeline_rank] {
+            for (rank0, text) in order.iter().enumerate() {
+                *fused.entry(text).or_insert(0.0) += 1.0 / (RRF_K + rank0 as f64 + 1.0);
+            }
+        }
+        for (idx, score) in neural.iter_mut() {
+            let e = &bank.entries[*idx];
+            let src = if e.source == "assistant" {
+                ASSISTANT_MULT
+            } else {
+                1.0
+            };
+            let sup = if e.superseded_at.is_some() {
+                SUPERSEDED_MULT
+            } else {
+                1.0
+            };
+            *score = fused.get(e.text.as_str()).copied().unwrap_or(0.0) * src * sup;
+        }
+    }
+
+    // The per-band instrumentation `memory_stats` serves (cms.py:1430-1437).
+    if p.count_access {
+        crate::read::stats::record_query(hit_bands.iter().copied());
+    }
+
+    // Stable sort: ties keep the insertion order (band walk, slot, BM25, timeline).
+    neural.sort_by(|a, b| b.1.total_cmp(&a.1));
+    if !rerank_before_cut {
+        neural.truncate(k);
+    }
+    // Pool 2 (reference documents) is a declared divergence: none here.
+    let mut combined = neural;
+
+    // ── Pool 3: cross-encoder rerank (cms.py:1466-1600) ──
+    let top_n = p.rerank.top_n;
+    let mut rerank_log = obj(json!({
+        "enabled": p.rerank_enabled, "fired": false, "skip_reason": null,
+        "top_n": top_n, "candidate_count": combined.len(), "scored_candidates": 0,
+        "scoring_policy": "complete_pool_or_skip",
+    }));
+    let ce_ready = ce.filter(|c| c.available());
+    if p.rerank_enabled
+        && let Some(ce) = ce_ready
         && !p.query.is_empty()
+        && !combined.is_empty()
+        && combined.len() as i64 <= top_n
     {
-        bm25_fuse(bank, p, knobs, &eligible, &mut seen, &mut hits);
+        let texts: Vec<&str> = combined
+            .iter()
+            .map(|(i, _)| bank.entries[*i].text.as_str())
+            .collect();
+        let orig: Vec<f64> = combined.iter().map(|(_, s)| *s).collect();
+        rerank_log.insert("top_n".into(), json!(top_n));
+        rerank_log.insert("skip_margin".into(), json!(p.rerank.skip_margin));
+        rerank_log.insert("fusion_weight".into(), json!(p.rerank.fusion_weight));
+        rerank_log.insert("model".into(), json!(p.rerank.model_name));
+        let mut skip_for_margin = false;
+        if p.rerank.skip_margin > 0.0 {
+            let mut sorted = orig.clone();
+            sorted.sort_by(|a, b| b.total_cmp(a));
+            let margin = if sorted.len() >= 2 {
+                sorted[0] - sorted[1]
+            } else {
+                f64::INFINITY
+            };
+            skip_for_margin = margin >= p.rerank.skip_margin;
+            rerank_log.insert(
+                "margin".into(),
+                if margin.is_finite() {
+                    json!(margin)
+                } else {
+                    Value::Null
+                },
+            );
+        }
+        let scores = if skip_for_margin {
+            rerank_log.insert("skip_reason".into(), json!("unambiguous_margin"));
+            Vec::new()
+        } else {
+            ce.scores(&p.query, &texts)
+        };
+        for (i, t) in texts.iter().enumerate() {
+            if let Some(c) = comps.get_mut(*t) {
+                c.insert("ce".into(), scores.get(i).map_or(Value::Null, |s| json!(s)));
+            }
+        }
+        if !scores.is_empty() {
+            rerank_log.insert("fired".into(), json!(true));
+            rerank_log.insert("scored_candidates".into(), json!(scores.len()));
+            let w = if crate::mutants::active("search-rerank-unfused") {
+                1.0
+            } else {
+                p.rerank.fusion_weight
+            };
+            let fused = crate::read::rerank::fuse(w, &orig, &scores);
+            let mut reranked: Vec<(usize, f64)> = combined
+                .iter()
+                .zip(fused)
+                .map(|(&(i, _), f)| (i, f))
+                .collect();
+            reranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+            combined = reranked;
+        } else if !skip_for_margin {
+            rerank_log.insert("skip_reason".into(), json!("rerank_failed_or_unavailable"));
+        }
+    } else if p.rerank_enabled {
+        let over_budget = ce.is_some() && !p.query.is_empty() && combined.len() as i64 > top_n;
+        let reason = if over_budget {
+            "candidate_budget_exceeded"
+        } else {
+            "unavailable"
+        };
+        rerank_log.insert("skip_reason".into(), json!(reason));
     }
-    hits.sort_by(|a, b| b.score.total_cmp(&a.score)); // stable
-    hits.truncate(p.k);
-    hits
+    if rerank_before_cut {
+        // No reference documents: the deferred cut keeps the first k memories.
+        combined.truncate(k);
+    }
+
+    let mut bm25_params = obj(json!({"enabled": p.bm25_enabled}));
+    if p.bm25_enabled {
+        let b = p.bm25;
+        bm25_params.insert("weight".into(), json!(b.weight));
+        bm25_params.insert("min_score".into(), json!(b.min_norm));
+        bm25_params.insert("k1".into(), json!(b.k1));
+        bm25_params.insert("b".into(), json!(b.b));
+        bm25_params.insert("top_n".into(), json!(b.top_n));
+    }
+    let params = json!({
+        "top_k": k,
+        "min_score": floor,
+        "min_score_explicit": explicit_floor,
+        "band_count": n,
+        "recency_boost": n > 1 && !p.disable_recency_boost && p.recency_boost_enabled,
+        "recency_base_half_life_s": p.recency_base_half_life_s,
+        "hide_superseded": p.hide_superseded,
+        "bm25": bm25_params,
+        "candidate_pool": {
+            "multiplier": pool_mult,
+            "pool_size": pool_size,
+            "fusion": p.fusion_name,
+            "rerank_position": if rerank_before_cut { "before_cut" } else { "after_cut" },
+        },
+        "reranker": rerank_log,
+        "timeline": {"enabled": p.timeline_enabled, "fired": timeline_fired},
+        "filters": p.filters_json,
+    });
+
+    // Timeline presentation: the memory part in stream order (timestamp, seq).
+    if timeline_fired && !crate::mutants::active("search-timeline-unsorted") {
+        combined.sort_by(|a, b| {
+            bank.entries[a.0]
+                .ts
+                .total_cmp(&bank.entries[b.0].ts)
+                .then(bank.entries[a.0].id.cmp(&bank.entries[b.0].id))
+        });
+    }
+    if p.count_access && !crate::mutants::active("search-no-access-bump") {
+        for (i, _) in &combined {
+            bank.entries[*i]
+                .access_count
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    let hits = combined
+        .into_iter()
+        .map(|(idx, score)| Hit {
+            idx,
+            score,
+            via: via_map.get(bank.entries[idx].text.as_str()).copied(),
+        })
+        .collect();
+    Ranked {
+        hits,
+        comps,
+        params,
+    }
+}
+
+fn obj(v: Value) -> Map<String, Value> {
+    match v {
+        Value::Object(m) => m,
+        _ => Map::new(),
+    }
+}
+
+/// `BM25Index(candidates).score(query, top_k)` (`memory/bm25.py:110-204`).
+fn bm25_score(
+    bank: &Bank,
+    cand: &[usize],
+    query: &str,
+    k1: f64,
+    b: f64,
+    top_n: usize,
+) -> Vec<(usize, f64)> {
+    let docs: Vec<(usize, Vec<String>)> = cand
+        .iter()
+        .map(|&i| (i, bm25_tokens(&bank.entries[i].text)))
+        .collect();
+    let n = docs.len() as f64;
+    if docs.is_empty() {
+        return Vec::new();
+    }
+    let q = bm25_tokens(query);
+    if q.is_empty() {
+        return Vec::new();
+    }
+    let total: usize = docs.iter().map(|(_, t)| t.len()).sum();
+    let avg = total as f64 / n;
+    let mut df: HashMap<&str, usize> = HashMap::new();
+    for (_, toks) in &docs {
+        let uniq: HashSet<&str> = toks.iter().map(String::as_str).collect();
+        for t in uniq {
+            *df.entry(t).or_default() += 1;
+        }
+    }
+    let mut scored: Vec<(usize, f64)> = Vec::new();
+    for (idx, toks) in &docs {
+        if toks.is_empty() {
+            continue;
+        }
+        let mut tf: HashMap<&str, usize> = HashMap::new();
+        for t in toks {
+            *tf.entry(t.as_str()).or_default() += 1;
+        }
+        let norm = 1.0 - b
+            + b * (if avg != 0.0 {
+                toks.len() as f64 / avg
+            } else {
+                0.0
+            });
+        let mut s = 0.0;
+        for qt in &q {
+            let f = *tf.get(qt.as_str()).unwrap_or(&0) as f64;
+            if f == 0.0 {
+                continue;
+            }
+            let d = *df.get(qt.as_str()).unwrap_or(&0) as f64;
+            if d == 0.0 {
+                continue;
+            }
+            let idf = (1.0 + (n - d + 0.5) / (d + 0.5)).ln();
+            if idf <= 0.0 {
+                continue;
+            }
+            s += idf * (f * (k1 + 1.0)) / (f + k1 * norm);
+        }
+        if s > 0.0 {
+            scored.push((*idx, s));
+        }
+    }
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1)); // stable
+    scored.truncate(top_n);
+    scored
+}
+
+/// `normalize_scores` (`memory/bm25.py:207-227`): min-max; one hit or a flat set is 1.0.
+fn normalize_scores(scored: Vec<(usize, f64)>) -> Vec<(usize, f64)> {
+    if scored.len() <= 1 {
+        return scored.into_iter().map(|(i, _)| (i, 1.0)).collect();
+    }
+    let mx = scored.iter().map(|x| x.1).fold(f64::MIN, f64::max);
+    let mn = scored.iter().map(|x| x.1).fold(f64::MAX, f64::min);
+    let span = mx - mn;
+    scored
+        .into_iter()
+        .map(|(i, s)| (i, if span <= 0.0 { 1.0 } else { (s - mn) / span }))
+        .collect()
 }
 
 /// `memory/bm25.py:tokenize`: identifier-aware, lowercased, tiny stop list.
@@ -154,117 +678,16 @@ pub fn bm25_tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Weighted-sum BM25 fusion (cms.py:1204-1260): boost dense/slot hits whose
-/// text BM25 also found, then inject BM25-only hits at `weight * norm`.
-fn bm25_fuse<'a>(
-    bank: &'a Bank,
-    p: &Params,
-    knobs: Bm25Knobs,
-    eligible: &dyn Fn(&Entry) -> bool,
-    seen: &mut HashSet<&'a str>,
-    hits: &mut Vec<Hit>,
-) {
-    let docs: Vec<(usize, Vec<String>)> = bank
-        .entries
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| eligible(e))
-        .map(|(i, e)| (i, bm25_tokens(&e.text)))
-        .collect();
-    if docs.is_empty() {
-        return;
-    }
-    let n = docs.len() as f64;
-    let avg = docs.iter().map(|(_, t)| t.len()).sum::<usize>() as f64 / n;
-    let mut df: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for (_, toks) in &docs {
-        let uniq: HashSet<&str> = toks.iter().map(String::as_str).collect();
-        for t in uniq {
-            *df.entry(t).or_default() += 1;
-        }
-    }
-    let q = bm25_tokens(&p.query);
-    if q.is_empty() {
-        return;
-    }
-    let mut scored: Vec<(usize, f64)> = Vec::new();
-    for (idx, toks) in &docs {
-        if toks.is_empty() {
-            continue;
-        }
-        let mut tf: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-        for t in toks {
-            *tf.entry(t.as_str()).or_default() += 1;
-        }
-        let norm = 1.0 - knobs.b + knobs.b * (toks.len() as f64 / avg);
-        let mut s = 0.0;
-        for qt in &q {
-            let f = *tf.get(qt.as_str()).unwrap_or(&0) as f64;
-            let d = *df.get(qt.as_str()).unwrap_or(&0) as f64;
-            if f == 0.0 || d == 0.0 {
-                continue;
-            }
-            let idf = (1.0 + (n - d + 0.5) / (d + 0.5)).ln();
-            if idf <= 0.0 {
-                continue;
-            }
-            s += idf * (f * (knobs.k1 + 1.0)) / (f + knobs.k1 * norm);
-        }
-        if s > 0.0 {
-            scored.push((*idx, s));
-        }
-    }
-    scored.sort_by(|a, b| b.1.total_cmp(&a.1)); // stable
-    scored.truncate(knobs.top_n);
-    // normalize_scores: min-max; one hit or a flat set is 1.0.
-    let (mx, mn) = scored
-        .iter()
-        .fold((f64::MIN, f64::MAX), |(mx, mn), (_, s)| {
-            (mx.max(*s), mn.min(*s))
-        });
-    let normed: Vec<(usize, f64)> = scored
-        .iter()
-        .map(|&(i, s)| {
-            (
-                i,
-                if scored.len() == 1 || mx - mn <= 0.0 {
-                    1.0
-                } else {
-                    (s - mn) / (mx - mn)
-                },
-            )
-        })
-        .collect();
-    // Text-keyed lookup; a later duplicate text overwrites an earlier one, as a dict does.
-    let mut lookup: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
-    for &(i, s) in &normed {
-        if s >= knobs.min_norm {
-            lookup.insert(bank.entries[i].text.as_str(), s);
-        }
-    }
-    for h in hits.iter_mut() {
-        let boost = *lookup
-            .get(bank.entries[h.idx].text.as_str())
-            .unwrap_or(&0.0);
-        if boost > 0.0 {
-            h.score += knobs.weight * boost;
-        }
-    }
-    for (i, s) in normed {
-        let text = bank.entries[i].text.as_str();
-        if seen.contains(text) || s < knobs.min_norm {
-            continue;
-        }
-        let injected = knobs.weight * s;
-        if p.min_score.is_some_and(|m| injected < m) {
-            continue;
-        }
-        seen.insert(text);
-        hits.push(Hit {
-            idx: i,
-            score: injected,
-        });
-    }
+/// `_TEMPORAL_CUE_RE` (cms.py:69-77): word-bounded, case-insensitive; no "may".
+pub fn has_temporal_cue(text: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)\b(first|last|when|earliest|latest|before|after|since|until|ago|how many times|how long|what order|in order|order in which|sequence|chronolog\w*|timeline|january|february|march|april|june|july|august|september|october|november|december)\b",
+        )
+        .unwrap()
+    })
+    .is_match(text)
 }
 
 const STOP_WORDS: &[&str] = &[
@@ -306,18 +729,22 @@ fn slot_tokens(e: &Entry) -> HashSet<String> {
 }
 
 /// Python `round(x, 4)`: correctly rounded from the exact binary value, ties to even.
-fn round4(x: f64) -> f64 {
+pub fn round4(x: f64) -> f64 {
     format!("{x:.4}").parse().unwrap_or(x)
 }
 
-pub fn entry_json(bank: &Bank, e: &Entry, score: f64) -> Value {
+/// `_entry_to_dict` (service.py:147-190).
+pub fn entry_json(e: &Entry, score: f64) -> Value {
     let mut m = Map::new();
     m.insert("id".into(), json!(e.id));
     m.insert("text".into(), json!(e.text));
     m.insert("source".into(), json!(e.source));
     m.insert("bank".into(), json!(e.band));
     m.insert("timestamp".into(), json!(e.ts));
-    m.insert("access_count".into(), json!(e.access_count));
+    m.insert(
+        "access_count".into(),
+        json!(e.access_count.load(Ordering::Relaxed)),
+    );
     let surprise = if crate::mutants::active("search-surprise-float32") {
         f64::from(e.surprise)
     } else {
@@ -348,63 +775,169 @@ pub fn entry_json(bank: &Bank, e: &Entry, score: f64) -> Value {
         m.insert("slots".into(), Value::Array(slots));
     }
     m.insert("score".into(), json!(round4(score)));
-    if e.superseded_at.is_some() {
-        // service.py:_annotate_supersession: resolve the successor by exact text.
-        let mut found: Vec<&Entry> = match &e.superseded_by_text {
-            Some(t) => bank
+    Value::Object(m)
+}
+
+/// `_annotate_supersession` (service.py:213-269): resolve each served
+/// superseded entry's successor by exact text over the resident bank.
+pub fn annotate_supersession_in(bank: &Bank, served: &mut [(usize, Value)]) {
+    for (idx, d) in served.iter_mut() {
+        let e = &bank.entries[*idx];
+        if e.superseded_at.is_none() {
+            continue;
+        }
+        let mut found: Vec<(usize, &Entry)> = match &e.superseded_by_text {
+            Some(t) if !t.is_empty() => bank
                 .entries
                 .iter()
-                .filter(|r| &r.text == t && r.id != e.id)
+                .enumerate()
+                .filter(|(i, r)| &r.text == t && *i != *idx)
                 .collect(),
-            None => Vec::new(),
+            _ => Vec::new(),
         };
         if found.len() > 1 {
-            found.retain(|r| r.superseded_at.is_none());
+            found.retain(|(_, r)| r.superseded_at.is_none());
         }
         let one = if found.len() == 1 {
-            Some(found[0])
+            Some(found[0].1)
         } else {
             None
         };
-        m.insert("superseded_by_id".into(), json!(one.map(|r| r.id)));
-        m.insert(
-            "supersession_verified".into(),
-            json!(one.is_some_and(|r| r.source == "correction" || r.source == "consolidation")),
-        );
-        m.insert(
-            "superseded_by_current".into(),
-            json!(one.is_some_and(|r| r.superseded_at.is_none())),
-        );
+        if let Value::Object(m) = d {
+            m.insert("superseded_by_id".into(), json!(one.map(|r| r.id)));
+            m.insert(
+                "supersession_verified".into(),
+                json!(one.is_some_and(|r| r.source == "correction" || r.source == "consolidation")),
+            );
+            m.insert(
+                "superseded_by_current".into(),
+                json!(one.is_some_and(|r| r.superseded_at.is_none())),
+            );
+        }
     }
-    Value::Object(m)
+}
+
+/// `temporal_neighbors` (cms.py:620-664): stream-adjacent entries of the
+/// hit, same episode (or same source among episode-less entries), ordered
+/// by `(timestamp, seq)`; hydration assigns sequence in insertion-id order,
+/// before band seating changes resident indices.
+pub fn temporal_neighbors(
+    bank: &Bank,
+    idx: usize,
+    n_each: usize,
+    hide_superseded: bool,
+) -> (Vec<usize>, Vec<usize>) {
+    if n_each == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    let anchor = &bank.entries[idx];
+    let mut seen: HashSet<&str> = HashSet::from([anchor.text.as_str()]);
+    let mut pool: Vec<usize> = Vec::new();
+    for (i, e) in bank.entries.iter().enumerate() {
+        if seen.contains(e.text.as_str()) {
+            continue;
+        }
+        if !not_superseded_digest(e) || (hide_superseded && e.superseded_at.is_some()) {
+            continue;
+        }
+        match &anchor.episode_id {
+            Some(ep) if !ep.is_empty() => {
+                if e.episode_id.as_deref() != Some(ep.as_str()) {
+                    continue;
+                }
+            }
+            _ => {
+                if e.episode_id.as_deref().is_some_and(|x| !x.is_empty())
+                    || e.source != anchor.source
+                {
+                    continue;
+                }
+            }
+        }
+        pool.push(i);
+        seen.insert(&e.text);
+    }
+    let key = |i: usize| (bank.entries[i].ts, bank.entries[i].id);
+    let a = key(idx);
+    let le = |x: (f64, i64)| x.0 < a.0 || (x.0 == a.0 && x.1 <= a.1);
+    let mut before: Vec<usize> = pool.iter().copied().filter(|&i| le(key(i))).collect();
+    let mut after: Vec<usize> = pool.iter().copied().filter(|&i| !le(key(i))).collect();
+    let cmp = |x: &usize, y: &usize| {
+        key(*x)
+            .0
+            .total_cmp(&key(*y).0)
+            .then(key(*x).1.cmp(&key(*y).1))
+    };
+    before.sort_by(cmp);
+    after.sort_by(cmp);
+    let mut before = before[before.len().saturating_sub(n_each)..].to_vec();
+    if crate::mutants::active("search-neighbours-reversed") {
+        before.reverse();
+    }
+    after.truncate(n_each);
+    (before, after)
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_params(query: &str, k: usize) -> Params {
+    Params {
+        query: query.into(),
+        k,
+        sources: None,
+        tags: None,
+        episodes: None,
+        min_score: None,
+        default_floor: 0.25,
+        bm25: Bm25Knobs {
+            k1: 1.5,
+            b: 0.75,
+            weight: 0.3,
+            top_n: 20,
+            min_norm: 0.1,
+        },
+        bm25_enabled: false,
+        hide_superseded: false,
+        bands: None,
+        band_order: vec!["flat".into()],
+        disable_recency_boost: false,
+        recency_boost_enabled: false,
+        recency_base_half_life_s: 86400.0,
+        pool_multiplier: 1,
+        fusion_rrf: false,
+        fusion_name: "weighted_sum".into(),
+        timeline_enabled: false,
+        rerank_enabled: false,
+        rerank: RerankKnobs {
+            top_n: 20,
+            fusion_weight: 0.7,
+            skip_margin: 0.0,
+            model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2".into(),
+        },
+        count_access: true,
+        now: 1e9,
+        filters_json: serde_json::json!({}),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const DEFAULT_BM25: Bm25Knobs = Bm25Knobs {
-        k1: 1.5,
-        b: 0.75,
-        weight: 0.3,
-        top_n: 20,
-        min_norm: 0.1,
-    };
+    use std::sync::atomic::AtomicI64;
 
     fn entry(id: i64, text: &str, source: &str, superseded: bool) -> Entry {
         Entry {
             id,
-            embedding: vec![],
+            embedding: vec![0.0; DIM],
+            surprise_value: 0.0,
+            reinforcements: 0,
+            last_logical_turn: None,
+            dream_state: None,
             band: "flat".into(),
             stored_band: "flat".into(),
             text: text.into(),
             surprise: 0.5,
-            surprise_value: 0.5,
-            ts: 0.0,
-            access_count: 0,
-            reinforcements: 0,
-            last_logical_turn: None,
-            dream_state: None,
+            ts: id as f64,
+            access_count: AtomicI64::new(0),
             source: source.into(),
             superseded_at: superseded.then_some(1.0),
             superseded_by_text: None,
@@ -414,6 +947,7 @@ mod tests {
             slots: vec![],
             authority: None,
             distortion_tolerance: None,
+            ..Default::default()
         }
     }
 
@@ -424,40 +958,31 @@ mod tests {
         v
     }
 
+    fn params(query: &str, k: usize) -> Params {
+        fixture_params(query, k)
+    }
+
+    fn ids(bank: &Bank, r: &Ranked) -> Vec<i64> {
+        r.hits.iter().map(|h| bank.entries[h.idx].id).collect()
+    }
+
     #[test]
-    fn dense_matrix_rows_follow_the_loaded_embedding_dimension() {
-        for dim in [384, 1024] {
-            let mut matrix = vec![0.0; 2 * dim];
-            matrix[dim] = 1.0;
-            let bank = Bank {
-                dim,
-                matrix,
-                entries: vec![
-                    entry(1, "first", "x", false),
-                    entry(2, "second", "x", false),
-                ],
-            };
-            let mut query = vec![0.0; dim];
-            query[0] = 1.0;
-            let p = Params {
-                query: String::new(),
-                k: 2,
-                sources: None,
-                tags: None,
-                min_score: None,
-                default_floor: 0.25,
-                bm25: None,
-                hide_superseded: false,
-                bands: None,
-            };
-            assert_eq!(
-                rank(&bank, &query, &p)
-                    .iter()
-                    .map(|h| bank.entries[h.idx].id)
-                    .collect::<Vec<_>>(),
-                [2]
-            );
-        }
+    fn gate_large_candidate_pool_keeps_all_available_entries() {
+        let bank = Bank {
+            dim: DIM,
+            entries: vec![
+                entry(1, "a", "x", false),
+                entry(2, "b", "x", false),
+                entry(3, "c", "x", false),
+            ],
+            matrix: [unit(0.9), unit(0.8), unit(0.7)].concat(),
+        };
+        let mut p = params("", usize::MAX / 3 + 1);
+        p.pool_multiplier = 3;
+        assert_eq!(
+            ids(&bank, &rank(&bank, &unit(1.0), &p, None)),
+            vec![1, 2, 3]
+        );
     }
 
     #[test]
@@ -481,34 +1006,21 @@ mod tests {
             entries,
             matrix,
         };
-        let p = Params {
-            query: String::new(),
-            k: 6,
-            sources: None,
-            tags: None,
-            min_score: None,
-            bm25: None,
-            default_floor: 0.25,
-            hide_superseded: false,
-            bands: None,
-        };
-        let hits = rank(&bank, &unit(1.0), &p);
-        let ids: Vec<i64> = hits.iter().map(|h| bank.entries[h.idx].id).collect();
+        let r = rank(&bank, &unit(1.0), &params("", 6), None);
         // 6 (superseded digest) never surfaces; 2 duplicates 1; 5 is under the floor;
         // 3 ranks 0.765, 4 ranks 0.5225.
-        assert_eq!(ids, vec![1, 3, 4]);
-        let p = Params {
-            query: String::new(),
-            k: 6,
-            sources: Some(["assistant".to_string()].into()),
-            tags: None,
-            min_score: None,
-            bm25: None,
-            default_floor: 0.25,
-            hide_superseded: false,
-            bands: None,
-        };
-        assert_eq!(rank(&bank, &unit(1.0), &p).len(), 1);
+        assert_eq!(ids(&bank, &r), vec![1, 3, 4]);
+        // Served entries accrue one access each.
+        assert_eq!(bank.entries[0].access_count.load(Ordering::Relaxed), 1);
+        assert_eq!(bank.entries[1].access_count.load(Ordering::Relaxed), 0);
+        let mut p = params("", 6);
+        p.sources = Some(["assistant".to_string()].into());
+        assert_eq!(rank(&bank, &unit(1.0), &p, None).hits.len(), 1);
+        let mut p = params("", 6);
+        p.count_access = false;
+        rank(&bank, &unit(1.0), &p, None);
+        // The warmup-style call serves entry 1 again without counting it.
+        assert_eq!(bank.entries[0].access_count.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -531,26 +1043,14 @@ mod tests {
                 .map(String::from)
                 .into()
         );
-        let p = Params {
-            query: "deploy a new version".into(),
-            k: 8,
-            sources: None,
-            tags: None,
-            min_score: None,
-            bm25: None,
-            default_floor: 0.25,
-            hide_superseded: false,
-            bands: None,
-        };
-        let hits = rank(&bank, &unit(1.0), &p);
+        let r = rank(&bank, &unit(1.0), &params("deploy a new version", 8), None);
         // slot tokens {new, removed, membership, analogue}: overlap 1/4 -> 0.55 + 0.35 * 0.25
-        assert_eq!(hits.len(), 1);
-        assert!((hits[0].score - 0.6375).abs() < 1e-9);
-        let p = Params {
-            min_score: Some(0.7),
-            ..p
-        };
-        assert!(rank(&bank, &unit(1.0), &p).is_empty());
+        assert_eq!(r.hits.len(), 1);
+        assert!((r.hits[0].score - 0.6375).abs() < 1e-9);
+        assert_eq!(r.comps["slotted"]["channel"], "slot");
+        let mut p = params("deploy a new version", 8);
+        p.min_score = Some(0.7);
+        assert!(rank(&bank, &unit(1.0), &p, None).hits.is_empty());
     }
 
     #[test]
@@ -579,20 +1079,18 @@ mod tests {
             tags: Some(["valid".to_string()].into()),
             min_score: Some(0.0),
             default_floor: 0.0,
-            bm25: None,
-            hide_superseded: false,
-            bands: None,
+            ..params("", 1)
         };
-        assert_eq!(rank(&bank, &unit(1.0), &params).len(), 1);
+        assert_eq!(rank_compat(&bank, &unit(1.0), &params).len(), 1);
         assert_eq!(
-            entry_json(&bank, &bank.entries[0], 1.0)["tags"],
+            entry_json(&bank.entries[0], 1.0)["tags"],
             json!(["valid", 7, true])
         );
         let params = Params {
             tags: Some(["7".to_string(), "true".to_string()].into()),
             ..params
         };
-        assert!(rank(&bank, &unit(1.0), &params).is_empty());
+        assert!(rank_compat(&bank, &unit(1.0), &params).is_empty());
     }
 
     #[test]
@@ -619,19 +1117,11 @@ mod tests {
             entries,
             matrix,
         };
-        let p = Params {
-            query: "zeta_token".into(),
-            k: 8,
-            sources: None,
-            tags: None,
-            min_score: None,
-            bm25: Some(DEFAULT_BM25),
-            default_floor: 0.25,
-            hide_superseded: false,
-            bands: None,
-        };
-        let hits = rank(&bank, &unit(1.0), &p);
-        let got: Vec<(i64, f64)> = hits
+        let mut p = params("zeta_token", 8);
+        p.bm25_enabled = true;
+        let r = rank(&bank, &unit(1.0), &p, None);
+        let got: Vec<(i64, f64)> = r
+            .hits
             .iter()
             .map(|h| (bank.entries[h.idx].id, h.score))
             .collect();
@@ -640,8 +1130,163 @@ mod tests {
         assert_eq!(got[0].0, 1);
         assert_eq!(got[1].0, 2);
         assert!((got[1].1 - 0.3).abs() < 1e-12);
+        assert_eq!(r.comps["alpha beta"]["bm25"], 0.0);
+        assert_eq!(r.params["bm25"]["top_n"], 20);
     }
 
+    #[test]
+    fn temporal_cue_matches_python_lexicon() {
+        assert!(has_temporal_cue("When did we deploy?"));
+        assert!(has_temporal_cue("the CHRONOLOGICAL list"));
+        assert!(has_temporal_cue("what happened in August"));
+        assert!(!has_temporal_cue("may I deploy"));
+        assert!(!has_temporal_cue("whenever"));
+    }
+
+    #[test]
+    fn gate_timeline_same_tick_uses_insertion_order_across_bands() {
+        let bank = equal_time_bands();
+        let mut p = params("when did deploy happen", 2);
+        p.band_order.push("slow".into());
+        p.timeline_enabled = true;
+        let ranked = rank(&bank, &unit(1.0), &p, None);
+        assert_eq!(ranked.params["timeline"]["fired"], true);
+        assert_eq!(ids(&bank, &ranked), vec![1, 2]);
+    }
+
+    #[test]
+    fn gate_neighbors_same_tick_use_insertion_order_across_bands() {
+        assert_eq!(
+            temporal_neighbors(&equal_time_bands(), 0, 1, false),
+            (vec![1], vec![])
+        );
+    }
+
+    fn equal_time_bands() -> Bank {
+        let mut first = entry(1, "deploy first", "x", false);
+        first.band = "slow".into();
+        first.ts = 10.0;
+        let mut second = entry(2, "deploy second", "x", false);
+        second.ts = 10.0;
+        Bank {
+            dim: DIM,
+            entries: vec![second, first],
+            matrix: [unit(0.9), unit(0.8)].concat(),
+        }
+    }
+
+    #[test]
+    fn timeline_orders_by_stream_and_marks_via() {
+        let entries = vec![
+            entry(1, "deploy happened later", "x", false),
+            entry(2, "deploy happened first", "x", false),
+        ];
+        let mut matrix = unit(0.5);
+        matrix.extend(unit(0.9));
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
+        let mut p = params("when did the deploy happen", 8);
+        p.timeline_enabled = true;
+        let r = rank(&bank, &unit(1.0), &p, None);
+        assert_eq!(ids(&bank, &r), vec![1, 2]);
+        assert_eq!(r.params["timeline"]["fired"], true);
+    }
+
+    #[test]
+    fn rrf_replaces_scores_with_rank_sums() {
+        let entries = vec![entry(1, "a", "x", false), entry(2, "b", "assistant", false)];
+        let mut matrix = unit(0.9);
+        matrix.extend(unit(0.8));
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
+        let mut p = params("", 8);
+        p.fusion_rrf = true;
+        let r = rank(&bank, &unit(1.0), &p, None);
+        assert!((r.hits[0].score - 1.0 / 61.0).abs() < 1e-12);
+        assert!((r.hits[1].score - 0.85 / 62.0).abs() < 1e-12);
+    }
+
+    struct Fixed(Vec<f64>);
+    impl CrossEncoder for Fixed {
+        fn available(&self) -> bool {
+            true
+        }
+        fn scores(&self, _q: &str, texts: &[&str]) -> Vec<f64> {
+            self.0[..texts.len()].to_vec()
+        }
+    }
+
+    #[test]
+    fn rerank_fuses_and_logs() {
+        let entries = vec![entry(1, "a", "x", false), entry(2, "b", "x", false)];
+        let mut matrix = unit(0.9);
+        matrix.extend(unit(0.8));
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix,
+        };
+        let mut p = params("q", 8);
+        p.rerank_enabled = true;
+        let ce = Fixed(vec![0.0, 1.0]);
+        let r = rank(&bank, &unit(1.0), &p, Some(&ce));
+        assert_eq!(ids(&bank, &r), vec![2, 1]);
+        assert_eq!(r.params["reranker"]["fired"], true);
+        assert_eq!(r.comps["a"]["ce"], 0.0);
+        p.rerank.top_n = 1;
+        let r = rank(&bank, &unit(1.0), &p, Some(&ce));
+        assert_eq!(
+            r.params["reranker"]["skip_reason"],
+            "candidate_budget_exceeded"
+        );
+        assert_eq!(ids(&bank, &r), vec![1, 2]);
+    }
+
+    #[test]
+    fn neighbors_follow_episode_then_source() {
+        let mut entries = vec![
+            entry(1, "a", "s", false),
+            entry(2, "b", "s", false),
+            entry(3, "c", "s", false),
+            entry(4, "d", "other", false),
+        ];
+        entries[3].ts = 2.5;
+        let bank = Bank {
+            dim: DIM,
+            entries,
+            matrix: vec![0.0; 4 * DIM],
+        };
+        let (before, after) = temporal_neighbors(&bank, 1, 1, false);
+        assert_eq!(before, vec![0]);
+        assert_eq!(after, vec![2]);
+    }
+
+    const DEFAULT_BM25: Bm25Knobs = Bm25Knobs {
+        k1: 1.5,
+        b: 0.75,
+        weight: 0.3,
+        top_n: 20,
+        min_norm: 0.1,
+    };
+    fn rank_compat(bank: &Bank, q: &[f32], p: &Params) -> Vec<Hit> {
+        rank(bank, q, p, None).hits
+    }
+    fn entry_json_compat(bank: &Bank, e: &Entry, score: f64) -> Value {
+        let idx = bank
+            .entries
+            .iter()
+            .position(|row| std::ptr::eq(row, e))
+            .unwrap();
+        let mut served = vec![(idx, entry_json(e, score))];
+        annotate_supersession_in(bank, &mut served);
+        served.pop().unwrap().1
+    }
     fn mutation_params() -> Params {
         Params {
             query: String::new(),
@@ -650,9 +1295,8 @@ mod tests {
             tags: None,
             min_score: None,
             default_floor: 0.25,
-            bm25: None,
-            hide_superseded: false,
-            bands: None,
+            count_access: false,
+            ..params("", 8)
         }
     }
 
@@ -693,7 +1337,8 @@ mod tests {
                 if channel == 2 {
                     // Exercise the lexical channel without slot injection.
                     p.query = "needle".into();
-                    p.bm25 = Some(DEFAULT_BM25);
+                    p.bm25 = DEFAULT_BM25;
+                    p.bm25_enabled = true;
                 }
                 match filter {
                     0 => p.bands = Some(["flat".into()].into()),
@@ -706,7 +1351,7 @@ mod tests {
                         row.slots.clear();
                     }
                 }
-                let hits = rank(&bank, &[1.0, 0.0], &p);
+                let hits = rank_compat(&bank, &[1.0, 0.0], &p);
                 assert_eq!(
                     hits.iter()
                         .map(|h| bank.entries[h.idx].id)
@@ -732,7 +1377,7 @@ mod tests {
             min_score: Some(0.5),
             ..mutation_params()
         };
-        let hits = rank(&bank, &[1.0, 0.0], &p);
+        let hits = rank_compat(&bank, &[1.0, 0.0], &p);
         assert_eq!(hits.iter().map(|h| h.idx).collect::<Vec<_>>(), [0, 1]);
         assert_eq!(hits[0].score, 0.425);
         assert_eq!(hits[1].score, 0.275);
@@ -742,12 +1387,12 @@ mod tests {
             ..p
         };
         let bank = mutation_bank(bank.entries, &[0.5, 1.0]);
-        assert_eq!(rank(&bank, &[1.0, 0.0], &hidden)[0].idx, 0);
+        assert_eq!(rank_compat(&bank, &[1.0, 0.0], &hidden)[0].idx, 0);
         let above = Params {
             min_score: Some(0.500001),
             ..hidden
         };
-        assert!(rank(&bank, &[1.0, 0.0], &above).is_empty());
+        assert!(rank_compat(&bank, &[1.0, 0.0], &above).is_empty());
     }
 
     #[test]
@@ -764,7 +1409,7 @@ mod tests {
             default_floor: 0.99,
             ..mutation_params()
         };
-        let hits = rank(&bank, &[1.0, 0.0], &p);
+        let hits = rank_compat(&bank, &[1.0, 0.0], &p);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].idx, 0);
         assert!((hits[0].score - 0.495).abs() < 1e-12);
@@ -774,9 +1419,9 @@ mod tests {
             min_score: Some(0.49500000000000005),
             ..mutation_params()
         };
-        assert_eq!(rank(&bank, &[1.0, 0.0], &equal_floor).len(), 1);
+        assert_eq!(rank_compat(&bank, &[1.0, 0.0], &equal_floor).len(), 1);
         assert!(
-            rank(
+            rank_compat(
                 &bank,
                 &[1.0, 0.0],
                 &Params {
@@ -800,7 +1445,7 @@ mod tests {
             query: "needle".into(),
             ..mutation_params()
         };
-        let dense_hits = rank(&dense_bank, &[1.0, 0.0], &dense_params);
+        let dense_hits = rank_compat(&dense_bank, &[1.0, 0.0], &dense_params);
         assert_eq!(dense_hits.len(), 1);
         assert_eq!(dense_hits[0].score, 0.5);
 
@@ -837,15 +1482,16 @@ mod tests {
             );
             let p = Params {
                 query: "alpha beta beta".into(),
-                bm25: Some(Bm25Knobs {
+                bm25_enabled: true,
+                bm25: Bm25Knobs {
                     k1,
                     b,
                     min_norm: 0.0,
                     ..DEFAULT_BM25
-                }),
+                },
                 ..mutation_params()
             };
-            let hits = rank(&bank, &[1.0, 0.0], &p);
+            let hits = rank_compat(&bank, &[1.0, 0.0], &p);
             assert_eq!(
                 hits.iter()
                     .map(|h| bank.entries[h.idx].id)
@@ -860,7 +1506,7 @@ mod tests {
                 );
             }
             let boosted_bank = mutation_bank(bank.entries, &[0.0, 0.5, 0.0, 0.0, 0.0]);
-            let boosted = rank(&boosted_bank, &[1.0, 0.0], &p);
+            let boosted = rank_compat(&boosted_bank, &[1.0, 0.0], &p);
             assert_eq!(boosted.len(), 3);
             assert_eq!(boosted[0].idx, 1);
             assert!((boosted[0].score - (0.5 + 0.3 * middle)).abs() < 1e-12);
@@ -879,13 +1525,14 @@ mod tests {
         );
         let p = Params {
             query: "needle".into(),
-            bm25: Some(Bm25Knobs {
+            bm25_enabled: true,
+            bm25: Bm25Knobs {
                 min_norm: 1.0,
                 ..DEFAULT_BM25
-            }),
+            },
             ..mutation_params()
         };
-        let hits = rank(&bank, &[1.0, 0.0], &p);
+        let hits = rank_compat(&bank, &[1.0, 0.0], &p);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].idx, 0);
         assert_eq!(hits[0].score, 0.8);
@@ -894,9 +1541,9 @@ mod tests {
             min_score: Some(0.3),
             ..p
         };
-        assert_eq!(rank(&bank, &[1.0, 0.0], &p)[0].score, 0.3);
+        assert_eq!(rank_compat(&bank, &[1.0, 0.0], &p)[0].score, 0.3);
         assert!(
-            rank(
+            rank_compat(
                 &bank,
                 &[1.0, 0.0],
                 &Params {
@@ -914,10 +1561,11 @@ mod tests {
         let empty = mutation_bank(vec![], &[]);
         let mut p = Params {
             query: "needle".into(),
-            bm25: Some(DEFAULT_BM25),
+            bm25: DEFAULT_BM25,
+            bm25_enabled: true,
             ..mutation_params()
         };
-        assert!(rank(&empty, &[1.0, 0.0], &p).is_empty());
+        assert!(rank_compat(&empty, &[1.0, 0.0], &p).is_empty());
         let bank = mutation_bank(
             vec![
                 entry(1, "needle", "agent", false),
@@ -925,17 +1573,17 @@ mod tests {
             ],
             &[0.0, 0.0],
         );
-        p.bm25.as_mut().unwrap().top_n = 0;
-        assert!(rank(&bank, &[1.0, 0.0], &p).is_empty());
-        p.bm25.as_mut().unwrap().top_n = 1;
-        assert_eq!(rank(&bank, &[1.0, 0.0], &p).len(), 1);
+        p.bm25.top_n = 0;
+        assert!(rank_compat(&bank, &[1.0, 0.0], &p).is_empty());
+        p.bm25.top_n = 1;
+        assert_eq!(rank_compat(&bank, &[1.0, 0.0], &p).len(), 1);
         for query in ["", "the is are", "missing"] {
             p.query = query.into();
-            assert!(rank(&bank, &[1.0, 0.0], &p).is_empty(), "{query}");
+            assert!(rank_compat(&bank, &[1.0, 0.0], &p).is_empty(), "{query}");
         }
         let bank = mutation_bank(vec![entry(1, "the is are", "agent", false)], &[0.0]);
         p.query = "needle".into();
-        assert!(rank(&bank, &[1.0, 0.0], &p).is_empty());
+        assert!(rank_compat(&bank, &[1.0, 0.0], &p).is_empty());
     }
 
     #[test]
@@ -943,7 +1591,7 @@ mod tests {
         // service.py:147-195,213-259; sync.py:82-103.
         let mut row = entry(7, "note", "agent", false);
         row.ts = 12.5;
-        row.access_count = 3;
+        row.access_count = AtomicI64::new(3);
         row.surprise_value = 0.12345;
         row.episode_id = Some("episode".into());
         row.episode_title = Some("title".into());
@@ -953,7 +1601,7 @@ mod tests {
         row.distortion_tolerance = Some("constraint".into());
         let bank = mutation_bank(vec![row], &[0.0]);
         assert_eq!(
-            entry_json(&bank, &bank.entries[0], 0.03125),
+            entry_json_compat(&bank, &bank.entries[0], 0.03125),
             json!({
                 "id":7,"text":"note","source":"agent","bank":"flat","timestamp":12.5,
                 "access_count":3,"surprise_score":0.1235,"superseded":false,
@@ -967,7 +1615,7 @@ mod tests {
         bank.entries[0].authority = Some("".into());
         bank.entries[0].distortion_tolerance = Some("".into());
         bank.entries[0].slots.clear();
-        let served = entry_json(&bank, &bank.entries[0], 0.0);
+        let served = entry_json_compat(&bank, &bank.entries[0], 0.0);
         for key in [
             "authority",
             "distortion_tolerance",
@@ -1015,14 +1663,14 @@ mod tests {
                 rows.push(entry(i as i64 + 2, "replacement", source, retired));
             }
             let bank = mutation_bank(rows, &vec![0.0; sources.len() + 1]);
-            let value = entry_json(&bank, &bank.entries[0], 0.5);
+            let value = entry_json_compat(&bank, &bank.entries[0], 0.5);
             assert_eq!(value["superseded_by_id"], json!(want_id));
             assert_eq!(value["supersession_verified"], json!(verified));
             assert_eq!(value["superseded_by_current"], json!(current));
         }
         let bank = mutation_bank(vec![entry(1, "no successor", "agent", true)], &[0.0]);
         assert_eq!(
-            entry_json(&bank, &bank.entries[0], 0.0)["superseded_by_id"],
+            entry_json_compat(&bank, &bank.entries[0], 0.0)["superseded_by_id"],
             json!(null)
         );
     }

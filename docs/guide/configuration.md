@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v55). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v56). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -676,7 +676,10 @@ the bank directly, as `board-audit` and `export` do
 (`PSEUDOLIFE_MCP_DATABASE_URL`, else the lite tier's data dir), grants the
 lease to the next waiter, and logs a `lease_break` with the operator as its
 actor. It frees the board's record only: a process still holding the local lock
-keeps it until it exits.
+keeps it until it exits. If `lease break` or `lease delegate` says it lost the
+answer to its COMMIT, the change may have been committed: run
+`pseudolife-mcp lease list` before retrying. Any other failure means nothing
+was changed.
 
 `pseudolife-mcp lease delegate PROJECT AGENT [--for DURATION]` is the
 operator's way to name the maintainer's delegate for a project: the one
@@ -708,6 +711,43 @@ in `also_broken`). `pseudolife-mcp lease designate`, the command's name in
 0.16.0, still works and prints one line naming `lease delegate`. Both roles
 can also be given and taken from the Console, signed with your passkey: see
 [Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console).
+
+The delegate's session also gets a short brief after the startup check-in
+and one reminder line on every prompt, served by the daemon to the plugin's
+hooks (they pass the session's board address with the requests they already
+make). Both say to hand raw output to a subagent and to wake for decisions
+only; the check-in text itself is the same for every session. Only a grant
+by the operator or the maintainer counts, as for its urgent mail; the daemon
+rechecks it at most once a minute per session, so a grant or a revoke shows
+within a minute, and on the next session start for the brief.
+
+**The decision watcher: `pseudolife-mcp delegate-watch`.** The brief tells
+the delegate to start this once with `pseudolife-mcp delegate-watch
+--detach`. It waits without a model and sends its owner (by default the
+session whose `.agent` file sits beside its digest; `--owner` names another)
+one board message per batch of events: a pull request opened, merged or
+closed, turning green (with its merge state), failing on its head, finishing
+with checks cancelled (reported once, never as a failure), or newly
+conflicting; the newest master run of a workflow failing or passing again; a
+new file in `~/.pseudolife-mcp/suite-results`; and a `full-suite` or
+`full-suite@box` lease freeing up (`--lease` names others). A head counts as
+green or cancelled only once every workflow run on it has completed, so a run
+still queued keeps it pending. GitHub is read through the `gh` CLI
+(`--repo OWNER/NAME`, default the current checkout's; `--author` narrows it).
+The watcher registers its own board agent and prints its id; each message
+carries `clears="decision events"`, so park with
+`park_needs="decision events"` and `park_clear_by=<that id>` and the daemon
+rings you for it, then read with `memory_message(action="receive",
+ack=true)`. After 55 quiet minutes (`--quiet-after`) it sends one quiet line,
+unless you are parked `done`. It exits 0 when the owner leaves the board,
+when `--until-lease NAME` names a lease the owner no longer holds, after 14
+days (`--max-age`), or on `--stop`; it exits 2 when `gh` is missing or fails
+five polls in a row (after telling the owner), or when the board refuses it.
+`--detach` is safe to repeat: it answers that a live watcher is already
+running. The first run records what is already true and reports nothing for
+it; its state, log and a one-line-per-message ledger live beside the
+session's digest, else under `~/.pseudolife-mcp/watch/` (`--state` moves
+them).
 
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
@@ -1142,8 +1182,9 @@ and reuse the original request ID when retrying an addressed message.
 
 An active task should use `memory_agents` before shared-resource work and
 `memory_message(action="receive")` on resume and when the coordination digest
-(in the prompt hook or a tool result) shows pending mail. Receive does not
-acknowledge; use `action="ack"` after reading, with one `message_id` or
+(in the prompt hook or a tool result) shows pending mail. Receive without
+`ack` does not acknowledge; `ack=true` acknowledges what it returns in the
+same call, or use `action="ack"` after reading, with one `message_id` or
 several comma-separated (at most 50; a JSON array of strings, the form a
 host that stringifies list parameters sends, is read as that list): a batch
 returns the receipts in the order given and lists the ids that were not this
@@ -1813,8 +1854,9 @@ acknowledges mail. Optional adapter startup requests cancellation after three se
 for bounded in-flight request cleanup before falling back to ordinary memory
 service. This is not a three-second ceiling on total shim startup time.
 
-Messages have one recipient. Sending confirms durable enqueue; receiving does
-not acknowledge. The recipient explicitly acknowledges a message ID, and an
+Messages have one recipient. Sending confirms durable enqueue; receiving
+without `ack=true` does not acknowledge. The recipient explicitly acknowledges a
+message ID (or receives with `ack=true`), and an
 acknowledgment does not mean the requested work is complete. Retries reuse the
 same sender request key and content. Coordination traffic is not added to bands,
 cortex, graph, retrieval or dream input by the messaging APIs. Store a useful
@@ -1962,10 +2004,12 @@ a subagent only reads the board (`memory_agents(action="list")`,
 `memory_message(action="history")`, `memory_search`), and the
 orchestrating session owns the address. The served check-in says so, and
 since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
-(`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
-puts in a subagent's hook input, and never in the parent's, and denies that
+(`plugin/hooks/subagent-board-guard.sh`) sees the top-level `agent_id`
+Claude Code puts in a subagent's hook input, and never in the parent's (an
+`agent_id` inside the tool's arguments does not count), and denies that
 subagent's `memory_agents` update, claim and release and `memory_message`
-send and ack, whatever the server's name. Its list, receive and history
+send and ack (and receive with `ack=true`, which acknowledges what it
+returns), whatever the server's name. Its list, receive and history
 pass, and so does every call the parent makes. The subagent reads the refusal as
 `PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
 it to ask the parent instead (probed on Claude Code 2.1.283: the child's
@@ -3686,7 +3730,7 @@ installer and the session notices print.
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon. On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release (the newest release when it does not answer), and `--daemon-only` is refused naming the daemon's host |
-| `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
+| `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`, unless one of that runtime's installed requirements is outside the range its own `pseudolife-mcp` declares, as an mcp 2.1 runtime left by a 0.18.1 update is: then it installs again and says why); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
 | `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
@@ -4005,7 +4049,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v55**; migrations are additive
+The current Postgres meta version is **v56**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -4066,6 +4110,7 @@ The milestones:
 | v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
 | v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry, which credential redeemed it, and `failed_attempts`, the wrong-code guesses that burn it at five) and `maintainer_nonces` (spent challenge nonces, kept 7 days past their payload's expiry so a clock step back cannot reopen one). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
 | v55 | Board session names (2026-10-05). `coordination_agents` gains `name` (what the board shows for the row), `name_source` (who set it: `agent` — `memory_agents(action="update", name=...)` — over `harness` — the shim, from the title Claude Code or Codex already shows for the session — over `title` — a `memory_session_title` rename of the row's session; `''` means unnamed), `name_set_at` and `harness_name` (the newest harness title, kept while an agent name outranks it), plus a partial index on `episode` for the retitle path. An unnamed row reads as its label and the first 8 characters of its id. Additive/idempotent: the columns are added only when missing. |
+| v56 | Review-queue judge votes (2026-10-17). `edge_proposals` gains `judge2_verdict`, `judge2_confidence`, `judge2_model`, `judged2_at`, `judge2_relation`, `judge2_served_model` and `judge2_policy`: the link judge's second opinion beside its first (`link_judge_two_vote`, shadow by default). `entity_proposals` gains `judge2_served_model`, `judge2_policy`, `judge3_verdict`, `judge3_confidence`, `judge3_model`, `judged3_at`, `judge3_served_model` and `judge3_policy`: the merge judge's third opinion on a row whose first two disagree (`judge_tiebreak_mode`, shadow by default), and for each later vote the model its endpoint reported serving and that endpoint's judging-policy fingerprint. Both proposal tables gain `judge_served_model`: the model the first opinion's endpoint reported serving (`judge_model` is the configured name; the served name lived only in the judging memo, which every refresh prunes to pending rows). `merge_decisions` gains `votes` (JSONB): room for the judge votes a merge or junk proposal carried when it was decided, kept on the FK-free audit row because an accepted merge CASCADE-deletes the proposal with its votes; nothing writes it yet. All nullable; NULL = not asked (or, for a served model, not reported; for `votes`, no snapshot), the pre-v56 behaviour. Additive/idempotent (`ADD COLUMN IF NOT EXISTS`). |
 
 The customized RE Hub build adds a separate **`v34-rehub` extension schema**:
 `re_evidence_artifacts`, `re_claims`, and `re_claim_evidence`. Its version is

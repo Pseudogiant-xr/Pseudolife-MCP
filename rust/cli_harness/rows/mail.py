@@ -42,6 +42,33 @@ def _paths(home: Path, key: str = KEY) -> dict[str, Path]:
             "dir": d}
 
 
+def _while_held(change) -> None:
+    """Apply a mid-wait file change under a polling waiter. A Windows
+    reader's open handle refuses an unlink (WinError 32) or replace
+    (WinError 5; the producer reports a failed write) until it closes, so
+    retry briefly rather than lose the event (CI run 37952726143,
+    2026-10-09)."""
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            change()
+            return
+        except (PermissionError, RuntimeError):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
+def _remove_digest(arm) -> None:
+    _while_held(_paths(arm.home)["digest"].unlink)
+
+
+def _advance_digest(arm) -> None:
+    f = _paths(arm.home)
+    _while_held(lambda: p.write_digest(f["digest"], 8, _body()))
+    _while_held(lambda: p.write_ring(f["ring"], 8, "rung", "urgent"))
+
+
 def seed(digest_wm=7, ring=(7, "rung", "urgent"), seen=None, text=True, key=KEY,
          ring_raw: str | None = None):
     def setup(arm):
@@ -237,13 +264,11 @@ def cases() -> list[Case]:
              rules=DELIVERY))
     add(Case("digest-advances-later", ["wait-mail", *SID, "--timeout", "20", *QUICK],
              setup=seed(3, (3, "rung", "urgent"), seen=3),
-             during=armed_then(lambda arm: (
-                 p.write_digest(_paths(arm.home)["digest"], 8, _body()),
-                 p.write_ring(_paths(arm.home)["ring"], 8, "rung", "urgent"))),
+             during=armed_then(_advance_digest),
              rules=DELIVERY))
     add(Case("digest-disappears", ["wait-mail", *SID, "--timeout", "20", *QUICK],
              setup=seed(ring=None),
-             during=armed_then(lambda arm: _paths(arm.home)["digest"].unlink())))
+             during=armed_then(_remove_digest)))
 
     # After /clear: the host record maps the new id back to the shim's key.
     def host_record(arm, confirmed=True):

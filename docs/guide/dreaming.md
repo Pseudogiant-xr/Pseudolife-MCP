@@ -946,14 +946,17 @@ reject in every gate, and a reject beside a relate is agreement, not a
 `2nd (<model>): relate:<relation> …` for a second opinion); the review
 payloads' `judge` / `judge2` blocks carry it as `relation`. When an
 automatic reject applies and a relate vote was one of its votes, the sweep
-also files that relation (the more confident vote's, if both related) as a
+also files that relation (the more confident typed vote's, if both
+related) as a
 link proposal with source `merge-judge-relate`, through the ordinary filing
-gate, unless the relation is not a registered one or an edge or link
+gate, unless the relation is not a registered one, is the untyped
+`related-to` (since 2026-10-17), or an edge or link
 proposal already joins the pair (so a reject reopened by a new link's
 evidence change never files a second one). A filing that fails is logged
 and never undoes the reject. The link judge then settles the proposal at
 its own gates; the merge judge never writes an edge, and a shadow verdict
-files nothing. A row whose first verdict sat
+files nothing. Untyped `related-to` proposals filed before 2026-10-17 stay
+in the Review queue until someone rejects them. A row whose first verdict sat
 below that gate gets a **second opinion** on a later sweep
 (`judge_second_opinion`, optionally `judge_second_model` — both Console knobs) — a fresh batch,
 so an independent sample. The second opinion is asked on the first
@@ -968,8 +971,51 @@ other disagreement (an accept or a leave against a reject or relate, or an
 accept against a leave) stamps `split` on the note and leaves the row for a
 human. `judge_mode: auto` goes one step further and folds a pair when two
 independent accepts from different models agree on a row that is not
-`low_differential` at mean >= `judge_accept_min_confidence` — the only path
-that ever auto-applies an accept. "Different" is decided on what the
+`low_differential` at mean >= `judge_accept_min_confidence` — with the
+tiebreak's 2-of-3 accept below, the only paths that ever auto-apply an
+accept. A `split` row gets a **third opinion** (schema v56,
+`judge_tiebreak_mode`, default `shadow`) on a later sweep, in a fresh batch,
+from `judge_third_model` — on the first opinion's endpoint unless
+`judge_third_url` points it at its own, whose bearer key is env-only
+(`PSEUDOLIFE_JUDGE_THIRD_API_KEY`). It is asked only when a third model is
+set (else the result counts `third_opinion_skipped_unconfigured`) and that
+name is neither the first's nor the second's (else
+`third_opinion_skipped_same_model`, no call). The note gains a
+`| 3rd (<model>): <verdict> <conf> [2-1 reject | 2-1 accept | no majority]`
+tail and the review payloads a `judge3` block. In `auto` a 2-of-3 majority
+applies through the two-vote gates: two reject-class votes at mean >=
+`judge_reject_min_confidence_2` reject (filing a relate vote's link as
+above, under `auto-reject` or `auto`), and two accepts at mean >=
+`judge_accept_min_confidence` fold only under `judge_mode: auto` on a row
+that is not `low_differential`, behind the same guards as the two-vote
+accept (dismissed pairs, analyzer rows, name vetoes, snapshot first). Both
+need the third vote served by a model other than both earlier ones
+(`tiebreak_refused_same_model` counts the refusals), and the second vote's
+served model known: a second endpoint that named no model leaves only the
+configured name, so the tiebreak is refused with the vote kept
+(`tiebreak_refused_unknown_second`; split rows recorded before v56 carry no
+served model and need a `review_rejudge`). Each later vote keeps the
+endpoint it came from on the row (`judgeN_served_model`, `judgeN_policy`),
+and a tiebreak decision records both, so reconsideration reopens it when
+either endpoint later reports serving another model. `tiebreak_applied`
+counts what it applied (also inside `auto_rejected` / `auto_accepted`). No
+ladder has measured the third vote yet, which is why it ships in shadow.
+**Promoting a mode keeps the votes.** `judge_tiebreak_mode` and
+`link_judge_two_vote` decide what applies, not what a judge says, so they
+are not part of the judging policy: switching either from `shadow` to
+`auto` keeps every recorded vote, and the next tick applies the gates to
+those votes with no model call. A row the gate refused for a lasting reason
+(no distinct model, an unknown second served model, a name veto, a variant
+conflict, an analyzer-filed row) is left for a human; a graph-snapshot
+failure instead sends the row back to its first opinion next tick. A
+recorded second or third vote whose endpoint has since reported serving
+another model is cleared and asked again, never applied (a cleared second
+vote takes the merge third with it).
+Switching back to `shadow` reopens none of the decisions `auto` took.
+Setting `judge_third_model` or `judge_third_url`, or changing
+`link_two_vote_min_confidence`, does change the policy: every queue's
+recorded verdicts are re-judged once and automatic decisions reconsidered.
+"Different" is decided on what the
 endpoints *served*, not the names they were asked for: a CLI shim answers a
 name outside its own family (a `claude-*` name on the Codex shim) with its
 launch default, which on 2026-09-03 turned a configured `claude-fable-5`
@@ -989,13 +1035,31 @@ it, the rows keep waiting, and the result counts them
 2 of 129 verdicts on the 2026-08-16 ladder, so little is lost. The sweep logs the merge judge's
 result whenever a tick judged, reconsidered, took second opinions,
 refused a same-model reject, saw a served-model mismatch or lost its
-second endpoint. Since 2026-09-02 the other queues have judges too, each riding the
+second endpoint, and (v56) whenever it took third opinions, refused one or
+lost the third endpoint. Since 2026-09-02 the other queues have judges too, each riding the
 same sweep as a bounded batch, all but one defaulting to `shadow`: the
 **link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
 edges and applies rejects, each at its own gate — a *retype* is only
 recorded, with its corrected relation on the row, for a reviewer to apply,
 because the first ladder scored the judge's relation choice at 0/1; edges
-are reversible, which is why this queue may run auto), the **junk judge**
+are reversible, which is why this queue may run auto). Since schema v56 a
+link row whose first accept or reject sat below its 0.8 gate (none of the
+435 pending link rows on the live bank reached it on 2026-10-17) also gets
+a **second opinion** in a fresh batch from the merge judge's second model
+and endpoint (`link_judge_two_vote`, default `shadow`; asked only while
+`judge_second_opinion` is on, and skipped with no call when the
+configuration makes it the first model again). In `auto`, and only while
+`link_judge_mode` is `auto`, two agreeing accepts or rejects from different
+models at mean >= `link_two_vote_min_confidence` (0.7) apply; a retype never
+does. Rescoring the 2026-09-29 ladder's 37 link rows at that gate gave 7/7
+and 8/8 correct accepts and 6/6 and 7/7 correct rejects per replicate
+(`evals/results/queue-judge-ladder-20260929-{opus55,sonnet55}.json`), against
+3 accepts and 5 rejects at the single 0.8 gate; the panel is small and
+predates the current inflow, hence shadow. The row's `judge2` block (with
+`relation` for a retype) and a `| 2nd (<model>): … [agree|split]` note tail
+show it; the result counts `second_opinions`, `two_vote_applied` and
+`two_vote_refused_same_model`. While first opinions wait, these second
+opinions take at most half of each batch. Then the **junk judge**
 (`junk_judge_mode`; `auto` deletes only under an evidence bar), the
 **store-curation judge** (`curation_judge_mode`; `auto-distinct` applies
 the reversible dismissal, `auto` also retires — never deletes — a losing
@@ -1090,9 +1154,49 @@ the oldest one no judge has recorded a verdict on
 (`oldest_unjudged_merge_age_days`), the
 configured mode of every judge (`judges_enabled`, `judge_mode`,
 `link_judge_mode`, `junk_judge_mode`, `curation_judge_mode`,
-`candidate_judge_mode`) and `attention: {needed, reasons}`. It costs two
-aggregate queries and never fails the status call (a failure is an
-`error` field). The store-curation listing is not counted: it is
+`candidate_judge_mode`), `attention: {needed, reasons}` and, since schema
+v56, `judge_agreement`: how often each recorded judge vote agreed with the
+decision a human (Console) or agent (`memory_graph_review`) later took on
+the same row, over the last 90 days. It is the number a judge mode in
+`shadow` is promoted to `auto` on. Per queue (`merge`, `junk`, `link`) and
+per opinion (`judge`, `judge2`, `judge3`): `voted`, `agree`, `abstain`
+(a `leave`), `precision` and `by_verdict`. `merge.agreed_two` and
+`link.agreed_two` score the rows whose first two opinions agreed from
+distinct models at the two-vote gates (`judge_accept_min_confidence`,
+`judge_reject_min_confidence_2`, `link_two_vote_min_confidence`), what
+the two-vote gates would have applied; `merge.majority_three` the rows
+whose 2-of-3 majority cleared its gate, what the tiebreak would have
+applied. "Distinct models" is the live gates' rule: a pair's two votes
+carry the models their endpoints reported serving, those names differ
+and so do the configured stamps; a majority needs both earlier served
+names known and a third served by a model other than every name heard
+(the first two may share one). A vote whose served name is unknown (an
+endpoint that named no model) is never part of a pair, as the live gate
+refuses it; a first vote recorded before v56 stamped it carries none, so
+its pair is not counted, though the live gate, which reads the judging
+memo while the row is pending, may still apply it until `review_rejudge`
+re-asks it. The accept side also replays, from the audit row, the
+refusals the live accept path applies whatever the votes say: an
+analyzer-filed proposal, a name veto and a variant conflict are left for
+a human, so they never count as what `auto` would have applied. Not
+replayed: the `low_differential` exclusion (computed from the evidence
+at judging time), so the accept side still counts a few rows `auto`
+would skip; the dismissed-pair check (`auto` closes such a row as a
+reject, and a human reject dismisses the pair itself, so it cannot be
+told apart afterwards); and a decided link row goes
+with either endpoint when a later merge or junk delete takes it, so
+links are scored while both endpoints exist. `scored` counts the decisions read, `labels` who
+took them; decisions the judges applied themselves (`dream-judge`,
+`dream-auto`) are not labels, and `unattributed_links` counts decided
+link rows with votes but no `decided_by` (the Console and
+`memory_graph_review` attribute link decisions since 2026-10-18; earlier
+ones, and the dream's own retype pass before it was named, cannot be
+told apart). Merge and junk votes come
+from the snapshot `merge_decisions.votes` keeps from the moment of the
+decision (an accepted merge deletes its proposal row), so decisions from
+before v56 are not scored; link votes stay on their rows. The health
+block costs two aggregate queries plus that scan and never fails the
+status call (a failure is an `error` field). The store-curation listing is not counted: it is
 recomputed on demand and capped at `curation_top_k` per store, so it
 cannot pile up. Attention covers the merge queue, the one that piled
 up; the junk and link counts are reported only. It is needed when the

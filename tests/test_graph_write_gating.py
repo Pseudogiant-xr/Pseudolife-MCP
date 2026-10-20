@@ -299,7 +299,8 @@ def test_retype_reads_only_text_and_one_registry_snapshot(monkeypatch, read_cont
         pending_proposals=lambda: pending, load_entries=load_entries,
         load_entry_texts=load_entry_texts,
         insert_proposal=lambda *args: inserted.append(args),
-        set_proposal_status=lambda *args: settled.append(args))
+        set_proposal_status=lambda *args, **kw: settled.append(
+            (args, kw.get("decided_by"))))
     svc._graph = SimpleNamespace(load_relations=load_relations)
 
     out = svc.retype_quarantined_links(
@@ -308,7 +309,9 @@ def test_retype_reads_only_text_and_one_registry_snapshot(monkeypatch, read_cont
     assert out == {"considered": 2, "retyped": 1, "settled": 1}
     assert calls == [(evidence, [("uses", "description of uses"),
                                  ("related-to", "description of related-to")])]
-    assert settled == [(2, "rejected")]
+    # The dream's own decision, named so the judge-agreement report
+    # never reads it as a human's.
+    assert settled == [((2, "rejected"), "dream-auto")]
     assert len(inserted) == 1
     assert inserted[0][:-1] == (
         10, "uses", 20, 0.7, None,
@@ -341,6 +344,9 @@ def test_retype_upgrades_a_quarantined_pair_to_a_typed_proposal(svc, monkeypatch
     # the original was stored as the resolved untyped fallback (`related-to`)
     assert ("related-to", "dream-low-confidence", "rejected") in rows
     assert ("uses", "dream-retyped", "pending") in rows
+    assert svc._storage.conn.execute(
+        "SELECT decided_by FROM edge_proposals "
+        "WHERE source = 'dream-low-confidence'").fetchone()[0] == "dream-auto"
     # a proposal, never a live edge — the retype is a second guess on
     # already-suspect material
     nb = svc.graph_neighborhood("retype-tool", depth=1)

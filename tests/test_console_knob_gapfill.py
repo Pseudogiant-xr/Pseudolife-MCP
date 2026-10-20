@@ -276,3 +276,24 @@ def test_judge_endpoint_knobs():
     second = _knob("memory.deep_dream.judge_second_url")
     assert "PSEUDOLIFE_JUDGE_SECOND_API_KEY" in second["help"]
     assert "PSEUDOLIFE_JUDGE_API_KEY" in _knob("memory.deep_dream.judge_url")["help"]
+
+
+def test_link_two_vote_and_merge_tiebreak_knobs():
+    # 2026-10-17 (schema v56): the link judge's second opinion and the merge
+    # judge's third, both shipped in shadow, are live Console knobs beside
+    # the judges they extend.
+    for path in ("memory.deep_dream.link_judge_two_vote",
+                 "memory.deep_dream.judge_tiebreak_mode"):
+        knob = _knob(path)
+        assert knob["type"] == "enum" and knob["options"] == ["off", "shadow", "auto"], path
+        assert knob["default"] == "shadow" and knob["restart"] is False, path
+        assert knob["group"] == "Deep dream", path
+    gate = _knob("memory.deep_dream.link_two_vote_min_confidence")
+    assert gate["type"] == "float" and gate["default"] == 0.7
+    assert gate["restart"] is False
+    model = _knob("memory.deep_dream.judge_third_model")
+    assert model["type"] == "string" and model["default"] is None
+    assert model["restart"] is False and "claude-fable-5" in model["suggestions"]
+    url = _knob("memory.deep_dream.judge_third_url")
+    assert url["type"] == "string" and url["format"] == "url" and url["default"] is None
+    assert "PSEUDOLIFE_JUDGE_THIRD_API_KEY" in url["help"]

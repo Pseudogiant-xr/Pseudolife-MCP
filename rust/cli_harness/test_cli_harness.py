@@ -1625,3 +1625,121 @@ def test_golden_secret_guards_scan_surrogateescape_strings(tmp_path, monkeypatch
         with pytest.raises(SystemExit, match="refusing to write"):
             runner.write_golden(tmp_path / "unsafe.json", rejected)
         assert not (tmp_path / "unsafe.json").exists()
+
+
+def test_digest_removal_waits_out_a_reader_holding_the_file(tmp_path):
+    """digest-disappears removes the digest while the Python waiter may be
+    reading it; on Windows that reader's open handle refuses the unlink
+    (WinError 32) until it closes (CI run 37952726143, 2026-10-09)."""
+    import threading  # noqa: PLC0415
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from cli_harness.rows import mail  # noqa: PLC0415
+    arm = SimpleNamespace(home=tmp_path)
+    digest = mail._paths(tmp_path)["digest"]
+    digest.parent.mkdir(parents=True, exist_ok=True)
+    digest.write_bytes(b"7\n")
+    reader = digest.open("rb")
+    threading.Timer(0.3, reader.close).start()
+    try:
+        mail._remove_digest(arm)
+    finally:
+        reader.close()
+    assert not digest.exists()
+
+
+@pytest.mark.parametrize("held", ["digest", "ring"])
+def test_digest_advance_waits_out_a_reader_holding_the_file(tmp_path, monkeypatch, held):
+    """digest-advances-later replaces the digest and ring while the Python
+    waiter may be reading them; on Windows an open handle refuses the
+    replace (WinError 5) and the producer reports it as a failed write."""
+    import threading  # noqa: PLC0415
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from cli_harness import producers as p  # noqa: PLC0415
+    from cli_harness.rows import mail  # noqa: PLC0415
+    monkeypatch.setattr(mail, "_body", lambda: "1 new message")
+    arm = SimpleNamespace(home=tmp_path)
+    paths = mail._paths(tmp_path)
+    paths["dir"].mkdir(parents=True, exist_ok=True)
+    p.write_digest(paths["digest"], 3, "")
+    p.write_ring(paths["ring"], 3, "rung", "urgent")
+    reader = paths[held].open("rb")
+    threading.Timer(0.3, reader.close).start()
+    try:
+        mail._advance_digest(arm)
+    finally:
+        reader.close()
+    assert paths["digest"].read_bytes().startswith(b"8\n")
+    assert paths["ring"].read_bytes() == b"8\nrung urgent\n"
+
+
+def test_tls_fixture_is_warm_before_an_arm_connects(monkeypatch):
+    """The first server-side TLS handshake on a cold machine pages in
+    OpenSSL's server code and outran the CLI's 0.25 s health probe, so the
+    first https case's first arm saw no daemon (CI, 2026-10-12/13/15). The
+    fixture completes one exchange itself before returning, and forgets it."""
+    import ssl  # noqa: PLC0415
+
+    from cli_harness.fixture_daemon import FixtureDaemon  # noqa: PLC0415
+    server_handshakes = []
+    original = ssl.SSLSocket.do_handshake
+
+    def spy(self, *args, **kwargs):
+        if self.server_side:
+            server_handshakes.append(self)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(ssl.SSLSocket, "do_handshake", spy)
+    daemon = FixtureDaemon({}, tls=True)
+    try:
+        assert server_handshakes, "no server-side handshake before the first arm"
+        assert daemon.requests() == []
+    finally:
+        daemon.close()
+
+
+def test_mutant_source_copy_drops_files_the_checkout_no_longer_has(tmp_path, monkeypatch):
+    # 2026-10-17: a target dir last used on a 2026-10-09 tree kept
+    # shim/src/cli/doctor.rs after master moved it to doctor/mod.rs, and
+    # every mutant build failed with rustc E0761.
+    from cli_harness import mutants
+
+    def write(path: Path, text: str = "x") -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    source, target = tmp_path / "rust", tmp_path / "target"
+    write(source / "shim" / "src" / "cli" / "doctor" / "mod.rs", "new")
+    write(source / "shim" / "src" / "main.rs")
+    write(source / "daemon" / "src" / "lib.rs")
+    write(source / "daemon" / "src" / "storage" / "mod.rs")
+    write(source / "cli_harness" / "rows" / "mail.py")
+    copy = target / "mutant-src" / "rust"
+    stale = [copy / "shim" / "src" / "cli" / "doctor.rs",
+             copy / "shim" / "src" / "gone" / "old.rs",
+             copy / "daemon" / "src" / "lib.rs" / "was_a_dir.rs"]
+    for path in stale:
+        write(path, "stale")
+    write(copy / "shim" / "src" / "cli" / "doctor" / "mod.rs", "old")
+    write(copy / "daemon" / "src" / "storage", "was a file")
+    ignored = [copy / "target" / "debug" / "keep", copy / "shim" / "target" / "keep",
+               copy / "cli_harness" / "keep.py", copy / "shim" / "__pycache__" / "keep.pyc"]
+    for path in ignored:
+        write(path, "keep")
+    old = time.time() - 3600
+    os.utime(source / "shim" / "src" / "main.rs", (old, old))
+    monkeypatch.setattr(mutants, "RUST", source)
+    monkeypatch.setenv("CARGO_TARGET_DIR", str(target))
+
+    mutant = mutants.Mutant("m", "row", "shim/src/main.rs", "x", "y")
+    assert mutants._sync_source([mutant]) == copy
+
+    assert [p for p in stale if p.exists()] == []
+    assert not (copy / "shim" / "src" / "gone").exists()
+    assert (copy / "daemon" / "src" / "lib.rs").read_text(encoding="utf-8") == "x"
+    assert (copy / "daemon" / "src" / "storage" / "mod.rs").read_text(encoding="utf-8") == "x"
+    assert (copy / "shim" / "src" / "cli" / "doctor" / "mod.rs").read_text(encoding="utf-8") == "new"
+    assert all(p.read_text(encoding="utf-8") == "keep" for p in ignored)
+    # Cargo must see the mutated file as newer than any earlier build.
+    assert (copy / "shim" / "src" / "main.rs").stat().st_mtime > old + 1800

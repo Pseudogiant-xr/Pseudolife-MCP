@@ -9,6 +9,8 @@ import re
 import subprocess
 import tomllib
 
+from .oracle_pins import require_pinned_head
+
 ROOT = Path(__file__).resolve().parents[2]
 SELECTION_ENV = "PSEUDOLIFE_PORT_ORACLE_SELECTION"
 
@@ -212,6 +214,10 @@ def main():
     selection = select(args.root, args.event_name,
                        json.loads(args.event_path.read_text(encoding="utf-8")), actual,
                        github_ref=args.github_ref)
+    # PR captures deliberately use their merge base. Check the originating
+    # production change too, before it can become a successor PR's oracle.
+    for head in dict.fromkeys((selection["candidate_head"], actual)):
+        require_pinned_head(args.root, head)
     encoded = json.dumps(selection, sort_keys=True, separators=(",", ":"))
     with args.out.open("x", encoding="utf-8") as output:
         output.write(encoded + "\n")

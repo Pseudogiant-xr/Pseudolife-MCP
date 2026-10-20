@@ -27,6 +27,7 @@ use yaml_rust2::scanner::{Marker, TScalarStyle};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub memory: MemoryConfig,
+    pub time: TimeConfig,
     pub embedding: EmbeddingConfig,
     pub coordination: CoordinationConfig,
     pub updates: UpdatesConfig,
@@ -43,14 +44,27 @@ pub struct MemoryConfig {
     pub preset: String,
     pub bands: Vec<String>,
     pub band_specs: Vec<StartupBandSpec>,
+    pub surprise_threshold: f64,
+    pub meta_filter_enabled: bool,
+    pub cortex_auto_promote: bool,
     pub retention_boost: f64,
     pub search: SearchConfig,
     pub bm25: Bm25Config,
     pub reranker_enabled: bool,
+    pub reranker: RerankerConfig,
+    pub cortex: CortexConfig,
+    pub mcp: McpConfig,
+    pub traces_enabled: bool,
     /// `memory.retrieval_log.enabled` (default on): with dreaming, it decides
     /// whether the sweep thread starts and parses its interval.
     pub retrieval_log_enabled: bool,
+    /// `memory.retrieval_log.use_window_seconds`: how far back a dereference
+    /// credits the search that served it.
+    pub retrieval_log_use_window_seconds: f64,
     pub retrieval_retention_days: f64,
+    /// `memory.lessons.enabled` (default on): gates the correction signal a
+    /// user-origin supersession records (`service.py:4961`).
+    pub lessons_enabled: bool,
     pub compaction_enabled: bool,
     pub compaction_keep_per_slot: i64,
     pub compaction_min_age_days: f64,
@@ -61,6 +75,90 @@ pub struct StartupBandSpec {
     pub name: String,
     pub max_entries: usize,
     pub retention_policy: String,
+    /// The consolidation cadence (`MIRASBandSpec.update_interval`), served
+    /// by `memory_stats` as configured (Python keeps a custom value raw).
+    pub update_interval: Value,
+}
+
+/// `RerankerConfig` (utils/config.py:208-252), the keys the search reads.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RerankerConfig {
+    pub model_name: String,
+    pub top_n: i64,
+    pub fusion_weight: f64,
+    pub skip_margin: f64,
+}
+
+impl Default for RerankerConfig {
+    fn default() -> Self {
+        RerankerConfig {
+            model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2".to_string(),
+            top_n: 20,
+            fusion_weight: 0.7,
+            skip_margin: 0.0,
+        }
+    }
+}
+
+/// `CortexConfig` (utils/config.py:692-743), the keys the reads and the
+/// fact writer use. The writer's three are read once when the store is built
+/// (`service.py:1568-1573`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CortexConfig {
+    pub enabled: bool,
+    pub search_first: bool,
+    pub guard_min_score: f64,
+    pub read_tracking: bool,
+    pub pin_constraints: bool,
+    /// A weaker-tier or below-margin conflicting write parks as a contender
+    /// instead of superseding; off is pure newer-wins.
+    pub protect_provenance: bool,
+    pub supersede_confidence_margin: f64,
+    pub reinforce_rate: f64,
+}
+
+impl Default for CortexConfig {
+    fn default() -> Self {
+        CortexConfig {
+            enabled: true,
+            search_first: true,
+            guard_min_score: 0.2,
+            read_tracking: true,
+            pin_constraints: true,
+            protect_provenance: true,
+            supersede_confidence_margin: 0.15,
+            reinforce_rate: 0.34,
+        }
+    }
+}
+
+/// `TimeConfig` (utils/config.py:1308): `relative_age` adds the human `age`
+/// to served canonical facts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimeConfig {
+    pub relative_age: bool,
+}
+
+impl Default for TimeConfig {
+    fn default() -> Self {
+        TimeConfig { relative_age: true }
+    }
+}
+
+/// `McpConfig` (utils/config.py:1158-1202): what an agent pays per call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct McpConfig {
+    pub compact_payloads: bool,
+    pub entry_text_chars: i64,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        McpConfig {
+            compact_payloads: true,
+            entry_text_chars: 600,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +168,7 @@ pub struct SearchConfig {
     pub candidate_pool_multiplier: i64,
     pub contiguity_neighbors: i64,
     pub timeline_channel: bool,
+    pub stale_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -80,6 +179,7 @@ pub struct Bm25Config {
     pub weight: f64,
     pub top_n: i64,
     pub min_score: f64,
+    pub cortex_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,8 +199,13 @@ pub struct EmbeddingConfig {
 pub struct CoordinationConfig {
     pub enabled: bool,
     pub wake: WakeConfig,
-    /// Stripped, lower-cased; `["default"]` when the key is absent.
+    // W2-F: the board's admission lists, audit window and maintainer cap.
+    pub awareness_limit: i64,
     pub allowed_principals: Vec<String>,
+    pub daemon_notice_principals: Vec<String>,
+    pub maintainer_principals: Vec<String>,
+    pub audit_retention_days: i64,
+    pub maintainer_per_recipient_per_hour: i64,
 }
 
 /// Field order is Python `WakeConfig`'s (`utils/config.py:1418-1423`).
@@ -307,6 +412,7 @@ impl Default for SearchConfig {
             candidate_pool_multiplier: 1,
             contiguity_neighbors: 0,
             timeline_channel: false,
+            stale_policy: "annotate".into(),
         }
     }
 }
@@ -320,6 +426,7 @@ impl Default for Bm25Config {
             weight: 0.3,
             top_n: 20,
             min_score: 0.1,
+            cortex_enabled: false,
         }
     }
 }
@@ -338,13 +445,23 @@ impl Default for MemoryConfig {
                 name: "flat".into(),
                 max_entries: 5250,
                 retention_policy: "balanced".into(),
+                update_interval: Value::from(1_000_000_000),
             }],
             retention_boost: 1.0,
+            surprise_threshold: 0.0,
+            meta_filter_enabled: false,
+            cortex_auto_promote: false,
             search: SearchConfig::default(),
             bm25: Bm25Config::default(),
             reranker_enabled: false,
+            reranker: RerankerConfig::default(),
+            cortex: CortexConfig::default(),
+            mcp: McpConfig::default(),
+            traces_enabled: true,
             retrieval_log_enabled: true,
+            retrieval_log_use_window_seconds: 3600.0,
             retrieval_retention_days: 365.0,
+            lessons_enabled: true,
             compaction_enabled: true,
             compaction_keep_per_slot: 3,
             compaction_min_age_days: 30.0,
@@ -386,7 +503,12 @@ impl Default for CoordinationConfig {
         CoordinationConfig {
             enabled: true,
             wake: WakeConfig::default(),
+            awareness_limit: 5,
             allowed_principals: vec![DEFAULT_PRINCIPAL.to_string()],
+            daemon_notice_principals: Vec::new(),
+            maintainer_principals: Vec::new(),
+            audit_retention_days: 90,
+            maintainer_per_recipient_per_hour: 30,
         }
     }
 }
@@ -431,6 +553,7 @@ impl Default for Config {
             coordination: CoordinationConfig::default(),
             updates: UpdatesConfig::default(),
             dream: DreamConfig::default(),
+            time: TimeConfig::default(),
         }
     }
 }
@@ -662,6 +785,31 @@ impl Node {
             Node::Seq(_) => "a list",
             Node::Map(_) => "a mapping",
         }
+    }
+}
+
+/// A YAML value as JSON, for a setting served as configured.
+fn node_json(node: &Node) -> Value {
+    match node {
+        Node::Null => Value::Null,
+        Node::Bool(b) => Value::from(*b),
+        Node::Int(i) => Value::from(*i),
+        Node::Float(f) => Value::from(*f),
+        Node::Str(s) => Value::from(s.as_str()),
+        Node::MergeKey => Value::from("<<"),
+        Node::Seq(items) => Value::Array(items.iter().map(node_json).collect()),
+        Node::Map(entries) => Value::Object(
+            entries
+                .iter()
+                .map(|(k, v)| {
+                    let key = match k {
+                        Node::Str(s) => s.clone(),
+                        other => node_json(other).to_string(),
+                    };
+                    (key, node_json(v))
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -1189,7 +1337,20 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
             memory.band_specs = read_startup_bands(miras, &memory.preset, &memory.bands)?;
         }
         if let Some(traces) = section(m, "traces", "memory.")? {
+            memory.traces_enabled = want_bool(traces, "enabled", "memory.traces", true)?;
             memory.retention_boost = want_float(traces, "retention_boost", "memory.traces", 1.0)?;
+        }
+        // Write-path overlay: these leaves change only when explicitly set.
+        if user_set("memory.surprise_threshold") {
+            memory.surprise_threshold = want_float(m, "surprise_threshold", p, 0.0)?;
+        }
+        if user_set("memory.meta_filter.enabled")
+            && let Some(Node::Map(mf)) = lookup(m, "meta_filter")
+        {
+            memory.meta_filter_enabled = want_bool(mf, "enabled", "memory.meta_filter", true)?;
+        }
+        if let Some(c) = section(m, "cortex", "memory.")? {
+            memory.cortex_auto_promote = want_bool(c, "auto_promote", "memory.cortex", false)?;
         }
         // `self.config.memory.reference.persist_dir = ...` (service.py:857).
         section(m, "reference", "memory.")?;
@@ -1206,12 +1367,18 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                 weight: want_float(b, "weight", p, d.weight)?,
                 top_n: want_int(b, "top_n", p, d.top_n)?,
                 min_score: want_float(b, "min_score", p, d.min_score)?,
+                cortex_enabled: want_bool(b, "cortex_enabled", p, d.cortex_enabled)?,
             };
         }
         if let Some(r) = section(m, "retrieval_log", "memory.")? {
             memory.retrieval_log_enabled = want_bool(r, "enabled", "memory.retrieval_log", true)?;
+            memory.retrieval_log_use_window_seconds =
+                want_float(r, "use_window_seconds", "memory.retrieval_log", 3600.0)?;
             memory.retrieval_retention_days =
                 want_float(r, "retention_days", "memory.retrieval_log", 365.0)?;
+        }
+        if let Some(l) = section(m, "lessons", "memory.")? {
+            memory.lessons_enabled = want_bool(l, "enabled", "memory.lessons", true)?;
         }
         if let Some(r) = section(m, "compaction", "memory.")? {
             memory.compaction_enabled = want_bool(r, "enabled", "memory.compaction", true)?;
@@ -1221,6 +1388,41 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
         }
         if let Some(r) = section(m, "reranker", "memory.")? {
             memory.reranker_enabled = want_bool(r, "enabled", "memory.reranker", false)?;
+            let p = "memory.reranker";
+            let d = RerankerConfig::default();
+            memory.reranker = RerankerConfig {
+                model_name: want_str(r, "model_name", p, &d.model_name)?,
+                top_n: want_int(r, "top_n", p, d.top_n)?,
+                fusion_weight: want_float(r, "fusion_weight", p, d.fusion_weight)?,
+                skip_margin: want_float(r, "skip_margin", p, d.skip_margin)?,
+            };
+        }
+        if let Some(c) = section(m, "cortex", "memory.")? {
+            let p = "memory.cortex";
+            let d = CortexConfig::default();
+            memory.cortex = CortexConfig {
+                enabled: want_bool(c, "enabled", p, d.enabled)?,
+                search_first: want_bool(c, "search_first", p, d.search_first)?,
+                guard_min_score: want_float(c, "guard_min_score", p, d.guard_min_score)?,
+                read_tracking: want_bool(c, "read_tracking", p, d.read_tracking)?,
+                pin_constraints: want_bool(c, "pin_constraints", p, d.pin_constraints)?,
+                protect_provenance: want_bool(c, "protect_provenance", p, d.protect_provenance)?,
+                supersede_confidence_margin: want_float(
+                    c,
+                    "supersede_confidence_margin",
+                    p,
+                    d.supersede_confidence_margin,
+                )?,
+                reinforce_rate: want_float(c, "reinforce_rate", p, d.reinforce_rate)?,
+            };
+        }
+        if let Some(c) = section(m, "mcp", "memory.")? {
+            let p = "memory.mcp";
+            let d = McpConfig::default();
+            memory.mcp = McpConfig {
+                compact_payloads: want_bool(c, "compact_payloads", p, d.compact_payloads)?,
+                entry_text_chars: want_int(c, "entry_text_chars", p, d.entry_text_chars)?,
+            };
         }
         if let Some(d) = section(m, "dream", "memory.")? {
             config.dream = read_dream(d)?;
@@ -1257,6 +1459,13 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
     }
     if let Some(u) = section(entries, "updates", "")? {
         config.updates = read_updates(u)?;
+    }
+    // `_dict_to_dataclass(TimeConfig, raw["time"])`: no type check, so the
+    // value counts by Python truthiness where it is read.
+    if let Some(t) = section(entries, "time", "")?
+        && let Some(v) = lookup(t, "relative_age")
+    {
+        config.time.relative_age = v.truthy();
     }
     Ok(config)
 }
@@ -1327,6 +1536,7 @@ fn read_startup_bands(
             name: "flat".into(),
             max_entries: 5250,
             retention_policy: "balanced".into(),
+            update_interval: Value::from(1_000_000_000),
         }]);
     }
     if preset != "custom" {
@@ -1337,6 +1547,7 @@ fn read_startup_bands(
                 name: name.clone(),
                 max_entries: [200, 250, 300, 400, 600, 1500, 1000, 1000][i],
                 retention_policy: if i < 5 { "balanced" } else { "surprise_heavy" }.into(),
+                update_interval: Value::from([1, 1, 2, 5, 15, 50, 200, 1000][i]),
             })
             .collect());
     }
@@ -1363,10 +1574,13 @@ fn read_startup_bands(
             {
                 return Err(refuse("unknown band retention_policy"));
             }
+            let update_interval =
+                lookup(fields, "update_interval").map_or(Value::from(1), node_json);
             Ok(StartupBandSpec {
                 name: name.clone(),
                 max_entries,
                 retention_policy,
+                update_interval,
             })
         })
         .collect()
@@ -1406,6 +1620,7 @@ fn read_search(s: &[(Node, Node)]) -> Result<SearchConfig, ConfigError> {
         )?,
         contiguity_neighbors: want_int(s, "contiguity_neighbors", p, d.contiguity_neighbors)?,
         timeline_channel: want_bool(s, "timeline_channel", p, d.timeline_channel)?,
+        stale_policy: want_str(s, "stale_policy", p, &d.stale_policy)?,
     })
 }
 
@@ -1509,11 +1724,8 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
             "coordination.audit_retention_days must be a whole number of days, 0 or more",
         ));
     }
-    let allowed_principals = match lookup(c, "allowed_principals") {
-        None => vec![DEFAULT_PRINCIPAL.to_string()],
-        Some(_) => principal_list(c, "allowed_principals")?,
-    };
-    principal_list(c, "daemon_notice_principals")?;
+    let allowed = principal_list(c, "allowed_principals")?;
+    let notice = principal_list(c, "daemon_notice_principals")?;
     let maintainers = principal_list(c, "maintainer_principals")?;
     let mut shared: Vec<&str> = [DAEMON_PRINCIPAL, DEFAULT_PRINCIPAL]
         .into_iter()
@@ -1526,10 +1738,40 @@ fn read_coordination(c: &[(Node, Node)]) -> Result<CoordinationConfig, ConfigErr
             shared.join(", ")
         )));
     }
+    let defaults = CoordinationConfig::default();
+    let present = |key: &str| lookup(c, key).is_some();
+    let dedupe = |names: Vec<String>| {
+        let mut out: Vec<String> = Vec::new();
+        for n in names {
+            if !out.contains(&n) {
+                out.push(n);
+            }
+        }
+        out
+    };
     Ok(CoordinationConfig {
         enabled,
         wake,
-        allowed_principals,
+        awareness_limit: match lookup(c, "awareness_limit") {
+            Some(Node::Int(i)) => *i,
+            _ => defaults.awareness_limit,
+        },
+        allowed_principals: if present("allowed_principals") {
+            dedupe(allowed)
+        } else {
+            defaults.allowed_principals
+        },
+        daemon_notice_principals: dedupe(notice),
+        maintainer_principals: dedupe(maintainers),
+        audit_retention_days: lookup(c, "audit_retention_days")
+            .and_then(|n| exact_int_at_least(n, 0))
+            .unwrap_or(defaults.audit_retention_days),
+        maintainer_per_recipient_per_hour: match lookup(c, "maintainer") {
+            Some(Node::Map(m)) => lookup(m, "maintainer_per_recipient_per_hour")
+                .and_then(|n| exact_int_at_least(n, 0))
+                .unwrap_or(defaults.maintainer_per_recipient_per_hour),
+            _ => defaults.maintainer_per_recipient_per_hour,
+        },
     })
 }
 
@@ -1652,6 +1894,14 @@ mod tests {
     //! 35b8f5d2 (load_config + the reference write + the MCP overlay).
     use super::*;
 
+    #[test]
+    fn relative_age_is_read_by_python_truthiness() {
+        assert!(cfg("").time.relative_age);
+        assert!(!cfg("time:\n  relative_age: false\n").time.relative_age);
+        assert!(!cfg("time:\n  relative_age: null\n").time.relative_age);
+        assert!(cfg("time:\n  relative_age: yes please\n").time.relative_age);
+    }
+
     fn cfg(text: &str) -> Config {
         match load_str(text) {
             Ok(c) => c,
@@ -1718,6 +1968,7 @@ mod tests {
                 candidate_pool_multiplier: 1,
                 contiguity_neighbors: 0,
                 timeline_channel: false,
+                stale_policy: "annotate".into(),
             }
         );
         assert_eq!(
@@ -1728,7 +1979,8 @@ mod tests {
                 b: 0.75,
                 weight: 0.3,
                 top_n: 20,
-                min_score: 0.1
+                min_score: 0.1,
+                cortex_enabled: false,
             }
         );
         assert!(!c.memory.reranker_enabled);
@@ -1878,6 +2130,20 @@ mod tests {
         );
         assert_eq!(c.memory.preset, "custom");
         assert_eq!(c.memory.bands, vec!["a", "band"]);
+        // `update_interval` is served as configured (default 1), never refused.
+        let intervals: Vec<Value> = c
+            .memory
+            .band_specs
+            .iter()
+            .map(|b| b.update_interval.clone())
+            .collect();
+        assert_eq!(intervals, vec![Value::from(1), Value::from(1)]);
+        let c = cfg(
+            "memory:\n  miras:\n    preset: custom\n    bands:\n      - name: a\n        update_interval: '5'\n",
+        );
+        assert_eq!(c.memory.band_specs[0].update_interval, Value::from("5"));
+        let c = cfg("memory:\n  miras:\n    preset: continuum\n");
+        assert_eq!(c.memory.band_specs[7].update_interval, Value::from(1000));
         // A string `bands` is iterated by Python; harmless outside custom.
         assert_eq!(
             cfg("memory:\n  miras:\n    bands: abc\n").memory.bands,
@@ -1932,7 +2198,8 @@ mod tests {
                 b: 0.5,
                 weight: 0.4,
                 top_n: 30,
-                min_score: 0.2
+                min_score: 0.2,
+                cortex_enabled: false,
             }
         );
         assert!(c.memory.reranker_enabled);

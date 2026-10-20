@@ -41,6 +41,15 @@ def test_continuum_preset_retained_yields_eight_cosine_bands():
     assert len(cfg.bands) == 8
 
 
+def test_legacy_preset_lookup_uses_its_public_registry(monkeypatch):
+    from pseudolife_memory.memory.miras import presets
+    from pseudolife_memory.utils.config import MIRASBandSpec
+
+    bands = [MIRASBandSpec(name="fixture-band")]
+    monkeypatch.setattr(presets, "PRESET_REGISTRY", {"fixture": lambda: bands})
+    assert presets.preset_bands("fixture") is bands
+
+
 def test_yaml_overrides(tmp_path):
     p = tmp_path / "config.yaml"
     p.write_text(

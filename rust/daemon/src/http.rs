@@ -5,14 +5,14 @@
 use crate::auth::{self, Resolved};
 use crate::routes::RouteTable;
 use crate::service::Service;
-use crate::{health, search, static_files};
+use crate::{health, static_files};
 use axum::body::{Body, HttpBody};
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use http_body_util::{BodyExt, Limited};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -38,7 +38,9 @@ pub struct App {
     pub env_tokens: auth::EnvTokens,
     pub store: Arc<auth::PrincipalStore>,
     pub static_dir: Option<PathBuf>,
+    pub board: Arc<crate::board::Board>,
     pair_failures: Mutex<VecDeque<Instant>>,
+    pub mcp: crate::mcp::McpState,
 }
 
 impl App {
@@ -47,13 +49,17 @@ impl App {
         env_tokens: auth::EnvTokens,
         store: Arc<auth::PrincipalStore>,
         static_dir: Option<PathBuf>,
+        board: Arc<crate::board::Board>,
     ) -> App {
+        let mcp = crate::mcp::McpState::from_env(env_tokens.configured());
         App {
             service,
             env_tokens,
             store,
             static_dir,
+            board,
             pair_failures: Mutex::new(VecDeque::new()),
+            mcp,
         }
     }
 
@@ -291,7 +297,7 @@ fn method_not_allowed() -> Response {
     json_response(405, &json!({"error": "method_not_allowed"}))
 }
 
-struct RequestBody {
+pub(crate) struct RequestBody {
     inner: Body,
     received: usize,
     frames: usize,
@@ -363,7 +369,7 @@ async fn finish_unread_body(
 }
 
 /// `_read_body(receive, max_bytes)`: None when over the limit.
-async fn read_body(body: &mut RequestBody, limit: usize) -> Option<Vec<u8>> {
+pub(crate) async fn read_body(body: &mut RequestBody, limit: usize) -> Option<Vec<u8>> {
     let limit = if crate::mutants::active("body-limit-inclusive") {
         limit.saturating_sub(1)
     } else {
@@ -436,7 +442,7 @@ fn normalize_pairing_code(v: &Value) -> Option<String> {
 /// Protect real object keys from serde_json's arbitrary-precision Number
 /// transport, as the doorbell reader does. Prefixing every key is injective,
 /// including escaped spellings; normal serde validation still owns syntax.
-fn parse_body_json(text: &str) -> Result<Value, serde_json::Error> {
+pub(crate) fn parse_body_json(text: &str) -> Result<Value, serde_json::Error> {
     let bytes = text.as_bytes();
     let mut encoded = String::with_capacity(text.len());
     let (mut index, mut copied) = (0, 0);
@@ -537,6 +543,7 @@ async fn hook(
     path: &str,
     method: &str,
     h: &HeaderMap,
+    raw_query: Option<&str>,
     body: &mut RequestBody,
 ) -> Response {
     match browser_gate(app, h) {
@@ -552,16 +559,25 @@ async fn hook(
         return method_not_allowed();
     }
     match path {
-        "/api/hook/memory-changes"
-        | "/api/hook/park-gate"
-        | "/api/hook/woke"
-        | "/api/hook/subagent" => {
+        "/api/hook/memory-changes" => {
             if authorized(app, h) {
                 not_implemented(path)
             } else {
                 hook_text("")
             }
         }
+        "/api/hook/park-gate" | "/api/hook/woke" | "/api/hook/subagent" => {
+            if !authorized(app, h) {
+                return hook_text("");
+            }
+            let query = parse_query(raw_query);
+            match path {
+                "/api/hook/park-gate" => crate::board::http::hook_park_gate(app, h, &query).await,
+                "/api/hook/woke" => crate::board::http::hook_woke(app, h, &query).await,
+                _ => crate::board::http::hook_subagent(app, h, &query).await,
+            }
+        }
+        "/api/hook/coordination-start" => crate::board::http::hook_coordination_start(app, h),
         "/api/hook/session-end" => {
             match resolve(app, h) {
                 Resolved::Unavailable => return principals_unavailable(),
@@ -599,62 +615,10 @@ async fn hook(
                 json_response(200, &json!({"ok": true}))
             }
         }
-        "/api/hook/coordination-start" => {
-            // `coordination.unavailable_reason`: config, the bearer and the
-            // stored-principal view only, never the board's storage.
-            let reason = board_unavailable_reason(app, h);
-            let text = if reason.is_some() {
-                String::new()
-            } else {
-                format!("{CHECKIN_TEXT}\n")
-            };
-            let state = match &reason {
-                Some(r) => format!("off; reason={r}"),
-                None => "on".to_string(),
-            };
-            let mut r = hook_text(&text);
-            r.headers_mut().insert(
-                "x-pl-board",
-                HeaderValue::from_str(&state).expect("ascii reason codes"),
-            );
-            r
-        }
         // session-start, memory-policy: their bodies (briefing and policy
         // text) belong to a later slice (W2-D).
         _ => not_implemented(path),
     }
-}
-
-/// `coordination.CHECKIN_TEXT`, recorded from Python (`harness/record_routes.py`).
-const CHECKIN_TEXT: &str = include_str!("../harness/goldens/checkin.txt");
-
-/// `coordination.unavailable_reason` (coordination.py:360-377).
-fn board_unavailable_reason(app: &App, h: &HeaderMap) -> Option<&'static str> {
-    if !app.service.config.coordination.enabled {
-        return Some("disabled");
-    }
-    // `authenticated_principal`: an open install never authenticates.
-    if !app.auth_configured() {
-        return Some("authentication_required");
-    }
-    let principal = match resolve(app, h) {
-        Resolved::Unavailable => return Some("principals_unavailable"),
-        Resolved::None => return Some("unauthorized"),
-        Resolved::Principal(p) => p,
-    };
-    // `principal_admitted` (principals.py:199-210).
-    let admitted = !matches!(principal.as_str(), "daemon" | "maintainer")
-        && (app
-            .service
-            .config
-            .coordination
-            .allowed_principals
-            .contains(&principal)
-            || app.store.admitted(&principal));
-    if !admitted {
-        return Some("principal_not_allowed");
-    }
-    None // a DSN is always configured in this port
 }
 
 fn body_limit(path: &str) -> usize {
@@ -704,6 +668,10 @@ async fn api(
     if method == "POST" && OPERATOR_POST_PATHS.contains(&path) && stored {
         return json_response(403, &json!({"error": "operator_principal_required"}));
     }
+    #[cfg(feature = "harness")]
+    if method == "POST" && path.starts_with("/api/_harness/tool/") {
+        return crate::harness_route::call(app, path, h, body).await;
+    }
     let params = parse_query(raw_query);
     let coordination_path = path.starts_with("/api/coordination/");
     let coordination_errors = coordination_path
@@ -714,6 +682,7 @@ async fn api(
     if coordination_path && method != "POST" {
         return method_not_allowed();
     }
+    let mut parsed_body = serde_json::Map::new();
     if method == "POST" {
         let Some(raw) = read_body(body, body_limit(path)).await else {
             return json_response(413, &json!({"error": "request_too_large"}));
@@ -738,17 +707,13 @@ async fn api(
                 Ok(v) if !v.is_object() => {
                     return json_response(400, &json!({"error": "body_must_be_object"}));
                 }
+                Ok(Value::Object(m)) => parsed_body = m,
                 Ok(_) => {}
             }
         }
     }
     if coordination_path {
-        // `authenticated_principal` runs before the hub: an open install is
-        // refused (api.py:775-778); the hub itself is a later slice (W2-F).
-        if !app.auth_configured() && !crate::mutants::active("tokenless-maintainer-open") {
-            return json_response(401, &json!({"error": "authentication_required"}));
-        }
-        return not_implemented(path);
+        return crate::board::http::coordination(app, path, h, parsed_body).await;
     }
     if (coordination_errors || maintainer_path)
         && !app.auth_configured()
@@ -768,8 +733,19 @@ async fn api(
             json_response(404, &json!({"error": "not_found", "path": path}))
         };
     }
-    if method == "GET" && path == "/api/search" {
-        return search_route(app, raw_query).await;
+    if method == "GET"
+        && let Some(r) = crate::read::get(app, path, raw_query, h).await
+    {
+        return r;
+    }
+    if method == "GET"
+        && path == "/api/agents"
+        && params.get("view").map(String::as_str) == Some("coordination")
+    {
+        return crate::board::http::console(app, h, &params).await;
+    }
+    if method == "POST" && path == "/api/daemon-notice" {
+        return crate::board::http::daemon_notice(app, h, parsed_body).await;
     }
     not_implemented(path)
 }
@@ -793,9 +769,11 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
         .get_all("expect")
         .iter()
         .any(|value| value.as_bytes().eq_ignore_ascii_case(b"100-continue"));
+    let mcp_path = path == "/mcp" || path.starts_with("/mcp/");
     let cap = match path.as_str() {
         "/api/pair" => PAIR_BODY_LIMIT,
         "/api/hook/session-end" => SESSION_END_BODY_LIMIT,
+        _ if mcp_path => crate::mcp::BODY_LIMIT,
         _ => body_limit(&path),
     };
     let mut body = RequestBody::new(body);
@@ -811,6 +789,7 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 | "/api/hook/coordination-start"
         );
     if (response.status().as_u16() >= 400 || bodyless_hook) && !body.inner.is_end_stream() {
+        let mut complete = false;
         // Polling an Expect body would send 100 Continue after admission refused it.
         if !expect_continue {
             let outcome = finish_unread_body(
@@ -819,6 +798,7 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE,
             )
             .await;
+            complete = outcome == DrainOutcome::Complete && body.received <= cap;
             if outcome != DrainOutcome::Complete || body.received > cap {
                 eprintln!(
                     "http refusal cleanup: outcome={outcome:?} received={} cap={cap} overshoot={} frames={} max_frame={}",
@@ -829,9 +809,14 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 );
             }
         }
-        response
-            .headers_mut()
-            .insert(header::CONNECTION, HeaderValue::from_static("close"));
+        // A fully drained MCP refusal can reuse the connection, matching
+        // the SDK mount. An unfinished/oversized body must still close;
+        // REST and hook cleanup retain their existing connection policy.
+        if !mcp_path || !complete {
+            response
+                .headers_mut()
+                .insert(header::CONNECTION, HeaderValue::from_static("close"));
+        }
     }
     response
 }
@@ -913,7 +898,7 @@ async fn dispatch(
                 | "/api/hook/subagent"
         )
     {
-        return hook(app, path, method, h, body).await;
+        return hook(app, path, method, h, raw_query, body).await;
     }
     if path == "/api/pair" {
         return pair(app, method, h, body).await;
@@ -921,13 +906,20 @@ async fn dispatch(
     if path.starts_with("/api/") || path == "/api" {
         return api(app, path, method, h, raw_query, body).await;
     }
-    match resolve(app, h) {
+    let principal = match resolve(app, h) {
         Resolved::Unavailable => return principals_unavailable(),
         Resolved::None => return unauthorized(),
-        Resolved::Principal(..) => {}
-    }
+        Resolved::Principal(p) => p,
+    };
     if path == "/mcp" || path.starts_with("/mcp/") {
-        return not_implemented(path);
+        // Tokenless MCP awaits the accepted Host/Origin and identity policy.
+        if !app.auth_configured() {
+            return not_implemented(path);
+        }
+        if let Some(refused) = crate::board::http::mcp_binding(app, h).await {
+            return refused;
+        }
+        return crate::mcp::handle(app, &principal, path, method, h.clone(), raw_query, body).await;
     }
     // The MCP app's own router: `/mcp` is its only route.
     text_response(
@@ -945,144 +937,154 @@ pub fn py_strip(s: &str) -> &str {
     s.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
-/// Python numeric literals allow single underscores between digits only.
-fn py_underscores(t: &str) -> Option<String> {
-    let b: Vec<char> = t.chars().collect();
-    for (i, c) in b.iter().enumerate() {
-        if *c == '_'
-            && !(i > 0 && i + 1 < b.len() && b[i - 1].is_ascii_digit() && b[i + 1].is_ascii_digit())
-        {
-            return None;
-        }
-    }
-    Some(t.replace('_', ""))
-}
-
-fn py_int(s: &str) -> Option<i64> {
-    py_underscores(py_strip(s))?.parse::<i64>().ok()
-}
-
-fn py_float(s: &str) -> Option<f64> {
-    py_underscores(py_strip(s))?.parse::<f64>().ok()
-}
-
-/// `_tribool` (web/routes.py:55): None follows config.
-fn tribool(q: &HashMap<String, String>, key: &str) -> Option<bool> {
-    let v = q.get(key)?;
-    if matches!(v.as_str(), "" | "null" | "auto") {
-        return None;
-    }
-    Some(matches!(
-        v.trim().to_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    ))
-}
-
-fn list(q: &HashMap<String, String>, key: &str) -> Option<Vec<String>> {
-    let items: Vec<String> = q
-        .get(key)?
-        .split(',')
-        .map(|s| py_strip(s).to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    (!items.is_empty()).then_some(items)
-}
-
-async fn search_route(app: &App, raw_query: Option<&str>) -> Response {
-    let q = parse_query(raw_query);
-    let cfg = &app.service.config.memory;
-    let ready = match app.service.ensure_init().await {
-        Ok(r) => r,
-        Err(e) => return json_response(500, &json!({"error": e})),
-    };
-    let bands = list(&q, "band");
-    if let Some(bands) = &bands {
-        let unknown: Vec<&String> = bands.iter().filter(|b| !cfg.bands.contains(b)).collect();
-        if !unknown.is_empty() {
-            let msg = format!(
-                "unknown band name(s) {unknown:?} — this preset has {:?}",
-                cfg.bands
-            );
-            return json_response(400, &json!({"error": msg}));
-        }
-    }
-    let query = q
-        .get("q")
-        .map(|s| py_strip(s).to_string())
-        .unwrap_or_default();
-    if query.is_empty() {
-        return json_response(
-            200,
-            &json!({"entries": [], "query": "", "count": 0, "low_confidence": true}),
-        );
-    }
-    let top_k = q
-        .get("top_k")
-        .filter(|s| !s.is_empty())
-        .and_then(|s| py_int(s))
-        .unwrap_or(search::ROUTE_TOP_K);
-    let k = match top_k {
-        0 => cfg.top_k.max(0) as usize,
-        n if n < 0 => return json_response(500, &json!({"error": "top_k must not be negative"})),
-        n => n as usize,
-    };
-    let b = &cfg.bm25;
-    let bm25_on = tribool(&q, "bm25").unwrap_or(b.enabled);
-    let params = search::Params {
-        query: query.clone(),
-        k,
-        sources: list(&q, "source").map(|v| v.into_iter().collect::<HashSet<_>>()),
-        tags: list(&q, "tag").map(|v| {
-            v.into_iter()
-                .map(|t| t.to_lowercase())
-                .collect::<HashSet<_>>()
-        }),
-        min_score: q
-            .get("min_score")
-            .filter(|s| !s.is_empty())
-            .and_then(|s| py_float(s)),
-        default_floor: cfg.search.min_score,
-        bm25: bm25_on.then_some(search::Bm25Knobs {
-            k1: b.k1,
-            b: b.b,
-            weight: b.weight,
-            top_n: b.top_n.max(0) as usize,
-            min_norm: b.min_score,
-        }),
-        hide_superseded: cfg.hide_superseded,
-        bands: bands.map(|v| v.into_iter().collect()),
-    };
-    let ready2 = ready.clone();
-    let floor = cfg.search_confidence_floor;
-    let result = tokio::task::spawn_blocking(move || {
-        let qv = ready2.embedder.embed_query(&query)?;
-        let hits = search::rank(&ready2.bank, &qv, &params);
-        let entries: Vec<Value> = hits
-            .iter()
-            .map(|h| search::entry_json(&ready2.bank, &ready2.bank.entries[h.idx], h.score))
-            .collect();
-        // `abstain.low_confidence` over the direct hits' raw scores.
-        let best = hits
-            .iter()
-            .map(|h| h.score)
-            .fold(f64::NEG_INFINITY, f64::max);
-        let low = hits.is_empty() || (floor > 0.0 && best < floor);
-        Ok::<_, anyhow::Error>((params.query, entries, low))
-    })
-    .await;
-    match result {
-        Ok(Ok((query, entries, low))) => json_response(
-            200,
-            &json!({"query": query, "count": entries.len(), "low_confidence": low, "entries": entries}),
-        ),
-        Ok(Err(e)) => json_response(500, &json!({"error": e.to_string()})),
-        Err(e) => json_response(500, &json!({"error": e.to_string()})),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mcp_refusal_app() -> Arc<App> {
+        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Arc::new(Service::new(
+            crate::config::Config::default(),
+            env,
+            PathBuf::from("unused"),
+            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+            true,
+        ));
+        let store = Arc::new(auth::PrincipalStore::new());
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+            service.clone(),
+            store.clone(),
+        ));
+        Arc::new(App::new(
+            service,
+            auth::EnvTokens {
+                single: Some("fixture-token".into()),
+                map: vec![],
+            },
+            store,
+            None,
+            board,
+        ))
+    }
+
+    #[tokio::test]
+    async fn mcp_refusal_complete_drain_preserves_connection() {
+        for path in ["/mcp", "/mcp/"] {
+            let chunks = [
+                Ok::<_, std::io::Error>(vec![b' '; CONTROL_BODY_LIMIT]),
+                Ok(vec![b' '; 1]),
+            ];
+            let request = Request::builder()
+                .method("POST")
+                .uri(path)
+                .body(Body::from_stream(futures::stream::iter(chunks)))
+                .unwrap();
+            let response = handle(State(mcp_refusal_app()), request).await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert!(
+                response.headers().get(header::CONNECTION).is_none(),
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_refusal_incomplete_drain_closes_connection() {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .body(Body::from_stream(futures::stream::pending::<
+                Result<Vec<u8>, std::io::Error>,
+            >()))
+            .unwrap();
+        let response = tokio::time::timeout(
+            Duration::from_secs(2),
+            handle(State(mcp_refusal_app()), request),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.headers()[header::CONNECTION], "close");
+    }
+
+    #[tokio::test]
+    async fn mcp_refusal_expect_does_not_poll_and_cap_stops_cleanup() {
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for expect in [false, true] {
+            let polls = Arc::new(AtomicUsize::new(0));
+            let count = polls.clone();
+            let chunks = futures::stream::iter([vec![b' '; crate::mcp::BODY_LIMIT], vec![b' '; 1]])
+                .map(move |chunk| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Ok::<_, std::io::Error>(chunk)
+                });
+            let mut request = Request::builder().method("POST").uri("/mcp");
+            if expect {
+                request = request.header("expect", "100-continue");
+            }
+            let response = handle(
+                State(mcp_refusal_app()),
+                request.body(Body::from_stream(chunks)).unwrap(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(response.headers()[header::CONNECTION], "close");
+            assert_eq!(polls.load(Ordering::SeqCst), usize::from(!expect));
+        }
+    }
+
+    #[tokio::test]
+    async fn tokenless_mcp_remains_unserved() {
+        let env = crate::config::DaemonEnv::from_env(&|_| None).unwrap();
+        let service = Arc::new(Service::new(
+            crate::config::Config::default(),
+            env,
+            PathBuf::from("unused"),
+            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+            false,
+        ));
+        let store = Arc::new(auth::PrincipalStore::new());
+        let board = Arc::new(crate::board::Board::new(
+            service.config.coordination.clone(),
+            "postgresql://unused@127.0.0.1:1/pl_cf_w2g_unused".into(),
+            service.clone(),
+            store.clone(),
+        ));
+        let app = Arc::new(App::new(
+            service,
+            auth::EnvTokens {
+                single: None,
+                map: vec![],
+            },
+            store,
+            None,
+            board,
+        ));
+        for path in ["/mcp", "/mcp/", "/mcp/x"] {
+            for method in ["GET", "POST", "DELETE"] {
+                let request = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("host", "127.0.0.1:8765")
+                    .body(Body::empty())
+                    .unwrap();
+                let response = handle(State(app.clone()), request).await;
+                assert_eq!(
+                    response.status(),
+                    StatusCode::NOT_IMPLEMENTED,
+                    "{method} {path}"
+                );
+                let body = axum::body::to_bytes(response.into_body(), 1024)
+                    .await
+                    .unwrap();
+                let payload: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(payload, json!({"error": "not_implemented", "path": path}));
+            }
+        }
+    }
 
     #[test]
     fn body_json_preserves_object_keys_and_numeric_values() {

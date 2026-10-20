@@ -28,6 +28,9 @@ import time
 import zipfile
 
 from .. import core, normalize
+# The oracle's schema version: the candidate's refusal names the one it
+# was built for, pinned to this constant by tests/test_schema_version.py.
+from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 from ..mutants import Mutant
 from . import _bank
 
@@ -447,8 +450,9 @@ normalize.rule("expect-export-deferred-any")(
 normalize.rule("expect-import-deferred")(
     _expect(_GENERIC.format("import"), False, _ran))
 normalize.rule("expect-import-schema-deferred")(_expect(
-    "pseudolife-stdio: import into a bank not at this build's schema (55) is "
-    "deferred in this candidate (needs native ensure_schema)", False, _ran))
+    "pseudolife-stdio: import into a bank not at this build's schema "
+    f"({SCHEMA_META_VERSION}) is deferred in this candidate (needs native "
+    "ensure_schema)", False, _ran))
 _NO_DATABASE = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL"
 # Host-independent: an oracle with pg0 refuses the unreadable marker with a
 # traceback, one without pg0 never attaches and prints the no-database
@@ -550,7 +554,7 @@ def _seed_target(conn) -> None:
 
 
 def _seed_null_stamps(conn) -> None:
-    """A non-empty schema-55 bank holding an edge as the daemon writes it
+    """A non-empty bank at the oracle's schema holding an edge as the daemon writes it
     (``PostgresStorage.upsert_edge``: tx_time, valid_time, writer_id NULL),
     which the oracle's ensure_schema backfills before refusing the import."""
     from pseudolife_memory.storage.postgres import PostgresStorage  # noqa: PLC0415

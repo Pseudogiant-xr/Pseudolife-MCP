@@ -1,7 +1,9 @@
 """Phase 2 CLI admission and byte comparison controls."""
 import ast
 import base64
+import hashlib
 from pathlib import Path
+import re
 import subprocess
 from types import SimpleNamespace
 
@@ -190,16 +192,58 @@ def test_cli_judge_rejects_exit_stream_and_newline_changes(field, replacement):
                            harness.Policy(source_text_paths=(), ignored_values=()))
 
 
+# The help bytes the Rust asset is frozen to: SHA-256 of cli.py's _USAGE.
+# A help change updates _USAGE, rust/shim/src/cli_help.txt and this pin
+# together (a content pin: a commit pin would name a commit a squash merge
+# discards).
+PINNED_USAGE_SHA256 = "00e581d612cb27e5d650fe79580aae90da8cba622c69649a94112ec43548c95c"
+
+
 def pinned_usage():
     root = Path(__file__).resolve().parents[2]
-    source = subprocess.check_output([
-        "git", "show", "f709abb54f7912ae9cd767998d0926ca33df4bcd:pseudolife_memory/cli.py"],
-        cwd=root)
-    tree = ast.parse(source.decode("utf-8"))
-    return next(ast.literal_eval(node.value) for node in tree.body
-                if isinstance(node, ast.Assign) and any(
-                    isinstance(target, ast.Name) and target.id == "_USAGE"
-                    for target in node.targets)).encode("utf-8")
+    tree = ast.parse((root / "pseudolife_memory/cli.py").read_text(encoding="utf-8"))
+    usage = next(ast.literal_eval(node.value) for node in tree.body
+                 if isinstance(node, ast.Assign) and any(
+                     isinstance(target, ast.Name) and target.id == "_USAGE"
+                     for target in node.targets)).encode("utf-8")
+    assert hashlib.sha256(usage).hexdigest() == PINNED_USAGE_SHA256, (
+        "cli.py's _USAGE changed: update rust/shim/src/cli_help.txt and "
+        "PINNED_USAGE_SHA256 together")
+    return usage
+
+
+def python_dispatched_modes(root):
+    """Every mode string cli.main() compares ``mode`` against (flags excluded)."""
+    tree = ast.parse((root / "pseudolife_memory/cli.py").read_text(encoding="utf-8"))
+    body = next(node for node in tree.body
+                if isinstance(node, ast.FunctionDef) and node.name == "main")
+    modes = set()
+    for node in ast.walk(body):
+        if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) and node.left.id == "mode":
+            for op, right in zip(node.ops, node.comparators):
+                if isinstance(op, ast.Eq) and isinstance(right, ast.Constant):
+                    modes.add(right.value)
+                elif isinstance(op, ast.In) and isinstance(right, (ast.Tuple, ast.List, ast.Set)):
+                    modes.update(e.value for e in right.elts if isinstance(e, ast.Constant))
+    return {m for m in modes if isinstance(m, str) and not m.startswith("-")}
+
+
+def test_every_python_mode_is_served_or_deferred_by_the_native_shim():
+    """A mode Python dispatches must not reach the native shim as "unknown
+    mode": the shim serves it or names it in DEFERRED_MODES (delegate-watch
+    shipped in v0.18.2 and was unknown to the shim until this guard)."""
+    root = Path(__file__).resolve().parents[2]
+    cli_rs = (root / "rust/shim/src/cli.rs").read_text(encoding="utf-8")
+    main_rs = (root / "rust/shim/src/main.rs").read_text(encoding="utf-8")
+    block = re.search(r"const DEFERRED_MODES: &\[&str\] = &\[(.*?)\];", cli_rs, re.S)
+    assert block, "DEFERRED_MODES not found in rust/shim/src/cli.rs"
+    deferred = set(re.findall(r'"([a-z][a-z-]*)"', block.group(1)))
+    served = {name for line in (cli_rs + main_rs).splitlines() if "mode" in line
+              and "DEFERRED_MODES" not in line
+              for name in re.findall(r'"([a-z][a-z-]*)"', line)}
+    python = python_dispatched_modes(root)
+    assert {"delegate-watch", "lease", "serve"} <= python
+    assert python - deferred - served == set()
 
 
 def test_help_source_matches_pinned_python_literal_bytes():

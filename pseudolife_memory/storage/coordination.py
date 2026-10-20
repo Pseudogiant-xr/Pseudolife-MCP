@@ -45,6 +45,19 @@ from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
 logger = logging.getLogger("pseudolife-mcp")
 
 
+class CommitOutcomeUnknown(psycopg.OperationalError):
+    """COMMIT was sent but the server never gave a definite answer (the
+    connection was lost, or the session ended with a FATAL), so the
+    transaction may or may not have committed. ``__cause__`` is the driver
+    error. A subclass so callers that catch OperationalError keep working."""
+
+
+def _severity(exc: psycopg.Error) -> str | None:
+    """The server's severity for ``exc`` (ERROR, FATAL, PANIC), or None
+    when no server answer came back."""
+    return exc.diag.severity_nonlocalized or exc.diag.severity
+
+
 class CoordinationConnection:
     """Dedicated autocommit connection for the mailbox, never the shared
     service connection.
@@ -105,9 +118,19 @@ class CoordinationConnection:
         conn = self.conn
         outer = not self._in_txn
         self._in_txn = True
+        committing = False
         try:
             with conn.transaction() as tx:
                 yield
+                committing = outer
+        except psycopg.Error as exc:
+            # The block finished and the outermost exit sent COMMIT. Only an
+            # ERROR the server answered with means it rolled back; a FATAL
+            # or a lost connection leaves the outcome unknown.
+            if committing and _severity(exc) != "ERROR":
+                raise CommitOutcomeUnknown(
+                    f"COMMIT got no definite answer ({type(exc).__name__})") from exc
+            raise
         finally:
             if outer:
                 self._in_txn = False
@@ -2806,18 +2829,56 @@ class CoordinationStore:
         if sender["principal"] in self.maintainer_principals:
             return "maintainer"
         project = recipient.get("project") or ""
-        if project and self._one(
-                "SELECT 1 AS hit FROM coordination_leases l WHERE l.name=%s "
-                "AND l.holder_agent_id=%s AND l.expires_at>%s AND EXISTS (SELECT 1 "
-                "FROM coordination_events e WHERE e.event='lease_delegate' "
-                "AND e.actor=ANY(%s) AND e.agent_id=l.holder_agent_id "
-                "AND CASE WHEN e.event='lease_delegate' THEN "
-                "e.payload::jsonb->>'name'=l.name "
-                "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END)",
-                (DELEGATE_PREFIX + project, sender["agent_id"], now,
-                 list(ROLE_ACTORS))) is not None:
+        if project and self.delegate_projects(sender["agent_id"], now, project=project):
             return "delegate"
         return None
+
+    def delegate_projects(self, agent_id, now, *, project=None):
+        """The projects ``agent_id`` is the maintainer's delegate for at
+        ``now``, sorted: each a live ``delegate:<project>`` hold with the
+        operator's or maintainer's ``lease_delegate`` record for its current
+        fence, the proof ``_authority`` applies (see there). Given
+        ``project``, that one only. Read from the lease table and the audit
+        log; a held lease alone, or a record by any other actor, is no
+        proof."""
+        return [row["name"][len(DELEGATE_PREFIX):]
+                for row in self._delegate_rows(agent_id, now, project=project)]
+
+    def _delegate_rows(self, agent_id, now, *, project=None):
+        """``delegate_projects``' proven leases: their names and expiries."""
+        if project is None:
+            # The prefix is matched with left(), not LIKE: a name's own
+            # characters are never a pattern.
+            match, params = "left(l.name, %s)=%s", (len(DELEGATE_PREFIX), DELEGATE_PREFIX)
+        else:
+            match, params = "l.name=%s", (DELEGATE_PREFIX + project,)
+        return self._all(
+            "SELECT l.name, l.expires_at FROM coordination_leases l WHERE " + match + " "
+            "AND l.holder_agent_id=%s AND l.expires_at>%s AND EXISTS (SELECT 1 "
+            "FROM coordination_events e WHERE e.event='lease_delegate' "
+            "AND e.actor=ANY(%s) AND e.agent_id=l.holder_agent_id "
+            "AND CASE WHEN e.event='lease_delegate' THEN "
+            "e.payload::jsonb->>'name'=l.name "
+            "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END) "
+            "ORDER BY l.name",
+            (*params, agent_id, now, list(ROLE_ACTORS)))
+
+    def delegate_of(self, agent_id, principal):
+        """``delegate_projects`` now, for the hook endpoints that brief the
+        delegate (spec 2026-10-14), as ``{"projects": [...], "remaining":
+        seconds}``: ``remaining`` until the earliest of those leases expires
+        (a cache must not outlive it), None without one. No projects for an
+        address the caller's principal does not own, or none at all, as
+        ``park_gate`` answers."""
+        row = self._one("SELECT 1 AS hit FROM coordination_agents WHERE agent_id=%s "
+                        "AND principal=%s AND credential_hash IS NOT NULL",
+                        (agent_id, principal))
+        if row is None:
+            return {"projects": [], "remaining": None}
+        now = self.clock()
+        rows = self._delegate_rows(agent_id, now)
+        return {"projects": [r["name"][len(DELEGATE_PREFIX):] for r in rows],
+                "remaining": min(r["expires_at"] for r in rows) - now if rows else None}
 
     def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id,
                        maintainer=False):

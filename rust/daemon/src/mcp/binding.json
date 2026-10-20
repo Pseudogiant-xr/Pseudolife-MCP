@@ -1,0 +1,2212 @@
+{
+ "source": {
+  "mcp": "2.2.0",
+  "pydantic": "2.14.0",
+  "pydantic-core": "2.50.0"
+ },
+ "tools": {
+  "memory_agents": {
+   "params": [
+    {
+     "name": "action",
+     "literal_text": false,
+     "default": "list",
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "list",
+       "update",
+       "claim",
+       "release"
+      ],
+      "message": "Input should be 'list', 'update', 'claim' or 'release'"
+     }
+    },
+    {
+     "name": "project",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 120
+      }
+     }
+    },
+    {
+     "name": "task",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 120
+      }
+     }
+    },
+    {
+     "name": "status",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 240
+      }
+     }
+    },
+    {
+     "name": "lease",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 120
+      }
+     }
+    },
+    {
+     "name": "worktree",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 4096
+      }
+     }
+    },
+    {
+     "name": "repository_id",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 64
+      }
+     }
+    },
+    {
+     "name": "path",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 4096
+      }
+     }
+    },
+    {
+     "name": "expect",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "int",
+       "strict": false,
+       "ge": 1,
+       "ge_message": "Input should be greater than or equal to 1",
+       "le": 604800,
+       "le_message": "Input should be less than or equal to 604800"
+      }
+     }
+    },
+    {
+     "name": "children",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       },
+       "max_length": 8
+      }
+     }
+    },
+    {
+     "name": "park_reason",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 20
+      }
+     }
+    },
+    {
+     "name": "park_needs",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 120
+      }
+     }
+    },
+    {
+     "name": "park_clear_by",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 120
+      }
+     }
+    },
+    {
+     "name": "park_resume",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 240
+      }
+     }
+    },
+    {
+     "name": "park_expires",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "float",
+       "strict": false,
+       "gt": 0,
+       "gt_message": "Input should be greater than 0"
+      }
+     }
+    },
+    {
+     "name": "name",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 120
+      }
+     }
+    }
+   ]
+  },
+  "memory_message": {
+   "params": [
+    {
+     "name": "action",
+     "literal_text": false,
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "send",
+       "receive",
+       "ack",
+       "history"
+      ],
+      "message": "Input should be 'send', 'receive', 'ack' or 'history'"
+     }
+    },
+    {
+     "name": "to",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "text",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 8192
+      }
+     }
+    },
+    {
+     "name": "request_id",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "reply_to",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "after",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "message_id",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "clears",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str",
+       "max_length": 120
+      }
+     }
+    },
+    {
+     "name": "urgent",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    },
+    {
+     "name": "limit",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "int",
+       "strict": false,
+       "ge": 1,
+       "ge_message": "Input should be greater than or equal to 1",
+       "le": 50,
+       "le_message": "Input should be less than or equal to 50"
+      }
+     }
+    },
+    {
+     "name": "peer",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "ack",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": true
+     }
+    }
+   ]
+  },
+  "memory_store": {
+   "params": [
+    {
+     "name": "text",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "source",
+     "literal_text": true,
+     "default": "agent",
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "tags",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "origin",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "literal",
+       "expected": [
+        "user",
+        "action",
+        "agent"
+       ],
+       "message": "Input should be 'user', 'action' or 'agent'"
+      }
+     }
+    },
+    {
+     "name": "episode",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "authority",
+     "literal_text": false,
+     "default": "auto",
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "auto",
+       "directive",
+       "observation",
+       "quoted"
+      ],
+      "message": "Input should be 'auto', 'directive', 'observation' or 'quoted'"
+     }
+    },
+    {
+     "name": "distortion_tolerance",
+     "literal_text": false,
+     "default": "auto",
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "auto",
+       "constraint",
+       "procedural",
+       "belief",
+       "preference",
+       "episodic"
+      ],
+      "message": "Input should be 'auto', 'constraint', 'procedural', 'belief', 'preference' or 'episodic'"
+     }
+    }
+   ]
+  },
+  "memory_search": {
+   "params": [
+    {
+     "name": "query",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "top_k",
+     "literal_text": false,
+     "default": 8,
+     "schema": {
+      "kind": "int",
+      "strict": false,
+      "ge": 1,
+      "ge_message": "Input should be greater than or equal to 1"
+     }
+    },
+    {
+     "name": "sources",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "bands",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "episodes",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "tags",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "min_score",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "float",
+       "strict": false
+      }
+     }
+    },
+    {
+     "name": "disable_recency_boost",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    },
+    {
+     "name": "rerank",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "bool",
+       "strict": false
+      }
+     }
+    },
+    {
+     "name": "bm25",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "bool",
+       "strict": false
+      }
+     }
+    },
+    {
+     "name": "explain",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    },
+    {
+     "name": "verbose",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_recent": {
+   "params": [
+    {
+     "name": "n",
+     "literal_text": false,
+     "default": 10,
+     "schema": {
+      "kind": "int",
+      "strict": false,
+      "ge": 1,
+      "ge_message": "Input should be greater than or equal to 1"
+     }
+    },
+    {
+     "name": "sources",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "episodes",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "tags",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "verbose",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_supersede": {
+   "params": [
+    {
+     "name": "old_text",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "new_text",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "entry_id",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "int",
+       "strict": true
+      }
+     }
+    }
+   ]
+  },
+  "memory_reinstate": {
+   "params": [
+    {
+     "name": "entry_id",
+     "literal_text": false,
+     "schema": {
+      "kind": "int",
+      "strict": true
+     }
+    },
+    {
+     "name": "operation_id",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "expected_text_sha256",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "expected_source_sha256",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "expected_superseded_at",
+     "literal_text": false,
+     "schema": {
+      "kind": "float",
+      "strict": false
+     }
+    },
+    {
+     "name": "expected_superseded_by_text_sha256",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "evidence_packet_sha256",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "reviewer_ids",
+     "literal_text": false,
+     "schema": {
+      "kind": "list",
+      "items": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "reason",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    }
+   ]
+  },
+  "memory_stats": {
+   "params": []
+  },
+  "memory_toolset": {
+   "params": [
+    {
+     "name": "action",
+     "literal_text": false,
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "expand",
+       "collapse",
+       "status"
+      ],
+      "message": "Input should be 'expand', 'collapse' or 'status'"
+     }
+    }
+   ]
+  },
+  "memory_get": {
+   "params": [
+    {
+     "name": "entry_id",
+     "literal_text": false,
+     "schema": {
+      "kind": "int",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_reinforce": {
+   "params": [
+    {
+     "name": "entry_id",
+     "literal_text": false,
+     "schema": {
+      "kind": "int",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_fact_get": {
+   "params": [
+    {
+     "name": "entity",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "attribute",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "verbose",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_fact_set": {
+   "params": [
+    {
+     "name": "entity",
+     "literal_text": true,
+     "schema": {
+      "kind": "after",
+      "validator": "_non_blank",
+      "inner": {
+       "kind": "str",
+       "min_length": 1
+      }
+     }
+    },
+    {
+     "name": "attribute",
+     "literal_text": true,
+     "schema": {
+      "kind": "after",
+      "validator": "_non_blank",
+      "inner": {
+       "kind": "str",
+       "min_length": 1
+      }
+     }
+    },
+    {
+     "name": "value",
+     "literal_text": true,
+     "schema": {
+      "kind": "after",
+      "validator": "_non_blank",
+      "inner": {
+       "kind": "str",
+       "min_length": 1
+      }
+     }
+    },
+    {
+     "name": "origin",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "literal",
+       "expected": [
+        "user",
+        "action",
+        "agent"
+       ],
+       "message": "Input should be 'user', 'action' or 'agent'"
+      }
+     }
+    },
+    {
+     "name": "confidence",
+     "literal_text": false,
+     "default": 0.8,
+     "schema": {
+      "kind": "float",
+      "strict": false,
+      "ge": 0,
+      "ge_message": "Input should be greater than or equal to 0",
+      "le": 1,
+      "le_message": "Input should be less than or equal to 1"
+     }
+    },
+    {
+     "name": "episode",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "freshness_class",
+     "literal_text": false,
+     "default": "auto",
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "auto",
+       "evergreen",
+       "slow",
+       "volatile"
+      ],
+      "message": "Input should be 'auto', 'evergreen', 'slow' or 'volatile'"
+     }
+    },
+    {
+     "name": "authority",
+     "literal_text": false,
+     "default": "auto",
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "auto",
+       "directive",
+       "observation",
+       "quoted"
+      ],
+      "message": "Input should be 'auto', 'directive', 'observation' or 'quoted'"
+     }
+    },
+    {
+     "name": "distortion_tolerance",
+     "literal_text": false,
+     "default": "auto",
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "auto",
+       "constraint",
+       "procedural",
+       "belief",
+       "preference",
+       "episodic"
+      ],
+      "message": "Input should be 'auto', 'constraint', 'procedural', 'belief', 'preference' or 'episodic'"
+     }
+    }
+   ]
+  },
+  "memory_set_add": {
+   "params": [
+    {
+     "name": "entity",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "attribute",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "member",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    }
+   ]
+  },
+  "memory_set_remove": {
+   "params": [
+    {
+     "name": "entity",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "attribute",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "member",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    }
+   ]
+  },
+  "memory_fact_resolve": {
+   "params": [
+    {
+     "name": "entity",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "attribute",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "accept",
+     "literal_text": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_history": {
+   "params": [
+    {
+     "name": "entity",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "attribute",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "as_of",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "after",
+      "validator": "_check_as_of",
+      "inner": {
+       "kind": "nullable",
+       "inner": {
+        "kind": "union",
+        "choices": [
+         {
+          "tag": "str",
+          "node": {
+           "kind": "str"
+          }
+         },
+         {
+          "tag": "float",
+          "node": {
+           "kind": "float",
+           "strict": false
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   ]
+  },
+  "memory_world_set": {
+   "params": [
+    {
+     "name": "entity",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "attribute",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "value",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "source_url",
+     "literal_text": true,
+     "default": "",
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "source_quote",
+     "literal_text": true,
+     "default": "",
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "freshness_class",
+     "literal_text": false,
+     "default": "volatile",
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "evergreen",
+       "slow",
+       "volatile"
+      ],
+      "message": "Input should be 'evergreen', 'slow' or 'volatile'"
+     }
+    },
+    {
+     "name": "confidence",
+     "literal_text": false,
+     "default": 0.85,
+     "schema": {
+      "kind": "float",
+      "strict": false,
+      "ge": 0,
+      "ge_message": "Input should be greater than or equal to 0",
+      "le": 1,
+      "le_message": "Input should be less than or equal to 1"
+     }
+    },
+    {
+     "name": "retrieved_at",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "float",
+       "strict": false
+      }
+     }
+    },
+    {
+     "name": "content_hash",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    }
+   ]
+  },
+  "memory_world_search": {
+   "params": [
+    {
+     "name": "query",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "top_k",
+     "literal_text": false,
+     "default": 5,
+     "schema": {
+      "kind": "int",
+      "strict": false,
+      "ge": 1,
+      "ge_message": "Input should be greater than or equal to 1"
+     }
+    },
+    {
+     "name": "verbose",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_outcome": {
+   "params": [
+    {
+     "name": "task",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "outcome",
+     "literal_text": false,
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "success",
+       "failure",
+       "correction"
+      ],
+      "message": "Input should be 'success', 'failure' or 'correction'"
+     }
+    },
+    {
+     "name": "about",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "detail",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "polarity",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "literal",
+       "expected": [
+        "+",
+        "-"
+       ],
+       "message": "Input should be '+' or '-'"
+      }
+     }
+    },
+    {
+     "name": "episode",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "used_ids",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "union",
+       "choices": [
+        {
+         "tag": "list[int]",
+         "node": {
+          "kind": "list",
+          "items": {
+           "kind": "int",
+           "strict": false
+          }
+         }
+        },
+        {
+         "tag": "str",
+         "node": {
+          "kind": "str"
+         }
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "memory_lesson_search": {
+   "params": [
+    {
+     "name": "query",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "top_k",
+     "literal_text": false,
+     "default": 5,
+     "schema": {
+      "kind": "int",
+      "strict": false,
+      "ge": 1,
+      "ge_message": "Input should be greater than or equal to 1"
+     }
+    },
+    {
+     "name": "verbose",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_forget": {
+   "params": [
+    {
+     "name": "scope",
+     "literal_text": false,
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "memory",
+       "fact",
+       "world",
+       "lesson"
+      ],
+      "message": "Input should be 'memory', 'fact', 'world' or 'lesson'"
+     }
+    },
+    {
+     "name": "entity",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "attribute",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "text",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "substring",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "source",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "episode",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "tag",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "confirm_bulk",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_dream": {
+   "params": [
+    {
+     "name": "action",
+     "literal_text": false,
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "status",
+       "pull",
+       "commit",
+       "run",
+       "deep",
+       "runs",
+       "rollback"
+      ],
+      "message": "Input should be 'status', 'pull', 'commit', 'run', 'deep', 'runs' or 'rollback'"
+     }
+    },
+    {
+     "name": "limit",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "int",
+       "strict": false,
+       "ge": 1,
+       "ge_message": "Input should be greater than or equal to 1"
+      }
+     }
+    },
+    {
+     "name": "commit_token",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "cursor",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "float",
+       "strict": false
+      }
+     }
+    },
+    {
+     "name": "apply",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    },
+    {
+     "name": "snippets",
+     "literal_text": false,
+     "default": true,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    },
+    {
+     "name": "run_id",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "int",
+       "strict": false
+      }
+     }
+    }
+   ]
+  },
+  "memory_graph_review": {
+   "params": [
+    {
+     "name": "action",
+     "literal_text": false,
+     "default": "list",
+     "schema": {
+      "kind": "literal",
+      "expected": [
+       "list",
+       "propose",
+       "relate",
+       "dismiss_pair",
+       "dismiss_slot_pair",
+       "restore_slot",
+       "accept_link",
+       "reject_link",
+       "accept_merge",
+       "accept_junk",
+       "reject_entity"
+      ],
+      "message": "Input should be 'list', 'propose', 'relate', 'dismiss_pair', 'dismiss_slot_pair', 'restore_slot', 'accept_link', 'reject_link', 'accept_merge', 'accept_junk' or 'reject_entity'"
+     }
+    },
+    {
+     "name": "proposal_id",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "int",
+       "strict": false
+      }
+     }
+    },
+    {
+     "name": "proposal_ids",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "int",
+        "strict": false
+       }
+      }
+     }
+    },
+    {
+     "name": "proposals",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "dict"
+       }
+      }
+     }
+    },
+    {
+     "name": "scope",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "src",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "dst",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "relation",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "store",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    }
+   ]
+  },
+  "memory_episode_start": {
+   "params": [
+    {
+     "name": "title",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "hint",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "episode",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    }
+   ]
+  },
+  "memory_episode_end": {
+   "params": [
+    {
+     "name": "episode",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    }
+   ]
+  },
+  "memory_session_title": {
+   "params": [
+    {
+     "name": "title",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "episode",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    }
+   ]
+  },
+  "memory_episode_summary": {
+   "params": [
+    {
+     "name": "id",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    }
+   ]
+  },
+  "memory_consolidation_candidates": {
+   "params": [
+    {
+     "name": "query",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "episode",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "sources",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "tags",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "top_k",
+     "literal_text": false,
+     "default": 20,
+     "schema": {
+      "kind": "int",
+      "strict": false,
+      "ge": 1,
+      "ge_message": "Input should be greater than or equal to 1"
+     }
+    },
+    {
+     "name": "min_cohesion",
+     "literal_text": false,
+     "default": 0.6,
+     "schema": {
+      "kind": "float",
+      "strict": false
+     }
+    },
+    {
+     "name": "min_cluster_size",
+     "literal_text": false,
+     "default": 2,
+     "schema": {
+      "kind": "int",
+      "strict": false,
+      "ge": 1,
+      "ge_message": "Input should be greater than or equal to 1"
+     }
+    },
+    {
+     "name": "max_clusters",
+     "literal_text": false,
+     "default": 10,
+     "schema": {
+      "kind": "int",
+      "strict": false,
+      "ge": 1,
+      "ge_message": "Input should be greater than or equal to 1"
+     }
+    }
+   ]
+  },
+  "memory_consolidate": {
+   "params": [
+    {
+     "name": "replaces",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "new_text",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "source",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "tags",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "str"
+       }
+      }
+     }
+    },
+    {
+     "name": "entry_ids",
+     "literal_text": false,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "list",
+       "items": {
+        "kind": "int",
+        "strict": true
+       }
+      }
+     }
+    }
+   ]
+  },
+  "memory_graph_relate": {
+   "params": [
+    {
+     "name": "src",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "relation",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "dst",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "origin",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "confidence",
+     "literal_text": false,
+     "default": 0.8,
+     "schema": {
+      "kind": "float",
+      "strict": false,
+      "ge": 0,
+      "ge_message": "Input should be greater than or equal to 0",
+      "le": 1,
+      "le_message": "Input should be less than or equal to 1"
+     }
+    },
+    {
+     "name": "src_type",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "dst_type",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    }
+   ]
+  },
+  "memory_graph_unrelate": {
+   "params": [
+    {
+     "name": "src",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "relation",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "dst",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    }
+   ]
+  },
+  "memory_alias": {
+   "params": [
+    {
+     "name": "entity",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "alias",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    }
+   ]
+  },
+  "memory_graph": {
+   "params": [
+    {
+     "name": "entity",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "depth",
+     "literal_text": false,
+     "default": 1,
+     "schema": {
+      "kind": "int",
+      "strict": false
+     }
+    },
+    {
+     "name": "include_facts",
+     "literal_text": false,
+     "default": true,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    },
+    {
+     "name": "to",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "relation_filter",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    }
+   ]
+  },
+  "memory_recall": {
+   "params": [
+    {
+     "name": "query",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "hops",
+     "literal_text": false,
+     "default": 3,
+     "schema": {
+      "kind": "int",
+      "strict": false
+     }
+    },
+    {
+     "name": "top_k",
+     "literal_text": false,
+     "default": 5,
+     "schema": {
+      "kind": "int",
+      "strict": false,
+      "ge": 1,
+      "ge_message": "Input should be greater than or equal to 1"
+     }
+    },
+    {
+     "name": "verbose",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    }
+   ]
+  },
+  "memory_relation_define": {
+   "params": [
+    {
+     "name": "name",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "description",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "transitive",
+     "literal_text": false,
+     "default": false,
+     "schema": {
+      "kind": "bool",
+      "strict": false
+     }
+    },
+    {
+     "name": "inverse_of",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "src_type",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    },
+    {
+     "name": "dst_type",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    }
+   ]
+  },
+  "document_ingest": {
+   "params": [
+    {
+     "name": "path",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "source",
+     "literal_text": true,
+     "default": null,
+     "schema": {
+      "kind": "nullable",
+      "inner": {
+       "kind": "str"
+      }
+     }
+    }
+   ]
+  },
+  "document_search": {
+   "params": [
+    {
+     "name": "query",
+     "literal_text": true,
+     "schema": {
+      "kind": "str"
+     }
+    },
+    {
+     "name": "top_k",
+     "literal_text": false,
+     "default": 5,
+     "schema": {
+      "kind": "int",
+      "strict": false,
+      "ge": 1,
+      "ge_message": "Input should be greater than or equal to 1"
+     }
+    }
+   ]
+  }
+ }
+}

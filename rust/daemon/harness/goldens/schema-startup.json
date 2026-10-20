@@ -4,12 +4,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -314,7 +314,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -393,7 +401,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -610,7 +627,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -622,7 +640,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -872,12 +890,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -1182,7 +1200,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -1261,7 +1287,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -1478,7 +1513,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -1490,7 +1526,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -5114,12 +5150,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -5424,7 +5460,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -5503,7 +5547,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -5720,7 +5773,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -5732,7 +5786,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -5982,12 +6036,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -6292,7 +6346,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -6371,7 +6433,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -6588,7 +6659,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -6600,7 +6672,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -7184,12 +7256,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -7494,7 +7566,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -7573,7 +7653,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -7790,7 +7879,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -7802,7 +7892,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -8052,12 +8142,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -8362,7 +8452,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -8441,7 +8539,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -8658,7 +8765,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -8670,7 +8778,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -9588,12 +9696,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -9898,7 +10006,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -9977,7 +10093,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -10194,7 +10319,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -10206,7 +10332,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -10456,12 +10582,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -10766,7 +10892,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -10845,7 +10979,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -11062,7 +11205,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -11074,7 +11218,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -11326,12 +11470,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -11636,7 +11780,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -11715,7 +11867,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -11932,7 +12093,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -11944,7 +12106,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -12194,12 +12356,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -12504,7 +12666,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -12583,7 +12753,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -12800,7 +12979,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -12812,7 +12992,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -13538,12 +13718,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -13848,7 +14028,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -13927,7 +14115,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -14144,7 +14341,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -14156,7 +14354,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -14406,12 +14604,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -14716,7 +14914,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -14795,7 +15001,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -15012,7 +15227,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -15024,7 +15240,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -15276,12 +15492,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "eb1ec334477ba3d97eb859b2"
+      "rows": 497,
+      "sha256": "c908dad751ec3d4deb8a3b62"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "fefde85034a3378f31f2e91b"
+      "rows": 497,
+      "sha256": "0c8f1450b0423de7df2db4df"
      },
      "constraints": {
       "rows": 356,
@@ -15586,7 +15802,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -15665,7 +15889,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -15882,7 +16115,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -15894,7 +16128,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -16144,12 +16378,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "eb1ec334477ba3d97eb859b2"
+      "rows": 497,
+      "sha256": "c908dad751ec3d4deb8a3b62"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "fefde85034a3378f31f2e91b"
+      "rows": 497,
+      "sha256": "0c8f1450b0423de7df2db4df"
      },
      "constraints": {
       "rows": 356,
@@ -16454,7 +16688,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -16533,7 +16775,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -16750,7 +17001,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -16762,7 +17014,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -17014,12 +17266,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -17324,7 +17576,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -17403,7 +17663,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -17620,7 +17889,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -17632,7 +17902,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -17882,12 +18152,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -18192,7 +18462,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -18271,7 +18549,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -18488,7 +18775,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -18500,7 +18788,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -20076,12 +20364,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -20386,7 +20674,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -20465,7 +20761,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -20682,7 +20987,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -20694,7 +21000,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -20944,12 +21250,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -21254,7 +21560,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -21333,7 +21647,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -21550,7 +21873,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -21562,7 +21886,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -21814,12 +22138,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -22124,7 +22448,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -22203,7 +22535,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -22420,7 +22761,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -22432,7 +22774,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -22682,12 +23024,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -22992,7 +23334,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -23071,7 +23421,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -23288,7 +23647,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -23300,7 +23660,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -24218,12 +24578,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -24528,7 +24888,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -24607,7 +24975,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -24824,7 +25201,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -24836,7 +25214,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -25086,12 +25464,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -25396,7 +25774,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -25475,7 +25861,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -25692,7 +26087,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -25704,7 +26100,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -25956,12 +26352,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -26266,7 +26662,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -26345,7 +26749,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -26562,7 +26975,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -26574,7 +26988,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -26824,12 +27238,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -27134,7 +27548,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -27213,7 +27635,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -27430,7 +27861,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -27442,7 +27874,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -28376,12 +28808,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -28686,7 +29118,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -28765,7 +29205,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -28982,7 +29431,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -28994,7 +29444,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -29244,12 +29694,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -29554,7 +30004,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -29633,7 +30091,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -29850,7 +30317,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -29862,7 +30330,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -30114,12 +30582,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "c233200d1ea4b3c0f9d3b67d"
+      "rows": 497,
+      "sha256": "3b40081f45b3e570e134379b"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7b82c63d84f3949a722f7b40"
+      "rows": 497,
+      "sha256": "b8073f279e4fd23ce919e47d"
      },
      "constraints": {
       "rows": 356,
@@ -30424,7 +30892,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -30503,7 +30979,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -30720,7 +31205,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -30732,7 +31218,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -30982,12 +31468,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "c233200d1ea4b3c0f9d3b67d"
+      "rows": 497,
+      "sha256": "3b40081f45b3e570e134379b"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7b82c63d84f3949a722f7b40"
+      "rows": 497,
+      "sha256": "b8073f279e4fd23ce919e47d"
      },
      "constraints": {
       "rows": 356,
@@ -31292,7 +31778,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -31371,7 +31865,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -31588,7 +32091,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -31600,7 +32104,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -31852,12 +32356,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -32162,7 +32666,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -32241,7 +32753,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -32458,7 +32979,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -32470,7 +32992,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -32720,12 +33242,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -33030,7 +33552,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -33109,7 +33639,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -33326,7 +33865,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -33338,7 +33878,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -33590,12 +34130,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -33900,7 +34440,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -33979,7 +34527,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -34196,7 +34753,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -34208,7 +34766,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -34458,12 +35016,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -34768,7 +35326,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -34847,7 +35413,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -35064,7 +35639,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -35076,7 +35652,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -35328,12 +35904,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -35638,7 +36214,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -35717,7 +36301,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -35934,7 +36527,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -35946,7 +36540,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -36196,12 +36790,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -36506,7 +37100,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -36585,7 +37187,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -36802,7 +37413,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -36814,7 +37426,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -38044,12 +38656,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -38354,7 +38966,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -38433,7 +39053,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -38650,7 +39279,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -38662,7 +39292,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -38912,12 +39542,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -39222,7 +39852,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -39301,7 +39939,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -39518,7 +40165,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -39530,7 +40178,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -39782,12 +40430,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -40092,7 +40740,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -40171,7 +40827,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -40388,7 +41053,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -40400,7 +41066,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -40650,12 +41316,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -40960,7 +41626,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -41039,7 +41713,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -41256,7 +41939,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -41268,7 +41952,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -42110,12 +42794,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -42420,7 +43104,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -42499,7 +43191,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -42716,7 +43417,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -42728,7 +43430,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -42978,12 +43680,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -43288,7 +43990,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -43367,7 +44077,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -43584,7 +44303,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -43596,7 +44316,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -43848,12 +44568,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -44158,7 +44878,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -44237,7 +44965,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -44454,7 +45191,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -44466,7 +45204,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -44716,12 +45454,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "52439715ba643f07a1888d4e"
+      "rows": 497,
+      "sha256": "a84bac0fb5b051c63eb4c7c8"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "4eb3a37d96453f869e798022"
+      "rows": 497,
+      "sha256": "7619c373857d42265919218e"
      },
      "constraints": {
       "rows": 356,
@@ -45026,7 +45764,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -45105,7 +45851,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -45322,7 +46077,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -45334,7 +46090,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -45586,12 +46342,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -45896,7 +46652,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -45975,7 +46739,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -46192,7 +46965,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -46204,7 +46978,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -46454,12 +47228,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -46764,7 +47538,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -46843,7 +47625,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -47060,7 +47851,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -47072,7 +47864,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -47324,12 +48116,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -47634,7 +48426,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -47713,7 +48513,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -47930,7 +48739,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -47942,7 +48752,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -48192,12 +49002,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -48502,7 +49312,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -48581,7 +49399,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -48798,7 +49625,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -48810,7 +49638,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -49062,12 +49890,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -49372,7 +50200,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -49451,7 +50287,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -49668,7 +50513,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -49680,7 +50526,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -49930,12 +50776,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "f34f47843aa9bcfdab5de56d"
+      "rows": 497,
+      "sha256": "141214c0dbf28ed18f5e0f68"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "c6ff644244fcae6f028c542d"
+      "rows": 497,
+      "sha256": "2f9b2d33dfa43d0c9e7871e8"
      },
      "constraints": {
       "rows": 356,
@@ -50240,7 +51086,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -50319,7 +51173,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -50536,7 +51399,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -50548,7 +51412,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -50800,12 +51664,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -51110,7 +51974,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -51189,7 +52061,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -51406,7 +52287,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -51418,7 +52300,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -51668,12 +52550,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -51978,7 +52860,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -52057,7 +52947,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -52274,7 +53173,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -52286,7 +53186,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -53068,12 +53968,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -53378,7 +54278,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -53457,7 +54365,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -53674,7 +54591,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -53686,7 +54604,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -53936,12 +54854,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -54246,7 +55164,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -54325,7 +55251,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -54542,7 +55477,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -54554,7 +55490,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -54806,12 +55742,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "eb1ec334477ba3d97eb859b2"
+      "rows": 497,
+      "sha256": "c908dad751ec3d4deb8a3b62"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "fefde85034a3378f31f2e91b"
+      "rows": 497,
+      "sha256": "0c8f1450b0423de7df2db4df"
      },
      "constraints": {
       "rows": 356,
@@ -55116,7 +56052,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -55195,7 +56139,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -55412,7 +56365,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -55424,7 +56378,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -55674,12 +56628,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "eb1ec334477ba3d97eb859b2"
+      "rows": 497,
+      "sha256": "c908dad751ec3d4deb8a3b62"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "fefde85034a3378f31f2e91b"
+      "rows": 497,
+      "sha256": "0c8f1450b0423de7df2db4df"
      },
      "constraints": {
       "rows": 356,
@@ -55984,7 +56938,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -56063,7 +57025,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -56280,7 +57251,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -56292,7 +57264,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -56544,12 +57516,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -56854,7 +57826,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -56933,7 +57913,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -57150,7 +58139,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -57162,7 +58152,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -57412,12 +58402,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -57722,7 +58712,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -57801,7 +58799,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -58018,7 +59025,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -58030,7 +59038,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -58868,12 +59876,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -59178,7 +60186,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -59257,7 +60273,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -59474,7 +60499,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -59486,7 +60512,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -59736,12 +60762,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -60046,7 +61072,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -60125,7 +61159,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -60342,7 +61385,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -60354,7 +61398,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -60606,12 +61650,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -60916,7 +61960,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -60995,7 +62047,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -61212,7 +62273,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -61224,7 +62286,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -61474,12 +62536,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "b24691d46971422e51e1b4c8"
+      "rows": 497,
+      "sha256": "e89a89250d3461e274cd8a7a"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "aab20f923d27a9ff3fe838ee"
+      "rows": 497,
+      "sha256": "31de42aaa571fc2fd510e6bd"
      },
      "constraints": {
       "rows": 356,
@@ -61784,7 +62846,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -61863,7 +62933,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -62080,7 +63159,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -62092,7 +63172,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -62344,12 +63424,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -62654,7 +63734,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -62733,7 +63821,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -62950,7 +64047,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -62962,7 +64060,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -63212,12 +64310,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -63522,7 +64620,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -63601,7 +64707,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -63818,7 +64933,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -63830,7 +64946,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -64082,12 +65198,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -64392,7 +65508,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -64471,7 +65595,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -64688,7 +65821,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -64700,7 +65834,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -64950,12 +66084,12 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 479,
-      "sha256": "959d3a0824286d778e1dcd50"
+      "rows": 497,
+      "sha256": "310b7b413407fef35167fabb"
      },
      "columns": {
-      "rows": 479,
-      "sha256": "7d7a406b70e80acb80375191"
+      "rows": 497,
+      "sha256": "8212873d2f27aac76cdc2780"
      },
      "constraints": {
       "rows": 356,
@@ -65260,7 +66394,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -65339,7 +66481,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -65556,7 +66707,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -65568,7 +66720,7 @@
       "rows": [
        [
         "schema_version",
-        55
+        56
        ],
        [
         "writer_lease_epoch",
@@ -65822,17 +66974,5 @@
   "catalog.extensions.extversion": "server-provided version; exact in live Python/Rust diff",
   "relations.created_at": "newly seeded rows only, against the common template"
  },
- "oracle_head": "babe75a5630e58355ccd0c6b4345b03ea37bb4ed",
- "recorded_extension_versions": [
-  [
-   "plpgsql",
-   "1.0",
-   "pg_catalog"
-  ],
-  [
-   "vector",
-   "0.8.6",
-   "public"
-  ]
- ]
+ "oracle_head": "370efe4542820a7fd3ad6b72a53146cf102193f3"
 }

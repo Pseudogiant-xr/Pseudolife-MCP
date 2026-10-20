@@ -770,10 +770,10 @@ class FixtureService:
     def graph_propose_links(self, proposals):
         return {"proposed": len(proposals), "skipped": 0}
 
-    def graph_accept_proposal(self, proposal_id):
+    def graph_accept_proposal(self, proposal_id, *, decided_by=None):
         return {"accepted": True, "src": "Track A", "relation": "related-to", "dst": "Track B"}
 
-    def graph_reject_proposal(self, proposal_id):
+    def graph_reject_proposal(self, proposal_id, *, decided_by=None):
         return {"rejected": True, "id": int(proposal_id)}
 
     def graph_accept_entity_merge(self, proposal_id, *, decided_by="human"):

@@ -134,6 +134,42 @@ def test_link_reject_reopens_on_observed_model_change(svc):
     assert row["status"] == "pending" and row["judge_verdict"] is None
 
 
+def test_reopen_clears_the_first_opinions_served_stamp(svc):
+    """A reopened row has no first verdict, so it carries no served-model
+    stamp either: the stamp belongs to the verdict it was recorded with.
+    Both proposal tables, since the reopen resets them separately."""
+    from pseudolife_memory.memory.review_decisions import refresh_proposal_terminals
+
+    st = svc._storage
+
+    def stamp(table, pid):
+        return st.conn.execute(
+            f"SELECT judge_verdict, judge_served_model FROM {table} WHERE id=%s",
+            (pid,)).fetchone()
+
+    link = _link(svc)
+    assert st.set_proposal_judgment(
+        link["id"], verdict="reject", confidence=0.9, note=None,
+        model="model-a", relation=None, at=time.time(), served_model="served-a")
+    link_review = _Review(svc, "link", link, model="served-a")
+    _auto_reject(svc, link_review, link)
+    assert stamp("edge_proposals", link["id"]) == ("reject", "served-a")
+    link_review.current_model = "served-b"
+    assert refresh_proposal_terminals(link_review, limit=1)["reopened"] == 1
+    assert stamp("edge_proposals", link["id"]) == (None, None)
+
+    merge = _merge(svc)
+    assert st.set_entity_proposal_judgment(
+        merge["id"], verdict="reject", confidence=0.9, note=None,
+        model="model-a", at=time.time(), served_model="served-a")
+    merge_review = _Review(svc, "merge", merge)
+    _auto_reject(svc, merge_review, merge)
+    assert stamp("entity_proposals", merge["id"]) == ("reject", "served-a")
+    merge_review.current_fingerprints[str(merge["id"])] = "changed-evidence"
+    assert refresh_proposal_terminals(merge_review, limit=1)["reopened"] == 1
+    assert stamp("entity_proposals", merge["id"]) == (None, None)
+
+
 def test_junk_keep_reopens_but_junk_delete_never_does(svc):
     from pseudolife_memory.memory.review_decisions import (
         record_proposal_terminal, refresh_proposal_terminals)

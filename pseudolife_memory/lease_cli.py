@@ -435,17 +435,38 @@ class _Board:
 
     def agents(self, *, timeout: float = ANNOUNCE_TIMEOUT) -> list[dict]:
         """The peers the board lists for this address (bounded page)."""
+        return self.agents_page(timeout=timeout)[0]
+
+    def agents_page(self, *, timeout: float = ANNOUNCE_TIMEOUT) -> tuple[list[dict], bool]:
+        """The listed peers, and whether the page was cut short: a peer
+        missing from a cut page may still be on the board."""
         reply = self._post("agents", {"limit": LIST_LIMIT}, timeout=timeout)
         agents = reply.get("agents")
         if not isinstance(agents, list):
             raise _Refused("the daemon's agents reply was not understood")
-        return [agent for agent in agents
-                if isinstance(agent, dict) and isinstance(agent.get("agent_id"), str)]
+        return ([agent for agent in agents
+                 if isinstance(agent, dict) and isinstance(agent.get("agent_id"), str)],
+                reply.get("truncated") is True)
 
-    def send(self, to: str, text: str, request_id: str, *,
-             timeout: float = ANNOUNCE_TIMEOUT) -> None:
-        self._post("send", {"to": to, "text": text, "request_id": request_id},
-                   timeout=timeout)
+    def send(self, to: str, text: str, request_id: str, *, clears: str | None = None,
+             urgent: bool = False, timeout: float = ANNOUNCE_TIMEOUT) -> None:
+        """``clears`` names the park need the message answers, so it rings a
+        recipient parked on it; ``urgent`` rings past any park. Each is sent
+        only when set."""
+        body: dict = {"to": to, "text": text, "request_id": request_id}
+        if clears is not None:
+            body["clears"] = clears
+        if urgent:
+            body["urgent"] = True
+        self._post("send", body, timeout=timeout)
+
+    def update(self, *, status: str | None = None, task: str | None = None,
+               timeout: float = ANNOUNCE_TIMEOUT) -> None:
+        """This address's status or task; only the fields given are sent.
+        Any action keeps an ephemeral address listed."""
+        body = {key: value for key, value in (("status", status), ("task", task))
+                if value is not None}
+        self._post("update", body, timeout=timeout)
 
     def lease(self, name: str, ttl: int, *, expect: int | None = None,
               purpose: str | None = None) -> dict:
@@ -1632,7 +1653,8 @@ def _operator(verb, act) -> int:
         if not dsn:
             raise NoBank
         from pseudolife_memory.storage.coordination import (
-            CoordinationConnection, CoordinationError, CoordinationStore)
+            CommitOutcomeUnknown, CoordinationConnection, CoordinationError,
+            CoordinationStore)
         try:
             storage = CoordinationConnection(dsn)
         except Exception as exc:  # noqa: BLE001 — a DSN in a driver message stays unprinted
@@ -1642,6 +1664,11 @@ def _operator(verb, act) -> int:
             result = act(CoordinationStore(storage))
         except CoordinationError as exc:
             _say(f"{verb} refused: {exc.code}")
+            return 1
+        except CommitOutcomeUnknown as exc:
+            _say(f"{verb} lost the answer to its COMMIT ({type(exc.__cause__).__name__}); "
+                 "it may have been committed: run `pseudolife-mcp lease list` before "
+                 "retrying")
             return 1
         except Exception as exc:  # noqa: BLE001
             _say(f"{verb} failed ({type(exc).__name__}); nothing was changed")

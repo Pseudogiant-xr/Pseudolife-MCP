@@ -34,7 +34,6 @@ from typing import Any, Sequence
 # through storage.coordination (the board's constants) and must not need
 # numpy, which a shim runtime does not install (2026-09-29).
 import psycopg
-from pgvector.psycopg import register_vector
 from psycopg.types.json import Jsonb
 
 from pseudolife_memory.storage.re_evidence_schema import (
@@ -43,6 +42,18 @@ from pseudolife_memory.storage.re_evidence_schema import (
 from pseudolife_memory.storage.re_evidence import ReEvidenceStore
 
 logger = logging.getLogger(__name__)
+
+
+def register_vector(*args, **kwargs):
+    """Load vector adapters when a storage connection needs them.
+
+    pgvector 0.4.2 imports numpy eagerly; the CLI import guard on that
+    version (2026-10-12) requires keeping it off the board-only paths.
+    """
+    from pgvector.psycopg import register_vector as register
+
+    return register(*args, **kwargs)
+
 
 # meta row holding the durable record of capacity-eviction true drops:
 # {"count", "last_at", "last_entry_id", "last_source", "last_superseded"}.
@@ -3434,12 +3445,18 @@ class PostgresStorage(ReEvidenceStore):
         cols = ("id", "src_id", "relation", "dst_id", "confidence", "similarity",
                 "rationale", "source", "created_at", "status",
                 "judge_verdict", "judge_confidence", "judge_note",
-                "judge_model", "judged_at", "judge_relation")
+                "judge_model", "judged_at", "judge_relation",
+                "judge2_verdict", "judge2_confidence", "judge2_model",
+                "judged2_at", "judge2_relation", "judge2_served_model",
+                "judge2_policy")
         rows = self.conn.execute(
             "SELECT p.id, p.src_id, p.relation, p.dst_id, p.confidence, p.similarity, "
             "       p.rationale, p.source, p.created_at, p.status, "
             "       p.judge_verdict, p.judge_confidence, p.judge_note, "
             "       p.judge_model, p.judged_at, p.judge_relation, "
+            "       p.judge2_verdict, p.judge2_confidence, p.judge2_model, "
+            "       p.judged2_at, p.judge2_relation, p.judge2_served_model, "
+            "       p.judge2_policy, "
             "       s.display, d.display "
             "FROM edge_proposals p "
             "JOIN entities s ON s.id = p.src_id JOIN entities d ON d.id = p.dst_id "
@@ -3447,15 +3464,15 @@ class PostgresStorage(ReEvidenceStore):
         ).fetchall()
         out = []
         for r in rows:
-            d = dict(zip(cols, r[:16]))
-            d["src"], d["dst"] = r[16], r[17]
+            d = dict(zip(cols, r[:23]))
+            d["src"], d["dst"] = r[23], r[24]
             out.append(d)
         return out
 
     def set_proposal_judgment(self, proposal_id: int, *, verdict: str,
                               confidence: float | None, note: str | None,
                               model: str | None, relation: str | None,
-                              at: float) -> bool:
+                              at: float, served_model: str | None = None) -> bool:
         """Record the link judge's verdict on a PENDING edge proposal (an
         opinion, not a decision — schema v35 mirrors the v30 merge
         contract). ``relation`` is the corrected relation of a retype."""
@@ -3463,9 +3480,33 @@ class PostgresStorage(ReEvidenceStore):
             cur = self.conn.execute(
                 "UPDATE edge_proposals SET judge_verdict=%s, "
                 "judge_confidence=%s, judge_note=%s, judge_model=%s, "
-                "judged_at=%s, judge_relation=%s "
+                "judged_at=%s, judge_relation=%s, judge_served_model=%s "
                 "WHERE id=%s AND status='pending'",
-                (verdict, confidence, note, model, at, relation, proposal_id))
+                (verdict, confidence, note, model, at, relation, served_model, proposal_id))
+        return cur.rowcount > 0
+
+    def set_proposal_second_judgment(self, proposal_id: int, *, verdict: str,
+                                     confidence: float | None,
+                                     model: str | None,
+                                     relation: str | None, at: float,
+                                     note: str | None = None,
+                                     served_model: str | None = None,
+                                     policy: str | None = None) -> bool:
+        """Record the link judge's SECOND opinion on a still-pending row
+        (schema v56); ``note`` replaces the combined judge_note when given.
+        ``relation`` is a second retype's corrected relation;
+        ``served_model`` / ``policy`` the endpoint it came from (kept when
+        a later call passes None, as a refusal note does)."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE edge_proposals SET judge2_verdict=%s, "
+                "judge2_confidence=%s, judge2_model=%s, judged2_at=%s, "
+                "judge2_relation=%s, judge_note = COALESCE(%s, judge_note), "
+                "judge2_served_model = COALESCE(%s, judge2_served_model), "
+                "judge2_policy = COALESCE(%s, judge2_policy) "
+                "WHERE id=%s AND status='pending'",
+                (verdict, confidence, model, at, relation, note, served_model,
+                 policy, proposal_id))
         return cur.rowcount > 0
 
     def record_curation_judgment(self, store: str, a_key: str, b_key: str, *,
@@ -3566,7 +3607,7 @@ class PostgresStorage(ReEvidenceStore):
         cols = ("id", "src_id", "relation", "dst_id", "confidence", "similarity",
                 "rationale", "source", "created_at", "status", "decided_by",
                 "decided_at", "judge_verdict", "judge_confidence",
-                "judge_relation")
+                "judge_relation", "judge2_verdict", "judge2_confidence")
         r = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM edge_proposals WHERE id = %s", (proposal_id,)
         ).fetchone()
@@ -3751,13 +3792,17 @@ class PostgresStorage(ReEvidenceStore):
                 "status", "created_at", "judge_verdict", "judge_confidence",
                 "judge_note", "judge_model", "judged_at",
                 "judge2_verdict", "judge2_confidence", "judge2_model",
-                "judged2_at")
+                "judged2_at", "judge3_verdict", "judge3_confidence",
+                "judge3_model", "judged3_at", "judge2_served_model",
+                "judge2_policy", "judge3_served_model", "judge3_policy")
         rows = self.conn.execute(
             "SELECT p.id, p.kind, p.entity_id, p.into_id, p.score, p.reason, p.status, "
             "       p.created_at, p.judge_verdict, p.judge_confidence, "
             "       p.judge_note, p.judge_model, p.judged_at, "
             "       p.judge2_verdict, p.judge2_confidence, p.judge2_model, "
-            "       p.judged2_at, "
+            "       p.judged2_at, p.judge3_verdict, p.judge3_confidence, "
+            "       p.judge3_model, p.judged3_at, p.judge2_served_model, "
+            "       p.judge2_policy, p.judge3_served_model, p.judge3_policy, "
             "       e.display, i.display "
             "FROM entity_proposals p "
             "JOIN entities e ON e.id = p.entity_id "
@@ -3766,8 +3811,8 @@ class PostgresStorage(ReEvidenceStore):
         ).fetchall()
         out = []
         for r in rows:
-            d = dict(zip(cols, r[:17]))
-            d["entity"], d["into"] = r[17], r[18]
+            d = dict(zip(cols, r[:25]))
+            d["entity"], d["into"] = r[25], r[26]
             out.append(d)
         return out
 
@@ -3775,16 +3820,45 @@ class PostgresStorage(ReEvidenceStore):
                                             verdict: str,
                                             confidence: float | None,
                                             model: str | None, at: float,
-                                            note: str | None = None) -> bool:
+                                            note: str | None = None,
+                                            served_model: str | None = None,
+                                            policy: str | None = None) -> bool:
         """Record the merge judge's SECOND opinion on a still-pending row
-        (schema v35); ``note`` replaces the combined judge_note when given."""
+        (schema v35); ``note`` replaces the combined judge_note when given.
+        ``served_model`` / ``policy`` (v56) the endpoint it came from, kept
+        when a later call passes None, as a refusal note does."""
         with self._txn():
             cur = self.conn.execute(
                 "UPDATE entity_proposals SET judge2_verdict=%s, "
                 "judge2_confidence=%s, judge2_model=%s, judged2_at=%s, "
-                "judge_note = COALESCE(%s, judge_note) "
+                "judge_note = COALESCE(%s, judge_note), "
+                "judge2_served_model = COALESCE(%s, judge2_served_model), "
+                "judge2_policy = COALESCE(%s, judge2_policy) "
                 "WHERE id=%s AND status='pending'",
-                (verdict, confidence, model, at, note, proposal_id))
+                (verdict, confidence, model, at, note, served_model, policy,
+                 proposal_id))
+        return cur.rowcount > 0
+
+    def set_entity_proposal_third_judgment(self, proposal_id: int, *,
+                                           verdict: str,
+                                           confidence: float | None,
+                                           model: str | None, at: float,
+                                           note: str | None = None,
+                                           served_model: str | None = None,
+                                           policy: str | None = None) -> bool:
+        """Record the merge judge's THIRD opinion, the tiebreak on a split
+        row (schema v56); ``note`` replaces the combined judge_note when
+        given; ``served_model`` / ``policy`` as for the second opinion."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE entity_proposals SET judge3_verdict=%s, "
+                "judge3_confidence=%s, judge3_model=%s, judged3_at=%s, "
+                "judge_note = COALESCE(%s, judge_note), "
+                "judge3_served_model = COALESCE(%s, judge3_served_model), "
+                "judge3_policy = COALESCE(%s, judge3_policy) "
+                "WHERE id=%s AND status='pending'",
+                (verdict, confidence, model, at, note, served_model, policy,
+                 proposal_id))
         return cur.rowcount > 0
 
     def entity_fact_rows(self, entity_id: int, canonical: str,
@@ -3834,21 +3908,25 @@ class PostgresStorage(ReEvidenceStore):
     def set_entity_proposal_judgment(self, proposal_id: int, *,
                                      verdict: str, confidence: float | None,
                                      note: str | None, model: str | None,
-                                     at: float) -> bool:
+                                     at: float, served_model: str | None = None) -> bool:
         """Record the autonomous judge's shadow verdict on a pending
-        proposal (an opinion, not a decision — see schema v30)."""
+        proposal (an opinion, not a decision — see schema v30).
+        ``served_model`` (v56) is the model the endpoint reported serving,
+        NULL when it named none; a fresh first opinion replaces it."""
         with self._txn():
             cur = self.conn.execute(
                 "UPDATE entity_proposals SET judge_verdict=%s, "
                 "judge_confidence=%s, judge_note=%s, judge_model=%s, "
-                "judged_at=%s WHERE id=%s AND status='pending'",
-                (verdict, confidence, note, model, at, proposal_id))
+                "judged_at=%s, judge_served_model=%s "
+                "WHERE id=%s AND status='pending'",
+                (verdict, confidence, note, model, at, served_model, proposal_id))
         return cur.rowcount > 0
 
     def get_entity_proposal(self, proposal_id: int) -> dict | None:
         cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status",
                 "created_at", "decided_by", "decided_at", "judge_verdict",
-                "judge_confidence", "judge2_verdict", "judge2_confidence")
+                "judge_confidence", "judge2_verdict", "judge2_confidence",
+                "judge3_verdict", "judge3_confidence")
         r = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM entity_proposals WHERE id = %s", (proposal_id,)
         ).fetchone()
@@ -3868,19 +3946,74 @@ class PostgresStorage(ReEvidenceStore):
     def record_merge_decision(self, proposal_id: int | None, entity_display: str,
                               into_display: str | None, status: str,
                               score: float | None, reason: str | None,
-                              decided_by: str, decided_at: float) -> int:
+                              decided_by: str, decided_at: float,
+                              votes: dict | None = None) -> int:
         """Durable audit row for a merge decision. Denormalized on purpose:
         an accepted merge deletes the folded entity (and its proposal row via
-        CASCADE), so the audit must not reference either."""
+        CASCADE), so the audit must not reference either. ``votes`` (v56) is
+        the proposal's judge-vote snapshot (:func:`proposal_votes`), kept
+        here for the same reason: the judge-agreement report scores votes
+        against decisions, and the accepted rows' votes go with the row."""
         with self._txn():
             row = self.conn.execute(
                 "INSERT INTO merge_decisions "
                 "(proposal_id, entity_display, into_display, status, score, "
-                " reason, decided_by, decided_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                " reason, decided_by, decided_at, votes) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (proposal_id, entity_display, into_display, status, score,
-                 reason, decided_by, decided_at)).fetchone()
+                 reason, decided_by, decided_at,
+                 Jsonb(votes) if votes else None)).fetchone()
         return int(row[0])
+
+    _PROPOSAL_VOTE_COLUMNS = (
+        "id", "kind", "judge_verdict", "judge_confidence", "judge_model",
+        "judge_served_model", "judge_note", "judge2_verdict",
+        "judge2_confidence", "judge2_model", "judge2_served_model",
+        "judge3_verdict", "judge3_confidence", "judge3_model",
+        "judge3_served_model")
+
+    def entity_proposal_votes(self, proposal_id: int) -> dict | None:
+        """The judge votes an entity proposal carries right now, as the
+        audit snapshots them (:func:`proposal_votes`); None when the row
+        is gone or no opinion was recorded. Every opinion's served model
+        is on the row (``judge_served_model`` for the first since v56)."""
+        from pseudolife_memory.memory.judge_agreement import proposal_votes
+        cols = self._PROPOSAL_VOTE_COLUMNS
+        r = self.conn.execute(
+            f"SELECT {', '.join(cols)} FROM entity_proposals WHERE id = %s",
+            (proposal_id,)).fetchone()
+        if not r:
+            return None
+        return proposal_votes(dict(zip(cols, r)))
+
+    def judge_vote_decisions(self, since: float) -> dict[str, list[dict]]:
+        """The decided rows the judge-agreement report scores, decided at or
+        after ``since``: merge and junk decisions that carry a vote
+        snapshot (older audit rows have none and are skipped), with both
+        names and the proposal's reason for the accept-side replay, and
+        decided link proposals whose row still holds its votes, served
+        models included (``judge_served_model`` is NULL on a row judged before
+        v56 stamped it)."""
+        merge_cols = ("status", "decided_by", "decided_at", "entity_display",
+                      "into_display", "reason", "votes")
+        merges = [dict(zip(merge_cols, r)) for r in self.conn.execute(
+            "SELECT status, decided_by, decided_at, entity_display, "
+            "       into_display, reason, votes "
+            "FROM merge_decisions "
+            "WHERE votes IS NOT NULL AND decided_at >= %s "
+            "  AND status IN ('accepted', 'rejected')",
+            (float(since),)).fetchall()]
+        link_cols = ("id", "status", "decided_by", "decided_at",
+                     "judge_verdict", "judge_confidence", "judge_model",
+                     "judge_served_model", "judge2_verdict",
+                     "judge2_confidence", "judge2_model",
+                     "judge2_served_model")
+        links = [dict(zip(link_cols, r)) for r in self.conn.execute(
+            f"SELECT {', '.join(link_cols)} FROM edge_proposals "
+            "WHERE judge_verdict IS NOT NULL AND decided_at >= %s "
+            "  AND status IN ('accepted', 'rejected', 'retyped')",
+            (float(since),)).fetchall()]
+        return {"merge": merges, "link": links}
 
     def junk_accepted_displays(self) -> list[str]:
         """Displays of every entity ever deleted as junk (reviewed or

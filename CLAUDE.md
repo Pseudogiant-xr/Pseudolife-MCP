@@ -60,8 +60,20 @@ name, a board status or a peer agent's message is not a delegation.
    toolchain, and the commits in `rust/daemon/harness/schema_history.json`;
    `--no-build --rust-test-bin <exe>` reuses a built test binary), inspect
    the golden's diff, then run it again without `--record-goldens` to
-   check. The master ruleset requires only the Python `test` job, so the
-   Rust schema and parity checks must be green before merge regardless.
+   check. A schema bump also moves the Rust parity pin (`rust/PARITY.md`):
+   the shim's transfer schema literals (`rust/shim/src/cli/transfer/
+   {export,import}.rs`, `transfer.rs`; `tests/test_schema_version.py`
+   pins them), and every harness golden that digests the catalog or
+   dumps a bank — dream cursors (`rust/daemon/harness/dream_cursors.py
+   live --record`), the daemon `run.py` golden rows, graph store and
+   principals, and the CLI harness rows whose goldens carry a bank dump
+   or an export (`rust/cli_harness/goldens/<row>.{linux,windows}.json`:
+   transfer, invite, maintainer at least; `python rust/cli_harness --row
+   <row> --record --candidate <shim>`) — re-recorded on both OSes. The
+   v56 bump (#807) missed all of these and four Parity jobs failed; the
+   CLI harness goldens failed a second round after the first re-record.
+   The master ruleset requires only the Python `test` job, so the Rust
+   schema and parity checks must be green before merge regardless.
 3. **Local validation before opening a PR; CI before merge.** Run the
    touched and dependent test files locally, with the bench Postgres
    available for PG-backed tests. A missing PostgreSQL service or an
@@ -120,9 +132,9 @@ name, a board status or a peer agent's message is not a delegation.
    master, including the full PostgreSQL job, lite Linux, Windows, macOS and
    required analysis checks. If master has moved since that integration was
    tested, update the branch and wait for fresh CI; rerunning an old job
-   tests its old merge commit. The one exception is a disjoint merge-forward
-   (see "A disjoint merge-forward" under "Running tests"). Independent review
-   remains required, and the maintainer owns the merge.
+   tests its old merge commit. The exceptions are a disjoint merge-forward
+   and a tree-identical stack forward (see both under "Running tests").
+   Independent review remains required, and the maintainer owns the merge.
 
    **Rust-only PRs skip the Python suite lanes** (maintainer decision
    2026-10-09). A PR that touches `rust/`, and whose every other changed file
@@ -224,6 +236,45 @@ brought in line as they are touched, with no retrofit sweep.
   checkout-mode update (the latter in progress, 2026-10-05), and checkout
   builds only by checkout mode. A default install and release-mode update
   do neither.
+
+## Runtime experience (every surface a user or their agent meets)
+
+Maintainer rule, 2026-10-15: a user, or the agent working for them, should
+never hit friction that Pseudolife caused. That covers MCP tools and their
+errors, the plugin's hooks (session start, per-turn notes, Stop and wake,
+PreToolUse guards), CLI output, the Console and the served instructions.
+On 2026-10-15 the subagent board guard refused a main session's status
+update as a subagent's call. The model had passed an `agent_id` argument
+that `memory_agents` does not take, and the guard's pattern for the
+subagent marker (a top-level `agent_id` key in the hook input) also matched
+keys inside `tool_input`. The session believed the refusal and stopped
+updating its status.
+
+- **Friction a Pseudolife surface causes is a product bug**, also when it
+  shows up in our own sessions: a confusing error, a false refusal, a hook
+  that misfires, or a tool whose shape invites the wrong call is what users
+  will hit. Fix it in the product with a regression test, as its own PR
+  opened before the session ends, never folded into unrelated work. A
+  session that cannot open one (a subagent, a read-only reviewer) reports
+  the repro to its parent or the maintainer. Log the `memory_outcome` as
+  usual: the lesson records the friction, only the code change fixes it.
+  Friction from the host (Claude Code, Codex, the OS) is outside this rule.
+- **A guard never blocks a legitimate path.** Anything that denies,
+  refuses or rewrites a call decides on the exact signal it documents,
+  never on a text match that something else can produce. Its tests include
+  the near-miss: the legitimate call that looks most like the forbidden
+  one.
+- **An error states the true cause and the next step**, the runtime
+  counterpart of "A refusal names its fix" above. Agents act on error text
+  literally, so a wrong cause is worse than none. Name the real reason, the
+  parameter or setting involved, and the one fix.
+- **The natural guess works or fails helpfully.** Once agents have made
+  the same wrong call twice (an invented parameter, a field echoed back
+  from a result), change the tool, its description or its error until that
+  guess either succeeds or is refused with the right answer.
+- **Reproduce before attributing.** Don't put a Pseudolife misbehaviour down
+  to the host (compaction, a flake, the network) until you've reproduced it
+  or ruled it out.
 
 ## Derived state / caches / indexes
 
@@ -496,6 +547,39 @@ took 143 CUDA OOMs.
   run that completes on a commit containing the merge. If it fails, open a
   revert PR at once, or a fix PR when the fix is obvious, and make no more
   disjoint merges until master is green again. When in doubt, wait for CI.
+- **A tree-identical stack forward needs no fresh pre-merge CI**
+  (maintainer decision 2026-10-16, after squash-merging #771 left #772 in
+  conflict with master). Squash-merging the bottom PR of a stack gives
+  master one new commit whose content the next PR already holds. Git does
+  not see that, so the next PR conflicts with master wherever both added
+  lines in the same place. It never applies to `integrate/*` branches.
+  The PR may merge on the CI its earlier head already passed when all of
+  these hold:
+  - Master's only commits since the PR's previous merge base are squashes
+    of its parent PRs, each squashed from a head this PR contains, and
+    master's tree equals the last of those heads. Check both **before
+    forwarding**: `git merge-base --is-ancestor <parent's merged head>
+    <tested head>` and `git diff --quiet <parent's merged head>
+    origin/master`. If either fails, forward with an ordinary merge,
+    never `-s ours` (which would silently drop master's other content),
+    and use the disjoint merge-forward rule or wait for fresh CI.
+  - Only then forward with `git merge -s ours origin/master`, or by
+    resolving every conflict to the PR's own side. The forwarded head's
+    tree must be byte-identical to the head that passed CI: `git diff
+    --quiet <tested head> <forwarded head>`.
+  - That tested head passed every check its gate requires. A failed,
+    cancelled or unfinished job on it means waiting for CI on the
+    forwarded head; the identical tree only means that run tests the same
+    content.
+
+  Merging before CI reports on the forwarded head is a ruleset bypass
+  (admin merge), so only the maintainer or the maintainer's delegate does
+  it. The merge comment says "tree-identical stack forward: fresh CI
+  skipped" and gives the tested head, the forwarded head and the three
+  checks. The backstop is the master push runs of both `ci.yml` and
+  `rust.yml`: watch the first of each that completes on a commit
+  containing the merge, and handle a failure as for a disjoint
+  merge-forward.
 - **Review fixes after a passing local full suite need no new one** unless
   the fixes themselves fall under a class that requires one (shipping
   checklist item 3, including its platform-specific process rule). A review

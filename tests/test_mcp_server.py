@@ -1478,6 +1478,19 @@ def test_transport_security_policy_is_explicit_not_inherited():
         mcp_server._TRANSPORT_SECURITY = prior
 
 
+def test_daemon_session_manager_keeps_unbounded_session_lifetime():
+    """mcp 2.2.0's streamable-HTTP session manager closes a stateful session
+    after 1800 s idle and answers 503 past 10,000 live sessions by default.
+    The daemon keeps 2.1's behaviour (maintainer decision 2026-10-16): no
+    idle close, no cap. Asserted on the manager the built app really uses."""
+    from pseudolife_memory import mcp_server
+
+    mcp_server.build_streamable_http_app()
+    manager = mcp_server.mcp.session_manager
+    assert manager.session_idle_timeout is None
+    assert manager.max_sessions is None
+
+
 # ---------------------------------------------------------------------------
 # memory_outcome(used_ids=...) — the relevance label an agent writes
 # ---------------------------------------------------------------------------

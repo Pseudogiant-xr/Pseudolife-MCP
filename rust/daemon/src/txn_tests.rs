@@ -7,7 +7,7 @@ use tokio_postgres::NoTls;
 
 // OPEN belongs to the process's one leased writer. Keep isolated peers from
 // deliberately exercising that marker concurrently with each other.
-static TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(crate) async fn background_recovers_before_write(
     operation: impl for<'a> FnOnce(&'a Client) -> std::pin::Pin<Box<dyn Future<Output = ()> + 'a>>,
@@ -195,12 +195,12 @@ async fn message(stream: &mut TcpStream, tag: u8, data: &[u8]) {
     stream.write_all(data).await.unwrap();
 }
 
-async fn completion(stream: &mut TcpStream, tag: &[u8], state: u8) {
+pub(crate) async fn completion(stream: &mut TcpStream, tag: &[u8], state: u8) {
     message(stream, b'C', tag).await;
     message(stream, b'Z', &[state]).await;
 }
 
-async fn startup(stream: &mut TcpStream) {
+pub(crate) async fn startup(stream: &mut TcpStream) {
     let length = stream.read_u32().await.unwrap();
     let mut data = vec![0; (length - 4) as usize];
     stream.read_exact(&mut data).await.unwrap();
@@ -209,7 +209,7 @@ async fn startup(stream: &mut TcpStream) {
     message(stream, b'Z', b"I").await;
 }
 
-async fn query(stream: &mut TcpStream) -> String {
+pub(crate) async fn query(stream: &mut TcpStream) -> String {
     assert_eq!(stream.read_u8().await.unwrap(), b'Q');
     let length = stream.read_u32().await.unwrap();
     let mut data = vec![0; (length - 4) as usize];
@@ -217,7 +217,7 @@ async fn query(stream: &mut TcpStream) -> String {
     String::from_utf8(data[..data.len() - 1].to_vec()).unwrap()
 }
 
-async fn terminal_error(stream: &mut TcpStream, code: &str) {
+pub(crate) async fn terminal_error(stream: &mut TcpStream, code: &str) {
     let data = format!("SERROR\0VERROR\0C{code}\0Mfixture terminal-command refusal\0\0");
     message(stream, b'E', data.as_bytes()).await;
     message(stream, b'Z', b"E").await;

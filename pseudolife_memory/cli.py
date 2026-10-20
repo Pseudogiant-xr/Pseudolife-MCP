@@ -86,6 +86,9 @@ modes:
                  (plain mail never wakes), print the mail and exit (arm as a
                  background command to wake an idle session; exit 0 ring,
                  3 timeout, 2 setup; --help for options)
+  delegate-watch wake a delegate session with board mail only when something
+                 needs a decision: pull requests, CI, suite results and suite
+                 leases, polled without a model (--help for options)
   lease          hold a named lease around a command: `lease run NAME --
                  COMMAND...` takes an OS file lock the agent board mirrors
                  (FIFO queue, holder, expected end); `lease hold NAME
@@ -205,6 +208,9 @@ def main() -> None:
     elif mode == "wait-mail":
         from pseudolife_memory.wait_mail_cli import run_wait_mail
         sys.exit(run_wait_mail(sys.argv[2:]))
+    elif mode == "delegate-watch":
+        from pseudolife_memory.delegate_watch_cli import main as delegate_watch_main
+        sys.exit(delegate_watch_main(sys.argv[2:]))
     elif mode == "lease":
         from pseudolife_memory.lease_cli import main as lease_main
         sys.exit(lease_main(sys.argv[2:]))

@@ -1,5 +1,6 @@
 //! Session-scoped coordination. Mailbox credentials never enter diagnostics.
 pub mod adapter;
+pub mod claim_name;
 pub mod claims;
 #[cfg(feature = "codex-delivery")]
 pub mod delivery;

@@ -188,9 +188,39 @@ if [ "${1:-}" = memory-changes ]; then
     SINCE=${SINCE%$'\r'}
     case "$SINCE" in ''|*[!0123456789.]*) SINCE="" ;; esac
     [ "${#SINCE}" -le 22 ] || SINCE=""
+    # The session's board address (<key>.agent, which the shim writes beside
+    # its digest): the daemon appends the maintainer's delegate's one-line
+    # reminder to this same answer, and nothing for any other session. The
+    # shim keys its files by its launch id, so a Claude Code hook follows the
+    # process record while line 2 confirms it for this session, as
+    # coordination-prompt.sh does; the cursor above stays this session's own.
+    AGENT_KEY=$KEY
+    if [ -z "$CODEX_HOOK_CONTEXT" ]; then
+        case "${CLAUDE_PID:-}" in
+            ''|*[!0123456789]*) ;;
+            *)
+                RECORD="$MARK_DIR/claude-$CLAUDE_PID.host"
+                if [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ] &&
+                        [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
+                    SHIM="" FOR=""
+                    { IFS= read -r SHIM; IFS= read -r FOR; } 2>/dev/null < "$RECORD"
+                    case "$SHIM" in ''|*[!0123456789abcdef]*) SHIM="" ;; esac
+                    [ "${#SHIM}" -eq 64 ] && [ "$FOR" = "$KEY" ] && AGENT_KEY=$SHIM
+                fi
+                ;;
+        esac
+    fi
+    AGENT_ID=""
+    AGENT_FILE="$MARK_DIR/$AGENT_KEY.agent"
+    if [ -f "$AGENT_FILE" ] && [ ! -L "$AGENT_FILE" ]; then
+        IFS= read -r AGENT_ID 2>/dev/null < "$AGENT_FILE"
+        AGENT_ID=${AGENT_ID%$'\r'}
+        case "$AGENT_ID" in *[!0123456789abcdef]*) AGENT_ID="" ;; esac
+        [ "${#AGENT_ID}" -eq 32 ] || AGENT_ID=""
+    fi
     # One attempt, no retry: at most about 2 s of the 5 s hook budget.
     BODY=$(curl -L --max-redirs 0 -sf --connect-timeout 1 --max-time 2 \
-        "${AUTH[@]}" "${URL}/api/hook/memory-changes?session_id=${SID}${SINCE:+&since=${SINCE}}" \
+        "${AUTH[@]}" "${URL}/api/hook/memory-changes?session_id=${SID}${SINCE:+&since=${SINCE}}${AGENT_ID:+&agent=${AGENT_ID}}" \
         2>/dev/null) || exit 0
     TOKEN=${BODY%%$'\n'*}
     case "$TOKEN" in ''|*[!0123456789.]*) exit 0 ;; esac
