@@ -154,12 +154,20 @@ def test_failure_cleans_only_this_scenarios_databases(harness, monkeypatch, tmp_
             daemons.append(self)
 
         def start(self, timeout):
+            self.launch()
+            return self.wait(timeout)
+
+        def launch(self):  # daemons.start_all launches every arm, then waits
+            self.started = True
+            return self
+
+        def wait(self, timeout, stages=None):
             nonlocal starts
             starts += 1
-            self.started = True
             if (stage == "seed-start" or stage == "arm-start"
                     and starts == (2 if mode == "live" else 1)):
                 raise FixtureFailure(stage)
+            return self
 
         def stop(self):
             self.stopped = True

@@ -347,6 +347,11 @@ impl PrincipalStore {
         self.len() == 0
     }
 
+    /// A refresh has completed at least once (`/health` `pending`).
+    pub fn loaded(&self) -> bool {
+        self.snap.read().unwrap().loaded_at.is_some()
+    }
+
     pub fn available(&self) -> bool {
         crate::mutants::active("principal-unavailable")
             || matches!(self.snap.read().unwrap().loaded_at, Some(t) if t.elapsed() <= STALE_AFTER)

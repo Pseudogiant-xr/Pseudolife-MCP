@@ -217,6 +217,14 @@ RING="$DIGEST_DIR/$KEY.ring"
 AGENT="$DIGEST_DIR/$KEY.agent"
 TURN="$DIGEST_DIR/$KEY.turn"
 [ -L "$FILE" ] && exit 0
+# Whether the digest was there when the Stop fired. The watch's first look
+# comes after the park gate and the lease write: one spawn later on an idle
+# host, seconds on a loaded Windows one. A digest the shim removed inside
+# that gap (it exits with Claude Code) would otherwise read as one not yet
+# written and be waited for, and the watcher would fire on a later
+# session's mail.
+DIGEST_AT_ARM=0
+[ -f "$FILE" ] && DIGEST_AT_ARM=1
 
 # A bearer file the hook may read: a regular, owner-only, single-link file
 # of bounded size under no symlinked directory. The same check as
@@ -620,7 +628,7 @@ wait_for_mail() {
     # first look always happens, however much of the wait start-up used;
     # the last sleep is cut to the time left, so a short wait ends at its
     # deadline instead of a whole poll later.
-    local deadline=$WAIT snapshot present=0 nap
+    local deadline=$WAIT snapshot present=$DIGEST_AT_ARM nap
     while :; do
         still_owner || return 3
         if [ -n "$PARENT" ] && ! parent_alive; then return 3; fi

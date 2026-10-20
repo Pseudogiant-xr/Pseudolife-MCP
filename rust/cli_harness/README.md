@@ -98,6 +98,14 @@ the rows already finished; `complete` is true only once every row ran.
   `TEMP`, ...). Tokens, digest and lock directories never leak in from the
   caller. `PSEUDOLIFE_MCP_DAEMON_URL` always names the case's fixture daemon,
   or a closed loopback port, so no case reaches a real daemon.
+- Both arms run with `PSEUDOLIFE_HOOK_PROBE_MS=5000` (`core.HOOK_PROBE_MS`).
+  Hooks probe `/health` with a 250 ms budget and stay silent on a miss; a cold
+  hosted Windows runner can stall one arm's first connection or TLS
+  handshake past that, which reads as a difference neither port caused. Both
+  CLIs read the variable the same way (a positive whole number of
+  milliseconds, clamped to 60000; anything else keeps 250 ms), so the
+  comparison is unchanged. It is a test-facing knob, not a user setting. The
+  health-trickle cases, which test the per-read deadline itself, unset it.
 - Bank-backed rows use disposable databases on the bench PostgreSQL through
   the test login only, never the live bank. Every database and template name
   has a random run suffix; cleanup accepts only names allocated by that run.
