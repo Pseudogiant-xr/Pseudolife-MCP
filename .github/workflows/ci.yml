@@ -150,7 +150,8 @@ jobs:
 
       - name: Tree-wide guards
         # Every test file that reads CHANGELOG.md, plus the tracked-tree
-        # scans. The disposable-database guard scans every tracked .py file,
+        # scans (the wall-clock budget guard covers rust/ tests, so Rust-only
+        # PRs, which skip the test job, still run it). The disposable-database guard scans every tracked .py file,
         # rust/cli_harness/ included: #660 and #662 landed an unguarded reap
         # there on 2026-10-09 because this job did not run it.
         run: >-
@@ -160,7 +161,7 @@ jobs:
           tests/test_codex_hook_launcher.py tests/test_label_pair.py
           tests/test_merge_queue.py tests/test_plugin_packaging.py
           tests/test_rescore_strict_mc.py tests/test_schema_version.py
-          tests/test_changelog_fragments.py
+          tests/test_changelog_fragments.py tests/test_wall_clock_budgets.py
           "tests/test_disposable_database_guard.py::test_every_reap_and_full_bank_truncate_is_guarded_first"
 
   test:
