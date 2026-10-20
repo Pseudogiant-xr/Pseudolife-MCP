@@ -126,3 +126,25 @@ def test_tagged_proof_covers_hint_ring_receive_ack_and_drops_its_bank(pg_url, pg
                for stage in result["stages"])
     assert result["host_delivery"] == result["model_ack"] == "unverified"
     assert "synthetic-proof-bearer" not in json.dumps(result)
+
+
+def test_the_cleanup_budget_outlasts_a_measured_checkpoint(monkeypatch):
+    """DROP DATABASE waits for an immediate checkpoint. The bench Postgres's
+    largest took 150-172 s under a 4-worker suite (2026-10-19), and the
+    30 s attempts gave up, leaving the bank and a false cleanup failure."""
+    import re
+    from pseudolife_memory import coordination_proof as proof
+    budgets = []
+    class Admin:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def execute(self, statement):
+            text = statement if isinstance(statement, str) else statement.as_string()
+            if text.startswith("SET statement_timeout"):
+                budgets.append(text)
+    monkeypatch.setattr(psycopg, "connect", lambda *args, **kwargs: Admin())
+    with proof._disposable_bank("host=127.0.0.1 port=6543 dbname=pseudolife_memory_test_fixture"):
+        pass
+    cleanup = budgets[-1]
+    seconds = int(re.search(r"'(\d+)s'", cleanup).group(1))
+    assert seconds > 172, cleanup

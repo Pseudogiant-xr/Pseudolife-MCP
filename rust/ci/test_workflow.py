@@ -57,6 +57,8 @@ PARITY_CHECKS = {
     "Daemon resident startup parity": "cli",
     "Run unchanged candidates and differential judges": "judges",
 }
+# Parity uploads carry the lane prefix: empty on hosted, set by parity-selfhosted.
+ARTIFACT_PREFIX = "${{ env.PARITY_ARTIFACT_PREFIX }}"
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
                   "--collect-only", "--co", "--lf", "--last-failed", "--stepwise", "--sw"}
 
@@ -176,14 +178,14 @@ def check_w1c_shards(jobs):
                     ("--row", "test_login", "--record", "-v", "--out"))
     retained = steps["Retain the recorded Linux test_login golden"]
     assert retained["if"] == "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
-    assert retained["with"]["name"] == "test_login-linux-golden"
+    assert retained["with"]["name"] == ARTIFACT_PREFIX + "test_login-linux-golden"
     assert retained["with"]["path"].splitlines() == [
         "rust/cli_harness/goldens/test_login.linux.json",
         "${{ runner.temp }}/test-login-linux-record.json"]
     summaries = steps["Retain CLI harness summaries"]
     assert summaries["if"] == ("always() && (matrix.suite == 'cli' || "
                                "startsWith(matrix.suite, 'w1c-'))")
-    assert summaries["with"]["name"] == "cli-harness-${{ runner.os }}-${{ matrix.suite }}"
+    assert summaries["with"]["name"] == ARTIFACT_PREFIX + "cli-harness-${{ runner.os }}-${{ matrix.suite }}"
     assert summaries["with"]["path"] == "${{ runner.temp }}/cli-harness*.json"
     # A second explicit row invocation outside the shard step duplicates work.
     for step in job["steps"]:
@@ -543,7 +545,7 @@ def run_gate(needs, event):
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
 @pytest.mark.parametrize("dependency", ["parity-checks", "source-mutants"])
-@pytest.mark.parametrize("event", ["pull_request", "push", "schedule", "workflow_dispatch"])
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push", "schedule", "workflow_dispatch"])
 def test_required_parity_gate_fails_closed(result, dependency, event):
     gate = workflow()["jobs"]["parity"]
     assert gate["needs"] == GATE_NEEDS
@@ -556,8 +558,8 @@ def test_required_parity_gate_fails_closed(result, dependency, event):
     executed = subprocess.run(["pwsh", "-NoProfile", "-Command", step["run"]],
                               env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
                               capture_output=True, text=True)
-    accepted = result == "success" or (event in ("pull_request", "push") and dependency == "source-mutants"
-                                       and result == "skipped")
+    accepted = result == "success" or (event in ("pull_request", "merge_group", "push")
+                                       and dependency == "source-mutants" and result == "skipped")
     assert executed.returncode == (0 if accepted else 1), executed.stderr
 
 
@@ -566,8 +568,9 @@ DOCS_ONLY_SKIP = {"scope": {"result": "success", "outputs": {"rust": "false"}},
                   "parity-checks": {"result": "skipped"}, "source-mutants": {"result": "skipped"}}
 
 
-def test_parity_gate_accepts_a_documentation_only_pull_request():
-    executed = run_gate(DOCS_ONLY_SKIP, "pull_request")
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+def test_parity_gate_accepts_a_documentation_only_pull_request_or_merge_group(event):
+    executed = run_gate(DOCS_ONLY_SKIP, event)
     assert executed.returncode == 0, executed.stderr
 
 
@@ -583,10 +586,11 @@ def test_parity_gate_accepts_the_docs_skip_only_on_pull_requests(event):
     {"result": "skipped", "outputs": {}},
     {"result": "cancelled", "outputs": {"rust": "false"}},
 ])
-def test_parity_gate_rejects_skips_scope_did_not_choose(scope):
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+def test_parity_gate_rejects_skips_scope_did_not_choose(scope, event):
     needs = copy.deepcopy(DOCS_ONLY_SKIP)
     needs["scope"] = scope
-    assert run_gate(needs, "pull_request").returncode == 1
+    assert run_gate(needs, event).returncode == 1
 
 
 @pytest.mark.parametrize("job", ["rust", "candidate", "parity-checks"])
@@ -597,22 +601,34 @@ def test_parity_gate_still_fails_a_broken_job_on_a_docs_pull_request(job, result
     assert run_gate(needs, "pull_request").returncode == 1
 
 
-def run_scope(tmp_path, event, files, git_exit=0):
+def run_scope(tmp_path, event, files, git_exit=0, base_ref="refs/heads/master", fetch_exit=0):
     import os
     step = next(s for s in workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
+    assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}",
+                           "MERGE_GROUP_BASE_REF": "${{ github.event.merge_group.base_ref }}"}
     output = tmp_path / "github_output"
     output.write_text("", encoding="utf-8")
-    # Stand in for `git diff`, the step's only external input.
+    # Stand in for `git fetch` and `git diff`, the step's only external inputs.
+    # A pull request diffs its merge commit against the base parent; a merge
+    # group fetches master's tip and diffs that against the group head, so
+    # every unmerged queue entry counts whatever merge_group.base_sha names.
     bootstrap = r'''
 function git {
+    $line = $args -join ' '
+    if ($env:EVENT_NAME -ceq 'merge_group' -and $line -ceq 'fetch --no-tags --depth=1 origin refs/heads/master') {
+        $global:LASTEXITCODE = [int]$env:PL_FIXTURE_FETCH_EXIT
+        return
+    }
+    $base = if ($env:EVENT_NAME -ceq 'merge_group') { 'FETCH_HEAD' } else { 'HEAD^1' }
     # Renames must list both paths, or rust/x.md -> docs/x.md reads as docs.
-    if (($args -join ' ') -cne 'diff --no-renames --name-only HEAD^1 HEAD') { throw "unexpected git $args" }
+    if ($line -cne "diff --no-renames --name-only $base HEAD") { throw "unexpected git $args" }
     $global:LASTEXITCODE = [int]$env:PL_FIXTURE_GIT_EXIT
     if ($env:PL_FIXTURE_FILES) { $env:PL_FIXTURE_FILES -split "`n" }
 }
 '''
     result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", bootstrap + step["run"]],
                             env=dict(os.environ, EVENT_NAME=event, GITHUB_OUTPUT=str(output),
+                                     MERGE_GROUP_BASE_REF=base_ref, PL_FIXTURE_FETCH_EXIT=str(fetch_exit),
                                      PL_FIXTURE_FILES="\n".join(files), PL_FIXTURE_GIT_EXIT=str(git_exit)),
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -653,14 +669,30 @@ CODE_CHANGES = [
 ]
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", DOCS_ONLY_CHANGES)
-def test_scope_skips_a_documentation_only_pull_request(tmp_path, files):
-    assert run_scope(tmp_path, "pull_request", files) == ["rust=false"]
+def test_scope_skips_a_documentation_only_pull_request(tmp_path, files, event):
+    assert run_scope(tmp_path, event, files) == ["rust=false"]
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", CODE_CHANGES)
-def test_scope_runs_everything_for_any_other_change(tmp_path, files):
-    assert run_scope(tmp_path, "pull_request", files) == ["rust=true"]
+def test_scope_runs_everything_for_any_other_change(tmp_path, files, event):
+    assert run_scope(tmp_path, event, files) == ["rust=true"]
+
+
+def test_scope_runs_everything_for_a_mixed_merge_group(tmp_path):
+    # A docs PR and a code PR queued together: the group is not docs-only.
+    group = ["CLAUDE.md", "docs/guide/configuration.md", "rust/daemon/src/main.rs"]
+    assert run_scope(tmp_path, "merge_group", group) == ["rust=true"]
+
+
+@pytest.mark.parametrize("base_ref, fetch_exit", [
+    ("", 0), ("master", 0), ("refs/heads/topic", 0), ("refs/heads/master2", 0),
+    ("REFS/HEADS/MASTER", 0), ("refs/heads/master", 128)])
+def test_scope_runs_everything_without_a_fetched_master_tip(tmp_path, base_ref, fetch_exit):
+    assert run_scope(tmp_path, "merge_group", ["CLAUDE.md"], base_ref=base_ref,
+                     fetch_exit=fetch_exit) == ["rust=true"]
 
 
 @pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
@@ -668,9 +700,10 @@ def test_scope_never_skips_outside_pull_requests(tmp_path, event):
     assert run_scope(tmp_path, event, ["CLAUDE.md"]) == ["rust=true"]
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files, git_exit", [([], 0), (["CLAUDE.md"], 128)])
-def test_scope_runs_everything_on_an_empty_or_unreadable_diff(tmp_path, files, git_exit):
-    assert run_scope(tmp_path, "pull_request", files, git_exit) == ["rust=true"]
+def test_scope_runs_everything_on_an_empty_or_unreadable_diff(tmp_path, files, git_exit, event):
+    assert run_scope(tmp_path, event, files, git_exit) == ["rust=true"]
 
 
 def concurrency_group(event, ref="refs/heads/master", mode=None, run_id="101"):
@@ -712,7 +745,28 @@ def test_nightly_never_shares_a_group_with_master_pushes():
     assert workflow()["concurrency"]["cancel-in-progress"] is True
 
 
-@pytest.mark.parametrize("event, runs", [("pull_request", False), ("push", False),
+def test_merge_group_runs_share_no_group_with_pull_requests_or_pushes():
+    # Each queue entry has its own branch ref, so neither a PR's newer push nor
+    # a master push can cancel the queue's run, and it cancels neither.
+    queued = "refs/heads/gh-readonly-queue/master/pr-830-" + "a" * 40
+    group = concurrency_group("merge_group", queued)
+    assert group not in (concurrency_group("push"), concurrency_group("schedule"),
+                         concurrency_group("pull_request", "refs/pull/830/merge"),
+                         concurrency_group("workflow_dispatch", mode="ci"))
+    assert group != concurrency_group(
+        "merge_group", "refs/heads/gh-readonly-queue/master/pr-831-" + "b" * 40)
+
+
+def test_merge_queue_trigger_and_image_base():
+    events = workflow().get("on", workflow().get(True))
+    assert "merge_group" in events and "pull_request" in events
+    step = next(s for s in workflow()["jobs"]["daemon-image"]["steps"]
+                if s.get("id") == "image-inputs")
+    assert step["env"]["BASE_SHA"] == ("${{ github.event.pull_request.base.sha || "
+                                       "github.event.merge_group.base_sha || github.event.before }}")
+
+
+@pytest.mark.parametrize("event, runs", [("pull_request", False), ("merge_group", False), ("push", False),
                                          ("schedule", True), ("workflow_dispatch", True)])
 def test_source_mutants_run_nightly_and_on_manual_ci_only(event, runs):
     condition = workflow()["jobs"]["source-mutants"]["if"]
@@ -1119,3 +1173,135 @@ def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
     # cancelled run saves no cache, so the next run on that image is cold too.
     assert job["timeout-minutes"] >= 45
     assert 0 < override["timeout-minutes"] < job["timeout-minutes"]
+
+
+# --- self-hosted comparison lane (docs/specs/2026-10-19-self-hosted-parity-lane.md) ---
+
+SELF_HOSTED = "runner.environment == 'self-hosted'"
+GATE_STEP = "Yield to this machine's full suite"
+VENV_STEP = "Give the shard its own Python environment"
+
+
+def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    # Anchors, not a copy: a step or shard added to the hosted matrix reaches
+    # the self-hosted lane in the same edit.
+    for alias in ("steps: *parity_steps", "suite: *parity_suites", "include: *parity_shards"):
+        assert text.count(alias) == 1, alias
+    jobs = workflow()["jobs"]
+    hosted, lane = jobs["parity-checks"], jobs["parity-selfhosted"]
+    assert lane["steps"] == hosted["steps"]
+    assert lane["strategy"]["matrix"]["suite"] == hosted["strategy"]["matrix"]["suite"]
+    assert lane["strategy"]["matrix"]["include"] == hosted["strategy"]["matrix"]["include"]
+    assert lane["strategy"]["matrix"]["runner"] == (
+        "${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
+    assert lane["strategy"]["fail-fast"] is False
+    assert lane["needs"] == hosted["needs"] == ["candidate", "rust"]
+    # Only the maintainer's registered runners: one label per machine.
+    assert lane["runs-on"] == ["self-hosted", "pseudolife-parity-${{ matrix.runner }}"]
+    assert lane["timeout-minutes"] >= 210 + int(lane["env"]["PARITY_YIELD_MINUTES"])
+    assert lane["env"]["PARITY_MIN_FREE_GB"] == "8"
+
+
+def test_selfhosted_lane_never_touches_a_required_check():
+    jobs = workflow()["jobs"]
+    lane = jobs["parity-selfhosted"]
+    assert lane["continue-on-error"] is True
+    for name, job in jobs.items():
+        needs = job.get("needs", [])
+        assert "parity-selfhosted" not in ([needs] if isinstance(needs, str) else needs), name
+    assert "parity-selfhosted" not in jobs["parity"]["steps"][0]["run"]
+    # Nightly and manual CI only: their concurrency groups are their own, so
+    # queued self-hosted jobs neither hold a PR's checks open nor let a newer
+    # master push cancel a run whose hosted jobs already finished.
+    assert lane["if"] == (
+        "${{ !cancelled() && (github.event_name == 'schedule' || "
+        "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
+        "&& vars.PARITY_SELFHOSTED_RUNNERS != '' "
+        "&& needs.candidate.result == 'success' && needs.rust.result == 'success' }}")
+    assert "pull_request" not in lane["if"] and "'push'" not in lane["if"]
+
+
+def test_both_lanes_upload_under_distinct_names():
+    jobs = workflow()["jobs"]
+    assert jobs["parity-checks"]["env"]["PARITY_ARTIFACT_PREFIX"] == ""
+    assert jobs["parity-selfhosted"]["env"]["PARITY_ARTIFACT_PREFIX"] == "self-hosted-"
+    uploads = [step for step in jobs["parity-checks"]["steps"]
+               if step.get("uses") == "actions/upload-artifact@v4"]
+    assert uploads
+    for step in uploads:
+        assert step["with"]["name"].startswith(ARTIFACT_PREFIX), step.get("name")
+
+
+def test_self_hosted_only_steps_leave_the_hosted_shard_unchanged():
+    steps = workflow()["jobs"]["parity-checks"]["steps"]
+    gate = steps[0]
+    assert gate["name"] == GATE_STEP and gate["if"] == SELF_HOSTED
+    assert steps[1]["uses"] == "actions/checkout@v4"
+    venv = next(step for step in steps if step.get("name") == VENV_STEP)
+    assert venv["if"] == SELF_HOSTED
+    setup = next(step for step in steps if step.get("uses") == "actions/setup-python@v5")
+    assert steps.index(setup) < steps.index(venv)
+    install = next(step for step in steps if step.get("name") == "Install checkout and test dependencies")
+    assert steps.index(venv) < steps.index(install)
+    # Self-hosted runners save nothing to the repository cache, which the
+    # hosted Rust caches need; hosted keeps both caches as before.
+    assert setup["with"]["cache"] == "${{ runner.environment != 'self-hosted' && 'pip' || '' }}"
+    cache = next(step for step in steps if step.get("uses") == "Swatinem/rust-cache@v2")
+    assert cache["with"]["save-if"] == "${{ runner.environment != 'self-hosted' }}"
+    added = [step for step in steps if SELF_HOSTED in step.get("if", "")]
+    assert [step["name"] for step in added] == [GATE_STEP, VENV_STEP]
+
+
+GATE_STUBS = r'''$ErrorActionPreference = 'stop'
+function Get-Command { if ($env:PL_NO_CLI -eq '1') { $null } else { $true } }
+function Start-Sleep { Add-Content -LiteralPath $env:PL_LOG -Value 'sleep' }
+function pseudolife-mcp {
+    Add-Content -LiteralPath $env:PL_LOG -Value ("call " + ($args -join ' ') + " | $env:PSEUDOLIFE_SUITE_LEASE | $env:PSEUDOLIFE_SUITE_LOCK_DIR")
+    $sequence = ConvertFrom-Json $env:PL_SEQUENCE -NoEnumerate
+    $calls = @(Get-Content -LiteralPath $env:PL_LOG | Where-Object { $_ -like 'call *' }).Count
+    $reply = $sequence[[math]::Min($calls, $sequence.Count) - 1]
+    ConvertTo-Json -Compress @{ name = $args[-1]; held = ($reply[0] -eq 1); local = @{ state = $reply[1] } }
+    $global:LASTEXITCODE = $reply[0]
+}
+'''
+
+
+@pytest.mark.parametrize("case, sequence, overrides, accepted, calls, sleeps", [
+    ("free", [[0, "free"]], {}, True, 1, 0),
+    ("waits for the suite", [[1, "held"], [1, "held"], [0, "free"]], {}, True, 3, 2),
+    ("yields", [[1, "held"]], {"PARITY_YIELD_MINUTES": "0"}, False, 1, 0),
+    ("check failed", [[70, None]], {}, False, 1, 0),
+    ("no lock file reads free", [[0, None]], {}, False, 1, 0),
+    ("the host's lease", [[0, "free"]], {"PSEUDOLIFE_PARITY_LEASE": "full-suite"}, False, 0, 0),
+    ("no lock directory", [[0, "free"]], {"PSEUDOLIFE_PARITY_LOCK_DIR": ""}, False, 0, 0),
+    ("no cli", [[0, "free"]], {"PL_NO_CLI": "1"}, False, 0, 0),
+    ("disk below the floor", [[0, "free"]], {"PARITY_MIN_FREE_GB": "1000000"}, False, 0, 0),
+])
+def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, overrides,
+                                                   accepted, calls, sleeps):
+    import os
+    gate = workflow()["jobs"]["parity-checks"]["steps"][0]
+    log, summary = tmp_path / "calls.log", tmp_path / "summary.md"
+    log.write_text("", encoding="utf-8")
+    env = dict(os.environ, PL_LOG=str(log), PL_SEQUENCE=json.dumps(sequence),
+               GITHUB_WORKSPACE=str(tmp_path), GITHUB_STEP_SUMMARY=str(summary),
+               PSEUDOLIFE_PARITY_LEASE="full-suite@fixture",
+               PSEUDOLIFE_PARITY_LOCK_DIR=str(tmp_path / "locks"),
+               **workflow()["jobs"]["parity-selfhosted"]["env"])
+    # Only the low-disk case may depend on this machine's free space.
+    env["PARITY_MIN_FREE_GB"] = "0"
+    env.pop("PSEUDOLIFE_SUITE_LEASE", None)
+    env.pop("PSEUDOLIFE_SUITE_LOCK_DIR", None)
+    env.update(overrides)
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                             GATE_STUBS + gate["run"]], env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == accepted, case + result.stdout + result.stderr
+    lines = log.read_text(encoding="utf-8").splitlines()
+    made = [line for line in lines if line.startswith("call ")]
+    assert len(made) == calls, lines
+    assert lines.count("sleep") == sleeps, lines
+    for line in made:
+        assert line == f"call lease check --json full-suite@fixture | full-suite@fixture | {tmp_path / 'locks'}"
+    yielded = summary.exists() and "Yielded" in summary.read_text(encoding="utf-8")
+    assert yielded == (case == "yields")

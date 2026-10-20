@@ -9,6 +9,7 @@ mod background_sessions;
 mod bank;
 mod board;
 mod config;
+mod consolidation_tools;
 mod contradiction;
 mod correction_tools;
 mod dream;
@@ -22,6 +23,7 @@ mod fact_set;
 mod forget_tools;
 mod freshness;
 mod graph_read;
+mod graph_write_tools;
 #[cfg(feature = "harness")]
 mod harness_route;
 mod health;

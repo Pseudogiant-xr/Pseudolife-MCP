@@ -13,8 +13,8 @@ Any Rust build serves ``memory_store``, ``memory_fact_set``,
 ``memory_episode_start``, ``memory_episode_end``, ``memory_session_title``,
 ``memory_episode_summary``, ``memory_outcome``, ``memory_reinforce``,
 ``memory_history``, ``memory_world_set``, ``memory_world_search``,
-``memory_lesson_search``, ``memory_supersede``, ``memory_reinstate`` and
-``memory_forget`` on ``/mcp`` (``--features mutants`` adds the
+``memory_lesson_search``, ``memory_supersede``, ``memory_reinstate``,
+``memory_forget`` and ``memory_consolidation_candidates`` on ``/mcp`` (``--features mutants`` adds the
 deliberate breaks). Each scenario prepares
 one template bank through the Python daemon's own write path (seed calls
 only, never hand-written rows, except the declared ``sql`` seed op below),
@@ -45,6 +45,9 @@ Normalizers (declared, spec "Free for W1 and W2"):
   ``hlc_phys`` keep only null-or-not; ``retrieved_at`` (column and answer)
   does only when it lies within a day of now (a write without one takes the
   clock), and an explicit past value compares exactly;
+* a candidate cluster's ``seed_score`` compares like a search ``score`` and
+  its ``cohesion`` within one rounding unit (1e-4), only inside a cluster
+  (an object with ``members``);
 * a search ``score`` in a response, and each ``score`` in a
   ``lesson_search_events.served`` list, compares within 1.5e-4: the two
   embedders agree to the measured tolerance, and scores are rounded to 4
@@ -139,7 +142,8 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("memory_trace_invalidations", "invalidated_at"),
          ("entry_reinstatement_decisions", "decided_at"),
          ("lessons", "superseded_at"), ("edges", "superseded_at"),
-         ("store_decisions", "decided_at"), ("slot_reads", "last_read_at")}
+         ("store_decisions", "decided_at"), ("slot_reads", "last_read_at"),
+         ("edges", "asserted_at"), ("relations", "created_at")}
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
 RECENT_CLOCK = {("world_facts", "retrieved_at")}
@@ -151,6 +155,9 @@ RESPONSE_RECENT_CLOCK = {"retrieved_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
 SCORE_TOLERANCE = 1.5e-4
+# A cluster's cohesion: cosines over vectors both banks hold identically,
+# rounded to 4 places, so at most one rounding unit apart.
+COHESION_TOLERANCE = 1e-4
 # meta key -> paths (keys) inside its JSON value that are wall-clock.
 META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -200,7 +207,15 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-forget-no-bulk-guard", "mcp-forget-delete-digests", "mcp-forget-cortex-stale",
            "mcp-forget-no-lesson-cascade", "mcp-forget-lessons-stale", "mcp-forget-facts-kept",
            "mcp-forget-edges-kept", "mcp-forget-slot-reads-kept", "mcp-forget-no-world-audit",
-           "mcp-forget-no-lesson-audit"]
+           "mcp-forget-no-lesson-audit",
+           # memory_consolidation_candidates (spec CC1-CC9): caught by
+           # consolidation-candidates.
+           "mcp-consolidation-unsorted", "mcp-consolidation-unverified",
+           # the graph store's write tools (spec GW1-GW12): caught by the
+           # graph-writes and graph-relations scenarios.
+           "mcp-graph-no-etype-backfill", "mcp-graph-no-slot-fold", "mcp-graph-no-warnings",
+           "mcp-graph-unrelate-missing-dst", "mcp-graph-alias-canonical",
+           "mcp-graph-redefine-builtin", "mcp-graph-inverse-unchecked"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1211,7 +1226,7 @@ def supersede(new_text, headers=(), **kw) -> dict:
 
 
 # Scenarios whose operations may include ``external`` writes.
-EXTERNAL_WRITES = {"supersede-branches", "reinstate"}
+EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates"}
 
 
 def external(statement: str) -> dict:
@@ -1683,6 +1698,207 @@ SCENARIOS.update({
 })
 
 
+# memory_consolidation_candidates (spec CC1-CC9), read-only, on templates
+# whose entries (near-duplicates across sessions, a retired one, a tagged
+# one) the Python daemon's own tools wrote.
+def candidates(headers=(), **kw) -> dict:
+    return {"op": "tool", "name": "memory_consolidation_candidates", "args": kw,
+            "headers": list(headers)}
+
+
+STAGING = "staging database host"
+SCENARIOS.update({
+    "consolidation-candidates": {
+        "config": None,
+        "seed": [
+            store("The staging database lives on host db-stage-1.", [sess("sess-c1")]),
+            store("Staging DB host is db-stage-1.", [sess("sess-c2")]),
+            store("db-stage-1 hosts the staging database.", [sess("sess-c3")], source="user"),
+            store("Our CI runs on GitHub Actions.", [sess("sess-c1")]),
+            store("Continuous integration uses GitHub Actions runners.", [sess("sess-c2")]),
+            store("I like oat milk in my coffee.", [sess("sess-c1")]),
+            store("Deploys happen on Tuesdays after the staging database check.",
+                  [sess("sess-c1")], tags=["ops"]),
+            store("The staging database used to be on db-stage-0.", [sess("sess-c1")]),
+            # a twin text in sess-c1 (the episode walk offers one per text),
+            # with another entry's vector: an exact score tie would leave the
+            # retrieval order free (torch.topk; divergences.md)
+            sql("INSERT INTO entries (band, text, embedding, surprise, ts, access_count, source, "
+                "episode_id, episode_title, tags, slots, dream_state) SELECT a.band, a.text, "
+                "b.embedding, a.surprise, a.ts + 1, 0, a.source, a.episode_id, a.episode_title, "
+                "a.tags, a.slots, a.dream_state FROM entries a, entries b "
+                "WHERE a.text = 'Our CI runs on GitHub Actions.' "
+                "AND b.text = 'I like oat milk in my coffee.'", after_stop=True),
+            supersede("The staging database moved off db-stage-0 to db-stage-1.",
+                      old_text="The staging database used to be on db-stage-0."),
+        ],
+        "ops": [
+            # no anchor (an empty query is none): nothing to cluster
+            candidates(),
+            candidates(query=""),
+            # the query anchor: retrieval (access accrual), retired entries
+            # excluded, clusters by cosine to the seed
+            candidates(query=STAGING),
+            candidates(query=STAGING, min_cohesion=0.95),
+            candidates(query="continuous integration", sources=["agent"], top_k=5),
+            candidates(query=STAGING, tags=[" OPS "]),
+            candidates(query="what do we run", min_cluster_size=1, max_clusters=2),
+            candidates(query=STAGING, min_cohesion="nan"),
+            candidates(query=STAGING, episode="@root:sess-c2:32"),
+            # empty lists and an empty episode are no filter
+            candidates(query=STAGING, sources=[], tags=[], episode=""),
+            # the episode anchor: its entries in band order, score 1.0
+            candidates(episode="@root:sess-c1:32", min_cohesion=0.3),
+            candidates(episode="@root:sess-c1:32", sources=["user"]),
+            candidates(episode="@root:sess-c1:32", tags=["ops"], min_cluster_size=1),
+            # the episode walk compares tags as stored: no normalization
+            candidates(episode="@root:sess-c1:32", tags=[" OPS "], min_cluster_size=1),
+            # a row gone behind the daemons' backs is filtered out
+            external("DELETE FROM entries WHERE text = 'Staging DB host is db-stage-1.'"),
+            candidates(query=STAGING),
+            # the episode walk's candidates are checked too, before the cut
+            candidates(episode="@root:sess-c2:32", top_k=1, min_cluster_size=1),
+        ],
+    },
+})
+
+
+def relate(src, relation, dst, **kw) -> dict:
+    return tool("memory_graph_relate", src=src, relation=relation, dst=dst, **kw)
+
+
+def unrelate(src, relation, dst) -> dict:
+    return tool("memory_graph_unrelate", src=src, relation=relation, dst=dst)
+
+
+def alias(entity, name) -> dict:
+    return tool("memory_alias", entity=entity, alias=name)
+
+
+def define(name, description, **kw) -> dict:
+    return {"op": "tool", "name": "memory_relation_define",
+            "args": {"name": name, "description": description, **kw}, "headers": []}
+
+
+SCENARIOS.update({
+    "graph-writes": {
+        "config": None,
+        "seed": [
+            # fact_set mints the subject entities; the Kettle fact's value
+            # names no entity yet, so its object link is empty
+            fact("Postgres", "port", "5432"),
+            fact("Kettle", "brand", "Breville"),
+            fact("Redis", "role", "cache"),
+            # a current fact whose owner node is gone: the fold mints it
+            fact("Nginx", "port", "80"),
+            sql("UPDATE facts SET entity_id = NULL WHERE entity = 'Nginx'; "
+                "DELETE FROM entities WHERE canonical = 'nginx'", after_stop=True),
+        ],
+        "ops": [
+            # an unknown relation: suggestions, nothing minted
+            relate("pgbouncer", "dependz-on", "Postgres"),
+            relate("pgbouncer", "zzzz", "Postgres"),
+            # a fresh source, an existing target
+            relate("PgBouncer", "depends-on", "Postgres"),
+            # the slot-key fold: "postgres.port" is the Postgres port slot
+            relate("postgres.port", "related-to", "Kettle"),
+            # a typed fold: the owner is backfilled; an owner without a node
+            # is minted under its own name and type, relinking its fact
+            relate("postgres.port", "uses", "Kettle", src_type="database"),
+            relate("nginx.port", "related-to", "Kettle", src_type="proxy"),
+            # minting Breville relinks the Kettle fact's object; a later
+            # cortex save must keep the link
+            relate("Breville", "related-to", "Kettle"),
+            fact("Kettle", "colour", "red"),
+            # re-assertion: the confidence bump, capped, and the origin rank
+            relate("PgBouncer", "depends-on", "Postgres", confidence=0.5),
+            relate("PgBouncer", "depends-on", "Postgres", confidence=0.97, origin="user"),
+            relate("PgBouncer", "depends-on", "Postgres", origin="agent"),
+            relate("Redis", "uses", "Postgres", confidence=0.123456, origin="action"),
+            relate("Redis", "uses", "Kettle", confidence=1.0),
+            relate("Redis", "uses", "Breville", confidence=0),
+            # types: a fresh node takes its type, an untyped one is
+            # backfilled, a typed one keeps its own
+            relate("Memcached", "uses", "Postgres", src_type="cache", dst_type="database"),
+            relate("Memcached", "uses", "Postgres", src_type="store", dst_type="other"),
+            # an empty name, a self-loop, a final sigma
+            relate("   ", "related-to", "Kettle"),
+            relate("Kettle", "related-to", "kettle"),
+            relate("\u039f\u0394\u03a5\u03a3\u03a3\u0395\u03a5\u03a3", "related-to", "Kettle"),
+            # unrelate: unknown relation (no hint), unknown entities
+            # (the source is named first), then a live edge twice
+            unrelate("PgBouncer", "dependz-on", "Postgres"),
+            unrelate("Nobody", "depends-on", "Postgres"),
+            unrelate("PgBouncer", "depends-on", "Nobody"),
+            unrelate("Nobody", "depends-on", "Nothing"),
+            unrelate("pgbouncer", "Depends On", "postgres"),
+            unrelate("pgbouncer", "depends-on", "postgres"),
+            # a superseded edge revives on re-assertion
+            relate("PgBouncer", "depends-on", "Postgres"),
+            # aliases: empty, alias of an alias, the canonical refused (a
+            # node minted on the way stays), reassignment, a slot-key owner,
+            # an alias that is another node's canonical
+            alias("Postgres", "  "),
+            alias("Postgres", "pg"),
+            alias("pg", "PostgreSQL"),
+            alias("Postgres", "POSTGRES"),
+            alias("New Thing", "new_thing"),
+            alias("Redis", "pg"),
+            alias("postgres.port", "pgsql"),
+            alias("Redis", "kettle"),
+            # unrelate and relate through aliases
+            relate("pgsql", "stores-data-in", "Redis"),
+            unrelate("PostgreSQL", "stores-data-in", "pg"),
+        ],
+    },
+    "graph-relations": {
+        "config": None,
+        "seed": [
+            fact("Postgres", "port", "5432"),
+            fact("Kettle", "brand", "Breville"),
+        ],
+        "ops": [
+            # refusals: no name, no description, a builtin, an unknown
+            # inverse (the known list sorted), a blank inverse; punctuation
+            # survives normalization, so "!!" is a name
+            define("", "a relation"),
+            define("!!", "a relation"),
+            define("serves", "   "),
+            define("Related To", "redefined"),
+            define("hosted-on", "src runs on host dst", inverse_of="hosts-of"),
+            define("mirrors", "src mirrors dst", inverse_of="   "),
+            # code-point order differs from a collation's for these two
+            define("ab-z", "a relation"),
+            define("abc", "a relation"),
+            define("cycles-with", "src cycles with dst", inverse_of="nope"),
+            # definitions: types, an inverse, a self-inverse, an empty
+            # inverse (none), a redefinition overwriting
+            define("Hosted On", "  src runs on host dst  ", src_type="service",
+                   dst_type="host"),
+            define("hosts-service", "src hosts dst", inverse_of="hosted_on"),
+            define("mirrors", "src mirrors dst", inverse_of="mirrors", transitive=True),
+            define("peers-with", "src peers with dst", inverse_of=""),
+            define("hosted-on", "src is deployed to host dst", src_type="service",
+                   dst_type="host", transitive=True),
+            # typed relations warn on a mismatch and store anyway
+            relate("Redis", "hosted-on", "Postgres", src_type="service", dst_type="database"),
+            relate("Redis", "hosted-on", "box-1", dst_type="host"),
+            relate("Kettle", "Hosted_On", "box-1"),
+            # an empty-string type is stored and stays: a later hint is
+            # answered but not backfilled
+            relate("Toaster", "related-to", "Kettle", src_type=""),
+            relate("Toaster", "hosted-on", "Kettle", src_type="appliance"),
+            relate("Toaster", "hosted-on", "Kettle"),
+            # the new names resolve in relate and unrelate
+            relate("Postgres", "mirrors", "Redis"),
+            relate("box-1", "hosts-service", "Redis"),
+            unrelate("Redis", "hosted-on", "box-1"),
+            relate("Postgres", "hosted on", "box-2"),
+        ],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -2057,6 +2273,15 @@ def normalize_records(a, b, stats=None):
                 a[k], b[k] = _clock(a[k]), _clock(b[k])
             elif k in RESPONSE_RECENT_CLOCK:
                 a[k], b[k] = _recent_clock(a[k]), _recent_clock(b[k])
+            elif (k in ("cohesion", "seed_score") and "members" in a and "members" in b
+                  and isinstance(a[k], (int, float)) and isinstance(b[k], (int, float))
+                  and not isinstance(a[k], bool)):
+                # A candidate cluster: its seed score rests on the query
+                # embedding (the score allowance); its cohesion on vectors
+                # both banks hold identically (one rounding unit).
+                allow = COHESION_TOLERANCE if k == "cohesion" else SCORE_TOLERANCE
+                if abs(a[k] - b[k]) <= allow:
+                    a[k] = b[k] = f"<{k}>"
             elif (k == "score" and isinstance(a[k], (int, float))
                   and isinstance(b[k], (int, float)) and not isinstance(a[k], bool)):
                 d = abs(a[k] - b[k])
@@ -2266,7 +2491,7 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions", "facts", "entities",
                 "outcome_signals", "world_facts", "memory_trace_invalidations",
                 "entry_reinstatement_decisions", "lessons", "edges", "store_decisions",
-                "slot_reads")
+                "slot_reads", "entity_aliases", "relations")
 
 
 def pack(state: dict, full: bool) -> dict:
