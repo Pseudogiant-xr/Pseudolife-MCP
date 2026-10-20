@@ -175,6 +175,34 @@ async fn cleanup_refuses_a_child_outside_its_owned_session_group() {
     fs::remove_dir_all(&home.0).unwrap();
 }
 
+#[test]
+fn stat_of_a_process_reaped_after_open_counts_as_absent() {
+    // The group scan reads every /proc entry, and any process on the host can be
+    // reaped between the scan's open and read; the kernel then reports ESRCH.
+    let mut child = Command::new("sleep")
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let mut stat = fs::File::open(format!("/proc/{pid}/stat")).unwrap();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let mut bytes = Vec::new();
+    let read = io::Read::read_to_end(&mut stat, &mut bytes).map(|_| bytes);
+    assert_eq!(
+        read.as_ref().map_err(io::Error::raw_os_error).err(),
+        Some(Some(libc::ESRCH)),
+        "reading a reaped process's open stat file did not report ESRCH"
+    );
+    assert!(
+        stat_from_read(read, pid).unwrap().is_none(),
+        "a process reaped mid-scan was not treated as absent"
+    );
+}
+
 fn stat(pid: u32, state: u8, group: u32, session: u32, started: u64) -> Vec<u8> {
     let mut fields = vec![
         char::from(state).to_string(),

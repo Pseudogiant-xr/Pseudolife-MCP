@@ -90,7 +90,11 @@ fn parse_stat(bytes: &[u8], expected_pid: u32) -> io::Result<ProcessStat> {
 }
 
 fn read_stat(root: &Path, pid: u32) -> io::Result<Option<ProcessStat>> {
-    match fs::read(root.join(pid.to_string()).join("stat")) {
+    stat_from_read(fs::read(root.join(pid.to_string()).join("stat")), pid)
+}
+
+fn stat_from_read(read: io::Result<Vec<u8>>, pid: u32) -> io::Result<Option<ProcessStat>> {
+    match read {
         Ok(bytes) => parse_stat(&bytes, pid).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
