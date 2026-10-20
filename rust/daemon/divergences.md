@@ -37,7 +37,6 @@ tool's answers by value.
 | Tool | Body owner | Missing service prerequisite |
 |---|---|---|
 | `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred by decision (PARITY.md, "Graph traversal deferred by decision"). |
-| `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
@@ -54,7 +53,7 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_world_search`, `memory_lesson_search`, `memory_supersede`,
 `memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
 `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
-`memory_relation_define`, `memory_agents` and `memory_message`. The two board tools
+`memory_relation_define`, `memory_graph`, `memory_agents` and `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -185,7 +184,7 @@ binding"). What it cannot or does not reproduce:
 |---|---|---|---|
 | Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
 | Colliding inverse provenance | base-set iteration can select different source relation names for the same inverse triple depending on hash seed | choose the lexicographically smallest asserted source relation; exact triple and valid provenance membership are checked, with smallest-source choice pinned | W3-H; declared deterministic choice; all other provenance exact |
-| Whole graph caps, communities, graph service/MCP wiring, fact projection, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | store and GraphStore read-model helpers; these services are not wired (the four write tools are served: see "The graph store's write tools" below) | W3-H, subsequent increments |
+| Whole graph caps, communities, graph service/MCP wiring, fact projection, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | store and GraphStore read-model helpers; these services are not wired (the four write tools and `memory_graph` are served: see "The graph store's write tools" and "memory_graph" below) | W3-H, subsequent increments |
 
 ## W2-D: GET /api/search
 
@@ -359,6 +358,13 @@ this increment does not claim the complete write boundary or cutover readiness.
 | Several current facts owning one slot key (the slot-key fold) | `LIMIT 1` with no order | the same statement | declared free: both read one unordered row |
 | `POST /api/graph/relate` and `/api/graph/unrelate` (the Console's graph editor) | served over the same service bodies | not served | the Console REST rows (PARITY.md); the bodies are shared when they are |
 | File mode (`graph_requires_postgres`) | answered when no database is configured | not reachable: the daemon is PostgreSQL-only | the PostgreSQL-only rows above |
+
+### memory_graph (2026-10-19)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| The order of the inverse-derived edges that mirror asserted edges | `derive_edges` walks its inverse rule over a set of `(src, relation, dst)` tuples, so their order follows the per-process string hash | ordered by their source edge's relation, source and target (the read model's rule) | the "Colliding inverse provenance" row above: the harness compares them as a multiset in their slots. Asserted edges, transitive edges and the mirrors of transitive edges keep their exact order; an inverse edge only mirrors a pair already in the adjacency, so paths do not depend on it |
+| `GET /api/graph` (the Console's whole graph with `scope` and the `max_nodes` hub cap) | served over `_whole_graph` | not served; the MCP tool's whole graph (no scope, no cap) is | the Console REST rows (PARITY.md) |
 
 ## Coordination board completion (W2-F)
 
