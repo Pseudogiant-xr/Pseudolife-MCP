@@ -40,7 +40,8 @@ def request(port, method, body, headers, timeout=120, *, connection=None):
         if data is not None:
             c.putheader("Content-Length", str(len(data)))
         if data:
-            r, raw, send_error = _send_while_reading(c, method, data)
+            r, raw, send_exc = send_while_reading(c, method, data)
+            send_error = None if send_exc is None else f"{type(send_exc).__name__}: {send_exc}"
         else:
             c.endheaders(data)
             r = c.getresponse()
@@ -56,7 +57,7 @@ def request(port, method, body, headers, timeout=120, *, connection=None):
     return out
 
 
-def _send_while_reading(c, method, data):
+def send_while_reading(c, method, data, *, encode_chunked=False):
     """Read the response on a helper thread that is waiting before the request is sent.
 
     Until 2026-10-20 the Rust daemon refused an MCP body over its 4 MiB
@@ -66,12 +67,16 @@ def _send_while_reading(c, method, data):
     send, body_limit's 413 was lost to WinError 10054 in about 1 of 100 calls
     on an idle Windows 11 host (2026-10-18). The send starts once the reader
     signals that it is about to read, and the daemon reads 4 MiB before it
-    answers, so the receive is waiting by then. A response split across
-    segments with the reset right behind can still lose its tail, which
-    raises, never passes. A complete response is returned even if the send
-    was cut off, which the result records as ``send_error``; without one the
+    answers, which narrows the race without closing it: hosted run
+    39253550659 still lost two refusals decided after 4 MiB or 256 KiB on the
+    reader's first read (2026-10-20, #830). A response split across segments
+    with the reset right behind can likewise lose its tail. Either raises,
+    never passes. A complete response is returned even if the send
+    was cut off, and the send's exception is returned beside it (``request``
+    records it as ``send_error``); without one the
     read's error is raised, so a daemon that closes without a complete
-    answer still fails.
+    answer still fails. ``run.py`` sends its admission bodies the same way
+    (``data`` an iterable of chunks with ``encode_chunked``).
     """
     if c.sock is None:
         c.connect()
@@ -93,15 +98,15 @@ def _send_while_reading(c, method, data):
     reader.start()
     reading.wait()
     try:
-        c.endheaders(data)
-        send_error = None
+        c.endheaders(data, encode_chunked=encode_chunked)
+        send_exc = None
     except Exception as exc:
-        send_error = f"{type(exc).__name__}: {exc}"
+        send_exc = exc
     reader.join()
     if failed:
         r.close()
         raise failed[0]
-    return r, got[0], send_error
+    return r, got[0], send_exc
 
 
 def _kernel_timeouts(sock):

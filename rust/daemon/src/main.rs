@@ -23,6 +23,7 @@ mod fact_set;
 mod forget_tools;
 mod freshness;
 mod graph_read;
+mod graph_write_tools;
 #[cfg(feature = "harness")]
 mod harness_route;
 mod health;
