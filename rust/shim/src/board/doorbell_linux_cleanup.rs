@@ -96,7 +96,14 @@ fn read_stat(root: &Path, pid: u32) -> io::Result<Option<ProcessStat>> {
 fn stat_from_read(read: io::Result<Vec<u8>>, pid: u32) -> io::Result<Option<ProcessStat>> {
     match read {
         Ok(bytes) => parse_stat(&bytes, pid).map(Some),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        // A task reaped between open and read reports ESRCH: absent, like a missing entry.
+        // The leader stays unreaped until the fence passes, so its reads never see either.
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(libc::ESRCH) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(error),
     }
 }
