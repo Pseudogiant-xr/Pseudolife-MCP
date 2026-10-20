@@ -216,9 +216,15 @@ async fn board_ring_marker_staggers_sanitizes_deduplicates_and_withdraws() {
     adapter.update_mailbox(&wake).await;
     ring_settled(&home).await;
     assert!(!home.0.join("digest.ring").exists());
+    // The ring worker waits on tokio's clock: pause it, withdraw the wake,
+    // then advance past the due time and let the worker run, so a withdrawn
+    // ring that still fired is queued before ring_settled drains the queue.
+    tokio::time::pause();
     adapter.update_mailbox(&json!({"pending_count":3,"wake":{"decision":"rung","reason":"new","ring_at":liveness::now()+0.1}})).await;
     adapter.update_mailbox(&json!({"pending_count":0})).await;
-    tokio::time::sleep(Duration::from_millis(130)).await;
+    tokio::time::advance(Duration::from_secs(1)).await;
+    tokio::task::yield_now().await;
+    tokio::time::resume();
     ring_settled(&home).await;
     assert!(!home.0.join("digest.ring").exists());
     assert!(adapter.view().await.wake.is_none());

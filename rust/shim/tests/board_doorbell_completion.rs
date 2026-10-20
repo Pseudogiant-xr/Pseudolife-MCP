@@ -386,8 +386,11 @@ impl Drop for StopWorker {
     }
 }
 
+/// Poll for a real process's effect; the bound only stops a hang (a ring's
+/// queue process outlasted 5 s twice in 200 on the Windows dev VM under CPU
+/// load). Never call it while the clock is paused.
 async fn wait_for(mut condition: impl FnMut() -> bool) {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         while !condition() {
             tokio::time::sleep(Duration::from_millis(15)).await;
         }
@@ -700,11 +703,24 @@ struct Harness {
 }
 impl Harness {
     async fn new(shown: bool, quiet: Duration) -> Self {
+        Self::build(shown, quiet, false).await
+    }
+    /// Like `new`, but tokio's clock is paused before the watch starts, so
+    /// the quiet window (measured on `tokio::time::Instant`) moves only by
+    /// `tokio::time::advance`. The adapter's real HTTP setup runs first, on
+    /// the running clock; call `tokio::time::resume` before a real ring.
+    async fn paused(shown: bool, quiet: Duration) -> Self {
+        Self::build(shown, quiet, true).await
+    }
+    async fn build(shown: bool, quiet: Duration, paused: bool) -> Self {
         let fixture = Fixture::new(0);
         let home = Home::new();
         let adapter = Adapter::enter(adapter_config(&fixture, &home))
             .await
             .unwrap();
+        if paused {
+            tokio::time::pause();
+        }
         let command = home
             .0
             .join(if cfg!(windows) { "codex.cmd" } else { "codex" });
@@ -755,22 +771,26 @@ impl Harness {
 
 #[tokio::test]
 async fn quiet_tool_activity_and_delivered_hint_do_not_spend_a_future_offer() {
-    let rig = Harness::new(true, Duration::from_millis(80)).await;
+    // On paused time the window passes exactly when advanced, so a stalled
+    // runner between a tool call and the next observation cannot open it.
+    let rig = Harness::paused(true, Duration::from_millis(80)).await;
     let offered = view(&[1, 2], 2, 2, 1.0);
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
-    tokio::time::sleep(Duration::from_millis(90)).await;
+    tokio::time::advance(Duration::from_millis(90)).await;
     rig.bell
         .note_call(BANK, "memory_search", &json!({}), false)
         .await;
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
-    tokio::time::sleep(Duration::from_millis(90)).await;
+    tokio::time::advance(Duration::from_millis(90)).await;
     let mut informed = offered.clone();
     informed.delivered = 2;
     rig.bell.observe(BANK, &informed).await;
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
+    // The ring itself runs a real process, on the running clock.
+    tokio::time::resume();
     rig.bell.observe(BANK, &view(&[1, 2, 3], 3, 3, 1.0)).await;
     rig.accepted().await;
     assert_eq!(rig.calls(), 1);
@@ -865,14 +885,22 @@ async fn arrival_preview_complete_and_incomplete_ack_expiry_matrix() {
 #[tokio::test]
 async fn timed_offer_withdrawal_and_attention_permission_matrix() {
     let rig = Harness::new(true, Duration::ZERO).await;
-    let mut offered = view(&[1, 2], 2, 2, now() + 0.12);
+    // Due 2 s out on the wall clock the bell reads (not tokio time), so the
+    // first observation lands before it even on a stalled runner (0.12 s
+    // did not).
+    let ring_at = now() + 2.0;
+    let mut offered = view(&[1, 2], 2, 2, ring_at);
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
     let mut withdrawn = offered.clone();
     withdrawn.wake = None;
     withdrawn.wake_watermark = None;
     rig.bell.observe(BANK, &withdrawn).await;
-    tokio::time::sleep(Duration::from_millis(140)).await;
+    // Let the withdrawn offer come due, polling the bell's own clock: a bell
+    // that kept a copy of it would ring it now.
+    while now() <= ring_at {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     rig.bell.observe(BANK, &withdrawn).await;
     assert!(!rig.pending.path.exists());
     for wake in [

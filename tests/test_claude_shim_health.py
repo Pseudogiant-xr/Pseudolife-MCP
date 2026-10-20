@@ -7,6 +7,7 @@ import importlib.util
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -69,17 +70,25 @@ def test_health_stale_cache_served_while_revalidating(monkeypatch):
     cli = _cli(monkeypatch, True)
     assert cli.health()[0] is True           # warm
     calls = {"n": 0}
+    # The refresh is held until the test releases it, so the stale answer
+    # must arrive while the refresh is still running: an ordering check, not
+    # a wall-clock budget a stalled runner can overrun.
+    release, finished = threading.Event(), threading.Event()
 
     def _boom(s, u):
         calls["n"] += 1
+        release.wait(30)
+        finished.set()
         raise RuntimeError("nope")
     monkeypatch.setattr(cli, "chat", _boom)
     cli._health_at = time.monotonic() - 301  # expire the cache
 
-    t0 = time.monotonic()
-    ok, _ = cli.health()
-    assert ok is True                        # stale verdict, served instantly
-    assert time.monotonic() - t0 < 0.5
+    try:
+        ok, _ = cli.health()
+        assert ok is True                    # stale verdict, served instantly
+        assert not finished.is_set()         # ... before the refresh finished
+    finally:
+        release.set()
 
     deadline = time.monotonic() + 5.0        # background refresh lands
     while calls["n"] == 0 and time.monotonic() < deadline:

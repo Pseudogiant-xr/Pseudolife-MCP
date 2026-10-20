@@ -31,9 +31,10 @@ in the memory bank (search "dev machines homelab"), never in this tree.
   one shared `CARGO_TARGET_DIR` warm rather than cleaning it. Its default
   SSH shell is PowerShell 7. Its updates are notify-only and paused, with
   automatic restart disabled.
-- **Hosted CI.** The merge gate. Its Windows job runs a curated lite list
-  of test files, not the full suite (`.github/workflows/ci.yml`,
-  `test-lite-windows`).
+- **Hosted CI.** The merge gate. Its required Windows job runs the product
+  paths that differ on Windows, not the full suite (`.github/workflows/ci.yml`,
+  `test-lite-windows`); the Windows installer, hook and board plumbing runs
+  in the non-required `test-windows-nightly` job.
 
 The dev machines share the hypervisor's RAM, which carries two full suites
 at once in any mix (two Linux boxes, or a Linux box and the Windows VM),
