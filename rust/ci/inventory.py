@@ -14,7 +14,7 @@ SYSTEMS = ["ubuntu-latest", "windows-latest"]
 SOURCE_EVENTS = "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
 PARITY_EVENT_GATE = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
-$docsOnly = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
+$docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
 foreach ($job in @('rust', 'candidate', 'parity-checks')) {
   if ($results[$job].result -cne 'success' -and -not ($docsOnly -and $results[$job].result -ceq 'skipped')) {
     Write-Error "$job did not succeed"
@@ -22,8 +22,8 @@ foreach ($job in @('rust', 'candidate', 'parity-checks')) {
   }
 }
 $sourceResult = $results['source-mutants'].result
-if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
-  Write-Error "source-mutants did not succeed outside the PR and push skip exception"
+if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
+  Write-Error "source-mutants did not succeed outside the PR, merge-group and push skip exception"
   exit 1
 }
 """
@@ -170,7 +170,7 @@ def check(workflow):
     events = workflow.get('on', workflow.get(True))
     assert events.get('push') == {'branches': ['master']} \
         and events.get('schedule') == [{'cron': '23 3 * * *'}], 'source events dropped or changed'
-    assert 'pull_request' in events and 'workflow_dispatch' in events, 'source events dropped or changed'
+    assert {'pull_request', 'merge_group', 'workflow_dispatch'} <= set(events), 'source events dropped or changed'
     assert source['if'] == (f"${{{{ !cancelled() && ({SOURCE_EVENTS}) "
                             "&& needs.candidate.result == 'success' }}"), 'source event selection changed'
     gate = jobs['parity']
