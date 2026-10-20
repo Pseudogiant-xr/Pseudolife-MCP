@@ -1525,6 +1525,15 @@ jobs:
         run: |
           python rust/cli_harness/lease_ci.py
           exit $LASTEXITCODE
+      # test_login's container cases need the image the W1-C connection
+      # shard builds; hosted Windows runs Windows containers only, so the row
+      # skips those cases there.
+      - name: Build the test_login container image
+        if: runner.os == 'Linux' && contains(env.STRESS_SELECTION, 'test_login')
+        # Master run 38076979343, 2026-10-10: Linux image build 13s.
+        # Five-minute floor because this step is network-bound.
+        timeout-minutes: 5
+        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
       - name: Run the selection once
         shell: pwsh
         run: |

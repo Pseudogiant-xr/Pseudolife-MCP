@@ -103,6 +103,21 @@ def test_pytest_selections_get_the_parity_steps_candidates(tmp_path):
                          ("PSEUDOLIFE_RUST_BINARY", "pseudolife-stdio")):
         assert Path(env[name]).stem == binary and Path(env[name]).parent == tmp_path / "bin", name
     assert env["PSEUDOLIFE_BACKUP_NATIVE_REQUIRED"] == "1"
+    # The eval shard's episode executable nodes skip without it (batch #868
+    # review): a JSON list holding the absolute stdio candidate path.
+    episode = json.loads(env["PSEUDOLIFE_PORT_EPISODE_JSON"])
+    assert len(episode) == 1 and Path(episode[0]).is_absolute()
+    assert Path(episode[0]).stem == "pseudolife-stdio"
+
+
+def test_the_episode_candidate_is_absolute_from_a_relative_candidates_dir(tmp_path, monkeypatch):
+    # The workflow passes rust/target/release; the tests resolve it from
+    # their own working directory, so the path must not stay relative.
+    monkeypatch.chdir(tmp_path)
+    env = stress.environment("pytest", ["evals/rust_port/test_episode_executable.py"],
+                             Path("rust/target/release"), tmp_path)
+    assert json.loads(env["PSEUDOLIFE_PORT_EPISODE_JSON"]) == [
+        str((tmp_path / "rust/target/release" / Path(env["PSEUDOLIFE_RUST_BINARY"]).name).resolve())]
 
 
 @pytest.mark.parametrize("scenario", sorted(stress.REMOTE_BIND))
@@ -285,6 +300,17 @@ def test_stress_jobs_run_only_in_stress_mode_and_reuse_the_candidate():
     # so a loop on a branch must not stop there (Codex review of e56fe0f6);
     # but oracle-dependent pytest selections need it when it can bind (Codex
     # review of 028c3ebb), so it runs best-effort before the selection.
+    # test_login's container cases need the image the W1-C connection shard
+    # builds on Linux (batch #868 review); hosted Windows runs Windows
+    # containers only, so the row skips them there.
+    image = next(step for step in loop["steps"] if step.get("name") == "Build the test_login container image")
+    w1c = next(step for step in raw_workflow()["jobs"]["parity-checks"]["steps"]
+               if step.get("name") == "Build the test_login container image")
+    assert image["run"] == w1c["run"] == "docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops"
+    assert image["if"] == "runner.os == 'Linux' && contains(env.STRESS_SELECTION, 'test_login')"
+    assert image["timeout-minutes"] == w1c["timeout-minutes"]
+    names = [step.get("name") for step in loop["steps"]]
+    assert names.index(image["name"]) < names.index("Run the selection once")
     binds = [step for step in loop["steps"] if "evals.rust_port.oracle_selection" in step.get("run", "")]
     assert len(binds) == 1 and binds[0]["continue-on-error"] is True
     assert binds[0]["env"] == {"GITHUB_REF": "${{ github.ref }}"}
