@@ -22,7 +22,7 @@ def test_execution_failures_and_incomplete_reports_are_not_kills():
     import copy
     from mcp_compare import UNSERVED
 
-    baseline = {"summary": {"responses": 325, "cases": 18, "diffs": 0,
+    baseline = {"summary": {"responses": 321, "cases": 18, "diffs": 0,
                             "unserved_checked": sorted(UNSERVED)}, "diffs": []}
     for failure in [
         'handshake[0]: python={"exception": "TimeoutError: timed out"}\n          rust  ={}',
