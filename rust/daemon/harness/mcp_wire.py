@@ -60,9 +60,10 @@ def request(port, method, body, headers, timeout=120, *, connection=None):
 def send_while_reading(c, method, data, *, encode_chunked=False):
     """Read the response on a helper thread that is waiting before the request is sent.
 
-    The Rust daemon refuses an MCP body over its 4 MiB budget after reading
-    the budget, then closes with the overshoot unread, so its stack resets
-    the connection (divergences.md, MCP-REFUSAL-CLEANUP). Read only after the
+    Until 2026-10-20 the Rust daemon refused an MCP body over its 4 MiB
+    budget after reading the budget, then closed with the overshoot unread,
+    so its stack reset the connection; it now discards the rest and closes
+    by lingering (divergences.md, MCP-REFUSAL-CLEANUP). Read only after the
     send, body_limit's 413 was lost to WinError 10054 in about 1 of 100 calls
     on an idle Windows 11 host (2026-10-18). The send starts once the reader
     signals that it is about to read, and the daemon reads 4 MiB before it
