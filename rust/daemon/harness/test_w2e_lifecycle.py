@@ -4,6 +4,7 @@ import importlib
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -544,12 +545,14 @@ def test_deep_dream_scenarios_register_their_mutants_and_normalizers(harness, tm
 
 def test_merge_judge_scenarios_isolate_the_judge_and_register_their_mutants(harness):
     names = sorted(n for n in harness.SCENARIOS if n.startswith("judge-merge-"))
-    assert names == ["judge-merge-auto", "judge-merge-auto-reject", "judge-merge-endpoint-errors",
-                     "judge-merge-reconsider", "judge-merge-same-model",
+    assert names == ["judge-merge-alias", "judge-merge-auto", "judge-merge-auto-reject",
+                     "judge-merge-duplicates", "judge-merge-endpoint-errors",
+                     "judge-merge-first-moved", "judge-merge-moved",
+                     "judge-merge-reconsider", "judge-merge-replay", "judge-merge-same-model",
                      "judge-merge-served-mismatch", "judge-merge-shadow",
                      "judge-merge-tiebreak", "judge-merge-tiebreak-same-model",
                      "judge-merge-tiebreak-skip", "judge-merge-tiebreak-unknown-second",
-                     "judge-merge-unknown-served"]
+                     "judge-merge-unencodable", "judge-merge-unknown-served"]
     for n in names:
         scn = harness.SCENARIOS[n]
         config = scn["config"]
@@ -565,9 +568,15 @@ def test_merge_judge_scenarios_isolate_the_judge_and_register_their_mutants(harn
         # judges to settle; no proposal is seeded where a judge could race
         # the first comparison.
         assert all("entity_proposals" not in op.get("sql", "") for op in scn["seed"])
-        assert all(op.get("settle") for op in scn["ops"] if op["op"] == "sql")
+        assert all(op.get("settle") for op in scn["ops"] if op["op"] in ("sql", "restart"))
+        # Every scenario asserts the path it is written for on both banks.
+        assert any(op.get("expect") for op in scn["ops"]), n
+        for op in scn["ops"]:
+            if op["op"] == "restart":
+                for off in ("auto_tick: false", 'link_judge_mode: "off"'):
+                    assert off in op["config"], (n, off)
     judge_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-judge-")]
-    assert len(judge_mutants) == 8
+    assert len(judge_mutants) == 15
     src = Path(__file__).resolve().parents[1] / "src" / "dream"
     text = "".join((src / f).read_text(encoding="utf-8")
                    for f in ("judge.rs", "review_judgments.rs"))
@@ -582,3 +591,32 @@ def test_merge_judge_scenarios_isolate_the_judge_and_register_their_mutants(harn
         "proposal": {"judged_at": "<clock>", "judged3_at": None, "id": 7}}
     for col in ("judged_at", "judged2_at", "judged3_at"):
         assert ("entity_proposals", col) in harness.CLOCK
+    # A listed decision's recorded_at is a clock only in memory_graph_review's
+    # automatic_decisions listing; elsewhere it compares exactly.
+    now = time.time()
+    a = {"recorded_at": now, "automatic_decisions": [{"recorded_at": now, "state": "applied"}]}
+    b = {"recorded_at": now + 1, "automatic_decisions": [{"recorded_at": now + 1,
+                                                          "state": "applied"}]}
+    harness.normalize_records(a, b)
+    assert a["automatic_decisions"] == b["automatic_decisions"]
+    assert a["recorded_at"] != b["recorded_at"]
+
+
+def test_expect_reports_each_bank_that_misses_its_path(harness, monkeypatch):
+    import types
+    answers = {"py": [(True,), (False,)], "rs": [(True,), (None,)]}
+
+    class Conn:
+        def __init__(self, dsn):
+            self.dsn = dsn
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+        def execute(self, query):
+            return types.SimpleNamespace(fetchone=lambda: answers[self.dsn].pop(0))
+
+    fake = types.SimpleNamespace(connect=lambda dsn, autocommit=True: Conn(dsn))
+    monkeypatch.setitem(sys.modules, "psycopg", fake)
+    out = harness.expect_diffs({"expect": ["q1", "q2"]}, {"python": "py", "rust": "rs"})
+    assert out == ["expect python: q2", "expect rust: q2"]

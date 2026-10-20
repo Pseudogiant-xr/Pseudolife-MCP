@@ -232,7 +232,7 @@ impl Service {
     }
 
     /// `_ensure_init`, cold and fast paths.
-    async fn ensure_init_inner(&self) -> Result<Arc<Ready>, String> {
+    pub(crate) async fn ensure_init_inner(&self) -> Result<Arc<Ready>, String> {
         let mut inner = self.inner.lock().await;
         if let Some(r) = &inner.ready {
             if crate::mutants::active("startup-clock-reloads")
@@ -412,8 +412,8 @@ impl Service {
 }
 
 impl crate::background::Duties for Service {
-    fn sweep(&self) -> crate::background::Duty<'_> {
-        Box::pin(async {
+    fn sweep(&self, stop: tokio::sync::watch::Receiver<bool>) -> crate::background::Duty<'_> {
+        Box::pin(async move {
             if self.config.memory.compaction_enabled {
                 self.ensure_init_inner().await?;
                 // The current reader has no canonical resident stores.
@@ -447,8 +447,9 @@ impl crate::background::Duties for Service {
             if !self.config.dream.enabled {
                 return Ok(());
             }
-            let ready = self.ensure_init_inner().await?;
-            let judged = crate::dream::judge::deep_dream_judge(self, &ready).await;
+            // The judge checks its gates first and initializes inside its
+            // own `try` (`service_dream.py:4576-4596`).
+            let judged = crate::dream::judge::deep_dream_judge(self, &stop).await;
             if crate::dream::judge::worth_logging(&judged) {
                 eprintln!(
                     "deep-dream judge: {}",

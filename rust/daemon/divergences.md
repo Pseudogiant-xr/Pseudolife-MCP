@@ -448,7 +448,9 @@ this increment does not claim the complete write boundary or cutover readiness.
 | A tick's `error` text for a database failure | psycopg's message | tokio-postgres' message | the answer is only logged |
 | A merge decision audit for an entity whose display is NULL | `entity_display` / `into_display` NULL (`disp.get(id, "?")` finds the NULL) | `?` | as the review actions write it; a display is NULL only for hand-written rows |
 | Transactions inside one verdict | nested `transaction()` savepoints around each storage call | one transaction per verdict, with one savepoint around the relate link | no data differs: a nested block only rolls back on an exception, which ends the tick in both |
-| The tiebreak replay (votes recorded under `shadow`, the mode then promoted to `auto`) | served | served, not exercised by a scenario | the mode is read at start, so promoting it needs a restart, which a scenario does not do; the same gates run as on the live path |
+| The sweep tick's log line (`deep-dream judge: …`) | the answer as a Python dict repr | the answer as JSON | log-only; no caller parses it |
+| Shutdown while a judge tick is running | the sweep's daemon thread dies with the process, wherever it is (an open transaction rolls back with the connection) | the tick stops at the next lock-free phase: an endpoint construction, alias probe, model call or signing in flight is abandoned, no new phase starts, and a verdict transaction already begun runs to its end; the tick answers `skipped: "stopping"` | so `Background::shutdown` does not wait out a model's timeout (240 s by default); no committed state differs from a Python process killed between the same two transactions |
+| A reply's served model holding a lone surrogate | PostgreSQL refuses the response identity's JSON (`invalid input syntax for type json`, with its DETAIL and CONTEXT) | the same statement fails on the same server, its text laid out as psycopg's (message, DETAIL, CONTEXT) without psycopg's closing parameter line | log-only, as the tick's `error` text for a database failure (above) |
 
 ## Coordination board completion (W2-F)
 

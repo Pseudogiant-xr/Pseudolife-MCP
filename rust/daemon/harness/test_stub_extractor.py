@@ -332,6 +332,26 @@ def test_times_entries_answer_per_caller_then_yield(stub_factory):
     assert [keyed_request(s, path, body, "side-rust")[0] for _ in range(2)] == [500, 200]
 
 
+def test_judge_verdict_lists_repeat_an_id_and_models_move(stub_factory):
+    s = stub_factory({"reply_model": "one", "second_reply_model": "two", "replies": [
+        {"kind": "judge_merges", "endpoint": "second", "times": 1, "model": "two-a",
+         "verdicts": {"A|B": [{"verdict": "reject", "confidence": 0.8},
+                              {"verdict": "leave", "confidence": 0.4}]}},
+        {"kind": "judge_merges", "endpoint": "second", "model": "two-b",
+         "verdicts": {"A|B": {"verdict": "accept", "confidence": 0.7}}},
+    ]})
+    body = chat_body(JUDGE_SYSTEM, judge_user(("A", "B")))
+    path = "/second/v1/chat/completions"
+    first = json.loads(keyed_request(s, path, body, "side-python")[1])
+    assert first["model"] == "two-a"
+    assert json.loads(first["choices"][0]["message"]["content"]) == {"verdicts": [
+        {"id": 1, "verdict": "reject", "confidence": 0.8},
+        {"id": 1, "verdict": "leave", "confidence": 0.4}]}
+    later = json.loads(keyed_request(s, path, body, "side-python")[1])
+    assert later["model"] == "two-b"
+    assert json.loads(keyed_request(s, path, body, "side-rust")[1])["model"] == "two-a"
+
+
 def test_shared_stub_records_read_per_caller(stub_factory):
     from stub_extractor import auth_digest
     s = stub_factory({"replies": [{"kind": "judge_merges", "verdicts": {}}]})

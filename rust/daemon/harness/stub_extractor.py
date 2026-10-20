@@ -32,7 +32,9 @@ A ``judge_merges`` entry may answer by pair instead of by user content:
 ``"verdicts": {"Alpha|Beta": {"verdict": ..., "confidence": ...,
 "relation": ..., "note": ...}}`` builds the reply from the request's
 numbered proposals, listing a verdict for each proposal whose FROM and INTO
-displays (either order) name a key, and none for the rest. An entry with
+displays (either order) name a key, and none for the rest; a key naming a
+list of verdicts lists each of them under that proposal's number (a reply
+repeating an id). An entry with
 ``"times": N`` answers N requests per caller (the request's
 ``Authorization`` digest), then lets the next matching entry answer, so an
 endpoint can fail once and recover.
@@ -333,7 +335,7 @@ class StubExtractor:
 def judge_reply(verdicts: dict, body: bytes) -> str:
     """A ``judge_merges`` reply built from the request's proposals: each
     proposal whose ``FROM|INTO`` (either order) names a key gets that
-    verdict, under its number."""
+    verdict (each of a list of them), under its number."""
     parsed = parse_chat(body)
     user = parsed[1] if parsed and isinstance(parsed[1], str) else ""
     out = []
@@ -344,6 +346,6 @@ def judge_reply(verdicts: dict, body: bytes) -> str:
             continue
         a, b = head.group(2), into.group(1)
         v = verdicts.get(f"{a}|{b}") or verdicts.get(f"{b}|{a}")
-        if v is not None:
-            out.append({"id": int(head.group(1)), **v})
+        for one in (v if isinstance(v, list) else [] if v is None else [v]):
+            out.append({"id": int(head.group(1)), **one})
     return json.dumps({"verdicts": out})

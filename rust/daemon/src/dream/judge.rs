@@ -1,8 +1,8 @@
 //! The deep dream's merge judge: `service_dream.deep_dream_judge`
-//! (`service_dream.py:4525-5002`) with its extractors, model-identity
+//! (`service_dream.py:4525-4932`) with its extractors, model-identity
 //! checks and the two-vote and three-judge tiebreak gates (3849-4524), the
-//! judge request and its reply parsing (`memory/dream.py:425-466,
-//! 1661-1716`), and the dream-judge decisions it applies
+//! judge request and its reply parsing (`memory/dream.py:426-465,
+//! 1661-1713`), and the dream-judge decisions it applies
 //! (`service.py:8965-9083`, `decided_by="dream-judge"`).
 //!
 //! The sweep calls [`deep_dream_judge`] once per tick. Lock windows follow
@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Map, Value, json};
+use tokio::sync::watch;
 use tokio_postgres::Client;
 
 use super::extractor::{self, Compat, ExtractFailure, field, py_str, truthy as py_truthy};
@@ -633,6 +634,41 @@ fn bump(out: &mut Map<String, Value>, key: &str, n: i64) {
 
 // ── storage writes (`storage/postgres.py`) ───────────────────────────────
 
+/// A reply's float bound to a REAL column: psycopg binds a float8, and
+/// PostgreSQL's float8-to-float4 assignment cast refuses an overflow or an
+/// underflow to zero, so the verdict's transaction fails and the tick
+/// answers the error. (The parser clamps confidences to [0, 1], so only an
+/// underflow is reachable.)
+#[allow(clippy::result_large_err)]
+fn real(x: f64) -> Result<f32, ToolError> {
+    let r = x as f32;
+    if crate::mutants::active("mcp-dream-judge-real-unchecked") {
+        return Ok(r);
+    }
+    if r.is_infinite() && x.is_finite() {
+        return Err(internal("value out of range: overflow"));
+    }
+    if r == 0.0 && x != 0.0 {
+        return Err(internal("value out of range: underflow"));
+    }
+    Ok(r)
+}
+
+/// psycopg's `UnicodeEncodeError` on a text parameter holding a reply's
+/// lone surrogate (the first such parameter, in bind order): raised while
+/// the parameters are dumped, so before any server-side error.
+#[allow(clippy::result_large_err)]
+fn encodable(params: &[Option<&str>]) -> Result<(), ToolError> {
+    if crate::mutants::active("mcp-dream-judge-encode-unchecked") {
+        return Ok(());
+    }
+    let fields: Vec<&str> = params.iter().flatten().copied().collect();
+    match extractor::encode_error(&fields) {
+        Some(e) => Err(internal(e)),
+        None => Ok(()),
+    }
+}
+
 /// `set_entity_proposal_judgment` (3895-3910).
 #[allow(clippy::too_many_arguments)]
 async fn set_first_judgment(
@@ -645,20 +681,14 @@ async fn set_first_judgment(
     at: f64,
     served: Option<&str>,
 ) -> Result<bool, ToolError> {
+    encodable(&[Some(verdict), note, Some(model), served])?;
+    let confidence = real(confidence)?;
     Ok(c.execute(
         "UPDATE entity_proposals SET judge_verdict=$1, \
          judge_confidence=$2, judge_note=$3, judge_model=$4, \
          judged_at=$5, judge_served_model=$6 \
          WHERE id=$7 AND status='pending'",
-        &[
-            &verdict,
-            &(confidence as f32),
-            &note,
-            &model,
-            &at,
-            &served,
-            &id,
-        ],
+        &[&verdict, &confidence, &note, &model, &at, &served, &id],
     )
     .await
     .map_err(internal)?
@@ -688,7 +718,8 @@ async fn set_later_judgment(
          judge{n}_policy = COALESCE($7, judge{n}_policy) \
          WHERE id=$8 AND status='pending'"
     );
-    let conf = confidence.map(|x| x as f32);
+    encodable(&[verdict, model, note, served, policy])?;
+    let conf = confidence.map(real).transpose()?;
     Ok(c.execute(
         &sql,
         &[&verdict, &conf, &model, &at, &note, &served, &policy, &id],
@@ -1203,7 +1234,9 @@ async fn tiebreak_apply(
         return Ok(());
     };
     for opinion in ["second", "third"] {
-        if rj::vote_endpoint_moved(c, row, opinion, None).await? {
+        if rj::vote_endpoint_moved(c, row, opinion, None).await?
+            && !crate::mutants::active("mcp-dream-judge-moved-applies")
+        {
             return Ok(());
         }
     }
@@ -1359,9 +1392,51 @@ pub(crate) fn worth_logging(judged: &Map<String, Value>) -> bool {
         .any(|k| truthy(k))
 }
 
+/// The tick's answer when the daemon began shutting down mid-tick.
+const STOPPED: &str = "stopped: the daemon is shutting down";
+
+/// `fut`, unless the background stop signal fires first: the lock-free
+/// phases (endpoint construction, the alias probes, the model calls, the
+/// signing) give way to a shutdown, so the sweep's join never waits out a
+/// model's timeout. Transactions are never raced; the tick stops between
+/// them.
+pub(crate) async fn or_stop<T>(
+    stop: &watch::Receiver<bool>,
+    fut: impl std::future::Future<Output = T>,
+) -> Result<T, String> {
+    let mut rx = stop.clone();
+    if *rx.borrow_and_update() {
+        return Err(STOPPED.into());
+    }
+    let stopped = async move {
+        // A dropped sender (no background owner) never stops the tick.
+        if rx.wait_for(|s| *s).await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::select! {
+        biased;
+        () = stopped => Err(STOPPED.into()),
+        v = fut => Ok(v),
+    }
+}
+
+/// No new phase starts once the daemon is shutting down.
+fn check_stop(stop: &watch::Receiver<bool>) -> Result<(), String> {
+    if *stop.borrow() {
+        Err(STOPPED.into())
+    } else {
+        Ok(())
+    }
+}
+
 /// `deep_dream_judge()`: never fails into the sweep; an error is the
-/// answer's `error` field.
-pub(crate) async fn deep_dream_judge(service: &Service, ready: &Ready) -> Map<String, Value> {
+/// answer's `error` field. The gates come first and the daemon's
+/// initialization runs inside the judge's `try`, as Python's does.
+pub(crate) async fn deep_dream_judge(
+    service: &Service,
+    stop: &watch::Receiver<bool>,
+) -> Map<String, Value> {
     let cfg = &service.config.memory.deep_dream;
     let one = |k: &str, v: Value| {
         let mut m = Map::new();
@@ -1375,8 +1450,13 @@ pub(crate) async fn deep_dream_judge(service: &Service, ready: &Ready) -> Map<St
     if !matches!(cfg.judge_mode.as_str(), "shadow" | "auto-reject" | "auto") {
         return one("skipped", json!("disabled"));
     }
-    match judge_tick(service, ready).await {
+    let result = match service.ensure_init_inner().await {
+        Ok(ready) => judge_tick(service, &ready, stop).await,
+        Err(e) => Err(e),
+    };
+    match result {
         Ok(out) => out,
+        Err(e) if e == STOPPED => one("skipped", json!("stopping")),
         Err(e) => {
             eprintln!("deep-dream judge failed: {e}");
             one("error", json!(e))
@@ -1385,7 +1465,11 @@ pub(crate) async fn deep_dream_judge(service: &Service, ready: &Ready) -> Map<St
 }
 
 /// The judge's `try` body.
-async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Value>, String> {
+async fn judge_tick(
+    service: &Service,
+    ready: &Ready,
+    stop: &watch::Receiver<bool>,
+) -> Result<Map<String, Value>, String> {
     let cfg = &service.config.memory.deep_dream;
     let client = ready.storage.client();
     let e2s = |e: ToolError| err_text(&e);
@@ -1406,13 +1490,13 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
         m.insert("judged".into(), json!(0));
         return Ok(m);
     }
-    let Some(mut ex) = judge_extractor(service, None).await else {
+    let Some(mut ex) = or_stop(stop, judge_extractor(service, None)).await? else {
         let mut m = Map::new();
         m.insert("judged".into(), json!(0));
         m.insert("skipped".into(), json!("no_judge_extractor"));
         return Ok(m);
     };
-    let current_model = rj::observed_model(&ex.compat, ex.served.as_deref()).await;
+    let current_model = or_stop(stop, rj::observed_model(&ex.compat, ex.served.as_deref())).await?;
     let mut review = Review::new(&service.config, &ex.compat, pending, current_model);
     let reconsidered = {
         let _lock = ready.write.lock().await;
@@ -1429,7 +1513,7 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
         .map_err(e2s)?;
         reconsidered
     };
-    review.sign().await.map_err(e2s)?;
+    or_stop(stop, review.sign()).await?.map_err(e2s)?;
     let pending = {
         let _lock = ready.write.lock().await;
         let r = &mut review;
@@ -1483,7 +1567,7 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
     let mut ex3: Option<JudgeEx> = None;
     let mut third_skips: Vec<(&str, usize)> = Vec::new();
     if !split.is_empty() {
-        ex3 = judge_third_extractor(service).await;
+        ex3 = or_stop(stop, judge_third_extractor(service)).await?;
         match &ex3 {
             None => third_skips.push(("third_opinion_skipped_unconfigured", split.len())),
             Some(x3) => {
@@ -1513,8 +1597,10 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
                 break;
             }
             let note = vs(p, "judge_note").unwrap_or("");
+            let filtered = !crate::mutants::active("mcp-dream-judge-replay-no-refusal-filter")
+                && refused.iter().any(|r| note.contains(r.as_str()));
             if rj::truthy(p, "judge3_verdict")
-                && !refused.iter().any(|r| note.contains(r.as_str()))
+                && !filtered
                 && tiebreak_majority(p, &review.rows(std::slice::from_ref(p))[0], cfg).is_some()
             {
                 replay.push(p.clone());
@@ -1563,6 +1649,7 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
         out.insert(k.into(), v);
     }
     if !replay.is_empty() {
+        check_stop(stop)?;
         tiebreak_replay(
             ready,
             (service, cfg, ex.served.clone()),
@@ -1582,7 +1669,8 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
     let mut proposals2: Vec<Row> = Vec::new();
     let mut second_observed: Option<String> = None;
     if !second.is_empty() {
-        ex2 = judge_second_extractor(service).await;
+        check_stop(stop)?;
+        ex2 = or_stop(stop, judge_second_extractor(service)).await?;
         eprintln!(
             "deep-dream judge: second opinion on {} pending merge proposal(s) (mode {})",
             batch2.len(),
@@ -1592,12 +1680,14 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
         proposals2 = proposals_of(&enriched2, cfg);
         let result = match ex2.as_mut() {
             Some(x2) => {
-                second_observed = rj::observed_model(&x2.compat, x2.served.as_deref()).await;
-                judge_merges(x2, &proposals2).await
+                second_observed =
+                    or_stop(stop, rj::observed_model(&x2.compat, x2.served.as_deref())).await?;
+                or_stop(stop, judge_merges(x2, &proposals2)).await?
             }
             None => {
-                second_observed = rj::observed_model(&ex.compat, ex.served.as_deref()).await;
-                judge_merges(&mut ex, &proposals2).await
+                second_observed =
+                    or_stop(stop, rj::observed_model(&ex.compat, ex.served.as_deref())).await?;
+                or_stop(stop, judge_merges(&mut ex, &proposals2)).await?
             }
         };
         match result {
@@ -1681,6 +1771,7 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
         && budget > 0
         && let Some(x3) = ex3.as_mut()
     {
+        check_stop(stop)?;
         let mut batch3: Vec<Row> = third.iter().take(budget as usize).cloned().collect();
         eprintln!(
             "deep-dream judge: third opinion on {} split merge proposal(s) (mode {}, tiebreak {})",
@@ -1690,9 +1781,10 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
         );
         let enriched3 = review.rows(&batch3);
         let proposals3 = proposals_of(&enriched3, cfg);
-        let third_observed = rj::observed_model(&x3.compat, x3.served.as_deref()).await;
+        let third_observed =
+            or_stop(stop, rj::observed_model(&x3.compat, x3.served.as_deref())).await?;
         let mut verdicts3 = Vec::new();
-        match judge_merges(x3, &proposals3).await {
+        match or_stop(stop, judge_merges(x3, &proposals3)).await? {
             Ok(v) => verdicts3 = v,
             Err(err) => {
                 if same_endpoint(Some(x3), &ex) {
@@ -1724,6 +1816,7 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
     }
 
     if !first.is_empty() && budget > 0 {
+        check_stop(stop)?;
         let batch: Vec<Row> = first.iter().take(budget as usize).cloned().collect();
         eprintln!(
             "deep-dream judge: judging {} pending merge proposal(s) (mode {})",
@@ -1732,7 +1825,7 @@ async fn judge_tick(service: &Service, ready: &Ready) -> Result<Map<String, Valu
         );
         let enriched = review.rows(&batch);
         let proposals = proposals_of(&enriched, cfg);
-        let mut verdicts = judge_merges(&mut ex, &proposals).await?;
+        let mut verdicts = or_stop(stop, judge_merges(&mut ex, &proposals)).await??;
         stamp_skipped(&mut verdicts, &proposals);
         relate_needs_relation(&mut verdicts);
         report_served_model(&mut out, "first", &ex);
@@ -1997,7 +2090,7 @@ async fn tiebreak_record(
     review: &mut Review,
     ex: &JudgeEx,
     ex3: &JudgeEx,
-    batch3: Vec<Row>,
+    mut batch3: Vec<Row>,
     enriched3: Vec<Row>,
     mut verdicts3: Vec<Verdict>,
     proposals3: Vec<Row>,
@@ -2044,16 +2137,25 @@ async fn tiebreak_record(
     let policy3 = review.third_policy.clone();
     for v in apply_order(&verdicts3) {
         let e = enriched3[v.n - 1].clone();
-        let mut row = batch3[v.n - 1].clone();
+        // One row dict per proposal, as Python's `batch3[v["n"] - 1]`: a
+        // second verdict for the same id sees the first's vote, note and
+        // refusal.
+        let mut copy;
+        let row: &mut Row = if crate::mutants::active("mcp-dream-judge-third-row-copy") {
+            copy = batch3[v.n - 1].clone();
+            &mut copy
+        } else {
+            &mut batch3[v.n - 1]
+        };
         let (r, o, cx) = (&mut *review, &mut *out, &mut ctx);
         let (model3, served3, policy3) = (model3.as_str(), served3.as_deref(), policy3.as_deref());
         in_txn(client, |c| async move {
-            if !r.current(c, &row, true, true).await? {
+            if !r.current(c, row, true, true).await? {
                 return Ok(());
             }
             let classes: Vec<Option<&str>> = [
-                vs(&row, "judge_verdict"),
-                vs(&row, "judge2_verdict"),
+                vs(row, "judge_verdict"),
+                vs(row, "judge2_verdict"),
                 Some(v.verdict.as_str()),
             ]
             .into_iter()
@@ -2070,10 +2172,10 @@ async fn tiebreak_record(
             let (v3, c3) = (v.verdict.clone(), v.confidence);
             let token3 = verdict_token(&v3, v.relation.as_deref());
             let note = note_with_tail(
-                vs(&row, "judge_note"),
+                vs(row, "judge_note"),
                 &format!(" | 3rd ({model3}): {token3} {} [{tally}]", fixed2(c3)),
             );
-            let id = vi(&e, "id").unwrap_or_else(|| id_of(&row));
+            let id = vi(&e, "id").unwrap_or_else(|| id_of(row));
             if !set_later_judgment(
                 c,
                 3,
@@ -2099,7 +2201,7 @@ async fn tiebreak_record(
             row.insert("judge3_policy".into(), json!(policy3));
             row.insert("judge_note".into(), json!(note));
             row.insert("judge3_relation".into(), json!(v.relation));
-            tiebreak_apply(c, cx, o, r, &mut row, &e).await
+            tiebreak_apply(c, cx, o, r, row, &e).await
         })
         .await?;
     }
@@ -2130,11 +2232,108 @@ mod tests {
     }
 
     #[test]
+    fn reply_values_fail_where_psycopg_and_postgresql_fail() {
+        // CPython 3.11, psycopg 3, PostgreSQL (probed 2026-10-20 on the
+        // test server): UPDATE ... SET judge_confidence=%s raises
+        // 'value out of range: underflow' for 1e-50, 5e-324 and 1e-46, and
+        // stores 1e-45.
+        for x in [1e-50, 5e-324, 1e-46] {
+            assert_eq!(
+                err_text(&real(x).unwrap_err()),
+                "value out of range: underflow"
+            );
+        }
+        assert_eq!(real(1e-45).unwrap(), 1e-45_f32);
+        assert_eq!(real(0.0).unwrap(), 0.0);
+        assert_eq!(
+            err_text(&real(1e39).unwrap_err()),
+            "value out of range: overflow"
+        );
+        // A text parameter "ab\ud83d": the first unencodable one, in bind order.
+        let s = |n: u32| char::from_u32(crate::mcp::py_loads::LONE_SURROGATE_BASE + n).unwrap();
+        let note = format!("ab{}", s(0x3d));
+        let served = s(0x600).to_string();
+        assert_eq!(
+            err_text(&encodable(&[Some("accept"), Some(&note), None, Some(&served)]).unwrap_err()),
+            r"'utf-8' codec can't encode character '\ud83d' in position 2: surrogates not allowed"
+        );
+        assert!(encodable(&[Some("accept"), None, Some("judge-one")]).is_ok());
+    }
+
+    #[test]
     fn dated_snapshots_are_the_requested_model() {
         assert!(dated_snapshot("-20240806"));
         assert!(dated_snapshot("-2024-08-06"));
         assert!(!dated_snapshot("-mini"));
         assert!(!dated_snapshot("-2024080"));
+    }
+
+    /// A sweep blocked in a judge call to an endpoint that never answers
+    /// (its timeout 240 s) gives way to shutdown at once.
+    #[tokio::test]
+    async fn shutdown_during_a_slow_judge_call_returns_promptly() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let connected = Arc::new(AtomicBool::new(false));
+        let seen = connected.clone();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                seen.store(true, Ordering::SeqCst);
+                held.push(sock);
+            }
+        });
+        struct Slow {
+            url: String,
+            finished: AtomicBool,
+        }
+        impl crate::background::Duties for Slow {
+            fn sweep(&self, stop: watch::Receiver<bool>) -> crate::background::Duty<'_> {
+                Box::pin(async move {
+                    let mut ex =
+                        JudgeEx::new(Compat::new(&self.url, "judge-one", None, 64, 240.0, None));
+                    let mut p = Map::new();
+                    p.insert("n".into(), json!(1));
+                    let r = or_stop(&stop, judge_merges(&mut ex, &[p])).await;
+                    assert_eq!(r.err().as_deref(), Some(STOPPED));
+                    self.finished.store(true, Ordering::SeqCst);
+                    Ok(())
+                })
+            }
+            fn autosave(&self) -> crate::background::Duty<'_> {
+                Box::pin(async { Ok(()) })
+            }
+            fn warmup(&self, _stop: watch::Receiver<bool>) -> crate::background::Duty<'_> {
+                Box::pin(async { Ok(()) })
+            }
+            fn reap(&self, _: f64) -> crate::background::Duty<'_> {
+                Box::pin(async { Ok(()) })
+            }
+        }
+        let slow = Arc::new(Slow {
+            url: format!("http://{addr}/v1"),
+            finished: AtomicBool::new(false),
+        });
+        let bg = crate::background::Background::default();
+        assert!(bg.start_dream_sweep(slow.clone(), true, false, 0.001));
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while !connected.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the judge call reached the endpoint");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            bg.shutdown(slow.as_ref()),
+        )
+        .await
+        .expect("shutdown did not wait out the model call");
+        assert!(slow.finished.load(Ordering::SeqCst));
     }
 
     #[test]

@@ -246,6 +246,18 @@ async fn get_meta_map(c: &Client, key: &str) -> Result<Map<String, Value>, ToolE
 }
 
 pub(crate) async fn set_meta(c: &Client, key: &str, value: &Value) -> Result<(), ToolError> {
+    if let Some(text) = lone_surrogate_json(value) {
+        // `json.dumps` escapes a lone surrogate (`\ud83d`), which PostgreSQL's
+        // jsonb input refuses: the statement fails there, as Python's does.
+        c.execute(
+            "INSERT INTO meta (key, value) VALUES ($1, $2::text::jsonb) \
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            &[&key, &text],
+        )
+        .await
+        .map_err(|e| internal(psycopg_text(&e)))?;
+        return Ok(());
+    }
     c.execute(
         "INSERT INTO meta (key, value) VALUES ($1, $2::jsonb) \
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
@@ -254,6 +266,63 @@ pub(crate) async fn set_meta(c: &Client, key: &str, value: &Value) -> Result<(),
     .await
     .map_err(internal)?;
     Ok(())
+}
+
+/// A server error as psycopg's `str(exc)` lays it out: the primary message,
+/// then its DETAIL, HINT and CONTEXT lines (psycopg's CONTEXT also names the
+/// statement's parameter, which tokio-postgres does not report).
+fn psycopg_text(e: &tokio_postgres::Error) -> String {
+    let Some(db) = e.as_db_error() else {
+        return e.to_string();
+    };
+    let mut text = db.message().to_string();
+    for (name, part) in [
+        ("DETAIL", db.detail()),
+        ("HINT", db.hint()),
+        ("CONTEXT", db.where_()),
+    ] {
+        if let Some(part) = part {
+            text.push_str(&format!("\n{name}:  {part}"));
+        }
+    }
+    text
+}
+
+/// `json.dumps(value)` when a string in it holds a reply's lone-surrogate
+/// stand-in ([`crate::mcp::py_loads::loads_reply`]), with each stand-in
+/// escaped as the lone surrogate Python escapes; None when none does.
+fn lone_surrogate_json(value: &Value) -> Option<String> {
+    use crate::dream::extractor::lone_surrogate;
+    fn stand_ins(v: &Value, out: &mut Vec<char>) {
+        match v {
+            Value::String(s) => out.extend(s.chars().filter(|c| lone_surrogate(*c).is_some())),
+            Value::Array(items) => items.iter().for_each(|x| stand_ins(x, out)),
+            Value::Object(m) => m.iter().for_each(|(k, x)| {
+                out.extend(k.chars().filter(|c| lone_surrogate(*c).is_some()));
+                stand_ins(x, out);
+            }),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    stand_ins(value, &mut found);
+    if found.is_empty() || crate::mutants::active("mcp-dream-judge-encode-unchecked") {
+        return None;
+    }
+    found.sort_unstable();
+    found.dedup();
+    let mut text = crate::pyjson::dumps(value);
+    for c in found {
+        let mut buf = [0u16; 2];
+        let pair: String = c
+            .encode_utf16(&mut buf)
+            .iter()
+            .map(|u| format!("\\u{u:04x}"))
+            .collect();
+        let lone = format!("\\u{:04x}", lone_surrogate(c).unwrap_or(0));
+        text = text.replace(&pair, &lone);
+    }
+    Some(text)
 }
 
 // ── fingerprints and the judging policy ──────────────────────────────────
@@ -329,7 +398,10 @@ pub(crate) fn evidence(v: &Value) -> Value {
 /// `observed_model(extractor)`: a launch-default alias asks the endpoint
 /// (`fetch_served_model`); any other name reports its last served model.
 pub(crate) async fn observed_model(ex: &Compat, served: Option<&str>) -> Option<String> {
-    if !ex.base_url.is_empty() && matches!(ex.model.as_str(), "extractor" | "bench" | "judge") {
+    if !ex.base_url.is_empty()
+        && matches!(ex.model.as_str(), "extractor" | "bench" | "judge")
+        && !crate::mutants::active("mcp-dream-judge-alias-unprobed")
+    {
         return crate::dream::extractor::fetch_served_model(&ex.base_url).await;
     }
     served.map(str::to_string)
@@ -649,6 +721,9 @@ impl Review {
         let mut cache = HashMap::new();
         for p in self.pending.iter_mut() {
             if !truthy(p, "judge_verdict") || !truthy(p, "judge2_verdict") {
+                continue;
+            }
+            if crate::mutants::active("mcp-dream-judge-moved-not-cleared") {
                 continue;
             }
             if vote_endpoint_moved(c, p, "second", Some(&mut cache)).await? {
@@ -1448,6 +1523,25 @@ pub(crate) async fn refresh_proposal_terminals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lone_surrogate_dumps_as_python_escapes_it() {
+        // json.dumps({"policy": "p", "model": "x\ud83d", "e": "é"}), CPython 3.11.
+        let stand_in = char::from_u32(crate::mcp::py_loads::LONE_SURROGATE_BASE + 0x3d)
+            .expect("stand-in for U+D83D");
+        let v = json!({"policy": "p", "model": format!("x{stand_in}"), "e": "\u{e9}"});
+        assert_eq!(
+            lone_surrogate_json(&v).as_deref(),
+            Some(
+                format!(
+                    r#"{{"policy": "p", "model": "x{b}ud83d", "e": "{b}u00e9"}}"#,
+                    b = char::from(0x5c)
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(lone_surrogate_json(&json!({"model": "judge-one"})), None);
+    }
 
     #[test]
     fn fingerprint_matches_python() {
