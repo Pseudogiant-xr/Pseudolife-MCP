@@ -59,7 +59,7 @@ fn number<T: std::str::FromStr>(bytes: &[u8]) -> io::Result<T> {
         .map_err(|_| invalid_stat())
 }
 
-fn parse_stat(bytes: &[u8], expected_pid: u32) -> io::Result<ProcessStat> {
+fn parse_stat(bytes: &[u8], expected_pid: u32) -> io::Result<Option<ProcessStat>> {
     let open = bytes
         .windows(2)
         .position(|part| part == b" (")
@@ -79,14 +79,19 @@ fn parse_stat(bytes: &[u8], expected_pid: u32) -> io::Result<ProcessStat> {
     if fields.len() < 20 || fields[0].len() != 1 || !b"RSDZTtXxKWPI".contains(&fields[0][0]) {
         return Err(invalid_stat());
     }
-    Ok(ProcessStat {
+    // X is past Z: release_task has begun, and once the signal struct is gone the
+    // kernel prints ppid 0 and group/session -1. The task is dead, so it is absent.
+    if fields[0][0] == b'X' {
+        return Ok(None);
+    }
+    Ok(Some(ProcessStat {
         pid: expected_pid,
         state: fields[0][0],
         parent: number(fields[1])?,
         group: number(fields[2])?,
         session: number(fields[3])?,
         started: number(fields[19])?,
-    })
+    }))
 }
 
 fn read_stat(root: &Path, pid: u32) -> io::Result<Option<ProcessStat>> {
@@ -95,7 +100,7 @@ fn read_stat(root: &Path, pid: u32) -> io::Result<Option<ProcessStat>> {
 
 fn stat_from_read(read: io::Result<Vec<u8>>, pid: u32) -> io::Result<Option<ProcessStat>> {
     match read {
-        Ok(bytes) => parse_stat(&bytes, pid).map(Some),
+        Ok(bytes) => parse_stat(&bytes, pid),
         // A task reaped between open and read reports ESRCH: absent, like a missing entry.
         // The leader stays unreaped until the fence passes, so its reads never see either.
         Err(error)
@@ -146,7 +151,7 @@ fn group_is_terminal_until(
                 if stat.session != leader.pid {
                     return Err(io::Error::other("owned queue group session changed"));
                 }
-                // Match the lifecycle contract: /proc absence or Z confirms death.
+                // Match the lifecycle contract: /proc absence, X or Z confirms death.
                 if stat.state != b'Z' {
                     return Ok(false);
                 }
