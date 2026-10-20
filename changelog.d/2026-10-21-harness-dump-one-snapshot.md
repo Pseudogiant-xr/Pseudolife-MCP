@@ -1,0 +1,3 @@
+### Fixed (2026-10-21 — a parity bank dump no longer mixes states from before and after a concurrent write)
+
+- The daemon parity harness's bank dump (`rust/daemon/harness/dbstate.py`) now reads the catalog and every table from one read-only `REPEATABLE READ` snapshot. Before, each table was its own autocommit read, so a write committing mid-dump showed in some tables and not others. The `sweep-recovery` scenario hit this on run 39422947014 (batch PR #882, ubuntu-latest): the prune committed between the reads of `dream_run_slots` and `dream_runs`, so the Python arm's dump held four slots beside two runs and differed from Rust's settled bank. Sequence `last_value` is not transactional and can still be newer than the rows.

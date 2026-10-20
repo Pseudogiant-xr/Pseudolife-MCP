@@ -114,8 +114,14 @@ def _order_columns(conn, schema: str, table: str) -> list[str]:
 
 
 def dump(dsn: str) -> dict:
+    """Every query reads one REPEATABLE READ snapshot, so a write committing
+    mid-dump (a prune cascading from dream_runs to dream_run_slots) cannot
+    show one table before it and the next after. Sequence ``last_value`` is
+    not transactional and can still be newer than the rows."""
     out: dict = {"catalog": {}, "rows": {}}
-    with psycopg.connect(dsn, autocommit=True) as conn:
+    with psycopg.connect(dsn) as conn:
+        conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+        conn.read_only = True
         for key, query in _CATALOG.items():
             out["catalog"][key] = [_plain(list(r)) for r in conn.execute(query).fetchall()]
         for schema, table in _tables(conn):

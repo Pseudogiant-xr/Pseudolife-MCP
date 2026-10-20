@@ -119,6 +119,39 @@ def test_pruning_scrub_rejects_rewrites_and_unexplained_sequence_changes(change)
     assert dbstate.diff(a, b)
 
 
+def test_dump_reads_every_table_from_one_snapshot(monkeypatch):
+    # PR #882's Rust run 39422947014: a prune committed between the reads of
+    # dream_run_slots and dream_runs, so one dump held 4 slots beside 2 runs.
+    import dbstate
+    import psycopg
+    import pgdisposable as pg
+    name = pg.name(pg.PREFIX + "dump_snapshot")
+    dsn = pg.create(name)
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("CREATE TABLE dream_runs (id bigint PRIMARY KEY)")
+            conn.execute("CREATE TABLE dream_run_slots (id bigint PRIMARY KEY, run_id bigint "
+                          "NOT NULL REFERENCES dream_runs(id) ON DELETE CASCADE)")
+            conn.execute("INSERT INTO dream_runs VALUES (1), (2), (3), (4)")
+            conn.execute("INSERT INTO dream_run_slots VALUES (1, 1), (2, 2), (3, 3), (4, 4)")
+        order_columns = dbstate._order_columns
+
+        def prune_between_tables(conn, schema, table):
+            if table == "dream_runs":  # read after dream_run_slots: commit the prune now
+                with psycopg.connect(dsn, autocommit=True) as other:
+                    other.execute("DELETE FROM dream_runs WHERE id NOT IN "
+                                  "(SELECT id FROM dream_runs ORDER BY id DESC LIMIT 2)")
+            return order_columns(conn, schema, table)
+
+        monkeypatch.setattr(dbstate, "_order_columns", prune_between_tables)
+        state = dbstate.dump(dsn)
+        runs = state["rows"]["public.dream_runs"]["rows"]
+        slots = state["rows"]["public.dream_run_slots"]["rows"]
+        assert {r[0] for r in runs} == {s[1] for s in slots}, (runs, slots)
+    finally:
+        pg.drop(name)
+
+
 def test_only_one_proven_warmup_sequence_increment_is_waived():
     import run as harness
     prior = pruning_state()
