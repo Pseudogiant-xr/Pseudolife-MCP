@@ -1,11 +1,10 @@
 //! Feature-gated process adapter for the dream differential harness.
 /// The acknowledgement engine only: the daemon's other dream modules
 /// (extractor, `memory_dream`) need the whole service.
+#[path = "../dream"]
 mod dream {
     #![allow(dead_code)]
-    #[path = "../../dream/cursors.rs"]
     pub mod cursors;
-    #[path = "../../dream/token.rs"]
     pub mod token;
 }
 #[path = "../graph_read.rs"]
