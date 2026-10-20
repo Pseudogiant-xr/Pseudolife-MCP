@@ -327,10 +327,9 @@ bank ("dev machines homelab"), never in the tree.
 - **A PR adding a test that runs on `windows-latest` and rests on process
   spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
   timeouts (a harness `run.py` scenario included) merges only after 20
-  clean hosted `windows-latest` runs of that test**, because the VM admits
-  what the runner then fails (#835: 0 of 525 on the VM, 3 of 5 hosted);
-  until the stress dispatch (issue #856) lands, the PR names that issue and
-  says the loop was not run, and the dispatch PR deletes this clause.
+  clean hosted `windows-latest` runs of that test** (the Rust workflow's
+  `mode=stress` dispatch), because the VM admits what the runner then
+  fails (#835: 0 of 525 on the VM, 3 of 5 hosted).
 - **Windows-sensitive Rust changes** (`cfg(windows)` / `windows-sys`,
   process spawn/wait/kill, sockets or named pipes, file locks or atomic
   replace, timeouts, Windows parity slices) build on the VM and run the

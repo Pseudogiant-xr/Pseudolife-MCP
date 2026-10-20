@@ -4,6 +4,9 @@
 #                                               # sized to WSL's CPUs and memory;
 #                                               # PSEUDOLIFE_SUITE_WORKERS=1: one process)
 #   pwsh ops/wsl-suite.ps1 tests/test_bm25.py   # anything else pytest takes
+#   $env:PSEUDOLIFE_SUITE_PROFILE='1'           # also profile the run (the
+#                                               # profile stays in WSL's
+#                                               # ~/.pseudolife-mcp/suite-profiles)
 #
 # A full suite on native Windows starts Git Bash processes in bursts that
 # stalled mouse input on the maintainer's host (tests/suite_lock.py carries
@@ -53,7 +56,7 @@ $forward = @(@(
     'PSEUDOLIFE_SUITE_LOCK', 'PSEUDOLIFE_SUITE_SLOTS', 'PSEUDOLIFE_TEST_CUDA',
     'PSEUDOLIFE_SUITE_VENV', 'PSEUDOLIFE_SUITE_PYTHON', 'PSEUDOLIFE_SUITE_PRUNE',
     'PSEUDOLIFE_SUITE_PRUNE_DAYS', 'PSEUDOLIFE_SUITE_KEEP', 'PSEUDOLIFE_SUITE_WORKERS',
-    'HF_HUB_OFFLINE'
+    'PSEUDOLIFE_SUITE_PROFILE', 'PSEUDOLIFE_SUITE_PROFILE_INTERVAL', 'HF_HUB_OFFLINE'
 ) | Where-Object { Test-Path "env:$_" })
 # The token file only when there is no token value: under /mnt/c it shows
 # loose permissions, and the board client refuses a credential file that is
