@@ -215,7 +215,8 @@ fn group_scan_treats_a_task_being_released_as_dead() {
     );
     assert!(stat_from_read(Ok(releasing.to_vec()), 611858).is_err());
     let home = Home::new();
-    let leader = stat(400, b'S', 400, 400, 123);
+    // The killed leader stays an unreaped zombie while the scan runs.
+    let leader = stat(400, b'Z', 400, 400, 123);
     fs::create_dir(home.0.join("400")).unwrap();
     fs::write(home.0.join("400/stat"), &leader).unwrap();
     fs::create_dir(home.0.join("611857")).unwrap();
