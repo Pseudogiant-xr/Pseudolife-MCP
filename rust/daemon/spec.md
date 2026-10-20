@@ -1487,6 +1487,93 @@ kernel; the kernel dispatcher against `dynamic.c`'s table on synthetic CPUs;
 candidate pairs (with excluded ids and pending pairs) and partition, slot duplicates, variant tokens, name
 containment, compound halves, junk and exact duplicates.
 
+### The merge judge and its tiebreak (2026-10-20)
+
+`dream/judge.rs` (the sweep's judge tick, its endpoints, the request and
+reply, the model-identity checks, the two-vote and three-judge gates, the
+dream-judge decisions and the relate link) and `dream/review_judgments.rs`
+(the fingerprints, the judging policy, response identity, moved vote
+endpoints, the evidence signing of one tick, and the versioned automatic
+reject records with their reconsideration), over `dream/deep.rs` (the
+evidence pack: `judge_evidence_body`, `judge_enrich_from`, the snapshot
+file), `dream/extractor.rs` (the client: `judge_body`, `judge_request`),
+`dream/prompts.rs` (`JUDGE_SYSTEM_PROMPT`, `RELATION_VOCAB`),
+`graph_review*.rs` (`merge_veto`, relate relations, the vote snapshot, the
+merge-decision audit) and the graph store's merge. Python:
+`memory/dream.py` `run_sweep_once` (2398-2547), `_RELATION_VOCAB` /
+`_JUDGE_SYSTEM_PROMPT` / `format_judge_proposal` (374-466), `judge_merges` /
+`_judge_request` (1661-1824); `service_dream.py` 3849-4524 and
+`deep_dream_judge` (4525-5002); `memory/review_judgments.py` (merge);
+`memory/review_decisions.py` (proposal records, 1-527);
+`memory/graph_review.py` 18-97; `service.py` 8965-9083.
+
+The claim: given identical model replies, both daemons send byte-identical
+judge requests and write identical banks. It claims nothing about model
+behaviour.
+
+| # | Exact item | Source |
+|---|---|---|
+| JM1 | The sweep runs the judge after the reapers, only while `memory.dream.enabled`; a tick is logged when it judged, reopened, took a second or third opinion, refused a same-model reject or a tiebreak, saw a served-model mismatch, lost an endpoint, or applied anything. | `memory/dream.py:2443-2512` |
+| JM2 | `judges_enabled` false answers `{judged: 0, skipped: "judges_disabled"}`; a `judge_mode` other than `shadow`, `auto-reject`, `auto` answers `skipped: "disabled"`; no pending merge row and no active merge decision answers `{judged: 0}` with no extractor built; no judge extractor answers `skipped: "no_judge_extractor"`; any failure answers `{judged: 0, error}` and never reaches the sweep. | `service_dream.py:4568-4596,4996-4998` |
+| JM3 | Endpoints: `judge_url` builds its own client (`model or judge_model or "judge"`, `PSEUDOLIFE_JUDGE_API_KEY`, the dream config's `extractor_max_tokens` / `extractor_timeout_seconds`, no extra body), else the dream extractor (`build_extractor_with_fallback`, a no-op extractor meaning none) with a requested model swapped on; the second opinion uses `judge_second_url` (`judge_second_model or "judge"`, `PSEUDOLIFE_JUDGE_SECOND_API_KEY`), else `judge_second_model` swapped onto the first's endpoint, else none (the first's endpoint object); the third uses `judge_third_url` (`PSEUDOLIFE_JUDGE_THIRD_API_KEY`), else `judge_third_model` swapped, else none. Every endpoint is built per tick. | `service_dream.py:3849-3934` |
+| JM4 | The request: `{**extra_body without reasoning_effort, model, messages: [system, user], response_format: json_object, max_tokens: max(max_tokens, 120 * rows), temperature: 0, chat_template_kwargs: {enable_thinking: false}}` as `json.dumps`; the reply's truthy `model` (as `str`) is stored as the endpoint's served model once the reply decodes, before its content is read; the content is cut from the first `{` to the last `}` and its `verdicts` list returned; any failure is `judge_merges failed: <cause>`. | `memory/dream.py:1752-1824` |
+| JM5 | The user text: each proposal `[n] FROM '<display>' (degree d, scopes <list repr>) evidence: <two snippets cut to snippet_chars, "; ">` / `    INTO ...` / `    detector: <reason or ?>[ (score <repr>)]`, the low-differential caution when stamped, joined by blank lines; the system prompt is `_JUDGE_SYSTEM_PROMPT` byte for byte. | `memory/dream.py:374-466,1679-1682` |
+| JM6 | Reply rows: `int(id)` (TypeError/ValueError skip the row; OverflowError fails the call), verdict `str().strip().lower()` among accept/reject/relate/leave for a known id, confidence clamped to [0, 1] (0.5 on a failed `float()`), note stripped and cut to 200; a reject or relate whose `norm_name(relation)` is a vocabulary name is `relate` with it, else `reject` with none. | `memory/dream.py:1683-1716` |
+| JM7 | Reconsideration before the batch: a fair, bounded batch of active merge decisions (after the cursor, then wrapped, at most the cap); a missing record or a changed terminal row or dismissal retires the marker (`externally_superseded`); the rest are re-signed over their projection (the recorded row, current non-judge fields, status pending, current displays) and reopened when the fingerprint, an observed model, or a later vote's endpoint identity moved: the row reset to pending with every judge column cleared and its dismissal deleted (the dismissal must still be the record's), the marker retired `reopened`; the cursor is written. | `memory/review_decisions.py:358-527` |
+| JM8 | Signing: `fingerprint` is the SHA-256 of `json.dumps(sort_keys=True, separators=(",", ":"))` over `{proposal: the row without n, id and judge* keys, evidence: its pack likewise with group signed as null, policy}`; the policy is `{version: 1, prompt, deep_dream, model, endpoint, max_tokens, extra_body, thinking: false, override, effort}` with `deep_dream` as `dataclasses.asdict` holds it, minus `link_judge_two_vote` and `judge_tiebreak_mode` and minus `judge_second_url`, `judge_third_model`, `judge_third_url` (empty or null) and `link_two_vote_min_confidence` (0.7) at their unset values. `prepare` reads the evidence for the verdict rows and the first `cap` unjudged rows; signing runs unlocked. | `memory/review_judgments.py:14-104,213-316` |
+| JM9 | `refresh` (one transaction): the memo (`review_judgments_v1_merge`) keeps live rows; a verdict whose memo fingerprint or served model (against the alias probe, the endpoint's served model and the last response identity under the request policy) no longer matches is cleared (every judge column) with its memo entry; then a later vote whose endpoint has since served another model (`review_response_identity_v1_merge_<opinion>` under its policy against its stored served model) is cleared, a moved second taking the third with it, and the note loses the cleared tails. | `memory/review_judgments.py:106-135,318-413` |
+| JM10 | The evidence pack: the graph, scopes, traces, entry texts and fact counts under the lock; mentions without vectors (every entry counts) for the rows' own entities; `_enrich_merge_proposals` at `max_context_snippets` and `judge_snippet_max_chars`. | `service_dream.py:4396-4428` |
+| JM11 | The queues: `first` (no verdict); `awaiting` (a verdict, no second, `judge_second_opinion`), all skipped and counted when no `judge_second_url` is set and `judge_second_model` is empty or the first endpoint's configured name; `split` (first and second verdict classes differ, no third; tiebreak `shadow` or `auto`), whose third endpoint is unconfigured (counted) or the first or second model again (`_third_model_taken`: the same object, or a non-alias third name among the first's configured name, the row's stamps and second served model and a non-alias `judge_second_model`; counted); `replay` (tiebreak `auto`, three votes, no refusal tail, a deciding majority, at most the cap). Nothing to do answers the idle dict. | `service_dream.py:4612-4685,3973-3991` |
+| JM12 | Order and budget: replay, then second opinions on `second[:cap]`, third opinions on `cap - len(second[:cap])`, first opinions on what is left; each loop takes the lock, validates the judged batch (the response identity and policy recorded for its endpoint, the served model checked against an alias probe, the rows re-signed), and applies the verdicts reject-class and `keep` first (stable), each verdict one transaction that first checks the row is still valid, pending and carrying the votes it pairs with. | `service_dream.py:4686-4994`; `memory/review_judgments.py:415-489` |
+| JM13 | A second or third endpoint that fails (another object, and another URL or key) records `second_opinion_error` / `third_opinion_error`, leaves its rows waiting and gives its budget to first opinions; a failure on the first's endpoint fails the tick. | `service_dream.py:4721-4745,4880-4893` |
+| JM14 | A second opinion writes `<first note[:160]> \| 2nd (<model>): <verdict or relate:rel> <conf:.2f> [split\|agree]` with its served model and policy. Two reject-class votes under `auto-reject` / `auto` at mean at or above `judge_reject_min_confidence_2` reject when the second is distinct (both served names known and different, another endpoint object, the first's stamp neither the second's model nor its configured name), else the note gains `\| auto-reject needs a distinct second model` (cut to 400) and nothing applies. | `service_dream.py:4751-4826,4115-4130` |
+| JM15 | Two accepts under `auto` on a row whose `low_differential` is false at mean at or above `judge_accept_min_confidence`: a pair already dismissed closes the row instead (a reject, `auto_accept_refused`); a second that is not distinct, an analyzer-filed row, a `merge_veto`, a variant conflict, or a failed graph snapshot (written once per call, before the first fold; its failure forgets the row's memo) refuses with the reason in the note; otherwise the pair folds. | `service_dream.py:4827-4859,4243-4264,4477-4484` |
+| JM16 | A first opinion writes its verdict, confidence, note (a relate's `relate:<rel>[ \| note]`), the served model's stamp (else the configured name) and served model, and records the memo; under `auto-reject` / `auto` a reject-class verdict at or above `judge_reject_min_confidence` rejects. `pending_unjudged` is the unjudged rows less the judged. | `service_dream.py:4936-4994` |
+| JM17 | A third opinion writes its vote with `note_with_tail(note, " \| 3rd (<model>): <token> <conf:.2f> [2-1 reject\|2-1 accept\|no majority]")` (only the free text gives way to the 400 cap), its served model and policy, then decides the tiebreak. | `service_dream.py:4266-4324`; `memory/graph_review.py:60-73` |
+| JM18 | The tiebreak (`auto`): two reject-class votes under `auto-reject` / `auto` at mean at or above `judge_reject_min_confidence_2` reject; two accepts under `auto` on a non-low-differential row at mean at or above `judge_accept_min_confidence` fold; a moved second or third endpoint applies nothing; an accept on a dismissed pair closes the row; an unknown second served model or a third not distinct by served name and stamp from both earlier votes (or a configured third among them) is refused once in the note (`tiebreak needs the second vote's served model` / `tiebreak needs a distinct third model`) and counted; an accept passes the accept guards; the decision records both later votes' policy and served model. | `service_dream.py:3993-4103` |
+| JM19 | Replay applies the tiebreak from recorded votes with no model call: the batch re-signed, each row still pending with its first and second votes. | `service_dream.py:4105-4123` |
+| JM20 | A served-model mismatch (the reply's model neither the requested name, a launch alias, nor the requested name plus `-YYYYMMDD` / `-YYYY-MM-DD`) is counted and listed in the answer and logged; it never blocks a verdict. | `service_dream.py:3936-3971` |
+| JM21 | A row the model skipped is recorded as `leave` at 0.0 (`model returned no verdict`); a relate without a relation is a reject; a vote's stamp is the served model, else the configured name. | `service_dream.py:4453-4491` |
+| JM22 | The decisions (`decided_by` `dream-judge`): a reject re-checks the row, sets status, writes the audit with the vote snapshot and closes the canonical pair, retiring no automatic record; a fold re-checks the row, folds over current evidence, writes the audit, merges and sets status. A reject is recorded (`automatic_review_decision_v1:<n>` and the index) when the row is the judge's terminal, the pair was open before and is closed now; a no-op forgets the memo entry; a fold invalidates the rest of the batch. | `service.py:8965-9083`; `memory/review_judgments.py:497-521`; `memory/review_decisions.py:78-198` |
+| JM23 | After an applied reject, the most confident typed relate vote (not `related-to`, a registered relation) files a link proposal oriented as the judge saw the pair, by entity id through the link gate (`merge-judge-relate`, rationale `merge judge: relate (<rel>) <conf:.2f> on merge proposal #<id>, rejected as distinct`), unless an edge or a link proposal already joins the pair; in a savepoint, its failure counted. | `service_dream.py:4493-4557` |
+| JM24 | Config: `memory.deep_dream` `judge_mode` shadow, `judge_batch` 8, `judge_snippet_max_chars` 240, `judge_reject_min_confidence` 0.8, `judge_url` / `judge_model` "", `judges_enabled` true, `judge_second_opinion` true, `judge_second_model` / `judge_second_url` "", `judge_reject_min_confidence_2` 0.7, `judge_accept_min_confidence` 0.6, `judge_tiebreak_mode` shadow, `judge_third_model` / `judge_third_url` "" (each string knob also null), `snapshot_keep` 10; every field signs as YAML gave it. | `utils/config.py:513-720` |
+
+`harness/w2e.py live --only judge-merge-shadow judge-merge-auto-reject
+judge-merge-auto judge-merge-same-model judge-merge-served-mismatch
+judge-merge-unknown-served judge-merge-tiebreak
+judge-merge-tiebreak-same-model judge-merge-tiebreak-unknown-second
+judge-merge-tiebreak-skip judge-merge-endpoint-errors
+judge-merge-reconsider` runs both daemons with dreaming on, a 0.25 s
+sweep and every other sweep step switched off (the analyzer filing and the
+deep tick, the link, junk, curation and candidate judges, the automatic
+dream), against one stub serving both (`shared_stub`, each side with its
+own key) with second and third opinion endpoints answering by pair. Each
+inserts its pending proposals out of band and compares the banks (the
+memo's and the decision records' fingerprints exactly, verdict clocks by
+presence) and the two request sequences byte for byte once both judges
+have settled, then the review listing. The scenarios cover: shadow (first,
+second and third opinions recorded, nothing applied, an evidence change
+clearing and re-asking a row); auto-reject (a single reject exactly at the
+bar with its relate link, a distinct two-vote reject at the mean bar, a
+split and a mean below the bar left); auto (two folds, one at the accept
+bar, each snapshot first, a name veto refused, a dismissed pair's row
+closed); a second endpoint configured with the first's model name; a
+second endpoint serving the first's model (a served-model mismatch); a
+first endpoint naming no model; the tiebreak deciding a 2-1 reject with
+its relate link and leaving a 2-1 accept under auto-reject and no
+majority; the tiebreak refused for a third serving the first's model and
+for an unknown second served model; a third configured as the first model
+(no call); a second and a third endpoint each failing once; and an
+automatic reject reopened by an evidence change and rejected again. The
+`mcp-dream-judge-*` mutants must be caught: the reject bar compared
+strictly, the two-vote reject on one vote, a same-model reject allowed,
+the served-name check skipped, the tiebreak taking the minority, a third
+of the first model asked, an evidence change not reopening, a stale verdict
+not cleared. `harness/goldens/w2e-merge-judge.json`
+(`gen_w2e_merge_judge_goldens.py`) pins against Python's own functions the
+prompt bytes, the proposal format, the reply validation, note tails, the
+served-model mismatch, the signed config and a policy fingerprint.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:

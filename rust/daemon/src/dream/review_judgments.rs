@@ -543,6 +543,7 @@ impl Review {
     }
 
     /// `sign()`, lock released, on a blocking thread.
+    #[allow(clippy::result_large_err)]
     pub(crate) async fn sign(&mut self) -> Result<(), ToolError> {
         let rows = std::mem::take(&mut self.to_sign);
         let ev = self.evidence.take();
@@ -700,6 +701,7 @@ impl Review {
     /// `validate(batch, response_extractor=, expected_model=, opinion=)`:
     /// `response` is the second or third opinion's endpoint (None: the
     /// first's), `served` the responding endpoint's served model.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn validate(
         &mut self,
         c: &Client,
@@ -774,7 +776,7 @@ impl Review {
             .iter()
             .filter(|p| {
                 let key = id_of(p).to_string();
-                sigs.get(&key).is_some() && sigs.get(&key) == self.expected.get(&key)
+                sigs.contains_key(&key) && sigs.get(&key) == self.expected.get(&key)
             })
             .map(id_of)
             .collect();

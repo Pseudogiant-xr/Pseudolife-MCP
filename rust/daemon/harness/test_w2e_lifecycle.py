@@ -540,3 +540,45 @@ def test_deep_dream_scenarios_register_their_mutants_and_normalizers(harness, tm
     v = harness.home_op({"op": "snapshot_file"}, tmp_path)["value"]
     assert v["files"] == 2 and v["name_shape"]
     assert v["tables"]["entities"] == {"columns": ["id", "created_at"], "rows": [[1, "<clock>"]]}
+
+
+def test_merge_judge_scenarios_isolate_the_judge_and_register_their_mutants(harness):
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("judge-merge-"))
+    assert names == ["judge-merge-auto", "judge-merge-auto-reject", "judge-merge-endpoint-errors",
+                     "judge-merge-reconsider", "judge-merge-same-model",
+                     "judge-merge-served-mismatch", "judge-merge-shadow",
+                     "judge-merge-tiebreak", "judge-merge-tiebreak-same-model",
+                     "judge-merge-tiebreak-skip", "judge-merge-tiebreak-unknown-second",
+                     "judge-merge-unknown-served"]
+    for n in names:
+        scn = harness.SCENARIOS[n]
+        config = scn["config"]
+        # The sweep's judge runs; every other step a tick would run is off.
+        assert "dream:\n    enabled: true" in config
+        for off in ("auto_tick: false", "analyzer_file_duplicates: false",
+                    'link_judge_mode: "off"', 'junk_judge_mode: "off"',
+                    'curation_judge_mode: "off"', 'candidate_judge_mode: "off"',
+                    "min_batch: 1000000", "idle_seconds: 1000000000", "infer_outcomes: false"):
+            assert off in config, (n, off)
+        assert scn["shared_stub"] and n in harness.EXTERNAL_WRITES
+        # The proposals land out of band and every such op waits for both
+        # judges to settle; no proposal is seeded where a judge could race
+        # the first comparison.
+        assert all("entity_proposals" not in op.get("sql", "") for op in scn["seed"])
+        assert all(op.get("settle") for op in scn["ops"] if op["op"] == "sql")
+    judge_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-judge-")]
+    assert len(judge_mutants) == 8
+    src = Path(__file__).resolve().parents[1] / "src" / "dream"
+    text = "".join((src / f).read_text(encoding="utf-8")
+                   for f in ("judge.rs", "review_judgments.rs"))
+    assert all(f'"{m}"' in text for m in judge_mutants)
+    # A decision record's clocks, and its proposal snapshot's verdict
+    # clocks, keep only null-or-not; the rest compares exactly.
+    rec = {"recorded_at": 1.5, "ended_at": None, "decided_at": 2.5, "dismissed_at": 3.0,
+           "fingerprint": "ab", "proposal": {"judged_at": 4.0, "judged3_at": None, "id": 7}}
+    assert harness.decision_record_clocks(rec) == {
+        "recorded_at": "<clock>", "ended_at": None, "decided_at": "<clock>",
+        "dismissed_at": "<clock>", "fingerprint": "ab",
+        "proposal": {"judged_at": "<clock>", "judged3_at": None, "id": 7}}
+    for col in ("judged_at", "judged2_at", "judged3_at"):
+        assert ("entity_proposals", col) in harness.CLOCK

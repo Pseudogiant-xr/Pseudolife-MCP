@@ -257,3 +257,105 @@ def test_extractor_diffs(harness):
     assert len(diffs) == 4
     long = harness.extractor_diffs([rec("a," * 2000)], [rec("b," * 2000)])
     assert len(long[0]) < 800
+
+
+JUDGE_SYSTEM = "You judge MERGE PROPOSALS for a knowledge-graph deduper."
+
+
+def keyed_request(stub, path, body, key=None):
+    host, port = stub.origin.removeprefix("http://").split(":")
+    c = http.client.HTTPConnection(host, int(port), timeout=10)
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    c.request("POST", path, body=body, headers=headers)
+    r = c.getresponse()
+    raw = r.read()
+    c.close()
+    return r.status, raw
+
+
+def judge_user(*pairs):
+    return "\n\n".join(
+        f"[{i}] FROM '{a}' (degree 1, scopes []) evidence: none\n"
+        f"    INTO '{b}' (degree 1, scopes []) evidence: none\n    detector: r"
+        for i, (a, b) in enumerate(pairs, 1))
+
+
+def test_judge_prompt_has_its_own_kind():
+    import stub_extractor
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from pseudolife_memory.memory import dream as d
+    assert stub_extractor.request_kind(d._JUDGE_SYSTEM_PROMPT) == "judge_merges"
+
+
+def test_judge_verdicts_answer_by_pair_on_each_endpoint(stub_factory):
+    s = stub_factory({"reply_model": "one", "second_reply_model": "two",
+                      "third_reply_model": None, "replies": [
+        {"kind": "judge_merges", "verdicts": {"A|B": {"verdict": "accept", "confidence": 0.9}}},
+        {"kind": "judge_merges", "endpoint": "second",
+         "verdicts": {"C|D": {"verdict": "reject", "confidence": 0.8, "relation": "uses"}}},
+        {"kind": "judge_merges", "endpoint": "third", "model": "three-x",
+         "verdicts": {"A|B": {"verdict": "leave", "confidence": 0.5}}},
+    ]})
+    body = chat_body(JUDGE_SYSTEM, judge_user(("B", "A"), ("D", "C")))
+    _, raw = keyed_request(s, "/v1/chat/completions", body)
+    reply = json.loads(raw)
+    assert reply["model"] == "one"
+    assert json.loads(reply["choices"][0]["message"]["content"]) == {
+        "verdicts": [{"id": 1, "verdict": "accept", "confidence": 0.9}]}
+    _, raw = keyed_request(s, "/second/v1/chat/completions", body)
+    reply = json.loads(raw)
+    assert reply["model"] == "two"
+    assert json.loads(reply["choices"][0]["message"]["content"]) == {
+        "verdicts": [{"id": 2, "verdict": "reject", "confidence": 0.8, "relation": "uses"}]}
+    _, raw = keyed_request(s, "/third/v1/chat/completions", body)
+    assert json.loads(raw)["model"] == "three-x"
+    status, raw = request(s, "GET", "/second/v1/models")
+    assert json.loads(raw)["data"][0]["id"] == "two"
+    # An endpoint-less entry never answers the judge endpoints, and an
+    # endpoint entry never answers the primary base.
+    s2 = stub_factory({"replies": [{"kind": "judge_merges", "endpoint": "second",
+                                    "verdicts": {}}]})
+    assert keyed_request(s2, "/v1/chat/completions", body)[0] == 500
+    assert keyed_request(s2, "/third/v1/chat/completions", body)[0] == 500
+
+
+def test_times_entries_answer_per_caller_then_yield(stub_factory):
+    s = stub_factory({"replies": [
+        {"kind": "judge_merges", "endpoint": "second", "times": 1, "status": 500, "body": "{}"},
+        {"kind": "judge_merges", "endpoint": "second", "verdicts": {}},
+    ]})
+    body = chat_body(JUDGE_SYSTEM, judge_user(("A", "B")))
+    path = "/second/v1/chat/completions"
+    assert [keyed_request(s, path, body, "side-python")[0] for _ in range(2)] == [500, 200]
+    assert [keyed_request(s, path, body, "side-rust")[0] for _ in range(2)] == [500, 200]
+
+
+def test_shared_stub_records_read_per_caller(stub_factory):
+    from stub_extractor import auth_digest
+    s = stub_factory({"replies": [{"kind": "judge_merges", "verdicts": {}}]})
+    body = chat_body(JUDGE_SYSTEM, judge_user(("A", "B")))
+    keyed_request(s, "/v1/chat/completions", body, "side-python")
+    keyed_request(s, "/v1/chat/completions", body, "side-rust")
+    keyed_request(s, "/v1/chat/completions", body, "side-python")
+    py, rs = auth_digest("Bearer side-python"), auth_digest("Bearer side-rust")
+    assert (s.count(py), s.count(rs), s.count()) == (2, 1, 3)
+    assert len(s.drain(auth=py)) == 2
+    assert s.count(py) == 0 and s.count(rs) == 1
+    assert [r["authorization"] for r in s.drain()] == [rs]
+
+
+def test_shared_stub_env_and_config(harness, stub_factory):
+    s = stub_factory()
+    scn = {"extractor": {"model": "judge-one"}, "shared_stub": True,
+           "config": "judge_second_url: \"@STUB@/second/v1\"\n"}
+    env = harness.extractor_env(scn, s, "rust")
+    assert env["PSEUDOLIFE_DREAM_API_KEY"] == env["PSEUDOLIFE_JUDGE_SECOND_API_KEY"] \
+        == env["PSEUDOLIFE_JUDGE_THIRD_API_KEY"] == "side-rust"
+    assert harness.scenario_config(scn, s) == f"judge_second_url: \"{s.origin}/second/v1\"\n"
+    stubs = harness.start_stubs(scn, ("seed", "python", "rust"))
+    try:
+        assert stubs["python"] is stubs["rust"] and stubs["seed"] is not stubs["python"]
+    finally:
+        harness.close_stubs(stubs)

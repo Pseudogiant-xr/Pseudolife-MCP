@@ -64,7 +64,7 @@ fn fixed2(x: f64) -> String {
         return format!("{x:.2}");
     }
     let last = digits.as_bytes()[1] - b'0';
-    if last % 2 == 0 {
+    if last.is_multiple_of(2) {
         format!("{head}.{}", &digits[..2])
     } else {
         format!("{x:.2}")
@@ -513,7 +513,7 @@ async fn second_opinion_distinct(
     Ok(served_ok
         && ex2.is_some()
         && first_model != model2
-        && !(!configured2.is_empty() && first_model == configured2))
+        && (configured2.is_empty() || first_model != configured2))
 }
 
 /// `_third_model_taken(row, ex, ex3, second_model)`.

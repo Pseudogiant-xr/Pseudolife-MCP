@@ -1623,61 +1623,6 @@ async fn deep_dream(
     Ok(out)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bound_keeps_small_answers_and_halves_the_head() {
-        let mut small = Map::new();
-        small.insert("candidates".into(), json!([1, 2, 3]));
-        assert_eq!(bound(small.clone()), small);
-        // Each item ~10 KB: 60 items overflow; 40, then 20 still overflow.
-        let item = "x".repeat(10_000);
-        let mut big = Map::new();
-        big.insert("dry_run".into(), json!(true));
-        big.insert("candidates".into(), json!(vec![item.clone(); 60]));
-        big.insert("would_junk".into(), json!(vec![item.clone(); 3]));
-        big.insert("totals".into(), json!({"candidates": 60}));
-        let out = bound(big);
-        let keys: Vec<&String> = out.keys().collect();
-        assert_eq!(
-            keys,
-            [
-                "dry_run",
-                "candidates",
-                "would_junk",
-                "totals",
-                "truncated",
-                "hint"
-            ]
-        );
-        // 20 items + 3 = 230 KB fits.
-        assert_eq!(out["candidates"].as_array().unwrap().len(), 20);
-        assert_eq!(out["truncated"], json!({"candidates": 60}));
-        assert!(out["hint"].as_str().unwrap().contains("leading 20 items"));
-    }
-
-    #[test]
-    fn kept_and_store_dismissals_follow_their_prefixes() {
-        let d: HashSet<(String, String)> = [
-            ("junk:kk", "junk:kk"),
-            ("junk:a", "junk:b"),
-            ("lesson:x|y", "lesson:z|w"),
-            ("lesson:x|y", "world:z|w"),
-            ("a", "b"),
-        ]
-        .iter()
-        .map(|(a, b)| (a.to_string(), b.to_string()))
-        .collect();
-        assert_eq!(kept_junk_norms(&d), HashSet::from(["kk".to_string()]));
-        assert_eq!(
-            store_dismissed(&d, "lesson"),
-            HashSet::from([("x|y".to_string(), "z|w".to_string())])
-        );
-    }
-}
-
 // ── the merge judge's evidence pack (`service_dream.py:4396-4428`) ────────
 
 /// The storage reads behind the merge-judge evidence pack
@@ -1881,4 +1826,59 @@ pub(crate) async fn write_graph_snapshot_body(
 ) -> Result<Option<String>, ToolError> {
     let tables = dump_graph_tables(c).await.map_err(internal)?;
     Ok(write_snapshot_file(data_dir, &tables, snapshot_keep))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bound_keeps_small_answers_and_halves_the_head() {
+        let mut small = Map::new();
+        small.insert("candidates".into(), json!([1, 2, 3]));
+        assert_eq!(bound(small.clone()), small);
+        // Each item ~10 KB: 60 items overflow; 40, then 20 still overflow.
+        let item = "x".repeat(10_000);
+        let mut big = Map::new();
+        big.insert("dry_run".into(), json!(true));
+        big.insert("candidates".into(), json!(vec![item.clone(); 60]));
+        big.insert("would_junk".into(), json!(vec![item.clone(); 3]));
+        big.insert("totals".into(), json!({"candidates": 60}));
+        let out = bound(big);
+        let keys: Vec<&String> = out.keys().collect();
+        assert_eq!(
+            keys,
+            [
+                "dry_run",
+                "candidates",
+                "would_junk",
+                "totals",
+                "truncated",
+                "hint"
+            ]
+        );
+        // 20 items + 3 = 230 KB fits.
+        assert_eq!(out["candidates"].as_array().unwrap().len(), 20);
+        assert_eq!(out["truncated"], json!({"candidates": 60}));
+        assert!(out["hint"].as_str().unwrap().contains("leading 20 items"));
+    }
+
+    #[test]
+    fn kept_and_store_dismissals_follow_their_prefixes() {
+        let d: HashSet<(String, String)> = [
+            ("junk:kk", "junk:kk"),
+            ("junk:a", "junk:b"),
+            ("lesson:x|y", "lesson:z|w"),
+            ("lesson:x|y", "world:z|w"),
+            ("a", "b"),
+        ]
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+        assert_eq!(kept_junk_norms(&d), HashSet::from(["kk".to_string()]));
+        assert_eq!(
+            store_dismissed(&d, "lesson"),
+            HashSet::from([("x|y".to_string(), "z|w".to_string())])
+        );
+    }
 }
