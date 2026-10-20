@@ -1063,8 +1063,8 @@ jobs:
           }
       - name: Ported rows and daemon controls
         if: startsWith(matrix.suite, 'h5-')
-        # Twice the Linux measurements named beside the matrix entries;
-        # retain the first hosted Windows measurement in the same artifacts.
+        # Budgets come from the hosted step timings named beside the matrix
+        # entries (rust/ci/parity_scope.py): five times the ubuntu p99.
         timeout-minutes: ${{ runner.os == 'Linux' && matrix.h5_timeout || matrix.h5_windows_timeout }}
         shell: pwsh
         run: |
