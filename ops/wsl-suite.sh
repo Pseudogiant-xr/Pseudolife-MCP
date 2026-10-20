@@ -36,6 +36,12 @@
 #   PSEUDOLIFE_SUITE_WORKERS     xdist workers for the default full run
 #                                (default: chosen from CPUs and memory;
 #                                0 or 1 runs it in one process)
+#   PSEUDOLIFE_SUITE_PROFILE     1: load tests/suite_profile_plugin.py (worker
+#                                timeline, resource and test-server samples,
+#                                run manifest) and fold its summary afterwards;
+#                                the arguments and exit code are unchanged
+#   PSEUDOLIFE_SUITE_PROFILE_DIR where the profile goes (default: a new
+#                                directory under ~/.pseudolife-mcp/suite-profiles)
 #
 # The run is offline (HF_HUB_OFFLINE=1) and WSL has its own Hugging Face
 # cache, so a fresh distribution needs the embedders CI warms
@@ -473,6 +479,21 @@ if [[ $# -eq 0 ]]; then
     echo "wsl-suite: full suite, $( (( workers >= 2 )) && echo "$workers xdist workers" || echo "one process")"
 fi
 
+# Opt-in profiling (tests/suite_profile_plugin.py): the plugin is added to
+# whatever pytest runs, default or chosen, so a profiled run tests the same
+# selection with the same workers as an unprofiled one.
+profile_dir=""
+case "${PSEUDOLIFE_SUITE_PROFILE:-}" in
+    ""|0|off|false|no) ;;
+    *)
+        profile_dir="${PSEUDOLIFE_SUITE_PROFILE_DIR:-$HOME/.pseudolife-mcp/suite-profiles/$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$root" rev-parse --short=8 HEAD 2>/dev/null || echo worktree)}"
+        mkdir -p "$profile_dir"
+        export PSEUDOLIFE_SUITE_PROFILE_DIR="$profile_dir"
+        set -- -p tests.suite_profile_plugin "$@"
+        echo "wsl-suite: profiling to $profile_dir"
+        ;;
+esac
+
 # Every process the run starts inherits this marker, so whatever outlives
 # pytest can be found by it and stopped, and nothing without it is touched
 # (the live daemon, another run). A detached process escapes the run's
@@ -563,4 +584,11 @@ trap 'pass_on INT 130' INT
 trap 'pass_on TERM 143' TERM
 code=0
 wait "$pytest_pid" || code=$?
+# The summary never changes the run's exit code; it runs only when the
+# plugin left its manifest (a run that never reached pytest leaves none).
+if [[ -n "$profile_dir" && -f "$profile_dir/manifest.json" ]]; then
+    "$venv/bin/python" evals/suite_profile_summary.py --profile-dir "$profile_dir" \
+        --tag "${profile_dir##*/}" --out "$profile_dir/summary.json" >&2 \
+        || echo "wsl-suite: the profile summary failed; the profile is in $profile_dir" >&2
+fi
 exit "$code"

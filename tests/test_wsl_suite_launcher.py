@@ -34,6 +34,14 @@ REFUSAL = "wsl-suite: a dispatched run"
 pytestmark = pytest.mark.skipif(BASH is None, reason="bash is not available")
 
 
+@pytest.fixture(autouse=True)
+def _not_profiled(monkeypatch):
+    """A profiled suite exports these; a launcher under test must not inherit
+    them, or it profiles itself (seen in the first profiled run, 2026-10-20)."""
+    monkeypatch.delenv("PSEUDOLIFE_SUITE_PROFILE", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_SUITE_PROFILE_DIR", raising=False)
+
+
 def _run(tmp_path: Path, *, lease_file: str | None = None, **env: str | None):
     home = tmp_path / "home"
     (home / ".pseudolife-mcp" / "locks").mkdir(parents=True, exist_ok=True)
@@ -842,3 +850,72 @@ def test_a_zero_padded_worker_count_is_read_as_decimal(tmp_path):
     proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="08")
     assert proc.returncode == 0, proc.stderr
     assert argv == [*_FULL, "-n", "8", "--dist", "loadfile", "--durations=30"]
+
+
+_PROFILE = ["-p", "tests.suite_profile_plugin"]
+
+
+@_LINUX_ONLY
+def test_profiling_adds_the_plugin_and_keeps_the_default_workers(tmp_path):
+    profile = tmp_path / "profile"
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="3",
+                              PSEUDOLIFE_SUITE_PROFILE="1",
+                              PSEUDOLIFE_SUITE_PROFILE_DIR=str(profile))
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", *_PROFILE, "tests/", "-q", "-rs", "-n", "3",
+                    "--dist", "loadfile", "--durations=30"]
+    assert f"wsl-suite: profiling to {profile}" in proc.stdout
+    assert profile.is_dir()
+
+
+@_LINUX_ONLY
+def test_profiling_keeps_chosen_arguments_as_they_are(tmp_path):
+    proc, argv = _pytest_argv(tmp_path, "tests/test_bm25.py", "-x",
+                              PSEUDOLIFE_SUITE_PROFILE="1",
+                              PSEUDOLIFE_SUITE_PROFILE_DIR=str(tmp_path / "p"))
+    assert proc.returncode == 0, proc.stderr
+    assert argv == ["-m", "pytest", *_PROFILE, "tests/test_bm25.py", "-x"]
+
+
+@pytest.mark.parametrize("value", ["", "0", "off", "false", "no"])
+@_LINUX_ONLY
+def test_profiling_is_off_unless_asked_for(tmp_path, value):
+    proc, argv = _pytest_argv(tmp_path, PSEUDOLIFE_SUITE_WORKERS="1",
+                              PSEUDOLIFE_SUITE_PROFILE=value)
+    assert proc.returncode == 0, proc.stderr
+    assert argv == _FULL
+    assert "profiling" not in proc.stdout
+
+
+@_LINUX_ONLY
+def test_a_failing_profiled_run_keeps_its_exit_code(tmp_path):
+    """pytest's code survives the summary step, even when the summary
+    itself fails; the summary runs only once the plugin wrote a manifest."""
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    calls = tmp_path / "calls"
+    (venv_bin / "python").write_text(
+        "#!/bin/bash\n"
+        f"echo \"$1\" >> '{calls}'\n"
+        'if [[ "$1" == -m ]]; then\n'
+        '    echo "{}" > "$PSEUDOLIFE_SUITE_PROFILE_DIR/manifest.json"; exit 5\n'
+        "fi\n"
+        "exit 1\n", encoding="utf-8")
+    (stubs / "uv").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for stub in (venv_bin / "python", stubs / "uv"):
+        stub.chmod(0o755)
+    env = hermetic_env(
+        HOME=str(tmp_path / "home"), PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+        PSEUDOLIFE_SUITE_VENV=str(tmp_path / "venv"), PSEUDOLIFE_SUITE_COMMIT=None,
+        PSEUDOLIFE_SUITE_DISPATCHED=None, PSEUDOLIFE_SUITE_WORKERS="1",
+        PSEUDOLIFE_SUITE_PROFILE="1",
+        PSEUDOLIFE_SUITE_PROFILE_DIR=str(tmp_path / "profile"))
+    proc = subprocess.run([BASH, str(SCRIPT)], capture_output=True, text=True,
+                          timeout=120, env=env)
+
+    assert proc.returncode == 5, proc.stderr
+    assert calls.read_text(encoding="utf-8").split() == [
+        "-m", "evals/suite_profile_summary.py"]
+    assert "the profile summary failed" in proc.stderr
