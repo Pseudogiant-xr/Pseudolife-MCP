@@ -129,7 +129,8 @@ def dump(dsn: str, timeout: float = 60.0) -> dict:
     dump that waited while holding a lock could deadlock it. Every table is
     therefore locked NOWAIT before the snapshot exists, any other wait is
     cut at 100 ms, and a conflict releases everything and retries: the dump
-    gives way and never holds a lock while waiting. Sequence ``last_value``
+    gives way, holding its locks through a wait of at most 100 ms (catalog
+    reads of objects it did not lock). Sequence ``last_value``
     and the ``pg_get_*def`` functions are not transactional and can still be
     newer than the rows."""
     deadline = clock.monotonic() + timeout
