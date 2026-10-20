@@ -348,7 +348,20 @@ def test_dream_stage_scenarios_key_their_replies_and_register_their_mutants(harn
         for reply in scn["extractor"]["replies"]:
             assert "sha256" not in reply
             assert reply["kind"] in ("outcomes", "lessons", "rules", "digest"), (n, reply)
-    # The digest map step's split agrees with Python's.
+    stage_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-stage-")]
+    assert len(stage_mutants) == 7
+    src = Path(__file__).resolve().parents[1] / "src"
+    text = "".join((src / f).read_text(encoding="utf-8") for f in (
+        "dream/stages.rs", "dream/lessons.rs", "dream/stage_calls.rs", "graph_review_slots.rs",
+        "stores/lessons.rs"))
+    assert all(f'"{m}"' in text for m in stage_mutants)
+
+
+def test_dream_stage_helpers_match_python(harness):
+    """The digest map step's split and the signal formatting agree with
+    Python's. Importing the dream module loads the memory package, which needs
+    torch; the Rust CI lane installs no model stack, so there it is skipped."""
+    pytest.importorskip("torch", reason="the Python dream module needs torch")
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     from pseudolife_memory.memory.dream import _format_signals, split_session_context
     for text, cap in ((harness.DIGEST_B_CONTEXT, harness.DIGEST_CHARS), ("ab\ncd", 1),
@@ -357,13 +370,6 @@ def test_dream_stage_scenarios_key_their_replies_and_register_their_mutants(harn
     for sigs in (harness.RULE_SIGNALS, harness.LESSON_SIGNALS, [harness.INFERRED_SIGNAL],
                  harness.LESSON_SIGNALS_3 + harness.LESSON_SIGNALS_4 + harness.LESSON_SIGNALS_5):
         assert harness.fmt_signals(sigs) == _format_signals(sigs)
-    stage_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-stage-")]
-    assert len(stage_mutants) == 7
-    src = Path(__file__).resolve().parents[1] / "src"
-    text = "".join((src / f).read_text(encoding="utf-8") for f in (
-        "dream/stages.rs", "dream/lessons.rs", "dream/stage_calls.rs", "graph_review_slots.rs",
-        "stores/lessons.rs"))
-    assert all(f'"{m}"' in text for m in stage_mutants)
 
 
 def test_lesson_write_clocks_and_episode_tokens_normalize(harness):
