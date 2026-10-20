@@ -20,18 +20,24 @@ conflicts, aborting that merge. It pushes nothing, so the local full suite
 runs on the batch head before any CI. `open` then checks the suite passed
 on that exact head, pushes the branch, opens the batch pull request, and
 comments on each dropped member naming what it collided with (removing its
-label). Nothing resolves a conflict and nothing force-pushes. Needs git
-2.38+ (`git merge-tree --write-tree`) and an authenticated `gh`.
+label). A member whose own diff changes the producer census inputs is
+dropped the same way when the batch head would fail CI's census check
+(`rust/producer_census.py --ci-check`). Nothing resolves a conflict and
+nothing force-pushes. Needs git 2.38+ (`git merge-tree --write-tree`) and an
+authenticated `gh`.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -43,17 +49,19 @@ PREFIX = "integrate/"
 MIN_MEMBERS = 2
 BATCH_RE = re.compile(r"^integrate/(\d{4}-\d{2}-\d{2})-batch-(\d+)$")
 MARKER_RE = r"^(<<<<<<<|>>>>>>>)( |$)"
+CENSUS = "rust/producer_census.py"
 
 
 class Refusal(Exception):
     """A precondition failed; nothing was changed."""
 
 
-def _run(argv: list[str], *, input: str | None = None,
-         check: bool = True) -> subprocess.CompletedProcess:
+def _run(argv: list[str], *, input: str | None = None, check: bool = True,
+         **kwargs) -> subprocess.CompletedProcess:
     try:
         proc = subprocess.run(argv, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", input=input)
+                              encoding="utf-8", errors="replace", input=input,
+                              **kwargs)
     except FileNotFoundError:
         raise Refusal(f"{argv[0]} is not on PATH") from None
     if check and proc.returncode != 0:
@@ -308,6 +316,82 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
         print(f"  dropped #{m.number}: {reason}")
 
 
+def _census_inputs(root: Path) -> set[str]:
+    """The census module's own CURRENCY_INPUTS, as the checked-out tree has it."""
+    spec = importlib.util.spec_from_file_location("_batch_producer_census", root / CENSUS)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return set(module.CURRENCY_INPUTS)
+
+
+def _census_ci_fails(root: Path, base_sha: str) -> bool:
+    """Would CI's producer census check fail on HEAD as a pull request on
+    `base_sha`? Runs the step CI runs, `rust/producer_census.py --ci-check`,
+    with a pull request event naming that base, so the census module itself
+    decides: drift is fatal only when the diff from the base touches its
+    CURRENCY_INPUTS, and otherwise only reported."""
+    with tempfile.TemporaryDirectory() as tmp:
+        event = Path(tmp) / "event.json"
+        event.write_text(json.dumps({"pull_request": {"base": {"sha": base_sha}}}),
+                         encoding="utf-8")
+        proc = _run([sys.executable, CENSUS, "--ci-check"], check=False, cwd=root,
+                    env={**os.environ, "GITHUB_EVENT_PATH": str(event)})
+    if proc.returncode == 1 and "producer census is stale" in proc.stderr:
+        return True
+    if proc.returncode != 0:
+        raise Refusal(f"`python {CENSUS} --ci-check` failed ({proc.returncode}) on "
+                      f"the batch head: {proc.stderr.strip() or proc.stdout.strip()}")
+    if "report only" in proc.stdout:
+        print("  producer census is stale on the batch head (report only, as in "
+              "CI: no member changes its inputs)")
+    return False
+
+
+def _census_culprits(plan: Plan) -> list[tuple[Member, list[str]]]:
+    """The merged members to drop so CI's census check passes on HEAD: none
+    when it passes already (or HEAD has no census), otherwise every member
+    whose own diff changes the census inputs."""
+    root = Path(_out("rev-parse", "--show-toplevel"))
+    if not (root / CENSUS).is_file() or not _census_ci_fails(root, plan.base_sha):
+        return []
+    inputs = _census_inputs(root)
+    culprits = [(m, sorted(_changed(m.sha, plan.base_sha) & inputs)) for m in plan.merged]
+    culprits = [(m, files) for m, files in culprits if files]
+    if not culprits:
+        raise Refusal(f"CI's producer census check would fail on the batch head, but "
+                      f"no member's own diff changes {', '.join(sorted(inputs))}; "
+                      f"check `python {CENSUS} --ci-check` by hand")
+    return culprits
+
+
+def _census_reason(member: Member, files: list[str], culprits: list[Member]) -> str:
+    others = [f"#{m.number}" for m in culprits if m is not member]
+    also = (f"; {' and '.join(others)} also change{'s' if len(others) == 1 else ''} "
+            "them and left this batch too" if others else "")
+    return (f"changes the producer census inputs ({', '.join(files)}) while the "
+            "committed census is stale on the batch head, so CI's census check "
+            f"(`python {CENSUS} --ci-check`) would fail{also}; once this batch "
+            f"merges, merge {BASE} forward, regenerate it with `python {CENSUS}`, "
+            "let CI pass, then re-apply the label")
+
+
+def _merge_batch(plan: Plan, members: list[Member]) -> None:
+    """Merge the members, then drop any whose census CI would fail on and
+    merge the rest again from the base; nothing is fixed inside a batch."""
+    census_drops: list[Dropped] = []
+    _merge_members(plan, members)
+    while culprits := _census_culprits(plan):
+        left = [m for m, _ in culprits]
+        for m, files in culprits:
+            census_drops.append(Dropped(m, _census_reason(m, files, left)))
+            print(f"  dropped #{m.number}: {census_drops[-1].reason}")
+        out = {d.member.number for d in census_drops}
+        print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
+        git("reset", "-q", "--hard", plan.base_sha)
+        plan.merged, plan.dropped = [], list(census_drops)
+        _merge_members(plan, [m for m in members if m.number not in out])
+
+
 def _new_markers(base_sha: str) -> list[str]:
     def files(rev: str) -> set[str]:
         proc = git("grep", "-l", "-E", MARKER_RE, rev, check=False)
@@ -386,7 +470,7 @@ def build(args: argparse.Namespace) -> int:
         git("switch", "-q", "-c", plan.branch, base_sha)
     done = False
     try:
-        _merge_members(plan, members)
+        _merge_batch(plan, members)
         plan.markers = _new_markers(base_sha)
         plan.head = _out("rev-parse", "HEAD")
         done = True
@@ -499,6 +583,16 @@ def open_(args: argparse.Namespace) -> int:
             raise Refusal(f"{REMOTE}/{BASE} moved since {branch} was built; switch "
                           f"back with `git switch --detach {REMOTE}/{BASE}`, remove "
                           "the local branch and build again")
+        # `build` drops these already; this catches a plan built without it.
+        culprits = _census_culprits(plan)
+        if culprits:
+            who = ", ".join(f"#{m.number} ({', '.join(files)})" for m, files in culprits)
+            numbers = ", ".join(f"#{m.number}" for m, _ in culprits)
+            raise Refusal(f"CI's producer census check would fail on {plan.head[:12]}: "
+                          f"the census is stale and {who} change its inputs. Nothing "
+                          f"is fixed inside a batch: remove `{plan.label}` from "
+                          f"{numbers}, switch back with `git switch --detach "
+                          f"{REMOTE}/{BASE}`, remove the local branch and build again")
     if url is None:
         try:
             git("push", "-q", "-u", REMOTE, plan.branch)

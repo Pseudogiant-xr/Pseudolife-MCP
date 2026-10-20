@@ -83,6 +83,23 @@ landed, waits for CI, and re-applies the label. If fewer than two members
 merge cleanly, no batch is built, the collisions are reported at once and
 the local branch is deleted; merge a lone ready pull request directly.
 
+The producer census gets the same treatment, because the local full suite
+does not run CI's census check. CI's Rust jobs run `python
+rust/producer_census.py --ci-check`, and it fails only when the census is
+stale *and* the diff from master touches the census inputs (the census
+module's `CURRENCY_INPUTS`: the census, its script and the port inventory).
+Elsewhere, drift is only reported. After merging, `build` runs that check on
+the batch head with a pull request event naming the batch's base. If the
+check would fail, `build` drops every member whose own diff changes those
+inputs, naming the other members that change them too, and merges the rest
+again from master. `open` comments on and unlabels each dropped member, as
+it does after a conflict. Its author merges master forward once the batch
+lands, regenerates the census with `python rust/producer_census.py`, waits
+for CI and re-applies the label. A census that is stale while no member
+touches its inputs is printed as report-only and left alone, as CI leaves
+it. Before the push, `open` runs the same check and refuses if it would
+fail, so a plan built without it cannot reach CI.
+
 The script never resolves a conflict (it merges with `rerere` off, so a
 remembered resolution is not replayed either) and never force-pushes. If
 the push or `gh pr create` fails, nothing is commented on and rerunning

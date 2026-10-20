@@ -766,6 +766,161 @@ def test_open_takes_a_stated_suite_result_and_says_it_was_not_checked(world, cap
     assert f"Local full suite: {note} (stated by the operator, not checked)" in body
 
 
+# The real census module with only its snapshot faked (a hash of each
+# scanned `ops/*.sh`), so the gate under test is the real `--ci-check`
+# decision: drift is fatal only when the diff from the event's base touches
+# CURRENCY_INPUTS.
+_CENSUS_STUB = """\
+import functools, hashlib, importlib.util
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("census_real", {real!r})
+census = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(census)
+ROOT = Path(__file__).resolve().parents[1]
+CURRENCY_INPUTS = census.CURRENCY_INPUTS
+census.OUTPUT = ROOT / "rust/producer-census.json"
+census.snapshot = lambda: {{
+    "scanned": {{p.name: hashlib.sha256(p.read_text(encoding="utf-8").encode()).hexdigest()
+                for p in sorted((ROOT / "ops").glob("*.sh"))}},
+    "surface": [], "inventory_gaps": [], "no_observed_producer": [], "unresolved": []}}
+census.ci_currency_required = functools.partial(census.ci_currency_required, ROOT)
+
+if __name__ == "__main__":
+    census.main()
+"""
+
+
+def _census(**scanned: str) -> str:
+    """The census `rust/producer_census.py` would write for these `ops/*.sh`."""
+    import hashlib
+    hashes = {f"{name}.sh": hashlib.sha256(text.encode()).hexdigest()
+              for name, text in sorted(scanned.items())}
+    return json.dumps({"scanned": hashes, "surface": [], "inventory_gaps": [],
+                       "no_observed_producer": [], "unresolved": []}, indent=2) + "\n"
+
+
+def _with_census(world) -> None:
+    """Master gains the census module, the port inventory it reads, a
+    scanned `ops/tool.sh` and a census current for it."""
+    (world.seed / "rust").mkdir(exist_ok=True)
+    (world.seed / "ops").mkdir(exist_ok=True)
+    stub = _CENSUS_STUB.format(real=str(ROOT / "rust" / "producer_census.py"))
+    world.advance_master({"rust/producer_census.py": stub, "ops/tool.sh": "t\n",
+                          "rust/producer-census.json": _census(tool="t\n"),
+                          "rust/contract-inventory.json": "{}\n"})
+
+
+def test_a_member_whose_census_is_stale_is_dropped_before_ci_sees_it(world, capsys):
+    # #865 on 2026-10-20: #842 regenerated the census for its own change, but
+    # #851 then added scanned files to master without regenerating it (report
+    # only there). The batch diff touched the census, so CI's gate was fatal.
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    world.advance_master({"ops/other.sh": "o\n"})        # census now stale on master
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    sha12 = world.pr(12, {"c.txt": "c\n"})
+    for n, sha in ((10, sha10), (11, sha11), (12, sha12)):
+        world.gh.add(n, sha)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    branch = f"integrate/{DATE}-batch-1"
+    assert _second_parents(world.origin, branch) == [sha11, sha12]
+    (args, body), = world.gh.bodies("comment")
+    assert args[2] == "10" and branch in body
+    assert "rust/producer-census.json" in body and "census is stale" in body
+    assert "python rust/producer_census.py" in body and "also" not in body
+    (edit_args, _), = world.gh.bodies("edit")
+    assert edit_args[2] == "10"
+    (_, create_body), = world.gh.bodies("create")
+    assert "#10" in create_body and "census" in create_body
+
+
+def test_every_member_touching_the_census_inputs_is_named_and_dropped(world, capsys):
+    _with_census(world)
+    sha10 = world.pr(10, {"rust/contract-inventory.json": '{"tools": []}\n'})
+    sha11 = world.pr(11, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    world.advance_master({"ops/other.sh": "o\n"})
+    sha12 = world.pr(12, {"b.txt": "b\n"})
+    sha13 = world.pr(13, {"c.txt": "c\n"})
+    for n, sha in ((10, sha10), (11, sha11), (12, sha12), (13, sha13)):
+        world.gh.add(n, sha)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha12, sha13]
+    comments = {args[2]: body for args, body in world.gh.bodies("comment")}
+    assert set(comments) == {"10", "11"}
+    assert "rust/contract-inventory.json" in comments["10"] and "#11" in comments["10"]
+    assert "rust/producer-census.json" in comments["11"] and "#10" in comments["11"]
+
+
+def test_a_stale_census_no_member_touches_is_reported_not_dropped(world, capsys):
+    # The near miss: drift outside the census inputs is report-only in CI,
+    # so a member that changes a scanned file but neither the census nor the
+    # inventory stays in, even with the census already stale on master.
+    _with_census(world)
+    world.advance_master({"ops/other.sh": "o\n"})        # stale on master itself
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n"})
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _publish(world) == 0
+    out = capsys.readouterr().out
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+    assert "report only" in out
+    assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
+
+
+def test_a_member_with_a_current_census_joins_the_batch(world, capsys):
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+    assert world.gh.bodies("comment") == []
+
+
+def test_open_refuses_a_batch_whose_census_ci_would_fail(world, capsys, monkeypatch):
+    # A plan built without the gate (an older script) is caught before the push.
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    world.advance_master({"ops/other.sh": "o\n"})
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+    real = integrate._census_culprits
+    monkeypatch.setattr(integrate, "_census_culprits", lambda plan: [])
+    assert _build() == 0
+    monkeypatch.setattr(integrate, "_census_culprits", real)
+    capsys.readouterr()
+
+    assert _open(world) == 2
+    err = capsys.readouterr().err
+
+    assert "#10" in err and "rust/producer-census.json" in err and "build again" in err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+def test_census_inputs_come_from_the_census_module():
+    spec = importlib.util.spec_from_file_location(
+        "census_for_test", ROOT / "rust" / "producer_census.py")
+    census = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(census)
+    assert integrate._census_inputs(ROOT) == set(census.CURRENCY_INPUTS)
+
+
 @pytest.mark.parametrize("rollup, expected", [
     (None, "none"),
     ([], "none"),
