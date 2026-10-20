@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
-        body = json.dumps({'status': 'ok', 'baseline_instance': {
+        body = json.dumps({'status': 'ok', 'ready': True, 'baseline_instance': {
             'nonce': os.environ.get('PSEUDOLIFE_BASELINE_NONCE'), 'pid': os.getpid(),
             'runtime': {'python': 'toy-fixture'}}}).encode()
         self.send_response(200); self.end_headers(); self.wfile.write(body)

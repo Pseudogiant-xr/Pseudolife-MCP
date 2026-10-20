@@ -25,6 +25,7 @@ listed JSON bodies) is free. References are to `pseudolife_memory/` at master
 | H3 | `db`: `"ok"` after a `SELECT 1` on a fresh connection, else `"error: <text>"` and `status` becomes `"degraded"`. | `daemon.py:~380`, `storage/postgres.py:702` |
 | H4 | 200 when `status == "ok"`, else 503 with the same body; 500 `{"status":"error","error":str}` if building the payload fails. | `web/api.py:418-427` |
 | H5 | `embedder` `{backend, device, dtype}` is present once the embedder is built; `dtype` is null for the ONNX backend. | `daemon.py` health payload |
+| H6 | Always, last, in this order: `ready` bool (`status == "ok"` and `pending` empty), then `pending`, the unfinished startup stages in this order: `"init"` until the stores are published and the clock reseeded (`coordination_tier_ready`), `"principals"` until the stored-principal view has completed a read (loaded once stays loaded, never stale-checked; never listed without Postgres). Neither changes `status` or the HTTP code. | `readiness.py`, `daemon.py` health payload |
 
 Conditional keys owned by subsystems outside this slice (`coordination`,
 `updates`, `extractor`, `stall`, `hooks_digest`, `build`, `init_refusal`,

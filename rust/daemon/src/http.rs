@@ -840,7 +840,7 @@ async fn dispatch(
     body: &mut RequestBody,
 ) -> Response {
     if path == "/health" {
-        let payload = health::payload(&app.service).await;
+        let payload = health::payload(&app.service, &app.store).await;
         let status = if payload["status"] == "ok" { 200 } else { 503 };
         return json_response(status, &payload);
     }

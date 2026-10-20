@@ -20,7 +20,7 @@ assert os.environ['PSEUDOLIFE_MCP_TOKEN']!='must-not-inherit'
 assert os.environ['_PSEUDOLIFE_PRODUCTION_DB']=='pseudolife_memory'
 class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
-  raw=json.dumps({'status':'ok','baseline_instance':{'nonce':os.environ['PSEUDOLIFE_BASELINE_NONCE'],'pid':os.getpid()}}).encode()
+  raw=json.dumps({'status':'ok','ready':True,'baseline_instance':{'nonce':os.environ['PSEUDOLIFE_BASELINE_NONCE'],'pid':os.getpid()}}).encode()
   self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
  def log_message(self,*args): pass
 HTTPServer(('127.0.0.1',int(os.environ['PSEUDOLIFE_MCP_PORT'])),Handler).serve_forever()
@@ -232,10 +232,11 @@ def test_full_bank_routes_candidate_arm_to_selected_target(tmp_path, monkeypatch
     assert receipt["status"] == "passed"
 
 
-def test_owned_candidate_waits_for_its_stored_principal_view(tmp_path):
+def test_owned_candidate_waits_for_ready(tmp_path):
     # The Rust candidate refreshes stored principals in the background too
-    # (principals::spawn_refresher); a bearer no token matches must get 401,
-    # not 503 principals_unavailable, before the corpus starts.
+    # (principals::spawn_refresher); its /health says ready only once they
+    # load, so a bearer no token matches gets 401, not 503
+    # principals_unavailable, before the corpus starts.
     import httpx
     from evals.rust_baseline.test_principals_readiness import stand_in
     with candidate.launched_candidate(stand_in(3), "synthetic-minted-bank", tmp_path,
@@ -243,4 +244,4 @@ def test_owned_candidate_waits_for_its_stored_principal_view(tmp_path):
         response = httpx.get(url + "/api/search?q=apricot", headers={"Authorization": "Bearer synthetic-invalid"},
                              trust_env=False, timeout=5)
         assert (response.status_code, response.json()["error"]) == (401, "unauthorized")
-        assert cleanup["principals_unavailable_before_ready"] == 3
+        assert cleanup["health_answers_before_ready"] == 3

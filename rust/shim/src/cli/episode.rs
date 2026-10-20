@@ -281,9 +281,16 @@ fn title(cwd: &[u32]) -> String {
 }
 
 async fn health(url: &str) -> Option<()> {
-    // probe_health: urllib's per-receive 0.25 s timeout and redirect limits.
-    let reply =
-        super::hook_http::get(url, "/health", None, Duration::from_millis(250), true).await?;
+    // probe_health: urllib's per-receive timeout (0.25 s unless
+    // PSEUDOLIFE_HOOK_PROBE_MS widens it) and redirect limits.
+    let reply = super::hook_http::get(
+        url,
+        "/health",
+        None,
+        crate::lifecycle::hook_probe_budget(),
+        true,
+    )
+    .await?;
     // The production health path decodes UTF-8 text, unlike json.loads(bytes).
     let value = super::hook_json::input(std::str::from_utf8(&reply.body).ok()?).ok()?;
     (!value.is_null()).then_some(())
