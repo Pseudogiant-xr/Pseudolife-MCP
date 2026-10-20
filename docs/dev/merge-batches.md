@@ -104,8 +104,9 @@ That check runs the batch head's census script, which is member code, so
 `build` (including `--dry-run`) executes it on this machine, as the full
 suite will. It runs with only the environment Python and git need to start,
 without tokens such as `GH_TOKEN`. The list of inputs is read from master's
-copy of the script; a member that changes the script changes one of the
-inputs, so it is caught either way.
+copy of the script, so no member code runs inside `ops/integrate.py`
+itself. A member that changes the script changes one of the inputs, so it
+is caught either way. With no census on master there is no check.
 
 The script never resolves a conflict (it merges with `rerere` off, so a
 remembered resolution is not replayed either) and never force-pushes. If

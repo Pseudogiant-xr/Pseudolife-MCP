@@ -776,7 +776,7 @@ from pathlib import Path
 
 if __name__ == "__main__" and "GH_TOKEN" in os.environ:
     raise SystemExit("the census ran with the operator's GH_TOKEN")
-spec =importlib.util.spec_from_file_location("census_real", {real!r})
+spec = importlib.util.spec_from_file_location("census_real", {real!r})
 census = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census)
 ROOT = Path(__file__).resolve().parents[1]
@@ -950,13 +950,23 @@ def test_a_census_drop_that_leaves_no_batch_is_reported_at_once(world, capsys):
     assert _git(world.work, "branch", "--list", "integrate/*") == ""
 
 
-def test_census_inputs_come_from_masters_census_module(monkeypatch):
+def test_census_inputs_come_from_masters_census_module(world):
     spec = importlib.util.spec_from_file_location(
         "census_for_test", ROOT / "rust" / "producer_census.py")
     census = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(census)
-    monkeypatch.chdir(ROOT)
-    assert integrate._census_inputs(ROOT, "HEAD") == set(census.CURRENCY_INPUTS)
+    first = _git(world.work, "rev-list", "--max-parents=0", "HEAD")
+    _with_census(world)
+    base = _git(world.work, "rev-parse", "origin/master")
+    # The checked-out tree's script lists one more input than master's.
+    stub = world.work / "rust" / "producer_census.py"
+    stub.write_text(stub.read_text(encoding="utf-8")
+                    + 'CURRENCY_INPUTS = CURRENCY_INPUTS | {"extra.txt"}\n',
+                    encoding="utf-8")
+    _git(world.work, "commit", "-q", "-am", "a member widens the census inputs")
+
+    assert integrate._census_inputs(base) == set(census.CURRENCY_INPUTS)
+    assert integrate._census_inputs(first) is None
 
 
 @pytest.mark.parametrize("rollup, expected", [

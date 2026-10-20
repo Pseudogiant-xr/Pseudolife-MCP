@@ -323,16 +323,16 @@ CENSUS_ENV = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC
               "PYTHONUTF8", "PYTHONIOENCODING")
 
 
-def _census_inputs(root: Path, base_sha: str) -> set[str]:
+def _census_inputs(base_sha: str) -> set[str] | None:
     """The census module's own CURRENCY_INPUTS, read from master's copy of
-    it (trusted, and a member changing the script is caught because the
-    script is one of them); the batch head's copy only when master has none."""
+    it, so no member code runs in this process (a member changing the script
+    is still caught: the script is one of them). None when master has none."""
+    shown = git("show", f"{base_sha}:{CENSUS}", check=False)
+    if shown.returncode != 0:
+        return None
     with tempfile.TemporaryDirectory() as tmp:
-        path = root / CENSUS
-        shown = git("show", f"{base_sha}:{CENSUS}", check=False)
-        if shown.returncode == 0:
-            path = Path(tmp) / "producer_census.py"
-            path.write_text(shown.stdout, encoding="utf-8")
+        path = Path(tmp) / "producer_census.py"
+        path.write_text(shown.stdout, encoding="utf-8")
         spec = importlib.util.spec_from_file_location("_batch_producer_census", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -357,9 +357,11 @@ def _census_ci_fails(root: Path, base_sha: str) -> bool:
     if proc.returncode != 0:
         raise Refusal(f"`python {CENSUS} --ci-check` failed ({proc.returncode}) on "
                       f"the batch head: {proc.stderr.strip() or proc.stdout.strip()}\n"
-                      "CI would fail the same way. Run it on a checkout of each "
-                      "member's head to find the one that breaks it, remove that "
-                      "member's label, and build again")
+                      f"Run `python {CENSUS} --ci-check` on {REMOTE}/{BASE} first: "
+                      "if it fails there too the cause is master or this machine. "
+                      "Otherwise run it on each member's head; the one that breaks "
+                      "it would fail CI the same way, so tell its author and leave "
+                      "it out of the next build")
     if "report only" in proc.stdout:
         print("  producer census is stale on the batch head (report only, as in "
               "CI: no member changes its inputs)")
@@ -368,12 +370,13 @@ def _census_ci_fails(root: Path, base_sha: str) -> bool:
 
 def _census_culprits(plan: Plan) -> list[tuple[Member, list[str]]]:
     """The merged members to drop so CI's census check passes on HEAD: none
-    when it passes already (or HEAD has no census), otherwise every member
-    whose own diff changes the census inputs."""
+    when it passes already (or master or HEAD has no census), otherwise
+    every member whose own diff changes the census inputs."""
     root = Path(_out("rev-parse", "--show-toplevel"))
-    if not (root / CENSUS).is_file() or not _census_ci_fails(root, plan.base_sha):
+    inputs = _census_inputs(plan.base_sha)
+    if (inputs is None or not (root / CENSUS).is_file()
+            or not _census_ci_fails(root, plan.base_sha)):
         return []
-    inputs = _census_inputs(root, plan.base_sha)
     culprits = [(m, sorted(_changed(m.sha, plan.base_sha) & inputs)) for m in plan.merged]
     culprits = [(m, files) for m, files in culprits if files]
     if not culprits:
