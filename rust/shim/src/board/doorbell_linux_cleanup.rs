@@ -79,9 +79,11 @@ fn parse_stat(bytes: &[u8], expected_pid: u32) -> io::Result<Option<ProcessStat>
     if fields.len() < 20 || fields[0].len() != 1 || !b"RSDZTtXxKWPI".contains(&fields[0][0]) {
         return Err(invalid_stat());
     }
-    // X is past Z: release_task has begun, and once the signal struct is gone the
-    // kernel prints ppid 0 and group/session -1. The task is dead, so it is absent.
-    if fields[0][0] == b'X' {
+    // Dead tasks are absent. X is EXIT_DEAD, past Z. do_task_stat reads the state
+    // first and fills ppid, group and session only while the task keeps its sighand,
+    // which __exit_signal clears on release; a released task prints the unset
+    // 0 -1 -1 beside whatever state it read. The unreaped leader shows neither.
+    if fields[0][0] == b'X' || (fields[1] == b"0" && fields[2] == b"-1" && fields[3] == b"-1") {
         return Ok(None);
     }
     Ok(Some(ProcessStat {
