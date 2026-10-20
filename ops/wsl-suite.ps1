@@ -3,7 +3,11 @@
 #   pwsh ops/wsl-suite.ps1                      # the full suite (xdist workers
 #                                               # sized to WSL's CPUs and memory;
 #                                               # PSEUDOLIFE_SUITE_WORKERS=1: one process)
-#   pwsh ops/wsl-suite.ps1 tests/test_bm25.py   # anything else pytest takes
+#   pwsh ops/wsl-suite.ps1 -q -n 2              # still the full suite: display
+#                                               # options and a worker choice
+#   pwsh ops/wsl-suite.ps1 tests/test_bm25.py   # anything else goes to pytest
+#                                               # unchanged (ops/wsl-suite.sh,
+#                                               # plan_run, has the contract)
 #   $env:PSEUDOLIFE_SUITE_PROFILE='1'           # also profile the run (the
 #                                               # profile stays in WSL's
 #                                               # ~/.pseudolife-mcp/suite-profiles)
@@ -23,9 +27,12 @@
 #
 # The lock a WSL run takes lives in the WSL home and cannot see a Windows
 # run's lock, which is why a host that adopts this refuses native Windows
-# full runs (PSEUDOLIFE_SUITE_WINDOWS / full-suite.windows). Every argument
-# goes to pytest unchanged; PSEUDOLIFE_WSL_DISTRO picks the distribution
-# (default: WSL's default one). The exit code is pytest's.
+# full runs (PSEUDOLIFE_SUITE_WINDOWS / full-suite.windows). Run with
+# `pwsh -File` (as above), every argument reaches ops/wsl-suite.sh unchanged,
+# `--` included (called from inside a PowerShell session, PowerShell drops a
+# `--`), and that script decides what pytest runs;
+# PSEUDOLIFE_WSL_DISTRO picks the distribution (default: WSL's default
+# one). The exit code is pytest's.
 #
 # The run logs in to the test Postgres with the test login file
 # (PSEUDOLIFE_TEST_PG_LOGIN_FILE, else ~/.pseudolife-mcp/test-pg.env, written
