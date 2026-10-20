@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 from .. import normalize
-from ..core import Case
+from ..core import HOOK_PROBE_ENV, Case
 from ..fixture_daemon import TLS_CA, Trickle, factory, json_body, redirect, text
 from ..mutants import Mutant
 from . import _daemon
@@ -122,7 +122,9 @@ def _wire_cases() -> list[Case]:
     # One-byte pieces keep the whole reply past 250 ms while 5 ms gaps leave
     # scheduler headroom inside that per-read deadline. Still require the POST
     # and a duration beyond the deadline, so a total-timeout client cannot pass.
+    # Unsetting the harness's wider probe budget keeps that deadline 250 ms.
     add(Case("start-health-trickle", start, rules=TITLE, stdin_json=hook(cwd="{CWD}"),
+             env={HOOK_PROBE_ENV: None},
              daemon=daemon(**{"/health": Trickle(json_body(HEALTH), 1, 0.005)}),
              after=require_post_read(0.25)))
     # The reply takes ~8 s in 8-byte pieces 0.7 s apart: past the 5 s timeout

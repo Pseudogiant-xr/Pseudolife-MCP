@@ -360,15 +360,35 @@ def test_definite_spawn_failure_rolls_back_only_its_private_reservation(tmp_path
     asyncio.run(drive())
 
 
-def test_single_exact_prompt_waits_briefly_for_real_lock_contention(tmp_path):
+def test_single_exact_prompt_waits_briefly_for_real_lock_contention(tmp_path, monkeypatch):
+    import pseudolife_memory.codex_doorbell_state as doorbell_state
     pending = PendingNotice(tmp_path, THREAD)
     first = pending.reserve(1)
     locked = threading.Event()
+    contended = threading.Event()
+    real_try_lock = doorbell_state._try_lock
+    def try_lock(handle):
+        taken = real_try_lock(handle)
+        if not taken:
+            contended.set()
+        return taken
+    monkeypatch.setattr(doorbell_state, "_try_lock", try_lock)
+
+    class _StillClock:
+        """The module's ``time`` with its retry clock stopped, so the retry
+        window cannot close while a stalled runner delays the holder."""
+        def __getattr__(self, name):
+            return getattr(time, name)
+        @staticmethod
+        def monotonic():
+            return 0.0
+    monkeypatch.setattr(doorbell_state, "time", _StillClock())
     def hold():
         with pending._locked() as taken:
             assert taken
             locked.set()
-            time.sleep(0.08)
+            # Release once the prompt has met the held lock and retried.
+            assert contended.wait(10)
     worker = threading.Thread(target=hold)
     worker.start()
     assert locked.wait(1)

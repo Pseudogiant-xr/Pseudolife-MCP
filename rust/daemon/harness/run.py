@@ -486,11 +486,13 @@ class Scenario:
     seed_entries = False
     settle = True          # wait until both report db + embedder
     snapshot_settle = True  # early HTTP witnesses still wait before measuring bank state
-    # Wait for the stored-principal view before the cases: required when a
-    # case's bearer matches no environment token on a reachable bank. The
-    # readiness settle does not imply it (its search uses an environment
-    # token), and a failed first read retries only after REFRESH_EVERY.
-    principals_settle = False
+    # What Daemon.start waits for before any case (pseudolife_memory/
+    # readiness.py): None is /health `ready: true` (initialized, stored
+    # principals loaded). A daemon that never becomes ready by design waits
+    # for the stages it can still finish, so /health `pending` is the same
+    # in every run: ("principals",) on a reachable bank whose init is
+    # refused or blocked, () (the first HTTP answer) on an unreachable one.
+    start_stages: tuple[str, ...] | None = None
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
     loopback_bind_fixture = False
@@ -624,7 +626,6 @@ class Tokens(Scenario):
     (one paired, one revoked) written by Python's principal store."""
     name = "tokens"
     seeds_principals = True
-    principals_settle = True  # several cases' bearers resolve through the stored view
 
     def __init__(self):
         self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT,
@@ -817,6 +818,7 @@ class DbDown(Scenario):
     and the stored-principal view never loads."""
     name = "db-down"
     settle = False
+    start_stages = ()  # no database: never initializes, principals never load
     unreachable_database = True
 
     def __init__(self):
@@ -840,6 +842,7 @@ class LeaseHeld(Scenario):
     503, the backoff refusal on a call, then recovery once released."""
     name = "lease-held"
     settle = False
+    start_stages = ("principals",)  # the held lease keeps init not_ready until the timeline releases it
     hold_lease = True
 
     def __init__(self):
@@ -873,6 +876,7 @@ class Reaper(Scenario):
     init retry recovers them (PSEUDOLIFE_SESSION_REAP_SECONDS=5)."""
     name = "reaper"
     settle = False
+    start_stages = ("principals",)  # the held lease outlasts both warmups
     hold_lease = True
 
     def __init__(self):
@@ -920,6 +924,7 @@ class DimMismatch(Scenario):
     """entries.embedding is vector(384): init_refusal before any DDL."""
     name = "dim-mismatch"
     settle = False
+    start_stages = ("principals",)  # init_refusal: never initializes
     snapshot_settle = False  # schema refusal never reaches healthy initialization
     golden_replay = True  # the timeline only waits; its cases replay against the golden
 
@@ -954,6 +959,7 @@ class StampedBank(Scenario):
     """Future schema: Python downgrades; Rust deliberately refuses unchanged."""
     name = "stamped"
     settle = False
+    start_stages = ("principals",)  # Rust refuses the future schema
     snapshot_settle = False  # timeline settles Python and observes Rust's schema refusal
 
     def prepare_template(self, dsn: str) -> None:
@@ -1195,6 +1201,7 @@ class NullEmbedding(Scenario):
     """A stored row with a NULL vector: hydration fails, not_ready, backoff."""
     name = "null-embedding"
     settle = False
+    start_stages = ("principals",)  # hydration fails: not_ready
     snapshot_settle = False  # timeline observes failed hydration, not a healthy bank
 
     def prepare_template(self, dsn: str) -> None:
@@ -1221,6 +1228,7 @@ class UnconstrainedDims(Scenario):
     guard passes, the hydrated-dimension guard refuses (init_refusal)."""
     name = "unconstrained-dims"
     settle = False
+    start_stages = ("principals",)  # init_refusal: never initializes
     snapshot_settle = False  # timeline observes the hydrated-dimension refusal
 
     def prepare_template(self, dsn: str) -> None:
@@ -1281,9 +1289,6 @@ class Encodings(Scenario):
     name = "encodings"
     config_yaml = "coordination:\n  allowed_principals: [alice]\n"
     settle = False
-    # "matching nothing" reaches the stored-principal view; before its first
-    # read both daemons answer principals_unavailable instead of unauthorized.
-    principals_settle = True
 
     def __init__(self):
         # The singular token is UTF-8 "caf\u00e9" read as latin-1; the map's is "caf\u00e9".
@@ -1340,6 +1345,7 @@ class StaticBuild(Scenario):
     """Every file in the committed Console build, with no storage/model dependency."""
     name = "static-build"
     settle = False
+    start_stages = ()  # no database: never initializes
     unreachable_database = True
     read_only_bank = True
     env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
@@ -1509,6 +1515,7 @@ class StaticRootLink(StaticPaths):
 class BodyLimits(Scenario):
     name = "body-limits"
     settle = False
+    start_stages = ()  # no database: never initializes
     unreachable_database = True
     read_only_bank = True
     env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
@@ -1546,6 +1553,7 @@ class BodyPairBudget(BodyLimits):
 class SecurityOpen(Scenario):
     name = "security-open"
     settle = False
+    start_stages = ()  # no database: never initializes
     unreachable_database = True
     read_only_bank = True
 
@@ -1677,41 +1685,6 @@ def wait_settled(ports: list[int], timeout: float = 600.0, token: str | None = N
         raise RuntimeError(f"daemons on {sorted(pending)} did not settle within {timeout}s")
 
 
-PRINCIPAL_PROBE = b"Bearer pl-harness-principal-probe"
-
-
-def principals_ready(port: int) -> bool:
-    """The stored-principal view has loaded: a bearer no token matches is
-    refused 401, not 503 ``principals_unavailable``. Both daemons start the
-    refresher in the background (``PrincipalRefresher.start``, Rust
-    ``principals::spawn_refresher``), so requests can arrive before its first
-    read. The refusal comes before any handler, so the probe writes nothing;
-    any other answer (an open daemon would run the search) is a scenario
-    misconfiguration and raises."""
-    try:
-        r = call(port, "GET", "/api/search?q=", [("Authorization", PRINCIPAL_PROBE)], timeout=30)
-    except OSError:
-        return False
-    error = (r.get("json") or {}).get("error")
-    if r["status"] == 503 and error == "principals_unavailable":
-        return False
-    if r["status"] == 401 and error == "unauthorized":
-        return True
-    raise RuntimeError(f"principal probe on {port}: expected 401 or 503 principals_unavailable, "
-                       f"got {r['status']} {error!r}")
-
-
-def wait_principals(ports: list[int], timeout: float = 60.0) -> None:
-    deadline = time.monotonic() + timeout
-    pending = set(ports)
-    while pending and time.monotonic() < deadline:
-        pending = {p for p in pending if not principals_ready(p)}
-        if pending:
-            time.sleep(0.2)
-    if pending:
-        raise RuntimeError(f"stored principals on {sorted(pending)} did not load within {timeout}s")
-
-
 def scenario_error(exc: BaseException, scn: Scenario) -> str:
     """The exception, with the case in flight and the deepest harness line it passed through.
 
@@ -1728,8 +1701,6 @@ def scenario_error(exc: BaseException, scn: Scenario) -> str:
 def settle_before_cases(scn: Scenario, ports: list[int]) -> None:
     if scn.settle:
         wait_settled(ports, token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"), check_db=not scn.settle_with_search)
-    if scn.principals_settle:
-        wait_principals(ports)
 
 
 def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) -> dict:
@@ -1880,8 +1851,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
                                             daemons.base_env(home, rust_env(env)))
         scn.configure_daemons(procs)
-        for d in procs.values():
-            d.start(240)
+        daemons.start_all(procs, 240, stages=scn.start_stages)
         settle_before_cases(scn, [d.port for d in procs.values()])
         rows = []
         golden_name = scn.name

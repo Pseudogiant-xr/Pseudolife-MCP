@@ -2445,8 +2445,7 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
             renv["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
         home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
-        for d in procs.values():
-            d.start(300)
+        daemons.start_all(procs, 300)
         w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
         clients = {side: Mcp(d.port) for side, d in procs.items()}
         for client in clients.values():

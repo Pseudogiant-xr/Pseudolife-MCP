@@ -49,7 +49,9 @@ async fn wait_cutoff_control(resume_pending: bool) {
     .await
     .unwrap();
 
-    let deadline = Instant::now() + Duration::from_millis(100);
+    // Long enough that the first poll below (resume_pending) always comes
+    // before it, even on a stalled runner; the test waits past it anyway.
+    let deadline = Instant::now() + Duration::from_secs(1);
     // Use the actual production reap helper under the same inner-first timeout.
     let mut wait = Box::pin(tokio::time::timeout_at(
         tokio::time::Instant::from_std(deadline),
@@ -89,9 +91,15 @@ async fn wait_cutoff_control(resume_pending: bool) {
     ))
     .await;
     let resumed = Instant::now();
-    let result = wait.as_mut().await;
+    // An expired wait must finish on the first poll after its deadline: a
+    // single-poll check, where an elapsed-time bound could be overrun by a
+    // stalled runner.
+    let first_poll = std::future::poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx))).await;
     drop(wait);
     let resumed_elapsed = resumed.elapsed();
+    let Poll::Ready(result) = first_poll else {
+        panic!("expired child wait stayed pending after its deadline");
+    };
     let identity_retained = child.id() == Some(leader);
     let timed_out = match result {
         Ok(Err(error)) => error.kind() == io::ErrorKind::TimedOut,
@@ -113,7 +121,6 @@ async fn wait_cutoff_control(resume_pending: bool) {
     assert!(timed_out, "expired child wait reported successful reaping");
     assert!(identity_retained, "expired wait released the owned leader");
     assert!(runtime_progress, "suspended wait blocked runtime progress");
-    assert!(resumed_elapsed < Duration::from_millis(50));
 }
 
 #[tokio::test]

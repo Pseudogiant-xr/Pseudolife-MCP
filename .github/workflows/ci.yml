@@ -1,6 +1,6 @@
 # CI (P2, 2026-07-02 review; lite-tier lanes added 2026-08-14): the full
 # suite runs on every merge instead of only when someone remembers.
-# Three lanes:
+# Suite lanes:
 #   * test            — full suite vs the production-parity PG 18 service
 #                       container (pgvector image, same as the Docker tier
 #                       since the 2026-08-14 16→18 bump), every test on the
@@ -10,12 +10,18 @@
 #                       lite provider itself on a Linux runner, and the
 #                       local default (tests/fake_embedder.py for every test
 #                       not marked real_model);
-#   * test-lite-windows — the lite-critical surface (embedded provider,
-#                       backup/restore rehearsal, shim) on a real Windows
-#                       runner. Windows runners cannot host service
+#   * test-lite-windows — the product paths that differ on Windows (embedded
+#                       provider, backup round trip, shim daemon spawn,
+#                       credential ACLs, tunnel DPAPI and process handling,
+#                       the msvcrt locks) on a real Windows runner, with no
+#                       retries. Windows runners cannot host service
 #                       containers at all, so embedded PG is the only
 #                       Postgres coverage possible there; the FULL suite on
 #                       Windows stays future work (embedder wall-time).
+#   * test-windows-nightly — not a merge gate: the process-spawning installer,
+#                       hook, board and test-tooling plumbing on Windows,
+#                       nightly and by hand, with one recorded retry
+#                       (split from test-lite-windows 2026-10-20).
 #   * test-lite-macos — the plugin hooks and client installers on a real
 #                       macOS runner (bash 3.2, BSD stat/base64/ps, shasum),
 #                       plus the embedded provider on its macOS wheel. Their
@@ -144,7 +150,8 @@ jobs:
 
       - name: Tree-wide guards
         # Every test file that reads CHANGELOG.md, plus the tracked-tree
-        # scans. The disposable-database guard scans every tracked .py file,
+        # scans (the wall-clock budget guard covers rust/ tests, so Rust-only
+        # PRs, which skip the test job, still run it). The disposable-database guard scans every tracked .py file,
         # rust/cli_harness/ included: #660 and #662 landed an unguarded reap
         # there on 2026-10-09 because this job did not run it.
         run: >-
@@ -154,7 +161,7 @@ jobs:
           tests/test_codex_hook_launcher.py tests/test_label_pair.py
           tests/test_merge_queue.py tests/test_plugin_packaging.py
           tests/test_rescore_strict_mc.py tests/test_schema_version.py
-          tests/test_changelog_fragments.py
+          tests/test_changelog_fragments.py tests/test_wall_clock_budgets.py
           "tests/test_disposable_database_guard.py::test_every_reap_and_full_bank_truncate_is_guarded_first"
 
   test:
@@ -388,10 +395,14 @@ jobs:
     # empty scope runs the suite instead of skipping it.
     if: ${{ !cancelled() && needs.scope.outputs.python != 'false' }}
     runs-on: windows-latest
-    # The curated lite surface needs no embedding model (torch installs as
-    # a core dep but never loads weights here), so this lane is minutes,
-    # not the ~40 the full suite would cost on a Windows runner.
-    timeout-minutes: 25
+    # Needs no embedding model (torch installs as a core dep but never loads
+    # weights here). Measured 2026-10-20 on the maintainer's Windows host,
+    # serially, against embedded PG: this selection's 377 cases took 75 s
+    # (85 s wall; 187 s while another session saturated loopback sockets); the 30-file, 1,865-case lane it replaced took 1,383 s
+    # there and 862 s on windows-latest (18 of its 25 minutes). 20, not 15:
+    # setup and the PG start take ~3.5 min, and a hung test must still reach
+    # pyproject's 600 s faulthandler dump before the job timeout.
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -407,18 +418,124 @@ jobs:
           python -m pip install -U pip
           pip install -e .[dev,lite]
 
-      - name: Lite-surface tests (embedded provider, backup + restore rehearsal, shim, schema pins, suite lock)
-        # These start their own embedded instances (including the crash /
-        # attach / lock paths) — no pre-started server, no service
-        # container (unsupported on Windows runners), no HF download.
-        # test_suite_lock.py is the only CI coverage of the msvcrt backend.
-        # The test_tunnel_*.py files run the tunnel's DPAPI key storage,
-        # owner-only ACLs and Windows process handling, which no other lane reaches.
-        # test_memory_changes_hook.py and test_coordination_turn_digest.py run
-        # lifecycle.ps1's delegate-brief paths, which only Codex on Windows uses.
-        # test_delegate_watch.py runs the watcher's detach flags, its
-        # GetProcessTimes start-time check and its lifetime lock on Windows.
-        run: python -m pytest tests/test_memory_changes_hook.py tests/test_coordination_turn_digest.py tests/test_delegate_watch.py tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_wait_mail_cli.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_update_cli.py tests/test_ops_update_wrappers.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_installer_plugin.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py tests/test_suite_lock.py tests/test_codex_doorbell.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py -q
+      - name: Record the runner image and CPU count
+        # The same step as the parity shards' in rust.yml, so the two compare.
+        shell: pwsh
+        run: |
+          $memory = [math]::Round([GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes / 1GB, 1)
+          $image = if ($env:ImageOS) { "$env:ImageOS $env:ImageVersion" } else { 'not a hosted image' }
+          $facts = "Runner: $env:RUNNER_OS $env:RUNNER_ARCH ($env:RUNNER_ENVIRONMENT), image $image, $([Environment]::ProcessorCount) logical CPUs, $memory GB memory"
+          Write-Output $facts
+          if ($env:GITHUB_STEP_SUMMARY) { $facts | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
+
+      - name: Start embedded PostgreSQL (the [lite] path, as test-lite-linux does)
+        # Without it the shim-to-daemon tests and the PG-backed coordination
+        # tests skip silently: hosted Windows has no service containers.
+        # attach_or_start, not start_embedded (whose atexit stop would end the
+        # server with this helper); the runner VM is discarded at job end.
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from pseudolife_memory.storage.embedded_pg import attach_or_start
+
+          dsn, _ = attach_or_start(Path.home() / "pl-ci-lite-bank")
+          base = dsn.rsplit("/", 1)[0]
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              fh.write(f"PSEUDOLIFE_TEST_DATABASE_URL={base}/pseudolife_memory_test\n")
+          print("embedded PG up:", base.rsplit("@", 1)[-1])
+          PY
+
+      - name: Product paths that differ on Windows
+        # A merge gate: product paths only, no retries. The process-spawning
+        # plumbing runs in test-windows-nightly; tests/test_ci_windows_lanes.py
+        # keeps every test in one lane and every Windows-only test in some lane.
+        # These start their own embedded instances: no pre-started server, no
+        # service container (unsupported on Windows runners), no HF download.
+        # - test_embedded_pg, test_backup_cli: the embedded provider's attach,
+        #   crash and msvcrt start-lock paths, and the backup round trip.
+        # - test_shim (picks): the Windows daemon spawn (creationflags, no
+        #   console window), its msvcrt spawn lock, and one real shim-to-daemon
+        #   handshake.
+        # - test_credentials, test_coordination_credentials: the token files'
+        #   Windows owner and explicit-ACL checks.
+        # - test_repository_claims: file claims refuse Windows junctions and
+        #   reserved names (CON, trailing dots and spaces).
+        # - test_tunnel_*: the tunnel's DPAPI key storage, owner-only ACLs and
+        #   Windows process handling, which no other lane reaches; the three
+        #   cancellation tests that reap real children run nightly.
+        # - test_suite_lock (picks): the only CI coverage of the msvcrt lock
+        #   backend, crash release and the native-Windows full-run refusal.
+        # - test_delegate_watch (picks): the watcher's detach flags, its
+        #   GetProcessTimes start-time check and its lifetime lock.
+        # - test_client_install_ux, test_installer_plugin, test_codex_hooks
+        #   (picks): a smoke of install.ps1 and the native Windows hooks; the
+        #   full installer and hook matrix runs nightly.
+        # - test_schema_version, test_doctor_cli, test_tool_annotations (one
+        #   test): schema pins and doctor, cheap and platform-sensitive.
+        env:
+          PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
+        run: >-
+          python -m pytest -ra --durations=30
+          --junitxml=ci-results/test-lite-windows.xml
+          tests/test_embedded_pg.py
+          tests/test_backup_cli.py
+          tests/test_schema_version.py
+          tests/test_doctor_cli.py
+          tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints
+          tests/test_credentials.py
+          tests/test_coordination_credentials.py
+          tests/test_repository_claims.py
+          tests/test_tunnel_profiles.py
+          tests/test_tunnel_service.py
+          tests/test_tunnel_cli.py
+          tests/test_tunnel_bridge.py
+          tests/test_tunnel_runtime.py
+          --deselect tests/test_tunnel_runtime.py::test_refresh_cancellation_reaps_actual_children_and_private_launch
+          --deselect tests/test_tunnel_runtime.py::test_initial_registration_cancellation_reaps_actual_child
+          --deselect tests/test_tunnel_runtime.py::test_refresh_registration_sigint_reaps_actual_child
+          tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations
+          tests/test_shim.py::test_spawn_daemon_never_allocates_a_console_window
+          tests/test_shim.py::test_concurrent_shims_spawn_exactly_one_daemon
+          tests/test_shim.py::test_spawn_lock_is_released_after_the_daemon_is_up
+          tests/test_shim.py::test_loopback_daemon_url_forms_still_spawn
+          tests/test_shim.py::test_no_spawn_env_falsy_value_still_spawns
+          tests/test_shim.py::test_startup_credential_check_passes_with_a_token_or_a_usable_token_file
+          tests/test_suite_lock.py::test_contention_errors_read_as_busy
+          tests/test_suite_lock.py::test_any_other_lock_error_is_raised_instead_of_waited_on
+          tests/test_suite_lock.py::test_a_ticket_counts_while_its_owner_holds_it
+          tests/test_suite_lock.py::test_a_full_run_takes_the_lock_and_records_its_holder
+          tests/test_suite_lock.py::test_a_second_process_waits_then_takes_the_lock_on_release
+          tests/test_suite_lock.py::test_the_lock_is_released_when_its_holder_crashes
+          tests/test_suite_lock.py::test_only_a_full_run_on_native_windows_is_refused_and_only_when_configured
+          tests/test_suite_lock.py::test_the_windows_policy_comes_from_the_env_then_the_file_then_allow
+          tests/test_delegate_watch.py::test_detach_starts_the_watcher_and_prints_its_address
+          tests/test_delegate_watch.py::test_detach_reports_one_already_running
+          tests/test_delegate_watch.py::test_detach_reports_a_child_that_never_came_up
+          tests/test_delegate_watch.py::test_detach_says_still_starting_while_the_child_runs_without_a_record
+          tests/test_delegate_watch.py::test_detach_that_lost_a_race_reports_the_winner
+          tests/test_delegate_watch.py::test_the_state_lock_excludes_a_watcher_in_another_process
+          tests/test_delegate_watch.py::test_a_second_watcher_on_the_same_state_exits_quietly
+          tests/test_delegate_watch.py::test_the_pid_file_names_the_watcher_while_it_runs
+          tests/test_delegate_watch.py::test_a_state_held_for_another_owner_is_refused
+          tests/test_delegate_watch.py::test_stop_asks_the_running_watcher_to_exit_at_its_next_poll
+          tests/test_client_install_ux.py::test_installer_ps1_parses
+          tests/test_client_install_ux.py::test_install_ps1_update_line_names_the_launcher_until_path_finds_it
+          tests/test_client_install_ux.py::test_installers_support_codex_hook_on_windows
+          tests/test_installer_plugin.py::test_fresh_machine_gets_marketplace_and_plugin
+          tests/test_codex_hooks.py::test_native_hook_rejects_broadened_managed_connection_acl
+          tests/test_codex_hooks.py::test_plugin_native_windows_prompt_context
+          tests/test_codex_hooks.py::test_native_session_start_sends_the_plugin_version
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-lite-windows-results
+          path: ci-results/
+          retention-days: 14
+          if-no-files-found: warn
 
   test-lite-macos:
     needs: scope
@@ -464,6 +581,150 @@ jobs:
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
         run: python -m pytest tests/test_delegate_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py -q -rs
+
+  test-windows-nightly:
+    # Not a merge gate, and never run for a pull request or merge group: the
+    # Windows plumbing that starts real processes and shells (installer
+    # matrix, Codex hook setup and doorbell, coordination digest and adapter,
+    # wait-mail, update CLI, register-claude-desktop, the stop-wake hook's
+    # timing tests, the rest of the suite lock, shim and delegate watcher).
+    # The 2026-10-20 CI flake review found the Windows flakes live here, so
+    # it runs nightly and by hand. ops/pytest_retry_once.py retries
+    # first-attempt failures once and keeps the first attempt's junit and
+    # attempts.json in the artifact, so a flake rate can be read off the
+    # runs. Retries belong here only; the merge gate holds deterministic tests.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    # The 30-file lane this half came from took 862 s on windows-latest; the
+    # plumbing half plus the nine files added below is most of that, and a
+    # retry repeats only what failed.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (dev + lite)
+        run: |
+          python -m pip install -U pip
+          pip install -e .[dev,lite]
+
+      - name: Record the runner image and CPU count
+        # The same step as the parity shards' in rust.yml, so the two compare.
+        shell: pwsh
+        run: |
+          $memory = [math]::Round([GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes / 1GB, 1)
+          $image = if ($env:ImageOS) { "$env:ImageOS $env:ImageVersion" } else { 'not a hosted image' }
+          $facts = "Runner: $env:RUNNER_OS $env:RUNNER_ARCH ($env:RUNNER_ENVIRONMENT), image $image, $([Environment]::ProcessorCount) logical CPUs, $memory GB memory"
+          Write-Output $facts
+          if ($env:GITHUB_STEP_SUMMARY) { $facts | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
+
+      - name: Start embedded PostgreSQL (the [lite] path, as test-lite-linux does)
+        # Without it the shim-to-daemon tests and the PG-backed coordination
+        # tests skip silently: hosted Windows has no service containers.
+        # attach_or_start, not start_embedded (whose atexit stop would end the
+        # server with this helper); the runner VM is discarded at job end.
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from pseudolife_memory.storage.embedded_pg import attach_or_start
+
+          dsn, _ = attach_or_start(Path.home() / "pl-ci-lite-bank")
+          base = dsn.rsplit("/", 1)[0]
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              fh.write(f"PSEUDOLIFE_TEST_DATABASE_URL={base}/pseudolife_memory_test\n")
+          print("embedded PG up:", base.rsplit("@", 1)[-1])
+          PY
+
+      - name: Windows plumbing (one recorded retry)
+        # Tests the merge gate names from a split file are deselected here (and
+        # the reverse for test_tunnel_runtime), so each runs in one Windows
+        # lane. The last nine files hold Windows-only tests that no CI lane
+        # ran before 2026-10-20.
+        env:
+          PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
+        run: >-
+          python ops/pytest_retry_once.py ci-results/test-windows-nightly
+          -ra --durations=30
+          tests/test_memory_changes_hook.py
+          tests/test_coordination_turn_digest.py
+          tests/test_coordination_adapter.py
+          tests/test_wait_mail_cli.py
+          tests/test_subagent_board_guard.py
+          tests/test_codex_hook_setup.py
+          tests/test_codex_hook_setup_edges.py
+          tests/test_codex_doorbell.py
+          tests/test_update_cli.py
+          tests/test_ops_update_wrappers.py
+          tests/test_register_claude_desktop.py
+          tests/test_installer_shim_upgrade.py
+          tests/test_installer_existing_upgrade.py
+          tests/test_codex_hooks.py
+          --deselect tests/test_codex_hooks.py::test_native_hook_rejects_broadened_managed_connection_acl
+          --deselect tests/test_codex_hooks.py::test_plugin_native_windows_prompt_context
+          --deselect tests/test_codex_hooks.py::test_native_session_start_sends_the_plugin_version
+          tests/test_client_install_ux.py
+          --deselect tests/test_client_install_ux.py::test_installer_ps1_parses
+          --deselect tests/test_client_install_ux.py::test_install_ps1_update_line_names_the_launcher_until_path_finds_it
+          --deselect tests/test_client_install_ux.py::test_installers_support_codex_hook_on_windows
+          tests/test_installer_plugin.py
+          --deselect tests/test_installer_plugin.py::test_fresh_machine_gets_marketplace_and_plugin
+          tests/test_shim.py
+          --deselect tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations
+          --deselect tests/test_shim.py::test_spawn_daemon_never_allocates_a_console_window
+          --deselect tests/test_shim.py::test_concurrent_shims_spawn_exactly_one_daemon
+          --deselect tests/test_shim.py::test_spawn_lock_is_released_after_the_daemon_is_up
+          --deselect tests/test_shim.py::test_loopback_daemon_url_forms_still_spawn
+          --deselect tests/test_shim.py::test_no_spawn_env_falsy_value_still_spawns
+          --deselect tests/test_shim.py::test_startup_credential_check_passes_with_a_token_or_a_usable_token_file
+          tests/test_suite_lock.py
+          --deselect tests/test_suite_lock.py::test_contention_errors_read_as_busy
+          --deselect tests/test_suite_lock.py::test_any_other_lock_error_is_raised_instead_of_waited_on
+          --deselect tests/test_suite_lock.py::test_a_ticket_counts_while_its_owner_holds_it
+          --deselect tests/test_suite_lock.py::test_a_full_run_takes_the_lock_and_records_its_holder
+          --deselect tests/test_suite_lock.py::test_a_second_process_waits_then_takes_the_lock_on_release
+          --deselect tests/test_suite_lock.py::test_the_lock_is_released_when_its_holder_crashes
+          --deselect tests/test_suite_lock.py::test_only_a_full_run_on_native_windows_is_refused_and_only_when_configured
+          --deselect tests/test_suite_lock.py::test_the_windows_policy_comes_from_the_env_then_the_file_then_allow
+          tests/test_delegate_watch.py
+          --deselect tests/test_delegate_watch.py::test_detach_starts_the_watcher_and_prints_its_address
+          --deselect tests/test_delegate_watch.py::test_detach_reports_one_already_running
+          --deselect tests/test_delegate_watch.py::test_detach_reports_a_child_that_never_came_up
+          --deselect tests/test_delegate_watch.py::test_detach_says_still_starting_while_the_child_runs_without_a_record
+          --deselect tests/test_delegate_watch.py::test_detach_that_lost_a_race_reports_the_winner
+          --deselect tests/test_delegate_watch.py::test_the_state_lock_excludes_a_watcher_in_another_process
+          --deselect tests/test_delegate_watch.py::test_a_second_watcher_on_the_same_state_exits_quietly
+          --deselect tests/test_delegate_watch.py::test_the_pid_file_names_the_watcher_while_it_runs
+          --deselect tests/test_delegate_watch.py::test_a_state_held_for_another_owner_is_refused
+          --deselect tests/test_delegate_watch.py::test_stop_asks_the_running_watcher_to_exit_at_its_next_poll
+          tests/test_tunnel_runtime.py::test_refresh_cancellation_reaps_actual_children_and_private_launch
+          tests/test_tunnel_runtime.py::test_initial_registration_cancellation_reaps_actual_child
+          tests/test_tunnel_runtime.py::test_refresh_registration_sigint_reaps_actual_child
+          tests/test_stop_wake_hook.py
+          tests/test_codex_shim_health.py
+          tests/test_connect.py
+          tests/test_expose_cli.py
+          tests/test_shim_runtimes.py
+          tests/test_wake_defaults.py
+          tests/test_codex_doorbell_revision.py
+          tests/test_installer_legacy_hooks.py
+          tests/test_ops_install_cache_retention.py
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-windows-nightly-results
+          path: ci-results/
+          retention-days: 30
+          if-no-files-found: warn
 
   frontend:
     runs-on: ubuntu-latest

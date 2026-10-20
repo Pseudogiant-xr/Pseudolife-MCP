@@ -936,7 +936,9 @@
     "memory": {
      "source": "unavailable"
     },
+    "pending": [],
     "persist_errors": 0,
+    "ready": true,
     "schema": 55,
     "status": "ok",
     "storage": "postgres",
@@ -982,7 +984,9 @@
     "memory": {
      "source": "unavailable"
     },
+    "pending": [],
     "persist_errors": 0,
+    "ready": true,
     "schema": 55,
     "status": "ok",
     "storage": "postgres",
@@ -1028,7 +1032,9 @@
     "memory": {
      "source": "unavailable"
     },
+    "pending": [],
     "persist_errors": 0,
+    "ready": true,
     "schema": 55,
     "status": "ok",
     "storage": "postgres",

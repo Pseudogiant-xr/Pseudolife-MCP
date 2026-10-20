@@ -90,18 +90,27 @@ class RealDaemon:
             time.sleep(0.25)
 
     def _await_health(self) -> None:
-        deadline = time.time() + 180
-        while time.time() < deadline:
-            if self.proc.poll() is not None:
-                raise RuntimeError("daemon exited:\n" + self.tail())
+        """Until /health is ok with the stored-principal view loaded (the
+        readiness contract, pseudolife_memory/readiness.py). Not ``ready``:
+        CI runs these rows without an embedding model, so init never
+        finishes; the warmup wait covers the model where there is one."""
+        from pseudolife_memory import readiness
+
+        deadline = time.monotonic() + 180
+        while True:
             try:
-                with urllib.request.urlopen(self.url + "/health", timeout=2) as r:
-                    if json.loads(r.read()).get("status") == "ok":
-                        return
-            except Exception:  # noqa: BLE001 — not up yet
-                pass
-            time.sleep(0.5)
-        raise RuntimeError("daemon never became healthy:\n" + self.tail())
+                body = readiness.wait_ready(
+                    self.url, max(0.1, deadline - time.monotonic()), stages=("principals",),
+                    alive=lambda: self.proc.poll() is None, poll=0.25)
+            except readiness.NotReady as exc:
+                state = "exited" if exc.exited else "never became healthy"
+                raise RuntimeError(f"daemon {state} ({exc}):\n" + self.tail()) from None
+            if body.get("status") == "ok":
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"daemon never became healthy (status {body.get('status')!r}):\n"
+                                   + self.tail())
+            time.sleep(0.25)
 
     def settle(self, fast: float = 0.08, streak: int = 5, limit: float = 90.0) -> None:
         """Wait until ``/health`` answers well inside the CLIs' 0.25 s probe
