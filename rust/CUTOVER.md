@@ -36,7 +36,7 @@ The surface counts come from the refreshed checklists in
 | Coordination actions (15) | All served and compared by the board harness. | Three declared cutover blockers (below). |
 | CLI modes (29) | 9 native, 15 partly native, 5 defer by name ([CLI checklist](PARITY.md#cli-mode-acceptance-checklist)). | The deferred sub-rows and modes in batch B10, plus the lite-tier rows (D1). |
 | Background duties | The scheduler, session reaper, dream-journal and log pruning, heap trim, release check and stored-principal refresh are implemented. | Autosave and the clean-exit flush are scheduled no-ops. The compaction policy is ported and golden-tested but never invoked. The reaper's automatic titles are absent. Automatic dreams, graph sweeps and the session-end dream trigger are absent or a declared no-op. |
-| Evidence | Every `ported` body rests on recorded Linux dev-lane differential runs (`w2d_search.py`, `w2e.py`, `board/run.py`). | Hosted CI compares no served MCP or REST body other than `memory_toolset`'s. It runs the MCP wire, binding and stub corpus, HTTP admission, security and body limits, static files, sweep pruning, dream cursors, the graph store and graph read model, and the CLI harness rows. No Windows runtime run of the daemon exists (batch B13). Since 2026-10-19 a local full suite runs in 9 to 12 minutes on four workers (#846, batch #850), and the CI reshape in batch #868 (open) would take the Windows `cli-live` parity suite out of the required gate (still required on Linux; the other live suites stay gated on Windows) and run only the parity shards a PR's diff reaches (#859), narrow the required Windows Python lane to the cases that reach Windows-specific product code (#862), and replace sub-second clock waits in tests with event waits, with a guard against new ones (#863). Proposal C below would move the body differentials to a nightly dev-box run. |
+| Evidence | Every `ported` body rests on recorded Linux dev-lane differential runs (`w2d_search.py`, `w2e.py`, `board/run.py`). | Hosted CI compares no served MCP or REST body other than `memory_toolset`'s. It runs the MCP wire, binding and stub corpus, HTTP admission, security and body limits, static files, sweep pruning, dream cursors, the graph store and graph read model, and the CLI harness rows. No Windows runtime run of the daemon exists (batch B13). Since 2026-10-19 a local full suite runs in 9 to 12 minutes on four workers (#846, batch #850), and the CI reshape in batch #868 (merged 2026-10-20 as 72fbcc88) takes the Windows `cli-live` parity suite out of the required gate (still required on Linux; the other live suites stay gated on Windows) and runs only the parity shards a PR's diff reaches (#859), narrows the required Windows Python lane to the cases that reach Windows-specific product code (#862), and replaces sub-second clock waits in tests with event waits, with a guard against new ones (#863). Proposal C below would move the body differentials to a nightly dev-box run. |
 | Declared divergences | About 150 rows in `daemon/divergences.md`, 9 in `daemon/spec.md` (W2-F) and a few dozen across the CLI harness rows and specs. | Each closed, or accepted by the maintainer (batch B14). |
 
 ### Named cutover blockers
@@ -239,8 +239,8 @@ batches #850 and #866 landed 12 member PRs between them. 16 PRs were open at
 this revision.
 
 Three changes since 2026-10-19 widen that queue: integration batches (#851)
-make one CI run land several PRs, the CI reshape in batch #868 (open) would
-cut the required hosted Windows lanes to what differs on Windows, and the
+make one CI run land several PRs, the CI reshape in batch #868 (merged as
+72fbcc88) cuts the required hosted Windows lanes to what differs on Windows, and the
 4-worker
 local suite (#846) gates a batch head in about ten minutes before CI sees
 it. The calendar estimate that follows is an estimate, not a commitment, and
