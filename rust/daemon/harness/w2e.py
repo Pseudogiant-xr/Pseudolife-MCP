@@ -2397,8 +2397,8 @@ def warmup_expected(scn: dict) -> bool:
 
 def warmup_landed(dsn: str, before: dict) -> bool:
     """The warmup probe's event row is committed: a ``warmup probe`` search
-    event whose id the pre-start state did not hold (a seeded template keeps
-    its seeding daemon's probe)."""
+    event whose id the pre-start state did not hold (a template may keep its
+    seeding daemon's probe)."""
     import psycopg
     t = before["rows"].get("public.retrieval_events", {})
     prior = [r[t["columns"].index("id")] for r in t.get("rows", [])]

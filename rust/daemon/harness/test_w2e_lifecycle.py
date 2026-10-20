@@ -377,3 +377,30 @@ def test_the_init_snapshot_waits_for_both_warmups(harness, monkeypatch, tmp_path
     first, second = result["steps"]
     assert first["diffs"] == (warmups(None, None) if log_on else [])
     assert second["diffs"] == []  # reported once, at the init step
+
+
+@pytest.mark.parametrize("before,prior", [
+    ({"rows": {}}, []),
+    ({"rows": {"public.retrieval_events": {"columns": ["query_text", "id"],
+                                           "rows": [["warmup probe", 1], ["other", 4]]}}}, [1, 4]),
+])
+def test_a_template_probe_does_not_count_as_this_boots_probe(harness, monkeypatch, before, prior):
+    seen = []
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params):
+            seen.append((" ".join(sql.split()), params))
+            return SimpleNamespace(fetchone=lambda: None)
+
+    monkeypatch.setitem(sys.modules, "psycopg",
+                        SimpleNamespace(connect=lambda dsn, autocommit: Conn()))
+    assert harness.warmup_landed("dsn", before) is False
+    (sql, params), = seen
+    assert "query_text = 'warmup probe'" in sql and "origin = 'search'" in sql
+    assert "NOT (id = ANY(%s::bigint[]))" in sql and params == (prior,)
