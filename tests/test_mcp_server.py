@@ -1642,3 +1642,42 @@ def test_memory_outcome_reports_the_truncated_tail(tmp_path: Path,
     out = _invoke("memory_outcome", {"task": "t", "outcome": "success",
                                      "used_ids": [12, 34]})
     assert "used_ids_truncated" not in out
+
+
+def test_re_evidence_dispatches_exact_artifact_selectors(monkeypatch):
+    from pseudolife_memory import mcp_server
+
+    seen = []
+    monkeypatch.setattr(mcp_server.service, "re_evidence_query",
+                        lambda **kw: seen.append(kw) or {"artifacts": []})
+    result = _invoke("re_evidence", {"action": "query", "project": "example",
+        "binary_id": "build:a", "artifact_id": 42, "content_hash": "a" * 64})
+    assert result == {"artifacts": []}
+    assert seen[0]["artifact_id"] == 42 and seen[0]["content_hash"] == "a" * 64
+
+
+@pytest.mark.parametrize("selectors", [
+    {"artifact_id": 0}, {"artifact_id": True}, {"artifact_id": 2 ** 63},
+    {"content_hash": "not-a-digest"},
+])
+def test_re_evidence_mcp_rejects_invalid_exact_selectors(monkeypatch, selectors):
+    from pseudolife_memory import mcp_server
+
+    def unexpected(**kw):
+        pytest.fail("invalid selectors reached the service")
+    monkeypatch.setattr(mcp_server.service, "re_evidence_query", unexpected)
+    result = asyncio.run(mcp_server.mcp.call_tool("re_evidence", {
+        "action": "query", "project": "example", "binary_id": "build:a", **selectors}))
+    assert result.is_error
+
+
+def test_re_evidence_exact_selectors_cannot_be_ignored_for_other_actions(monkeypatch):
+    from pseudolife_memory import mcp_server
+
+    def unexpected(**kw):
+        pytest.fail("query-only selector reached stats")
+    monkeypatch.setattr(mcp_server.service, "re_evidence_stats", unexpected)
+    result = asyncio.run(mcp_server.mcp.call_tool("re_evidence", {
+        "action": "stats", "project": "example", "artifact_id": 42}))
+    assert result.is_error
+    assert "require action=query" in result.content[0].text

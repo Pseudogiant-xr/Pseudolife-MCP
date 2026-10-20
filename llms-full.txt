@@ -9697,6 +9697,40 @@ re_evidence(
 )
 ```
 
+## Exact immutable artifact lookup
+
+Use `artifact_id` or `content_hash` with `action="query"` to find retained
+evidence independently of its original file path. Both remain scoped to the
+required exact `project` and `binary_id`; supplied artifact filters combine with
+each other and with `address` and `text` using AND. `artifact_id` is a positive
+signed 64-bit integer. `content_hash` is exactly 64 hexadecimal SHA-256 digits
+(case-insensitive, normalized to lower case). These query-only arguments are
+rejected on other actions.
+
+```text
+re_evidence(
+  action="query",
+  project="example-client",
+  binary_id="client.exe:sha256:<required-digest>",
+  content_hash="<64-hex-digit-artifact-digest>"
+)
+```
+
+Exact queries acknowledge the normalized filters in
+`artifact_selectors={"artifact_id": <id-or-null>, "content_hash": <digest-or-null>}`.
+Clients must check that acknowledgement before treating an empty exact query as
+proof of absence. An older daemon may reject these arguments; a path search miss
+does not establish that identical evidence has never been indexed. Preserve the
+existing record identity and resolve metadata conflicts rather than wrapping or
+reingesting the same evidence to manufacture another identity.
+
+A digest can match multiple retained locator identities within one build; the
+query returns those records using the existing ordering and limit. Default
+compact output still omits raw payloads and bytes. These selectors filter
+**artifacts only**: claim queries keep their existing subject/status/text
+semantics. Inspect a claim's `evidence_ids` to establish its relationship to a
+matched artifact; unrelated returned claims are not proof for that artifact.
+
 ## Reversibility
 
 No repository build, test, or stage gate should depend on this tool. To stop

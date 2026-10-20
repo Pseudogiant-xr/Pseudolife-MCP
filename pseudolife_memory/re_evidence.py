@@ -33,6 +33,20 @@ class EvidenceInputError(ValueError):
     """The caller supplied evidence that cannot safely enter the proof store."""
 
 
+def validate_artifact_selectors(
+    artifact_id: int | None = None, content_hash: str | None = None,
+) -> tuple[int | None, str | None]:
+    """Validate exact immutable identities before opening a database query."""
+    if artifact_id is not None and (
+            type(artifact_id) is not int or not 0 < artifact_id < 2 ** 63):
+        raise EvidenceInputError("artifact_id must be a positive signed 64-bit integer")
+    if content_hash is not None:
+        if not isinstance(content_hash, str) or re.fullmatch(r"[0-9a-fA-F]{64}", content_hash) is None:
+            raise EvidenceInputError("content_hash must be an exact 64-digit SHA-256 hex digest")
+        content_hash = content_hash.lower()
+    return artifact_id, content_hash
+
+
 def normalize_address(value: str) -> str:
     """Return a stable lower-case hex locator without a ``0x`` prefix."""
     match = _ADDRESS_RE.fullmatch(str(value).strip())

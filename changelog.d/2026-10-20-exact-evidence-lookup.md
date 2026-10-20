@@ -1,0 +1,2 @@
+### Added (2026-10-20 — find immutable RE evidence across retained paths)
+- `re_evidence(action="query")` accepts exact `artifact_id` and SHA-256 `content_hash` filters within the required project/build scope. Compact output and existing claim filters are preserved. Exact responses acknowledge normalized selectors so clients can distinguish supported absence from an older daemon that does not implement exact lookup. No schema or immutable-record changes.

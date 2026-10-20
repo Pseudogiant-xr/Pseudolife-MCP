@@ -100,11 +100,19 @@ class ReEvidenceStore:
         self, *, project: str, binary_id: str, address: str | None = None,
         text: str | None = None, limit: int | None = 50,
         include_payload: bool = False,
+        artifact_id: int | None = None, content_hash: str | None = None,
     ) -> list[dict]:
-        from pseudolife_memory.re_evidence import normalize_address
+        from pseudolife_memory.re_evidence import normalize_address, validate_artifact_selectors
 
+        artifact_id, content_hash = validate_artifact_selectors(artifact_id, content_hash)
         where = ["project = %s", "binary_id = %s"]
         values: list[Any] = [project.strip(), binary_id.strip()]
+        if artifact_id is not None:
+            where.append("id = %s")
+            values.append(artifact_id)
+        if content_hash is not None:
+            where.append("content_hash = %s")
+            values.append(content_hash)
         if address:
             where.append("addresses @> ARRAY[%s]::text[]")
             values.append(normalize_address(address))

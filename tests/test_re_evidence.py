@@ -775,3 +775,70 @@ def test_archive_runs_while_primary_holds_writer_lease(pg_url, tmp_path, monkeyp
         assert primary.re_evidence_stats("archive-rollback")["claims"] == {}
     finally:
         primary.close()
+
+
+def test_exact_artifact_selectors_find_retained_bytes_across_paths_and_scopes(pg_url, pg_conn, tmp_path):
+    from pseudolife_memory.re_evidence import parse_evidence_file
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    path = tmp_path / "retained.json"
+    path.write_text(json.dumps(_sample_payload()), encoding="utf-8")
+    artifact = {**parse_evidence_file(path), "project": "exact-project",
+                "binary_id": "build:a", "kind": "ghidra-function"}
+    storage = PostgresStorage(pg_url)
+    try:
+        first = storage.insert_re_evidence(artifact)
+        other_locator = storage.insert_re_evidence({**artifact, "locator": "retained-copy"})
+        other_build = storage.insert_re_evidence({**artifact, "binary_id": "build:b"})
+        other_project = storage.insert_re_evidence({**artifact, "project": "other-project"})
+        scope = {"project": "exact-project", "binary_id": "build:a"}
+        rows = storage.query_re_evidence(**scope, content_hash=artifact["content_hash"].upper())
+        assert {row["id"] for row in rows} == {first, other_locator}
+        assert all("payload" not in row and "raw_bytes" not in row for row in rows)
+        assert storage.query_re_evidence(**scope, text="new-unindexed/path.json") == []
+        assert [row["id"] for row in storage.query_re_evidence(**scope, artifact_id=first)] == [first]
+        assert storage.query_re_evidence(**scope, artifact_id=other_build) == []
+        assert storage.query_re_evidence(**scope, artifact_id=other_project) == []
+        assert storage.query_re_evidence(**scope, artifact_id=first, content_hash="0" * 64) == []
+        assert storage.query_re_evidence(**scope, content_hash=artifact["content_hash"], text="no-match") == []
+        expanded = storage.query_re_evidence(**scope, artifact_id=first, include_payload=True)
+        assert expanded[0]["payload"] == _sample_payload()
+        assert "raw_bytes" not in expanded[0]
+    finally:
+        storage.close()
+
+
+@pytest.mark.parametrize("selectors", [
+    {"artifact_id": 0}, {"artifact_id": -1}, {"artifact_id": True},
+    {"artifact_id": "1"}, {"artifact_id": 1.5}, {"artifact_id": 2 ** 63},
+    {"content_hash": ""}, {"content_hash": "a" * 63},
+    {"content_hash": "g" * 64}, {"content_hash": "a" * 64 + " OR 1=1"},
+])
+def test_exact_artifact_selector_validation_precedes_database_access(selectors):
+    from pseudolife_memory.re_evidence import EvidenceInputError
+    from pseudolife_memory.storage.re_evidence import ReEvidenceStore
+
+    with pytest.raises(EvidenceInputError):
+        ReEvidenceStore().query_re_evidence(project="example", binary_id="build:a", **selectors)
+
+
+def test_service_exact_artifact_selectors_acknowledged_without_claim_semantics_change():
+    from pseudolife_memory.service import MemoryService
+
+    class Storage:
+        def query_re_evidence(self, **kw):
+            assert kw["artifact_id"] == 42
+            assert kw["content_hash"] == "a" * 64
+            return [{"id": 42}]
+
+        def query_re_claims(self, **kw):
+            assert "artifact_id" not in kw and "content_hash" not in kw
+            return [{"id": 7, "evidence_ids": [99]}]
+
+    service = object.__new__(MemoryService)
+    service._lock = threading.RLock()
+    service._ensure_postgres_storage = lambda: Storage()
+    result = service.re_evidence_query(project="example", binary_id="build:a",
+                                      artifact_id=42, content_hash="A" * 64)
+    assert result["artifact_selectors"] == {"artifact_id": 42, "content_hash": "a" * 64}
+    assert result["claims"] == [{"id": 7, "evidence_ids": [99]}]

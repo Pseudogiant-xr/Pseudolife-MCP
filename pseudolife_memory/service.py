@@ -1742,18 +1742,27 @@ class MemoryService(DreamOps, MaintainerOps):
         subject: str | None = None, status: str | None = None,
         text: str | None = None, limit: int = 50,
         include_payload: bool = False,
+        artifact_id: int | None = None, content_hash: str | None = None,
     ) -> dict[str, Any]:
+        from pseudolife_memory.re_evidence import validate_artifact_selectors
+
+        artifact_id, content_hash = validate_artifact_selectors(artifact_id, content_hash)
+        selectors = ({"artifact_id": artifact_id, "content_hash": content_hash}
+                     if artifact_id is not None or content_hash is not None else {})
         with self._lock:
             storage = self._ensure_postgres_storage()
             artifacts = storage.query_re_evidence(
                 project=project, binary_id=binary_id, address=address,
                 text=text, limit=limit,
-                include_payload=include_payload)
+                include_payload=include_payload, **selectors)
             claims = storage.query_re_claims(
                 project=project, binary_id=binary_id,
                 subject=subject or address, status=status, text=text, limit=limit)
-        return {"project": project.strip(), "binary_id": binary_id.strip(),
-                "artifacts": artifacts, "claims": claims}
+        result = {"project": project.strip(), "binary_id": binary_id.strip(),
+                  "artifacts": artifacts, "claims": claims}
+        if selectors:
+            result["artifact_selectors"] = selectors
+        return result
 
     def re_evidence_export(
         self, *, project: str, binary_id: str, path: str,

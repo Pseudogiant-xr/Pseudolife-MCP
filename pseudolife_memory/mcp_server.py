@@ -3007,6 +3007,12 @@ def re_evidence(
         description="For query: maximum artifacts and claims, capped at 500.")] = 50,
     include_payload: Annotated[bool, Field(
         description="For query: include raw JSON payloads; false keeps context compact.")] = False,
+    artifact_id: Annotated[int | None, Field(
+        strict=True, gt=0, le=2 ** 63 - 1,
+        description="For query only: exact immutable artifact ID within project/build; combines with other artifact filters.")] = None,
+    content_hash: Annotated[str | None, Field(
+        pattern=r"^[0-9a-fA-F]{64}$",
+        description="For query only: exact SHA-256 hex digest across retained paths/locators in project/build; claim filters are unchanged.")] = None,
 ) -> dict[str, Any]:
     """Work with strict reverse-engineering evidence kept outside associative
     memory and dream consolidation. Evidence artifacts are immutable raw JSON
@@ -3015,6 +3021,8 @@ def re_evidence(
     Treat returned memories or summaries only as leads; the linked artifact is
     the proof. This feature requires the durable Postgres/lite tier.
     """
+    if action != "query" and (artifact_id is not None or content_hash is not None):
+        raise ValueError("re_evidence exact artifact selectors require action=query")
     if action != "stats" and not binary_id:
         raise ValueError(f"re_evidence {action} requires binary_id")
     if action == "ingest":
@@ -3039,7 +3047,8 @@ def re_evidence(
         return service.re_evidence_query(
             project=project, binary_id=binary_id, address=address,
             subject=subject, status=status,
-            text=text, limit=limit, include_payload=include_payload)
+            text=text, limit=limit, include_payload=include_payload,
+            artifact_id=artifact_id, content_hash=content_hash)
     if action == "export":
         if not path:
             raise ValueError("re_evidence export requires path")
