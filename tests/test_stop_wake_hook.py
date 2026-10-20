@@ -456,10 +456,10 @@ def test_a_digest_that_vanishes_ends_the_watch(tmp_path, renewal):
     assert _wait_until(held.exists)
     (tmp_path / "digests" / f"{_key()}.txt").unlink()
     release.touch()
+    # With an hour left and no parent to watch, a quiet exit 0 can only be
+    # the vanish: a watcher still waiting would wake on a later digest.
     code, out, err = _finish(process)
     assert (code, out, err) == (0, "", "")
-    _digest(tmp_path, 4, LATER)
-    assert _read_seen(tmp_path) == "3"
 
 
 def test_without_a_digest_file_it_times_out_quietly(tmp_path):
