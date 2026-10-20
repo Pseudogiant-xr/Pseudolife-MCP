@@ -1151,8 +1151,7 @@ def run_scenario(scn: Scenario, binary: Path, template: str, mode: str, record: 
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
                                             daemons.base_env(home, rust_env(dict(common_env(dsns["rust"]),
                                                                                  **scn.env))))
-        for d in procs.values():
-            d.start(300)
+        daemons.start_all(procs, 300)
         wait_settled([d.port for d in procs.values()], timeout=900, token=TOKEN)
         golden = json.loads((GOLDENS / f"{scn.name}.json").read_text(encoding="utf-8")) if mode == "golden" else None
         rows = []

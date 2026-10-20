@@ -25,6 +25,7 @@ listed JSON bodies) is free. References are to `pseudolife_memory/` at master
 | H3 | `db`: `"ok"` after a `SELECT 1` on a fresh connection, else `"error: <text>"` and `status` becomes `"degraded"`. | `daemon.py:~380`, `storage/postgres.py:702` |
 | H4 | 200 when `status == "ok"`, else 503 with the same body; 500 `{"status":"error","error":str}` if building the payload fails. | `web/api.py:418-427` |
 | H5 | `embedder` `{backend, device, dtype}` is present once the embedder is built; `dtype` is null for the ONNX backend. | `daemon.py` health payload |
+| H6 | Always, last, in this order: `ready` bool (`status == "ok"` and `pending` empty), then `pending`, the unfinished startup stages in this order: `"init"` until the stores are published and the clock reseeded (`coordination_tier_ready`), `"principals"` until the stored-principal view has completed a read (loaded once stays loaded, never stale-checked; never listed without Postgres). Neither changes `status` or the HTTP code. | `readiness.py`, `daemon.py` health payload |
 
 Conditional keys owned by subsystems outside this slice (`coordination`,
 `updates`, `extractor`, `stall`, `hooks_digest`, `build`, `init_refusal`,
@@ -1231,14 +1232,15 @@ incomplete tool coverage and incorrect per-case or corpus totals before writing 
 
 ### MCP refusal cleanup (2026-10-13)
 
-MCP admission and cleanup share the SDK's 4 MiB body limit. A complete,
-in-budget refusal drain keeps the connection reusable; incomplete cleanup,
-read failure, an exhausted budget or an unread Expect body closes it. The
-shared 250 ms deadline bounds cleanup, including headers-only peers. This
-resolves the accidental use of the REST 256 KiB budget without weakening
-body admission or changing REST cleanup. `MCP-REFUSAL-CLEANUP` in
-`divergences.md` records the remaining Python connection-lifetime difference.
-The strict live comparator and committed goldens are unchanged.
+MCP admission uses the SDK's 4 MiB body limit. Since 2026-10-20 every
+refusal is answered at once; the shared cleanup then discards at most 8 MiB
+more within 250 ms, keeping the connection when the body ends, and otherwise
+closes after the answer through the listener's lingering close
+(`src/linger.rs`). An unread Expect body is never polled, and it and a
+declared length past the budget are answered with `Connection: close`.
+`MCP-REFUSAL-CLEANUP` in `divergences.md` records the change and the
+Windows measurements; the strict live comparator keeps two declared
+differences, `body_limit[4]` and `[5]` (`mcp_ci.py`).
 
 Initialization validates known client-capability object fields and the SDK's
 boolean spellings for `roots.listChanged`; unknown capability fields remain

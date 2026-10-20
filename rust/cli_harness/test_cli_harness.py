@@ -945,6 +945,18 @@ def test_real_programs_allows_the_named_program_only(tmp_path):
         _preflight(tmp_path, ("plcfake-a", "plcfake-b"), ("plcfake-a",), env=env)
 
 
+def test_both_arms_get_the_same_hook_probe_budget(tmp_path, monkeypatch):
+    # The caller's value never leaks in; a case can unset it to test the
+    # product's 250 ms default.
+    monkeypatch.setenv(core.HOOK_PROBE_ENV, "1")
+    arm = core.Arm("python", tmp_path, tmp_path)
+    seen = {name: core._environment(core.Case("c", []), arm, core.Target(name, [])).get(
+        core.HOOK_PROBE_ENV) for name in ("python", "rust")}
+    assert seen == {"python": core.HOOK_PROBE_MS, "rust": core.HOOK_PROBE_MS}
+    pinned = core.Case("c", [], env={core.HOOK_PROBE_ENV: None})
+    assert core.HOOK_PROBE_ENV not in core._environment(pinned, arm, core.Target("rust", []))
+
+
 def test_one_child_per_environment_shape(tmp_path, monkeypatch):
     env = {"PATH": "{HOME}" + os.sep + "bin"}
     first = _preflight(tmp_path, ("plcfake",), env=env)
