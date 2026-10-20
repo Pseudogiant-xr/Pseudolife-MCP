@@ -68,7 +68,7 @@
 #   back the 4.50-4.53 fixes (CVE-2025-1194, -2099, -3263, -3264, -3777,
 #   -3933, -5197, -6051, -6638, -6921). Same hold as above.
 aiohappyeyeballs==2.6.2
-aiohttp==3.14.3
+aiohttp==3.14.4
 aiosignal==1.4.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
