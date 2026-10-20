@@ -214,6 +214,18 @@ fn group_scan_treats_a_task_being_released_as_dead() {
             .is_none()
     );
     assert!(stat_from_read(Ok(releasing.to_vec()), 611858).is_err());
+    // do_task_stat reads the state before the ids, so a task released in between
+    // prints its earlier state beside the same unset ids (shape from fs/proc/array.c).
+    for state in [b'Z', b'R', b'S'] {
+        let mut released = releasing.to_vec();
+        released[14] = state;
+        assert!(stat_from_read(Ok(released), 611857).unwrap().is_none());
+    }
+    // Only the kernel's exact unset triple means released; any other -1 stays invalid.
+    let partial = String::from_utf8(releasing.to_vec())
+        .unwrap()
+        .replacen("X 0 -1", "S 5 -1", 1);
+    assert!(stat_from_read(Ok(partial.into_bytes()), 611857).is_err());
     let home = Home::new();
     // The killed leader stays an unreaped zombie while the scan runs.
     let leader = stat(400, b'Z', 400, 400, 123);
