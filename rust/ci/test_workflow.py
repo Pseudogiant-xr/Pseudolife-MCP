@@ -403,7 +403,7 @@ def test_shards_cover_both_systems_and_build_once():
         assert not jobs[name].get("continue-on-error", False)
     assert jobs["rust"]["name"] == "Rust / ${{ matrix.os }}"
     assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
-    assert jobs["parity-checks"]["needs"] == ["candidate", "rust"]
+    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "rust"]
     rust_steps = jobs["rust"]["steps"]
     override = commands(next(step["run"] for step in rust_steps
                              if step.get("name") == "Daemon override build configurations"))
@@ -512,12 +512,14 @@ def test_daemon_artifact_is_built_once_and_shared_with_graph():
 @pytest.mark.parametrize("event", ["pull_request", "push", "schedule", "workflow_dispatch"])
 def test_required_parity_gate_fails_closed(result, dependency, event):
     gate = workflow()["jobs"]["parity"]
-    assert gate["needs"] == ["rust", "candidate", "parity-checks", "source-mutants"]
+    assert gate["needs"] == ["scope", "contracts", "rust", "candidate", "parity-checks", "source-mutants"]
     assert gate["if"].startswith("always() &&")
     step = gate["steps"][0]
     assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}", "GATE_EVENT": "${{ github.event_name }}"}
     import os
     needs = {name: {"result": "success"} for name in gate["needs"]}
+    needs["scope"]["outputs"] = {"needed": "true", "lane": "full"}
+    needs["contracts"]["result"] = "skipped"
     needs[dependency]["result"] = result
     executed = subprocess.run(["pwsh", "-NoProfile", "-Command", step["run"]],
                               env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
@@ -773,7 +775,7 @@ def test_w1c_rows_run_once_on_parallel_suites():
     step = next(s for s in jobs["parity-checks"]["steps"]
                 if s.get("name") == "CLI W1-C differential harness")
     assert step["if"] == "startsWith(matrix.suite, 'w1c-')"
-    assert jobs["parity"]["needs"] == ["rust", "candidate", "parity-checks", "source-mutants"]
+    assert jobs["parity"]["needs"] == ["scope", "contracts", "rust", "candidate", "parity-checks", "source-mutants"]
     check_executable_coverage(jobs)
 
 

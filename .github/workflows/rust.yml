@@ -28,8 +28,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || format('rust-{0}-{1}', github.workflow, github.ref) }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || format('rust-{0}-{1}-{2}', github.workflow, github.event_name, github.event_name == 'pull_request' && github.ref || github.run_id) }}
+  # Only superseded PRs share a group. Unique push/nightly/manual groups
+  # preserve pending relevant runs when an unrelated push follows them.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,8 +41,51 @@ env:
   MKL_NUM_THREADS: '1'
 
 jobs:
-  rust:
+  scope:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      needed: ${{ steps.scope.outputs.needed }}
+      lane: ${{ steps.scope.outputs.lane }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select Rust CI inputs
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.before }}
+        run: python rust/ci/scope.py --event "$EVENT_NAME" --base "$BASE_SHA" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
+
+  contracts:
+    needs: scope
+    if: needs.scope.outputs.lane == 'contracts'
+    name: Workflow contracts / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install workflow test dependencies
+        run: python -m pip install pytest pyyaml psutil "psycopg[binary]"
+      - name: Validate workflow selection and every retained runtime check
+        run: python -m pytest -q rust/ci/test_scope.py rust/ci/test_workflow.py rust/ci/test_h5_inventory.py rust/ci/test_console_mime.py rust/ci/test_snapshot_settle.py rust/ci/test_timings.py
+      - name: Check executable coverage inventory
+        run: python rust/ci/inventory.py
+
+  rust:
+    needs: scope
+    if: needs.scope.outputs.needed == 'true'
     name: Rust / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -167,7 +212,8 @@ jobs:
           if-no-files-found: error
 
   candidate:
-    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    needs: scope
+    if: needs.scope.outputs.needed == 'true'
     name: Candidate / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -215,9 +261,9 @@ jobs:
           if-no-files-found: error
 
   parity-checks:
-    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    if: needs.scope.outputs.needed == 'true'
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
-    needs: [candidate, rust]
+    needs: [scope, candidate, rust]
     strategy:
       fail-fast: false
       matrix:
@@ -847,11 +893,11 @@ jobs:
     # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs
     # queued behind the 20-job concurrency cap, with a largest matrix queue
     # of 24m25s. Catch CLI source survivors after merge on master/nightly.
-    if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')
+    if: needs.scope.outputs.needed == 'true' && (github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci'))
     name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
     # These shards compile their own source copies and consume no rust-job
     # artifact; the final Parity gate still requires both Rust jobs.
-    needs: [candidate]
+    needs: [scope, candidate]
     strategy:
       fail-fast: false
       matrix:
@@ -933,7 +979,8 @@ jobs:
 
   daemon-image:
     name: Rust daemon / disposable image
-    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
+    needs: scope
+    if: needs.scope.outputs.needed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -971,11 +1018,12 @@ jobs:
           docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
           python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
-    # Only a PR may skip the after-merge CLI source matrix. Master/nightly
-    # (and ordinary manual CI) require its success, never a skip or failure.
+    # Workflow-only PR/push runs require both contract jobs; unrelated runs
+    # require a proven scope skip. Full runtime inputs, nightly and ordinary
+    # manual CI retain their Rust/parity gates and after-merge source policy.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
     name: Parity / ${{ matrix.os }}
-    needs: [rust, candidate, parity-checks, source-mutants]
+    needs: [scope, contracts, rust, candidate, parity-checks, source-mutants]
     strategy:
       fail-fast: false
       matrix:
@@ -990,6 +1038,32 @@ jobs:
           GATE_EVENT: ${{ github.event_name }}
         run: |
           $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
+          if ($results['scope'].result -cne 'success') {
+            Write-Error "Rust CI scope did not succeed"
+            exit 1
+          }
+          $needed = $results['scope'].outputs.needed
+          $lane = $results['scope'].outputs.lane
+          $contractsResult = $results['contracts'].result
+          if ($needed -ceq 'false' -and $lane -cin @('none', 'contracts') -and $env:GATE_EVENT -cin @('pull_request', 'push')) {
+            $expected = if ($lane -ceq 'contracts') { 'success' } else { 'skipped' }
+            if ($contractsResult -cne $expected) {
+              Write-Error "Workflow contracts did not return $expected"
+              exit 1
+            }
+            foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
+              if ($results[$job].result -cne 'skipped') {
+                Write-Error "$job ran unexpectedly outside Rust scope"
+                exit 1
+              }
+            }
+            Write-Output "Rust CI lane: $lane"
+            exit 0
+          }
+          if ($needed -cne 'true' -or $lane -cne 'full' -or $contractsResult -cne 'skipped') {
+            Write-Error "Rust CI scope did not select required checks"
+            exit 1
+          }
           foreach ($job in @('rust', 'candidate', 'parity-checks')) {
             if ($results[$job].result -cne 'success') {
               Write-Error "$job did not succeed"
