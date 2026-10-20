@@ -251,6 +251,31 @@ experiment; investigate OpenMP/BLAS budgets separately afterward.
 Audit explicit `PSEUDOLIFE_BENCH_DB` overrides before parallel execution:
 an intentionally preserved pin can bypass automatic worker separation.
 
+### Windows development VM capacity
+
+The maintainer is willing to allocate more RAM to the Windows development VM.
+Treat that as an available experiment, not a configuration change made by this
+plan. The Windows VM's allocation is separate from the Linux dispatch scope;
+raising one does not raise the other, and neither changes hosted
+`windows-latest` runner capacity.
+
+Before proposing a new allocation, record current guest RAM and vCPUs, host
+headroom alongside other guests, guest committed/available memory, paging,
+disk latency and the process-tree peak during representative native validation.
+Choose the smallest increase that provides measured headroom, state the exact
+proposed allocation and any restart requirement, and obtain the maintainer's
+confirmation for that concrete configuration action. Never restart the
+hypervisor or another guest. Keep the machine's suite lease and concurrency
+policy unchanged.
+
+Compare baseline and expanded-RAM runs at the same revision, worker count,
+cache state and test selection first. Only then evaluate more internal workers
+as a separate experiment, retaining native Windows coverage and process/database
+isolation. More RAM can reduce paging or permit safe concurrency; it cannot
+by itself remove serial harness steps or establish that storage is faster.
+Record both guest improvement and host/other-guest pressure. Retain the prior
+allocation as the rollback setting, with any restart separately coordinated.
+
 If the tail is one slow file, consider moving independent tests into separate
 files or a duration-aware whole-file schedule. Audit module fixtures, shared
 corpora, ordering and reset assumptions first, notably recall and fake/real
