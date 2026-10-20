@@ -146,9 +146,12 @@ def _exchange(port: int, method: str, path: str, headers, body: bytes | None, *,
     elif body is not None:
         c.putheader("Content-Length", str(len(body)))
     if body and not headers_only:
-        # A daemon refusing a body closes with the rest of it unread, so its
-        # stack resets the connection, and Windows discards a received
-        # response the reset overtakes before it is read. Read after the send,
+        # A daemon that refuses a body and closes with the rest of it unread
+        # makes its stack reset the connection, and Windows discards a
+        # received response the reset overtakes before it is read. The Rust
+        # daemon did so until #860 (it now discards the rest and closes by
+        # lingering; the Python daemon never did), and this harness also
+        # drives fixture servers that still do. Read after the send,
         # 1024 of 2000 refusals were lost on a Windows 11 host (2026-10-19):
         # 882 of 1000 decided on the headers, 142 of 1000 after reading a
         # 4 MiB body, chunked or not. A receive already waiting before the
