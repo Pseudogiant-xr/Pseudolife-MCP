@@ -47,6 +47,21 @@ def _health_started(status: int, body) -> bool:
     return isinstance(pending, list) and "principals" not in pending
 
 
+def _read_health(opener, url: str):
+    """One GET /health: ``(status, parsed JSON or None)``. A 503 is read
+    like a 200 (urlopen raises it as HTTPError); any failure to read the
+    whole answer raises, for the caller's retry."""
+    try:
+        with opener.open(url + "/health", timeout=2) as r:
+            status, raw = r.status, r.read()
+    except urllib.error.HTTPError as exc:
+        status, raw = exc.code, exc.read()
+    try:
+        return status, json.loads(raw)
+    except ValueError:
+        return status, None
+
+
 def _hf_home() -> str:
     return os.environ.get("HF_HOME") or str(Path.home() / ".cache" / "huggingface")
 
@@ -120,14 +135,8 @@ class RealDaemon:
             if self.proc.poll() is not None:
                 raise RuntimeError(f"daemon exited (last answer: {last}):\n" + self.tail())
             try:
-                with opener.open(self.url + "/health", timeout=2) as r:
-                    status, body = r.status, json.loads(r.read())
-            except urllib.error.HTTPError as exc:
-                try:
-                    status, body = exc.code, json.loads(exc.read())
-                except ValueError:
-                    status, body = exc.code, None
-            except Exception:  # noqa: BLE001 — not up yet
+                status, body = _read_health(opener, self.url)
+            except Exception:  # noqa: BLE001 — not up yet, or cut off mid-answer
                 time.sleep(0.25)
                 continue
             last = f"HTTP {status}: {body!r}"[:300]

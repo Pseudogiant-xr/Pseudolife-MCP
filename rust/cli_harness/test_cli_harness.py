@@ -1832,3 +1832,37 @@ def test_real_daemon_start_never_imports_the_oracle_package(monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_real_daemon_retries_a_503_whose_body_is_cut_off():
+    # A daemon dying mid-answer: the 503's body ends early (IncompleteRead
+    # while reading the HTTPError). That is "not up yet", never a crash.
+    import socket
+    import threading
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    seen = []
+
+    def serve():
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            with conn:
+                conn.recv(65536)
+                seen.append(1)
+                if len(seen) == 1:
+                    conn.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n"
+                                 b"Content-Length: 100\r\nConnection: close\r\n\r\n{\"st")
+                else:
+                    body = b'{"status": "ok", "ready": true, "pending": []}'
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                                 + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        _started(f"http://127.0.0.1:{listener.getsockname()[1]}")
+        assert len(seen) >= 2
+    finally:
+        listener.close()
