@@ -72,16 +72,21 @@ async fn entity_sources_map(client: &Client) -> Res<HashMap<i64, Vec<String>>> {
 
 /// `upsert_entity_source(entity_id, source, "derived", now)`.
 async fn upsert_entity_source(client: &Client, id: i64, source: &str) -> Res<()> {
-    let t = now();
+    upsert_entity_source_at(client, id, source, now()).await
+}
+
+/// `upsert_entity_source(entity_id, source, "derived", t)`
+/// (`storage/postgres.py:4189-4203`): a derived row never downgrades a
+/// manual one; a repeat bumps `count` and `updated_at`.
+pub(crate) async fn upsert_entity_source_at(
+    client: &Client,
+    id: i64,
+    source: &str,
+    t: f64,
+) -> Res<()> {
     crate::txn::run(client, |c| async move {
         c.execute(
-            "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) \
-             VALUES ($1, $2, 1, 'derived', $3) \
-             ON CONFLICT (entity_id, source) DO UPDATE SET \
-               count = entity_sources.count + 1, \
-               updated_at = EXCLUDED.updated_at, \
-               origin = CASE WHEN entity_sources.origin = 'manual' \
-                             THEN 'manual' ELSE EXCLUDED.origin END",
+            "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at)              VALUES ($1, $2, 1, 'derived', $3)              ON CONFLICT (entity_id, source) DO UPDATE SET                count = entity_sources.count + 1,                updated_at = EXCLUDED.updated_at,                origin = CASE WHEN entity_sources.origin = 'manual'                              THEN 'manual' ELSE EXCLUDED.origin END",
             &[&id, &source, &t],
         )
         .await
@@ -117,8 +122,7 @@ async fn entity_fact_counts(client: &Client) -> Res<HashMap<i64, i64>> {
     Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
 }
 
-/// `insert_entity_proposal` (`storage/postgres.py:3716-3729`): the new id,
-/// or None on a conflict or a vanished endpoint.
+/// `insert_entity_proposal("merge", ...)` at the current time.
 async fn insert_entity_proposal(
     client: &Client,
     from: i64,
@@ -126,13 +130,35 @@ async fn insert_entity_proposal(
     score: f64,
     reason: &str,
 ) -> Res<Option<i64>> {
-    let t = now();
-    let score = score as f32;
+    insert_entity_proposal_row(
+        client,
+        "merge",
+        from,
+        Some(into),
+        Some(score),
+        Some(reason),
+        now(),
+    )
+    .await
+}
+
+/// `insert_entity_proposal` (`storage/postgres.py:3716-3729`): the new id,
+/// or None on a conflict or a vanished endpoint (both still burn the id
+/// sequence's value, as the Python insert does).
+pub(crate) async fn insert_entity_proposal_row(
+    client: &Client,
+    kind: &str,
+    entity: i64,
+    into: Option<i64>,
+    score: Option<f64>,
+    reason: Option<&str>,
+    created_at: f64,
+) -> Res<Option<i64>> {
+    let score = score.map(|s| s as f32);
     let r = crate::txn::run(client, |c| async move {
         c.query_opt(
-            "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at) \
-             VALUES ('merge', $1, $2, $3, $4, $5) ON CONFLICT DO NOTHING RETURNING id",
-            &[&from, &into, &score, &reason, &t],
+            "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at)              VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING RETURNING id",
+            &[&kind, &entity, &into, &score, &reason, &created_at],
         )
         .await
     })

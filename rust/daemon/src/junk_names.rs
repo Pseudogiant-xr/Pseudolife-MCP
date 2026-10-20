@@ -77,14 +77,14 @@ fn py_split(s: &str) -> Vec<&str> {
 }
 
 /// `_is_concat_artifact`: two names joined by a relation arrow.
-fn is_concat_artifact(name: &str) -> bool {
+pub(crate) fn is_concat_artifact(name: &str) -> bool {
     let parts: Vec<&str> = ARROW.split(name).map(py_strip).collect();
     parts.len() >= 2 && parts.iter().filter(|p| !p.is_empty()).count() >= 2
 }
 
 /// `_is_metric_reading`: 2-3 tokens, a decimal or decimal-range tail, every
 /// other token lower-case ("stale 0.8").
-fn is_metric_reading(name: &str) -> bool {
+pub(crate) fn is_metric_reading(name: &str) -> bool {
     let toks = py_split(name);
     if !(2..=3).contains(&toks.len()) || !DECIMAL_OR_RANGE.is_match(toks[toks.len() - 1]) {
         return false;
@@ -115,7 +115,7 @@ fn split_outside_parens(s: &str) -> Vec<&str> {
 }
 
 /// `_is_list_artifact`: at least two non-empty segments outside brackets.
-fn is_list_artifact(name: &str) -> bool {
+pub(crate) fn is_list_artifact(name: &str) -> bool {
     split_outside_parens(name)
         .iter()
         .filter(|p| !p.is_empty())

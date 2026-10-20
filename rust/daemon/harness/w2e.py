@@ -131,6 +131,15 @@ run on both banks between two calls (its result is not compared, only what
 the next call makes of it), for a row changed behind the daemons' backs.
 Only the scenarios in ``EXTERNAL_WRITES`` may use it.
 
+Two operations act on each side's data directory instead of its daemon
+(``HOME_OPS``): ``snapshot_file`` answers that side's newest deep-dream
+graph snapshot (``graph_snapshots/graph-*.json``: the name's shape, the file
+count, every table's columns and rows with CLOCK columns null-or-not), and
+``block_snapshots`` puts a plain file where that directory goes so the next
+snapshot write fails. In a ``memory_dream`` answer the snapshot name
+compares by shape, ``would_orphan[].age_days`` by rank, and
+``last_apply_at`` (like the meta ``deep_last_apply.ts``) by presence.
+
 A scenario may carry ``"extractor": {...}``, the spec of a stub
 OpenAI-style chat-completions endpoint (``stub_extractor.py``: health,
 models and chat routes, replies looked up by the SHA-256 of the exact
@@ -215,7 +224,9 @@ DREAM_RUN_CURSORS = ("cursor_before", "cursor_after")
 # memory_dream answer keys holding wall-clock seconds (the stall record and
 # the last extractor record).
 DREAM_CLOCK_KEYS = ("since", "last_success_at", "recovered_at", "at", "finished_at",
-                    "rolled_back_at")
+                    "rolled_back_at", "last_apply_at")
+# A deep apply's snapshot file name (its UTC second differs by side).
+SNAPSHOT_NAME = re.compile(r"graph-\d{8}-\d{6}\.json")
 # memory_dream answer keys holding a dream cursor (an entry's ts).
 DREAM_TS_KEYS = ("timestamp", "cursor", "dream_cursor", "cursor_before", "cursor_after")
 # Columns that are wall-clock only when written from the clock: a value
@@ -252,7 +263,9 @@ META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts
               # automatic review decisions a human verdict retires
               "automatic_review_decision_v1:d1": {"ended_at"},
               "automatic_review_decision_v1:d2": {"ended_at"},
-              "automatic_review_decision_v1:d3": {"ended_at"}}
+              "automatic_review_decision_v1:d3": {"ended_at"},
+              # the deep dream's apply watermark (memory_dream deep)
+              "deep_last_apply": {"ts"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
 GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # store-cancellable is w2e_shutdown.py's control: over MCP every call runs
@@ -351,7 +364,13 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-dream-stage-lessons-ack-unlanded", "mcp-dream-stage-snapshot-restore-skipped",
            # a compound about's lone surrogate fails the slot sync
            # (dream-stages-lessons).
-           "mcp-dream-stage-lessons-about-unchecked"]
+           "mcp-dream-stage-lessons-about-unchecked",
+           # memory_dream deep (spec DD1-DD16): caught by the dream-deep-*
+           # scenarios.
+           "mcp-dream-deep-no-rescore", "mcp-dream-deep-supersede-unsafe",
+           "mcp-dream-deep-tombstone-any-degree", "mcp-dream-deep-dropped-merge-filed",
+           "mcp-dream-deep-no-rollup", "mcp-dream-deep-no-stamp", "mcp-dream-deep-unbounded",
+           "mcp-dream-deep-kept-refiled"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -3682,6 +3701,221 @@ SCENARIOS.update({
 })
 
 
+# memory_dream deep (P2a): the deep dream, dry run and apply, compared
+# answer by answer and bank by bank, plus each side's newest graph snapshot
+# file (the ``snapshot_file`` op reads both daemons' data dirs). The graph
+# is seeded through the oracle's own tools (relate, store, fact_set,
+# outcome, world_set, the review tool's propose and dismiss_pair); declared
+# SQL seeds stand for what only the dream or the reviewer writes: junk
+# tombstones and a kept-junk dismissal, pending merge and junk proposals
+# with judge votes, scope attribution, a memory trace, lessons with fixed
+# embeddings, and entities whose evidence a forget or merge removed (the
+# orphan census; their created_at is a fixed old stamp, so the default
+# seven-day age bar admits only them). The dream's background tick and the
+# shallow sweep are off. min_similarity -1 lists every scope-coherent pair,
+# so candidate order rests on the float32 cosines both banks compute over
+# the same stored vectors.
+DEEP_DREAM_CONFIG = (
+    "memory:\n"
+    "  dream:\n    enabled: false\n"
+    "  scopes:\n"
+    "    exclude: [status, claude, agent, correction, noise]\n"
+    "    rollup:\n      proj-a: family\n"
+    "  deep_dream:\n"
+    "    auto_tick: false\n"
+    "    min_similarity: -1.0\n"
+    "    merge_min_similarity: -1.0\n"
+    "    min_entity_mentions: 1\n"
+    "    top_k_candidates: 25\n"
+    "    curation_min_similarity: -1.0\n"
+    "    curation_top_k: 8\n"
+)
+
+
+def deep_config(extra: str = "") -> str:
+    return DEEP_DREAM_CONFIG + extra
+
+
+def snapshot_file() -> dict:
+    """Each side's newest ``graph_snapshots/graph-*.json``, normalized."""
+    return {"op": "snapshot_file"}
+
+
+def block_snapshots() -> dict:
+    """A plain file where each side's ``graph_snapshots`` directory goes."""
+    return {"op": "block_snapshots"}
+
+
+def deep_lesson(task, aspect, lesson, seed) -> dict:
+    return slot_row_sql("lesson", slot_lesson(task, aspect, lesson,
+                                              embedding=slot_embedding(seed)))
+
+
+DEEP_NOTES = [
+    ("The Kafka Broker cluster feeds the Harbor Registry nightly.", "proj-a"),
+    ("Broker Kafka handles retries for the billing-service.", "proj-a"),
+    ("Tide Gauge readings land in the Ocean warehouse.", "proj-b"),
+    ("Kelp Farm sensors report to the Tide Gauge hub.", "proj-b"),
+    ("The orbit station alpha two telemetry is noisy.", "noise"),
+    ("orbit station alpha docking schedule changed.", "conversation"),
+    ("deploy runbook 2026-10-01 final covers the rollback.", "proj-a"),
+    ("The deploy runbook lives in the ops wiki.", "Proj-A"),
+    ("payments ledger prod reconciles every night.", "proj-b"),
+    ("payments ledger exports to the Warehouse.", "proj-b"),
+    ("tidecalc.py computes the tide tables; tidecalc is the module.", "proj-b"),
+    ("Mentioned Orphan shows up in this note.", "status"),
+    ("The deploy agent pushes images to the Harbor Registry.", "proj-a"),
+    ("postgres backs the billing-service ledger.", "proj-a"),
+]
+
+DEEP_SEED = [
+    *[store(t, source=s) for t, s in DEEP_NOTES],
+    # rescore (an agent edge stored at 0.8) and a hard violation
+    relate("deploy agent", "uses", "Harbor Registry", origin="agent"),
+    relate("billing-service", "runs-on", "postgres", origin="agent"),
+    relate("Warehouse", "related-to", "Ocean", confidence=0.45, origin="agent"),
+    # an exact duplicate (same token set) and a name-contained third
+    relate("Kafka Broker", "uses", "Harbor Registry"),
+    relate("Broker Kafka", "related-to", "billing-service"),
+    relate("Kafka Broker Cluster", "related-to", "Warehouse"),
+    relate("Tide Gauge", "related-to", "Ocean"),
+    relate("Kelp Farm", "related-to", "Ocean"),
+    relate("orbit station alpha", "related-to", "Ocean"),
+    relate("orbit station alpha two", "related-to", "Ocean"),
+    # a name-contained pair the event-slug veto keeps out of the merge queue
+    relate("deploy runbook 2026-10-01 final", "related-to", "Warehouse"),
+    relate("deploy runbook", "related-to", "Warehouse"),
+    # analyzer duplicates: a merge pair and a file and its stem
+    relate("payments ledger", "related-to", "Warehouse"),
+    relate("payments ledger prod", "related-to", "Warehouse"),
+    relate("tidecalc.py", "related-to", "Ocean"),
+    relate("tidecalc", "related-to", "Ocean"),
+    # junk: zero structure (one fact), tombstoned at degree 1 and 2, a junk
+    # name with two facts, a kept name
+    fact("QQ", "color", "blue"),
+    relate("ZZ", "related-to", "Ocean"),
+    relate("alpha, beta", "related-to", "Ocean"),
+    relate("alpha, beta", "related-to", "Warehouse"),
+    fact("WW", "color", "red"),
+    fact("WW", "size", "large"),
+    relate("KK", "related-to", "Ocean"),
+    # a fact naming an orphan-shaped entity, lesson-minted nodes
+    fact("Named Orphan", "status", "parked"),
+    outcome("ship the release", "success", about="release checklist"),
+    # world duplicates across entities, identifier-keyed siblings
+    world_set("Host A", "os", "Debian 12", source_url="https://example.org/a"),
+    world_set("Host B", "os", "Debian 12", source_url="https://example.org/b"),
+    world_set("Host A", "distro", "Debian bookworm", source_url="https://example.org/a"),
+    world_set("arxiv:2602-05665", "title", "Graph memory", source_url="https://arxiv.org/a"),
+    world_set("arxiv:2602-05666", "title", "Graph memory", source_url="https://arxiv.org/b"),
+    # a pending link proposal (its pair leaves the candidates) and a
+    # dismissed pair
+    review("propose", proposals=[{"src": "Tide Gauge", "relation": "related-to",
+                                  "dst": "Harbor Registry"}]),
+    review("dismiss_pair", src="Kelp Farm", dst="Harbor Registry"),
+    trace_sql(DEEP_NOTES[12][0], "harbor-registry", "receives"),
+    # lessons with fixed embeddings: a near-verbatim cross-key pair, aspect
+    # siblings, a dismissed pair
+    deep_lesson("Rotate Keys", "Cadence", "Rotate keys quarterly.", 3),
+    deep_lesson("Rotate Secrets", "Cadence", "Rotate secrets quarterly.", 3),
+    deep_lesson("Rotate Keys", "Owner", "The security team owns rotation.", 5),
+    deep_lesson("Ship Release", "Checklist", "Run the checklist.", 7),
+    deep_lesson("Ship Release", "Freeze", "Freeze merges a day ahead.", 7),
+    sql("INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) VALUES "
+        "('lesson:rotate-keys|owner', 'lesson:ship-release|checklist', 1), "
+        "('junk:kk', 'junk:kk', 1)", after_stop=True),
+    # junk tombstones (accepted junk verdicts)
+    sql("INSERT INTO merge_decisions (proposal_id, entity_display, into_display, status, score, "
+        "reason, decided_by, decided_at) VALUES (NULL, 'ZZ', NULL, 'accepted', NULL, 'junk: x', "
+        "'agent', 1), (NULL, 'alpha, beta', NULL, 'accepted', NULL, 'junk: y', 'agent', 2)",
+        after_stop=True),
+    # scope attribution (only the dream writes it): disjoint scopes drop a pair
+    sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+        f"VALUES ({eid('harbor-registry')}, 'proj-a', 1, 'derived', 0), "
+        f"({eid('ocean')}, 'proj-b', 1, 'derived', 0), "
+        f"({eid('kafka-broker')}, 'proj-a', 1, 'manual', 0)", after_stop=True),
+    # pending proposals (only the dream files them): merges with judge votes
+    # sharing an endpoint, an already-proposed merge, a pending junk row
+    sql("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at, "
+        "judge_verdict, judge_confidence, judge_note, judge_model, judged_at) VALUES "
+        f"('merge', {eid('tide-gauge')}, {eid('kelp-farm')}, 0.71, 'write-dedup: a', 1, "
+        "'relate', 0.8, 'relate:related-to distinct sensors', 'judge-a', 2), "
+        f"('merge', {eid('tide-gauge')}, {eid('ocean')}, 0.6, 'write-dedup: b', 1, "
+        "'reject', 0.9, 'different', 'judge-a', 2), "
+        f"('merge', {eid('orbit-station-alpha-two')}, {eid('orbit-station-alpha')}, NULL, "
+        "'write-dedup: c', 1, NULL, NULL, NULL, NULL, NULL)", after_stop=True),
+    sql("INSERT INTO entity_proposals (kind, entity_id, score, reason, created_at) VALUES "
+        f"('junk', {eid('ww')}, NULL, 'too-short', 1)", after_stop=True),
+    # entities whose evidence is gone: two unmentioned (the census and the
+    # sweep's cap), one an entry mentions, one a fact names
+    sql("INSERT INTO entities (canonical, display, etype, created_at) VALUES "
+        "('orphan-node', 'Orphan Node', NULL, 1700000000.0), "
+        "('orphan-two', 'Orphan Two', NULL, 1700000100.0), "
+        "('mentioned-orphan', 'Mentioned Orphan', NULL, 1700000000.0), "
+        "('named-orphan-x', 'Named Orphan', NULL, 1700000000.0)", after_stop=True),
+]
+
+# Long notes (about 6 KB each) for the response bound: every candidate
+# carries up to three snippets a side at snippet_max_chars 100000.
+DEEP_LONG = [
+    (f"{name} long note {i}: " + " ".join(f"{word}{i}x{j}" for j in range(700)), "proj-a")
+    for i, (name, word) in enumerate([
+        ("Alder Node", "alder"), ("Birch Node", "birch"), ("Cedar Node", "cedar"),
+        ("Dogwood Node", "dogwood"), ("Elm Node", "elm"), ("Fir Node", "fir"),
+        ("Alder Node and Birch Node", "pair"), ("Cedar Node with Elm Node", "duo")])
+]
+
+DEEP_BOUND_SEED = [
+    *[store(t, source=s) for t, s in DEEP_LONG],
+    *[relate(n, "related-to", "Hub") for n in
+      ("Alder Node", "Birch Node", "Cedar Node", "Dogwood Node", "Elm Node", "Fir Node")],
+]
+
+SCENARIOS.update({
+    "dream-deep-dry": {
+        "config": deep_config(),
+        "seed": DEEP_SEED,
+        "ops": [
+            dream("deep"),
+            dream("deep", snippets=False),
+            dream("deep", apply=False, snippets=True),
+            dream("status"),
+        ],
+    },
+    "dream-deep-apply": {
+        "config": deep_config("    orphan_sweep: true\n    orphan_max_per_apply: 1\n"
+                              "    snapshot_keep: 1\n"),
+        "seed": DEEP_SEED,
+        "ops": [
+            dream("deep", apply=True),
+            snapshot_file(),
+            dream("status"),
+            dream("deep"),
+            {"op": "sleep", "s": 1.2},
+            dream("deep", apply=True, snippets=False),
+            snapshot_file(),
+            review(),
+        ],
+    },
+    "dream-deep-apply-cautious": {
+        "config": deep_config("    auto_apply_safe: false\n"
+                              "    analyzer_file_duplicates: false\n"),
+        "seed": DEEP_SEED,
+        "ops": [dream("deep", apply=True), snapshot_file(), dream("status")],
+    },
+    "dream-deep-bound": {
+        "config": deep_config("    snippet_max_chars: 100000\n    top_k_candidates: 50\n"),
+        "seed": DEEP_BOUND_SEED,
+        "ops": [dream("deep"), dream("deep", snippets=False)],
+    },
+    "dream-deep-snapshot-failed": {
+        "config": deep_config(),
+        "seed": DEEP_SEED,
+        "ops": [block_snapshots(), dream("deep", apply=True), dream("status"), dream("deep")],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -4030,8 +4264,31 @@ def dream_tokens(value, ts_map: dict[float, str]):
             return payload
         if key == "idle_seconds" or key in DREAM_CLOCK_KEYS:
             return _clock(v)
+        if key == "snapshot" and isinstance(v, str) and SNAPSHOT_NAME.fullmatch(v):
+            return "<snapshot>"
         return v
-    return walk(value)
+    return walk(deep_orphan_ages(value))
+
+
+def deep_orphan_ages(value):
+    """A deep dry run's ``would_orphan[].age_days`` (wall-clock days since
+    each orphan's creation) becomes ``<age#N>``, N its rank among the
+    distinct ages in that answer: equality and order compare, the clock
+    does not."""
+    if isinstance(value, dict):
+        out = {}
+        for k, x in value.items():
+            if k == "would_orphan" and isinstance(x, list):
+                ages = sorted({o["age_days"] for o in x if isinstance(o, dict)
+                               and _number(o.get("age_days"))})
+                rank = {a: f"<age#{i}>" for i, a in enumerate(ages)}
+                x = [{**o, "age_days": rank.get(o.get("age_days"), o.get("age_days"))}
+                     if isinstance(o, dict) else o for o in x]
+            out[k] = deep_orphan_ages(x)
+        return out
+    if isinstance(value, list):
+        return [deep_orphan_ages(x) for x in value]
+    return value
 
 
 def _values_at(v, key: str):
@@ -4605,6 +4862,33 @@ def run_op(op: dict, port: int, mcp: Mcp, dsn: str) -> dict | None:
     return mcp.call(op["name"], args, headers)
 
 
+# Operations on each side's data directory rather than its daemon.
+HOME_OPS = ("snapshot_file", "block_snapshots")
+
+
+def home_op(op: dict, home: Path) -> dict:
+    """``snapshot_file``: the side's newest ``graph_snapshots/graph-*.json``
+    with its name's shape, the file count and every table's columns and rows
+    (CLOCK columns null-or-not, rows as a sorted set); ``block_snapshots``:
+    a plain file where the directory goes, so the snapshot write fails."""
+    snaps = home / "data" / "graph_snapshots"
+    if op["op"] == "block_snapshots":
+        snaps.write_text("blocked", encoding="utf-8")
+        return {"isError": False, "value": None}
+    names = sorted(p.name for p in snaps.glob("graph-*.json")) if snaps.is_dir() else []
+    if not names:
+        return {"isError": False, "value": {"files": 0}}
+    raw = (snaps / names[-1]).read_text(encoding="utf-8")
+    tables = {}
+    for t, rows in json.loads(raw).items():
+        cols = list(rows[0]) if rows else []
+        norm = [[_clock(r[c]) if (t, c) in CLOCK else r[c] for c in cols] for r in rows]
+        tables[t] = {"columns": cols, "rows": sorted(norm, key=json.dumps)}
+    return {"isError": False, "value": {
+        "files": len(names), "name_shape": bool(SNAPSHOT_NAME.fullmatch(names[-1])),
+        "ascii": raw.isascii(), "tables": tables}}
+
+
 def wait_landed(dsn: str, text: str, deadline_s: float = 30.0) -> None:
     """Wait until an abandoned store's row exists, up to the deadline: a
     store that survives its caller's disconnect lands whatever the embedder's
@@ -4685,6 +4969,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
     steps, stats = [], {}
     try:
         home = daemons.make_home(root, f"{tag}-py", scn.get("config"))
+        homes = {"python": home}
         penv = side_env(scn, dsns["python"], extractor_env(scn, stubs.get("python")))
         procs["python"] = daemons.python_daemon(home, daemons.free_port(),
                                                 daemons.base_env(home, penv))
@@ -4692,6 +4977,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
         if mutant:
             renv["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
         home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
+        homes["rust"] = home
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
         for d in procs.values():
             d.start(300)
@@ -4705,10 +4991,13 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
             row = {"step": i, "op": op, "diffs": []}
             if op["op"] != "init":
                 started = time.monotonic()
-                py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
-                            clients["python"], dsns["python"])
-                rs = run_op(with_pull_token(op, tokens["rust"]), procs["rust"].port,
-                            clients["rust"], dsns["rust"])
+                if op["op"] in HOME_OPS:
+                    py, rs = home_op(op, homes["python"]), home_op(op, homes["rust"])
+                else:
+                    py = run_op(with_pull_token(op, tokens["python"]), procs["python"].port,
+                                clients["python"], dsns["python"])
+                    rs = run_op(with_pull_token(op, tokens["rust"]), procs["rust"].port,
+                                clients["rust"], dsns["rust"])
                 row["wall_s"] = time.monotonic() - started
                 max_wall = max(max_wall, row["wall_s"])
                 for side, r in (("python", py), ("rust", rs)):

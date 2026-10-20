@@ -148,7 +148,7 @@ pub(super) fn parse_slot_key(key: &str) -> Option<(String, String)> {
 
 /// `service._slot_key`: the components joined by `|`, a literal `|` in one
 /// spelled `%7C`.
-pub(super) fn slot_key_text(entity_norm: &str, attribute_norm: &str) -> String {
+pub(crate) fn slot_key_text(entity_norm: &str, attribute_norm: &str) -> String {
     format!(
         "{}|{}",
         entity_norm.replace('|', SLOT_KEY_PIPE),

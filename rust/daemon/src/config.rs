@@ -106,10 +106,11 @@ pub struct MemoryConfig {
     pub deep_dream: DeepDreamConfig,
 }
 
-/// `DeepDreamConfig` (`utils/config.py:513-712`): the switches
+/// `DeepDreamConfig` (`utils/config.py:513-720`): the switches
 /// `graph_review`'s automation accounting reads (`service.py:7880-7884`),
-/// and the need signal, judge modes and gates `dream_status` reports
-/// (`service_dream.py:3677-3819`).
+/// the need signal, judge modes and gates `dream_status` reports
+/// (`service_dream.py:3677-3819`), and the knobs `memory_dream(action=
+/// "deep")` reads (`service_dream.py:3355-3675`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeepDreamConfig {
     pub judges_enabled: bool,
@@ -127,6 +128,22 @@ pub struct DeepDreamConfig {
     pub judge_accept_min_confidence: f64,
     pub judge_reject_min_confidence_2: f64,
     pub link_two_vote_min_confidence: f64,
+    pub min_similarity: f64,
+    pub top_k_candidates: i64,
+    pub max_context_snippets: i64,
+    pub auto_apply_safe: bool,
+    pub min_entity_mentions: i64,
+    pub max_fallback_mentions: i64,
+    pub merge_min_similarity: f64,
+    pub junk_max_degree: i64,
+    pub max_support_overlap: f64,
+    pub snippet_max_chars: i64,
+    pub snapshot_keep: i64,
+    pub curation_min_similarity: f64,
+    pub curation_top_k: i64,
+    pub orphan_sweep: bool,
+    pub orphan_min_age_days: f64,
+    pub orphan_max_per_apply: i64,
 }
 
 impl Default for DeepDreamConfig {
@@ -147,6 +164,22 @@ impl Default for DeepDreamConfig {
             judge_accept_min_confidence: 0.6,
             judge_reject_min_confidence_2: 0.7,
             link_two_vote_min_confidence: 0.7,
+            min_similarity: 0.55,
+            top_k_candidates: 50,
+            max_context_snippets: 3,
+            auto_apply_safe: true,
+            min_entity_mentions: 2,
+            max_fallback_mentions: 30,
+            merge_min_similarity: 0.90,
+            junk_max_degree: 1,
+            max_support_overlap: 0.8,
+            snippet_max_chars: 240,
+            snapshot_keep: 10,
+            curation_min_similarity: 0.80,
+            curation_top_k: 20,
+            orphan_sweep: false,
+            orphan_min_age_days: 7.0,
+            orphan_max_per_apply: 50,
         }
     }
 }
@@ -1742,6 +1775,57 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                     "link_two_vote_min_confidence",
                     p,
                     d.link_two_vote_min_confidence,
+                )?,
+                min_similarity: want_float(r, "min_similarity", p, d.min_similarity)?,
+                top_k_candidates: want_int(r, "top_k_candidates", p, d.top_k_candidates)?,
+                max_context_snippets: want_int(
+                    r,
+                    "max_context_snippets",
+                    p,
+                    d.max_context_snippets,
+                )?,
+                auto_apply_safe: want_bool(r, "auto_apply_safe", p, d.auto_apply_safe)?,
+                min_entity_mentions: want_int(r, "min_entity_mentions", p, d.min_entity_mentions)?,
+                max_fallback_mentions: want_int(
+                    r,
+                    "max_fallback_mentions",
+                    p,
+                    d.max_fallback_mentions,
+                )?,
+                merge_min_similarity: want_float(
+                    r,
+                    "merge_min_similarity",
+                    p,
+                    d.merge_min_similarity,
+                )?,
+                junk_max_degree: want_int(r, "junk_max_degree", p, d.junk_max_degree)?,
+                max_support_overlap: want_float(
+                    r,
+                    "max_support_overlap",
+                    p,
+                    d.max_support_overlap,
+                )?,
+                snippet_max_chars: want_int(r, "snippet_max_chars", p, d.snippet_max_chars)?,
+                snapshot_keep: want_int(r, "snapshot_keep", p, d.snapshot_keep)?,
+                curation_min_similarity: want_float(
+                    r,
+                    "curation_min_similarity",
+                    p,
+                    d.curation_min_similarity,
+                )?,
+                curation_top_k: want_int(r, "curation_top_k", p, d.curation_top_k)?,
+                orphan_sweep: want_bool(r, "orphan_sweep", p, d.orphan_sweep)?,
+                orphan_min_age_days: want_float(
+                    r,
+                    "orphan_min_age_days",
+                    p,
+                    d.orphan_min_age_days,
+                )?,
+                orphan_max_per_apply: want_int(
+                    r,
+                    "orphan_max_per_apply",
+                    p,
+                    d.orphan_max_per_apply,
                 )?,
             };
         }

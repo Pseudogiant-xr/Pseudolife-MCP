@@ -22,6 +22,7 @@ mod fact_resolve;
 mod fact_set;
 mod forget_tools;
 mod freshness;
+mod graph_consolidation;
 mod graph_read;
 mod graph_read_tools;
 mod graph_review;

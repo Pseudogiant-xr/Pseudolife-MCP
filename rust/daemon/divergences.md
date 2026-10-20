@@ -388,7 +388,7 @@ this increment does not claim the complete write boundary or cutover readiness.
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
 | `run` while graph insight (`memory.graph_insight.enabled`) is on, which is the default | refreshes the graph-insight digest | refused (`not_implemented`, naming the stage) | task P2b (a maintainer decision on a structurally compared divergence); with it off the pass and the other stages are served |
-| `deep` and `rollback` | served | refused | tasks P2a (deep dream) and the rollback increment |
+| `rollback` | served | refused | the rollback increment (`deep` is served since 2026-10-20) |
 | When dream tracking initializes (rows with no dream state classified) | at hydration | at the first `memory_dream` call | a Rust boot must not change the bank (the W1 boot comparison); every answer is the same once the call runs |
 | A pending entry whose row is missing at a write failure | re-flushed (`cms.reflush_entries`) | detected, not re-inserted | the store slice's persistence follow-up; the answer (a write hold) is the same |
 | The stall record's board notice and the overdue rule | posted by the sweep | logged; the overdue rule is never armed | the sweep (task P4) |
@@ -419,6 +419,21 @@ this increment does not claim the complete write boundary or cutover readiness.
 | A stage cursor whose `retry` is a list of pairs with non-string keys, or whose lists hold non-strings where they are sorted | coerced by `dict()` / compared by `sorted()` (or raises) | refused (`internal_error`) | corrupt persisted data only; the stages write these cursors |
 | A lesson audit snapshot with a non-string `task`/`aspect`/`lesson`/`about`/`outcome`/`polarity`/`origin` or provenance item | passed to `lesson_write` as is | refused (`internal_error`) before that slot is written | corrupt audit rows only; as for world snapshots |
 | A `RecursionError` message from a too-deep reply | `while decoding a JSON object/array` at the interpreter's depth | the same text at a fixed depth of 900 | as for the consolidation pass |
+
+### memory_dream deep: the deep dream (2026-10-20)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| The lock windows (read snapshot, snapshot file, apply writes, stamp and re-read) | the service lock is released between them; a concurrent edit there is tolerated (supersede, merge and rescore are no-ops on a changed row) | the writer lock is held for the whole call, the windows in Python's order | no write can interleave; with no concurrent writer the two are identical |
+| float32 dot products (`np.dot`, `np.linalg.norm`) behind context vectors, candidate and curation cosines | OpenBLAS `sdot` with the kernel the host CPU selects | OpenBLAS's AVX-512 (SkylakeX) kernel reproduced bit for bit (verified against numpy 2.4.3 on an AVX-512 host) | an AVX2-only host runs the Haswell kernel, which can differ in the last float32 bit: a cosine on a 4th-decimal rounding boundary then rounds differently, which can reorder near-tied candidates or move one across `top_k` / a floor |
+| A vector whose length is not a multiple of 32 | the kernel's scalar tail | a fused multiply-add tail, not bit-exact | the schema's vectors are 1024-dimensional (`vector(1024)`); goldens pin multiples of 32 only |
+| Two applies within one UTC second | the second snapshot overwrites the first (same name) | the same | the harness compares the name by shape and sleeps between applies; within one daemon the behaviour is identical |
+| A snapshot column of a type other than integer, float, boolean, text or JSON | `str(value)` (`default=str`) | PostgreSQL's text form | the five graph tables have no such column |
+| `re.IGNORECASE` letter classes at the variant-token boundaries (`(?<![A-Za-z0-9])`) | `ı` and `İ` count as letters | they do not (the Kelvin sign and long s match in both) | variant tokens in names with those letters only |
+| `\w` in the identifier-keyed entity pattern | `str.isalnum` or `_` | Unicode letters, numbers or `_` | rare characters only, as in `junk_names.rs` |
+| A deep call on a bank with storage unavailable | `_GRAPH_UNAVAILABLE` | not reachable: the Rust daemon always has storage | |
+| A missing embedding on an entry a context vector stacks, or `min_entity_mentions` at 0 with no mention | numpy's `ValueError` text | an internal error with Rust's wording | `entries.embedding` is `NOT NULL`; the default is 2 |
+| Wrong-type `memory.deep_dream` deep knobs (`top_k_candidates: 2.5`, `auto_apply_safe: "yes"`) | taken as given (slicing or truthiness) | refused at config load | the existing config-type substitution |
 
 ## Coordination board completion (W2-F)
 

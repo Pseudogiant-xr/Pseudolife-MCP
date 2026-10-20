@@ -206,7 +206,7 @@ pub fn date_like_re() -> &'static regex::Regex {
 /// `str.isdigit()` for one character: the decimal digits plus the common
 /// digit-valued superscripts, subscripts and circled digits (an
 /// approximation of `Numeric_Type=Digit`, declared).
-fn py_isdigit(c: char) -> bool {
+pub(crate) fn py_isdigit(c: char) -> bool {
     crate::graph_review::is_decimal(c)
         || matches!(c as u32,
             0xB2 | 0xB3 | 0xB9 | 0x2070 | 0x2074..=0x2079 | 0x2080..=0x2089

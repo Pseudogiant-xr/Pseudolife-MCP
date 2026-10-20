@@ -1322,7 +1322,7 @@ building 1999-2395); `memory/cortex.py` (the dream inputs of `write`,
 
 | # | Exact item | Source |
 |---|---|---|
-| DR1 | Bound arguments: `memory_dream(action, limit=None, commit_token=None, cursor=None, apply=False, snippets=True, run_id=None)`; an unknown action answers `unknown_action` with the seven actions. `deep` and `rollback` answer the `not_implemented` refusal (tasks P2a and P1-rollback). | `mcp_server.py:2171-2238` |
+| DR1 | Bound arguments: `memory_dream(action, limit=None, commit_token=None, cursor=None, apply=False, snippets=True, run_id=None)`; an unknown action answers `unknown_action` with the seven actions. `deep` is the deep dream (DD1-DD18); `rollback` answers the `not_implemented` refusal (task P1-rollback). | `mcp_server.py:2171-2238` |
 | DR2 | `status`: backlog, idle seconds, the display cursor, `would_fire`, the outcome-inference and digest counters, the deep-dream need block, the review queue with judge agreement, the stall record, then the extractor fields (with the alias served-model lookup and the primary probe when a fallback is set). | `service_dream.py:3035-3118,3677-3787`; `dream.py:2250-2275` |
 | DR3 | `pull`: the pending entries of the resident bank (not excluded sources, ordered by timestamp, row id and dream id, at most `limit or 40`, capped at 4096), with an HMAC commit token over them; `commit` acknowledges a token's entries (a legacy cursor or no token refused); `runs` lists recent run rows. Dream tracking covers entries stored after start. | `service_dream.py:1033-1302` |
 | DR4 | Endpoints: config or environment (`PSEUDOLIFE_DREAM_*`), the model override, the mode; `auto` with a fallback probes the primary's `/health` (a 404 retrying `/models`) twice, two seconds apart; the primary carries its key and `cache_prompt`/`reasoning_effort`, the fallback only its own key. No URL and model: a no-op extractor. | `dream.py:1999-2247,2366-2395` |
@@ -1403,6 +1403,81 @@ unit-tested against Python's own extractor (`stage_bodies`,
 `stage_replies` in `harness/goldens/dream-extractor.json`), the JSON error
 messages against CPython's, and `repr()` against CPython's Unicode 14
 table (`harness/gen_py_repr_unicode.py`).
+
+### memory_dream deep: the deep dream (2026-10-20)
+
+`dream/deep.rs` (the tool, the read snapshot, the snippets and merge
+enrichment, the apply writes, the snapshot file, the response bound) and
+`graph_consolidation.rs` (the pure half), over `graph_review.rs` (the
+analyzer, `merge_veto`, `lesson_only_ids`, the merge groups and judge
+blocks), `junk_names.rs`, `dream/relations.rs` (the entity-proposal insert
+and the derived scope upsert), `graph_review_tools.rs` (the pending merge
+rows, `insert_proposal`, the vote snapshot, the merge-decision audit) and the
+graph store's merge, supersede and delete. Python: `mcp_server.py`
+`memory_dream` / `_bound_deep_response` (2172-2290); `service_dream.py`
+`deep_dream` (3355-3675), `_file_analyzer_duplicates` (6095-6156),
+`_unreachable_orphans` / `_sweep_unreachable_orphans` (6158-6203),
+`_write_graph_snapshot[_locked]` (6205-6229), `_edge_label`, `_merge_labels`,
+`_attach_candidate_snippets` (6253-6340), `_enrich_merge_proposals`
+(6342-6420); `service.py` `_kept_junk_norms` (499-503),
+`_slot_duplicate_listings` (7989-8001), `_curation_records` (8766-8785),
+`_fold_direction` (8787-8799); all of `memory/graph_consolidation.py`;
+`storage/postgres.py` `dump_graph_tables`, `set_edge_confidence`,
+`supersede_edge`, `merge_entity`, `insert_entity_proposal`,
+`entity_proposal_keys`, `pending_entity_proposals`, `delete_entity`,
+`delete_entity_audited`, `record_merge_decision`, `entity_proposal_votes`,
+`junk_accepted_displays`, `zero_evidence_entities`, `upsert_entity_source`,
+`max_entity_id`, `set_meta` and the read queries listed in DD2.
+
+| # | Exact item | Source |
+|---|---|---|
+| DD1 | `deep` binds `apply` (default False) and `snippets` (default True) and runs detached under the writer lock. The answer is bounded: when it has a top-level list and its `json.dumps(payload, default=str)` text (default separators, `ensure_ascii`) exceeds 250,000 characters, every top-level list longer than the head is cut to its leading items, the head starting at 40 and halving until the text fits or the head is 1; cut lists' full lengths go under `truncated` and a fixed `hint` naming the head follows, both appended after the existing keys. An answer without lists (`snapshot_failed`) is returned untouched. | `mcp_server.py:2172-2290` |
+| DD2 | The read snapshot: `load_graph` (entities by id with `etype`, aliases, live edges by id with REAL confidence read through its text), `entity_sources_map`, `traces_by_entity_norm`, every `entries` row by id (embedding as float32), `dismissed_pairs`, `entity_proposal_keys` (`("merge", lo, hi)` or `(kind, id)`, any status), `pending_entity_proposals`, the pending link pairs, `lesson_entity_ids`, `entity_fact_counts`, `current_fact_counts_by_entity_text` (folded by graph `norm_name` into `facts_by_norm`), and the resident lesson and world stores' current records (`_slot_key`, label fields in Python's order, the value cut to `snippet_max_chars` code points with Python's slice semantics). | `service_dream.py:3369-3385`; `service.py:8766-8785`; `postgres.py:1435,3392,3427,3731,3777,4228-4268,4425` |
+| DD3 | Re-score: every edge with origin `agent` whose `edge_confidence(src display, relation, dst display)` differs from its stored confidence rounded to 3 places (`rescored` counts them); an apply writes each new value first (`UPDATE edges SET confidence`, float8 into REAL). | `graph_consolidation.py:37-49`; `service_dream.py:3550-3552`; `postgres.py:3387-3390` |
+| DD4 | Hard violations: agent edges both of whose endpoints are confidently typed and incompatible, labelled `{src, relation, dst, confidence}` (`would_supersede`); an apply supersedes them only under `auto_apply_safe` (`superseded` counts true returns). | `graph_consolidation.py:52-59`; `service_dream.py:3553-3556,6231-6234` |
+| DD5 | Exact duplicates: entity pairs whose full lowercase `[a-z0-9]` token sets are equal and non-empty, neither a concat artifact, the lower-degree side folded into the higher (a tie folds the higher id into the lower), sorted; `would_merge` labels them. An apply merges them in order under `auto_apply_safe`; a merged-away id is dropped from every later step. | `graph_consolidation.py:62-90`; `service_dream.py:3557-3560` |
+| DD6 | Junk: concat and list artifacts at any degree; with known names (canonicals and normalized aliases) the compound artifact (first spaced `/` or any `+`, both halves known, distinct and not the whole) and the slot-key artifact (a known dotted head, the tail neither a code/data extension under `re.I` nor code-shaped); then, at degree at most `junk_max_degree`, bare numbers (Unicode decimal), displays of at most two code points, status words, metric readings. Names a junk proposal was rejected for (`("junk:<canonical>",)*2` dismissals) are dropped. `junk_owned` is the junk ids plus pending junk proposals' entities. | `graph_consolidation.py:368-686`; `service.py:485-503`; `service_dream.py:3392-3410` |
+| DD7 | Context vectors: an entity's trace entries, or when it has none the entries whose `_token_set` contains its display's (excluded outright over `max_fallback_mentions`, 0 uncapped); kept at `min_entity_mentions` distinct live entries; the vector is `np.mean` of their float32 embeddings (a float32 sum in CPython's set iteration order, divided by the count) L2-normalized by `np.linalg.norm` (OpenBLAS `sdot`, then float32 `sqrt` and division). | `graph_consolidation.py:95-142`; `service_dream.py:3411-3413` |
+| DD8 | Link candidates: entity pairs (ascending ids, junk-owned and lesson-only ids excluded) not linked by an edge or a pending link proposal, not exact duplicates, not dismissed (sorted canonicals), whose supporting entries are not co-mentions (containment `|shared| / min` at or above `max_support_overlap`, name-contained pairs exempt), not in disjoint non-empty scopes, with `float(np.dot)` (float32 `sdot`) at or above `min_similarity`; `similarity` is Python's `round(sim, 4)`; sorted by `(-similarity, src_id, dst_id)`, cut to `top_k_candidates` with Python slice semantics. | `graph_consolidation.py:171-277`; `service_dream.py:3414-3426` |
+| DD9 | Partition: a pair at or above `merge_min_similarity` without a variant conflict (size, quant and dotted-version tokens, casefolded, `_` as `-`) whose names are token-subset or substring contained (both sides at least two tokens, no concat artifact) is a merge candidate, folded into the side with more `(degree + facts, degree)` (a tie folds the higher id into the lower); merge candidates `merge_veto` vetoes (event slug, numeric substitution) or touching a junk-owned id are dropped; the rest are link candidates. | `graph_consolidation.py:398-613`; `service_dream.py:3427-3439` |
+| DD10 | Snippets (`snippets=True`): per side the trace entries that resolve, then its sorted mentions not yet seen, else a token scan capped at 12; up to `max_context_snippets` distinct texts cut to `snippet_max_chars`. Link candidates keep pool order (`src_snippets`, `dst_snippets` after the five candidate keys); merge rows lead with entries exclusive to the side and stamp `evidence_overlap` (shared share of the shown snippets, rounded to 2) and `low_differential` (an empty side, a side's pool contained in the other's, or overlap at or above 0.5). | `service_dream.py:6236-6340` |
+| DD11 | `merge_proposals`: each pending merge row oriented by `_fold_direction` (swap when the stored source has strictly more degree + facts), grouped by `shared_pair_groups` on the stored ids, as `{id, score, reason, group, from, into}` with sides `{display, etype, degree, scopes (sorted), snippets}`, then (with snippets) the evidence stamps, then the `judge` / `judge2` / `judge3` blocks with relate relations. | `service_dream.py:6342-6420`; `graph_review.py:87-97,466-485` |
+| DD12 | `lesson_duplicates` / `world_duplicates`: cross-key pairs of current records with embeddings, cosine over float32 L2-normalized vectors (`sdot`) at or above `curation_min_similarity` (0.95 for one entity's aspect siblings), identifier-keyed siblings (`^([A-Za-z][\w.-]*):(\S+)$`, same prefix, different id) and the store's dismissed pairs skipped, `{a_key, b_key, a, b, similarity}` sorted by `(-similarity, a_key, b_key)`, cut to `curation_top_k`. | `graph_consolidation.py:280-363`; `service.py:7989-8001` |
+| DD13 | A dry run answers `{dry_run, rescored, would_orphan_count, would_orphan, would_supersede, would_merge, would_merge_propose (with already_proposed from the proposal keys), would_junk (with already_proposed), merge_proposals, lesson_duplicates, world_duplicates, candidates, totals}`; `would_orphan` is the orphan census (DD16) of at most 200 `{entity, age_days}` with `age_days = round((now - (created_at or now)) / 86400, 1)`, and writes nothing. | `service_dream.py:3462-3510` |
+| DD14 | An apply first writes the snapshot: `dump_graph_tables` (`SELECT * ... ORDER BY 1` of entities, edges, entity_aliases, edge_proposals, entity_proposals, each row a column-ordered dict, REAL through its shortest text) as `json.dumps(tables, default=str)` to `<data_dir>/graph_snapshots/graph-%Y%m%d-%H%M%S.json` (UTC), then deletes all but the newest `max(1, snapshot_keep)` `graph-*.json` (case-insensitive on Windows); an OS error answers `{error: "snapshot_failed", applied: false, detail}` and nothing is written. | `service_dream.py:3512-3515,6205-6229`; `postgres.py:3766-3775` |
+| DD15 | Apply, junk: each junk finding is filed (`insert_entity_proposal("junk", id, None, None, reason)`, a conflict or vanished entity not counted); then each pending junk row (re-read) whose entity is contentless (the larger of its id fact count and `facts_by_norm` at its display's and canonical's norm is at most 1) and either has degree 0 or is tombstoned (its display's norm among accepted target-less `merge_decisions`) at degree at most `junk_max_degree` (snapshot degrees) is deleted, its vote snapshot read first, then audited `accepted` by `dream-auto` with reason `junk auto-delete: <reason>[ (tombstoned)]`; deleted ids are dropped. | `service_dream.py:3561-3640`; `postgres.py:2906-2916,3933-3974,4005-4014` |
+| DD16 | Apply, then: merge candidates filed as merge proposals (similarity as score) unless an endpoint was dropped; scope stamping for live entities with mentions and no scope (each mentioning entry's source stripped and lowercased, excluded tags dropped, a rollup umbrella added unless excluded or equal, each key upserted `derived` in sorted order, `scoped` counting entities); with `analyzer_file_duplicates` the analyzer's duplicates over live, non-junk entities filed (`merge` proposals with the evidence fold and variant screen, `<file> implements <concept>` link proposals with `edge_confidence`, pairs the merge queue held at the read skipped); with `orphan_sweep` the census (zero-evidence entities older than `orphan_min_age_days`, unmentioned, no fact naming them, not dropped) deleted with a `deleted` / `orphan-unreachable auto-delete` / `dream-auto` audit in one transaction, at most `orphan_max_per_apply` (0 uncapped). | `service_dream.py:3641-3660,6095-6203`; `postgres.py:2918-2937,3862-3893,4189-4203` |
+| DD17 | Apply, last: `deep_last_apply = {ts, max_entity_id}` is stamped (so `status`'s `deep_dream` block resets), the pending merge rows re-read and enriched, and the answer is `{applied, rescored, superseded, merged, merge_proposed, junk_proposed, junk_deleted, scoped, analyzer_filed, orphans_deleted, snapshot, merge_proposals, lesson_duplicates, world_duplicates, candidates, totals}`. | `service_dream.py:3661-3675`; `postgres.py:2733-2739,4016-4022` |
+| DD18 | Config: `memory.deep_dream` `min_similarity` 0.55, `top_k_candidates` 50, `max_context_snippets` 3, `auto_apply_safe` true, `min_entity_mentions` 2, `max_fallback_mentions` 30, `merge_min_similarity` 0.90, `junk_max_degree` 1, `max_support_overlap` 0.8, `snippet_max_chars` 240, `snapshot_keep` 10, `curation_min_similarity` 0.80, `curation_top_k` 20, `orphan_sweep` false, `orphan_min_age_days` 7.0, `orphan_max_per_apply` 50; `memory.scopes.exclude` / `rollup`. | `utils/config.py:513-720,939-947` |
+
+`harness/w2e.py live --only dream-deep-dry dream-deep-apply
+dream-deep-apply-cautious dream-deep-bound dream-deep-snapshot-failed`
+compares every answer and the full bank after each step, and through the
+`snapshot_file` operation each side's newest snapshot file (its name's
+shape, the file count, every table's columns and rows, clock columns
+null-or-not). The scenarios cover a dry run with and without snippets;
+re-scoring; hard violations superseded with `auto_apply_safe` on and left
+with it off; an exact duplicate merged and its dropped id kept out of the
+merge filing; junk filed, a kept name (a rejected junk proposal) not
+re-filed, the zero-structure and tombstoned auto-deletes, a tombstoned name
+above the degree bar and a junk name with two facts kept; merge candidates
+filed with an event-slug pair vetoed and an already-proposed pair; link
+candidates with a pending pair, a dismissed pair, co-mentions and disjoint
+scopes left out; scope stamping with an excluded tag and a rollup; analyzer
+filing on and off; the orphan census, its sweep on (capped at one) and off;
+lesson and world duplicates with a dismissed pair and identifier-keyed
+siblings; a response cut by the bound; `status` after an apply; and an
+unwritable snapshot directory (`snapshot_failed`). `would_orphan[].age_days`
+compares by rank, `deep_last_apply.ts` and `last_apply_at` by presence, the
+snapshot name by shape. The `mcp-dream-deep-*` mutants must be caught: no
+re-score, violations superseded with `auto_apply_safe` off, the tombstone
+degree bar ignored, dropped ids filed, the rollup skipped, the stamp
+missing, the bound skipped, kept names re-filed. The pure half is also
+unit-tested against Python's own functions
+(`harness/goldens/w2e-deep-dream.json`, `gen_w2e_deep_dream_goldens.py`):
+CPython's set order, the float32 context vectors and cosines bit for bit,
+candidate pairs and partition, slot duplicates, variant tokens, name
+containment, compound halves, junk and exact duplicates.
 
 ### Board tools over MCP (2026-10-16)
 

@@ -489,3 +489,35 @@ def test_dream_answers_normalize_stall_clocks_and_run_cursors(harness):
     assert out["last_dream_extractor"]["at"] == "<clock>"
     assert out["runs"][0] == {"id": 1, "cursor_before": 0.0, "cursor_after": "<ts:3>",
                               "finished_at": "<clock>"}
+
+
+def test_deep_dream_scenarios_register_their_mutants_and_normalizers(harness, tmp_path):
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("dream-deep-"))
+    assert names == ["dream-deep-apply", "dream-deep-apply-cautious", "dream-deep-bound",
+                     "dream-deep-dry", "dream-deep-snapshot-failed"]
+    for n in names:
+        # No background tick or sweep may run a deep dream behind the ops.
+        assert "auto_tick: false" in harness.SCENARIOS[n]["config"]
+        assert "dream:\n    enabled: false" in harness.SCENARIOS[n]["config"]
+    deep_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-deep-")]
+    assert len(deep_mutants) == 8
+    text = (Path(__file__).resolve().parents[1] / "src" / "dream" / "deep.rs").read_text(
+        encoding="utf-8")
+    assert all(f'"{m}"' in text for m in deep_mutants)
+    # Orphan ages compare by rank, the snapshot name by shape.
+    answer = {"would_orphan": [{"entity": "a", "age_days": 1077.3},
+                               {"entity": "b", "age_days": 0.0},
+                               {"entity": "c", "age_days": 1077.3}],
+              "snapshot": "graph-20261020-121500.json"}
+    got = harness.dream_tokens(answer, {})
+    assert [o["age_days"] for o in got["would_orphan"]] == ["<age#1>", "<age#0>", "<age#1>"]
+    assert got["snapshot"] == "<snapshot>"
+    # The snapshot file op reads the newest file and drops clocks.
+    snaps = tmp_path / "data" / "graph_snapshots"
+    snaps.mkdir(parents=True)
+    (snaps / "graph-20261020-121500.json").write_text('{"entities": []}', encoding="utf-8")
+    (snaps / "graph-20261020-121501.json").write_text(
+        '{"entities": [{"id": 1, "created_at": 5.5}], "edges": []}', encoding="utf-8")
+    v = harness.home_op({"op": "snapshot_file"}, tmp_path)["value"]
+    assert v["files"] == 2 and v["name_shape"]
+    assert v["tables"]["entities"] == {"columns": ["id", "created_at"], "rows": [[1, "<clock>"]]}

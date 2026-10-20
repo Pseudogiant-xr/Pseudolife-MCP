@@ -708,7 +708,7 @@ impl From<tokio_postgres::Error> for Tx {
     }
 }
 
-pub(super) async fn in_txn<'c, T, F, Fut>(client: &'c Client, body: F) -> Result<T, ToolError>
+pub(crate) async fn in_txn<'c, T, F, Fut>(client: &'c Client, body: F) -> Result<T, ToolError>
 where
     F: FnOnce(&'c Client) -> Fut,
     Fut: std::future::Future<Output = Result<T, ToolError>>,
@@ -718,7 +718,7 @@ where
         .map_err(|Tx(e)| e)
 }
 
-pub(super) async fn reads<'c, T, F, Fut>(client: &'c Client, body: F) -> Result<T, ToolError>
+pub(crate) async fn reads<'c, T, F, Fut>(client: &'c Client, body: F) -> Result<T, ToolError>
 where
     F: FnOnce(&'c Client) -> Fut,
     Fut: std::future::Future<Output = Result<T, ToolError>>,
@@ -1032,7 +1032,10 @@ async fn set_entity_proposal_status_body(
 
 /// `judge_agreement.proposal_votes` over `entity_proposal_votes`' columns
 /// (3962-3974): each opinion with a verdict, or None.
-async fn entity_proposal_votes_body(c: &Client, id: i64) -> Result<Option<Value>, ToolError> {
+pub(crate) async fn entity_proposal_votes_body(
+    c: &Client,
+    id: i64,
+) -> Result<Option<Value>, ToolError> {
     let Some(r) = c
         .query_opt(
             "SELECT judge_verdict, judge_confidence::text::double precision, judge_model, \
@@ -1111,6 +1114,36 @@ async fn record_merge_decision_body(
     decided_at: f64,
     votes: Option<Value>,
 ) -> Result<i64, ToolError> {
+    record_merge_decision_by(
+        c,
+        proposal_id,
+        entity_display,
+        into_display,
+        status,
+        score,
+        reason,
+        DECIDED_BY,
+        decided_at,
+        votes,
+    )
+    .await
+}
+
+/// `record_merge_decision` with an explicit `decided_by` (the deep dream's
+/// unattended junk deletions record `dream-auto`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn record_merge_decision_by(
+    c: &Client,
+    proposal_id: i64,
+    entity_display: &str,
+    into_display: Option<&str>,
+    status: &str,
+    score: Option<f32>,
+    reason: Option<&str>,
+    decided_by: &str,
+    decided_at: f64,
+    votes: Option<Value>,
+) -> Result<i64, ToolError> {
     Ok(c.query_one(
         "INSERT INTO merge_decisions \
          (proposal_id, entity_display, into_display, status, score, \
@@ -1123,7 +1156,7 @@ async fn record_merge_decision_body(
             &status,
             &score,
             &reason,
-            &DECIDED_BY,
+            &decided_by,
             &decided_at,
             &votes,
         ],

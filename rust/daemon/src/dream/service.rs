@@ -14,8 +14,8 @@
 //! classified the two are indistinguishable; rows with a NULL state are
 //! classified at the first call here (declared).
 //!
-//! `run` is the consolidation pass (`run.rs`); `deep` and `rollback`
-//! answer the `not_implemented` refusal.
+//! `run` is the consolidation pass (`run.rs`), `deep` the deep dream
+//! (`deep.rs`); `rollback` answers the `not_implemented` refusal.
 
 use std::sync::Arc;
 
@@ -922,9 +922,28 @@ fn mcp_memory_dream<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFu
                 .map_err(internal)?
         });
     }
+    if action == "deep" {
+        // `apply: bool = False`, `snippets: bool = True`.
+        let apply = call
+            .args
+            .get("apply")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let snippets = call
+            .args
+            .get("snippets")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let service = app.service.clone();
+        return crate::graph_write_tools::spawn_locked(
+            app,
+            call.args,
+            move |ready, _| async move { super::deep::deep(&service, &ready, apply, snippets).await },
+        );
+    }
     if !matches!(action.as_str(), "status" | "pull" | "commit" | "runs") {
         return Box::pin(async move {
-            if matches!(action.as_str(), "deep" | "rollback") {
+            if action == "rollback" {
                 Err(unserved())
             } else {
                 Ok(json!({"error": "unknown_action", "actions": ACTIONS}))
