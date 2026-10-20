@@ -244,16 +244,17 @@ def test_retry_that_meets_a_permanent_refusal_stops(monkeypatch, capsys):
     async def driver(handler, calls, inbox):
         await asyncio.sleep(0.1)
         daemon.mode = "unauthorized"
-        await asyncio.sleep(0.3)
+        # Board writes are refused as pending until the retry has met the
+        # refusal and stopped; the first one forwarded after that is today's
+        # behaviour: the daemon decides, and the result says once why, since
+        # the instructions asked for a check-in. Waiting on that event
+        # replaces a fixed 0.3 s the retry had to finish inside.
+        headers, first = await _until_registered(handler, calls)
         count = len(daemon.calls)
         await asyncio.sleep(0.2)
         assert len(daemon.calls) == count  # no more attempts
-        # Today's behaviour from here: forwarded, and the daemon decides;
-        # the first result says once why, since the instructions asked for
-        # a check-in.
-        texts = _texts(await handler(None, _update()))
-        assert "X-PL-Agent" not in calls[-1]["headers"]
-        assert any("stopped retrying" in text for text in texts)
+        assert "X-PL-Agent" not in headers
+        assert any("stopped retrying" in text for text in _texts(first))
         assert _texts(await handler(None, _update())) == []
 
     _board_session(monkeypatch, daemon, driver=driver)
@@ -435,14 +436,11 @@ def test_unanswered_probe_then_a_refusal_stops_quietly(monkeypatch, capsys):
     probe = _scripted_probe(None, False)
 
     async def driver(handler, calls, inbox):
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 5
-        while len(probe.asked) < 2 and loop.time() < deadline:
-            await asyncio.sleep(0.01)
-        await asyncio.sleep(0.1)
-        texts = _texts(await handler(None, _update()))
-        assert "X-PL-Agent" not in calls[-1]["headers"]
-        assert texts == []
+        # Board writes are refused as pending until the retry has heard the
+        # no and stopped: wait on that, not on a fixed 0.1 s after the ask.
+        headers, first = await _until_registered(handler, calls)
+        assert "X-PL-Agent" not in headers
+        assert _texts(first) == []
 
     _board_session(monkeypatch, daemon, driver=driver, coordination=None, probe=probe)
     assert len(probe.asked) == 2
@@ -611,7 +609,12 @@ def test_codex_session_end_stops_an_unanswered_board_check(monkeypatch):
     probe = _scripted_probe(None)
 
     async def driver(handler, calls, inbox):
-        await asyncio.sleep(0.2)
+        # End the session once the check has been retried, not after a fixed
+        # 0.2 s: the retry asks from a worker thread a stalled runner delays.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while len(probe.asked) < 2 and loop.time() < deadline:
+            await asyncio.sleep(0.01)
 
     _board_session(monkeypatch, Daemon(), driver=driver, coordination=None,
                    probe=probe, codex_registry=Registry)
@@ -623,18 +626,23 @@ def test_codex_doorbell_hears_when_a_late_board_check_says_no(monkeypatch, capsy
     """An explicit doorbell needs the board; the no that arrives after an
     unanswered startup check says it is off, as a startup no does."""
     probe = _scripted_probe(None, False)
+    line = "PSEUDOLIFE_CODEX_DOORBELL needs agent coordination"
+    err = []
 
     async def driver(handler, calls, inbox):
+        # End the session once the line is out, not a fixed 0.05 s after the
+        # second ask, which a stalled runner let the close overtake.
         loop = asyncio.get_running_loop()
         deadline = loop.time() + 5
-        while len(probe.asked) < 2 and loop.time() < deadline:
+        while line not in "".join(err) and loop.time() < deadline:
+            err.append(capsys.readouterr().err)
             await asyncio.sleep(0.01)
-        await asyncio.sleep(0.05)
 
     monkeypatch.setattr(shim, "_doorbell_setting", lambda environ=None: (True, True))
     _board_session(monkeypatch, Daemon(), driver=driver, coordination=None,
                    probe=probe, codex_registry=_codex_registry())
-    assert "PSEUDOLIFE_CODEX_DOORBELL needs agent coordination" in capsys.readouterr().err
+    err.append(capsys.readouterr().err)
+    assert line in "".join(err)
 
 
 def test_a_codex_board_check_answered_as_the_close_begins_builds_nothing(monkeypatch):

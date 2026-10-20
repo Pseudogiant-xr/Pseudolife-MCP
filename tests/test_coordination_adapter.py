@@ -1089,7 +1089,8 @@ def test_permanent_receive_failure_wakes_and_stops_heartbeat(monkeypatch, tmp_pa
                 403, json={"error": "invalid_credential"}) if action == "receive" else None)
             async with aclosing(instance.inbox()) as inbox:
                 pending = asyncio.create_task(anext(inbox))
-                await asyncio.wait_for(instance._heartbeat_task, 0.5)
+                # A hang guard: the stop itself is asserted below.
+                await asyncio.wait_for(instance._heartbeat_task, 10)
                 pending.cancel()
                 with suppress(asyncio.CancelledError):
                     await pending
