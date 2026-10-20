@@ -144,6 +144,91 @@ pub struct DeepDreamConfig {
     pub orphan_sweep: bool,
     pub orphan_min_age_days: f64,
     pub orphan_max_per_apply: i64,
+    // The merge judge's knobs (`service_dream.py:3849-5002`).
+    pub auto_tick: bool,
+    pub judge_batch: i64,
+    pub judge_snippet_max_chars: i64,
+    pub judge_reject_min_confidence: f64,
+    /// `str | None` knobs: `None` is YAML null (the Console's clear).
+    pub judge_url: Option<String>,
+    pub judge_model: Option<String>,
+    pub judge_second_opinion: bool,
+    pub judge_second_model: Option<String>,
+    pub judge_second_url: Option<String>,
+    pub judge_tiebreak_mode: String,
+    pub judge_third_model: Option<String>,
+    pub judge_third_url: Option<String>,
+    /// `dataclasses.asdict(DeepDreamConfig)` as Python holds it: every field
+    /// at its default, overlaid with the YAML value as YAML typed it (Python
+    /// does not coerce), which the review fingerprints sign
+    /// (`review_judgments.signed_deep_dream`).
+    pub as_dict: JsonMap<String, Value>,
+}
+
+/// `DeepDreamConfig`'s fields and defaults in declaration order
+/// (`utils/config.py:513-720`), as `dataclasses.asdict` holds them.
+pub fn deep_dream_defaults() -> JsonMap<String, Value> {
+    let s = |v: &str| Value::from(v);
+    let fields: Vec<(&str, Value)> = vec![
+        ("min_similarity", Value::from(0.55)),
+        ("top_k_candidates", Value::from(50)),
+        ("max_context_snippets", Value::from(3)),
+        ("auto_apply_safe", Value::from(true)),
+        ("min_entity_mentions", Value::from(2)),
+        ("max_fallback_mentions", Value::from(30)),
+        ("merge_min_similarity", Value::from(0.9)),
+        ("junk_max_degree", Value::from(1)),
+        ("max_support_overlap", Value::from(0.8)),
+        ("snippet_max_chars", Value::from(240)),
+        ("snapshot_keep", Value::from(10)),
+        ("curation_min_similarity", Value::from(0.8)),
+        ("curation_top_k", Value::from(20)),
+        ("auto_tick", Value::from(true)),
+        ("auto_min_new_entities", Value::from(150)),
+        ("auto_interval_days", Value::from(7.0)),
+        ("review_queue_alert_pending", Value::from(500)),
+        ("review_queue_alert_age_days", Value::from(14.0)),
+        ("review_queue_alert_min_pending", Value::from(100)),
+        ("judge_mode", s("shadow")),
+        ("judge_batch", Value::from(8)),
+        ("judge_snippet_max_chars", Value::from(240)),
+        ("judge_reject_min_confidence", Value::from(0.8)),
+        ("judge_url", s("")),
+        ("judge_model", s("")),
+        ("judges_enabled", Value::from(true)),
+        ("judge_second_opinion", Value::from(true)),
+        ("judge_second_model", s("")),
+        ("judge_second_url", s("")),
+        ("judge_reject_min_confidence_2", Value::from(0.7)),
+        ("judge_accept_min_confidence", Value::from(0.6)),
+        ("judge_tiebreak_mode", s("shadow")),
+        ("judge_third_model", s("")),
+        ("judge_third_url", s("")),
+        ("link_judge_mode", s("shadow")),
+        ("link_accept_min_confidence", Value::from(0.8)),
+        ("link_reject_min_confidence", Value::from(0.8)),
+        ("link_judge_two_vote", s("shadow")),
+        ("link_two_vote_min_confidence", Value::from(0.7)),
+        ("junk_judge_mode", s("shadow")),
+        ("junk_keep_min_confidence", Value::from(0.8)),
+        ("junk_delete_min_confidence", Value::from(0.85)),
+        ("junk_max_auto_degree", Value::from(2)),
+        ("curation_judge_mode", s("shadow")),
+        ("curation_distinct_min_confidence", Value::from(0.8)),
+        ("curation_forget_min_confidence", Value::from(0.9)),
+        ("curation_rejudge_days", Value::from(30.0)),
+        ("candidate_judge_mode", s("off")),
+        ("candidate_min_confidence", Value::from(0.6)),
+        ("candidate_rejudge_days", Value::from(30.0)),
+        ("analyzer_file_duplicates", Value::from(true)),
+        ("orphan_sweep", Value::from(false)),
+        ("orphan_min_age_days", Value::from(7.0)),
+        ("orphan_max_per_apply", Value::from(50)),
+    ];
+    fields
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect()
 }
 
 impl Default for DeepDreamConfig {
@@ -180,6 +265,19 @@ impl Default for DeepDreamConfig {
             orphan_sweep: false,
             orphan_min_age_days: 7.0,
             orphan_max_per_apply: 50,
+            auto_tick: true,
+            judge_batch: 8,
+            judge_snippet_max_chars: 240,
+            judge_reject_min_confidence: 0.8,
+            judge_url: Some(String::new()),
+            judge_model: Some(String::new()),
+            judge_second_opinion: true,
+            judge_second_model: Some(String::new()),
+            judge_second_url: Some(String::new()),
+            judge_tiebreak_mode: "shadow".into(),
+            judge_third_model: Some(String::new()),
+            judge_third_url: Some(String::new()),
+            as_dict: deep_dream_defaults(),
         }
     }
 }
@@ -1424,6 +1522,19 @@ fn want_str(
     }
 }
 
+/// A `str | None` knob whose default is `""`: absent is `Some("")`, YAML
+/// null is `None`.
+fn want_knob_str(
+    entries: &[(Node, Node)],
+    key: &str,
+    path: &str,
+) -> Result<Option<String>, ConfigError> {
+    match lookup(entries, key) {
+        None => Ok(Some(String::new())),
+        Some(_) => want_opt_str(entries, key, path),
+    }
+}
+
 fn want_opt_str(
     entries: &[(Node, Node)],
     key: &str,
@@ -1827,6 +1938,44 @@ fn load_str(text: &str) -> Result<Config, ConfigError> {
                     p,
                     d.orphan_max_per_apply,
                 )?,
+                auto_tick: want_bool(r, "auto_tick", p, d.auto_tick)?,
+                judge_batch: want_int(r, "judge_batch", p, d.judge_batch)?,
+                judge_snippet_max_chars: want_int(
+                    r,
+                    "judge_snippet_max_chars",
+                    p,
+                    d.judge_snippet_max_chars,
+                )?,
+                judge_reject_min_confidence: want_float(
+                    r,
+                    "judge_reject_min_confidence",
+                    p,
+                    d.judge_reject_min_confidence,
+                )?,
+                judge_url: want_knob_str(r, "judge_url", p)?,
+                judge_model: want_knob_str(r, "judge_model", p)?,
+                judge_second_opinion: want_bool(
+                    r,
+                    "judge_second_opinion",
+                    p,
+                    d.judge_second_opinion,
+                )?,
+                judge_second_model: want_knob_str(r, "judge_second_model", p)?,
+                judge_second_url: want_knob_str(r, "judge_second_url", p)?,
+                judge_tiebreak_mode: want_str(r, "judge_tiebreak_mode", p, &d.judge_tiebreak_mode)?,
+                judge_third_model: want_knob_str(r, "judge_third_model", p)?,
+                judge_third_url: want_knob_str(r, "judge_third_url", p)?,
+                as_dict: {
+                    let mut view = d.as_dict.clone();
+                    for (k, v) in r {
+                        if let Node::Str(name) = k
+                            && view.contains_key(name)
+                        {
+                            view.insert(name.clone(), node_json(v));
+                        }
+                    }
+                    view
+                },
             };
         }
         if let Some(r) = section(m, "reranker", "memory.")? {

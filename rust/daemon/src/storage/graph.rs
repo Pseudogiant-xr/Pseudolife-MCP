@@ -178,7 +178,7 @@ async fn entity_id_map_body(client: &Client) -> anyhow::Result<Value> {
     Ok(Value::Object(map))
 }
 
-async fn load_relations_body(client: &Client) -> anyhow::Result<Value> {
+pub(crate) async fn load_relations_body(client: &Client) -> anyhow::Result<Value> {
     let rows = client
         .query(
             "SELECT name,description,src_type,dst_type,transitive,inverse_of,builtin \
@@ -340,7 +340,11 @@ async fn delete_entity_body(client: &Client, id: i64) -> anyhow::Result<bool> {
     Ok(deleted)
 }
 
-async fn merge_entity_body(client: &Client, from: i64, into: i64) -> anyhow::Result<bool> {
+pub(crate) async fn merge_entity_body(
+    client: &Client,
+    from: i64,
+    into: i64,
+) -> anyhow::Result<bool> {
     if from == into {
         return Ok(false);
     }

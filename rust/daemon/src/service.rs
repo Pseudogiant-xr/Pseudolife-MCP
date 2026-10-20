@@ -439,6 +439,22 @@ impl crate::background::Duties for Service {
             if runs > 0 || retrieval > 0 {
                 eprintln!("sweep maintenance: runs_pruned={runs} retrieval_pruned={retrieval}");
             }
+            // `run_sweep_once` (`memory/dream.py:2398-2547`): the steps after
+            // the reapers run only while dreaming is enabled. The analyzer
+            // and deep ticks before the judge, the review-queue judges after
+            // it, the stall tick and the automatic dream are not ported
+            // (divergences.md).
+            if !self.config.dream.enabled {
+                return Ok(());
+            }
+            let ready = self.ensure_init_inner().await?;
+            let judged = crate::dream::judge::deep_dream_judge(self, &ready).await;
+            if crate::dream::judge::worth_logging(&judged) {
+                eprintln!(
+                    "deep-dream judge: {}",
+                    crate::pyjson::dumps(&serde_json::Value::Object(judged))
+                );
+            }
             // The W3-H automatic-dream adapter runs after all maintenance.
             Ok(())
         })

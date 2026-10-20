@@ -142,7 +142,7 @@ pub fn embed_refused(texts: &[&str]) -> Option<&'static str> {
 /// `repr(s)`: as `crate::storage::py_repr`, except that a lone-surrogate
 /// stand-in prints as Python prints the surrogate (`'\ud83d'`), so the
 /// `str()` of a coerced list or dict value is the ASCII text Python builds.
-fn str_repr(s: &str) -> String {
+pub(super) fn str_repr(s: &str) -> String {
     if !s.chars().any(|c| lone_surrogate(c).is_some()) {
         return crate::storage::py_repr(s);
     }
@@ -333,7 +333,7 @@ pub fn py_int_str(text: &str) -> Option<i128> {
 }
 
 /// Python `float(v)`: `Ok(None)` where it raises TypeError/ValueError.
-fn py_float(v: &Value) -> Result<Option<f64>, Uncaught> {
+pub(super) fn py_float(v: &Value) -> Result<Option<f64>, Uncaught> {
     match v {
         Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Value::Number(n) => match py_num(n) {
@@ -353,7 +353,7 @@ fn py_float(v: &Value) -> Result<Option<f64>, Uncaught> {
 }
 
 /// Python `int(v)`: `Ok(None)` where it raises TypeError/ValueError.
-fn py_int(v: &Value) -> Result<Option<i128>, Uncaught> {
+pub(super) fn py_int(v: &Value) -> Result<Option<i128>, Uncaught> {
     match v {
         Value::Bool(b) => Ok(Some(i128::from(*b))),
         Value::Number(n) => match py_num(n) {
@@ -1506,6 +1506,12 @@ impl Compat {
 
     /// The reply's message content, as `completion` reads it.
     pub(super) async fn content(&self, body: String) -> Result<String, Raised> {
+        let data = self.post_json(body).await?;
+        content_of(&data)
+    }
+
+    /// POST the body and `json.loads` the reply (`data`).
+    pub(super) async fn post_json(&self, body: String) -> Result<Value, Raised> {
         let timeout = Duration::try_from_secs_f64(self.timeout)
             .map_err(|_| Raised::other("ValueError", "Timeout value must be positive"))?;
         let url = format!("{}/chat/completions", self.base_url);
@@ -1543,16 +1549,73 @@ impl Compat {
             .map_err(|e| transport_failure(&e, Phase::Body))?;
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| Raised::other("UnicodeDecodeError", "'utf-8' codec can't decode"))?;
-        let data = loads(text)?;
-        let content = envelope_content(&data)?;
-        match content {
-            c if !truthy(c) => Ok(String::new()),
-            Value::String(s) => Ok(s.clone()),
-            other => Err(Raised::other(
-                "AttributeError",
-                format!("{} object has no attribute 'find'", type_name(other)),
-            )),
-        }
+        loads(text)
+    }
+
+    /// The judge request body (`_judge_request`, `memory/dream.py:1752-1800`):
+    /// `extra_body` without `reasoning_effort`, then the shipped fields, with
+    /// the 120-per-row token floor. The daemon never sets `judge_thinking`.
+    pub fn judge_body(&self, system: &str, user: &str, n_rows: usize) -> String {
+        let mut m = self.extra_body.clone();
+        m.shift_remove("reasoning_effort");
+        m.insert("model".into(), json!(self.model));
+        m.insert(
+            "messages".into(),
+            json!([{"role": "system", "content": system}, {"role": "user", "content": user}]),
+        );
+        m.insert("response_format".into(), json!({"type": "json_object"}));
+        let floor = 120i64.saturating_mul(n_rows as i64);
+        m.insert("max_tokens".into(), json!(self.max_tokens.max(floor)));
+        m.insert("temperature".into(), json!(0));
+        m.insert(
+            "chat_template_kwargs".into(),
+            json!({"enable_thinking": false}),
+        );
+        pyjson::dumps(&Value::Object(m))
+    }
+
+    /// `_judge_request`: one JSON-object judge call, returning the raw
+    /// `verdicts` list, and the served model the reply named when the reply
+    /// decoded (`Some(None)`: it named none), which Python stores on the
+    /// extractor before reading the content. A failure is the labelled
+    /// `ExtractorError`.
+    pub async fn judge_request(
+        &self,
+        system: &str,
+        user: &str,
+        n_rows: usize,
+        label: &str,
+    ) -> (Option<Option<String>>, Result<Vec<Value>, ExtractFailure>) {
+        let body = self.judge_body(system, user, n_rows);
+        let data = match self.post_json(body).await {
+            Ok(d) => d,
+            Err(e) => return (None, Err(e.label(label, false).into())),
+        };
+        let served = match &data {
+            Value::Object(m) => m.get("model").filter(|v| truthy(v)).map(py_str),
+            _ => None,
+        };
+        let parsed = content_of(&data).and_then(|content| {
+            let content = match (content.find('{'), content.rfind('}')) {
+                (Some(s), Some(e)) if e > s => content[s..=e].to_string(),
+                _ => content,
+            };
+            loads(&content)
+        });
+        let result = match parsed {
+            Err(e) => Err(e.label(label, false).into()),
+            Ok(parsed) => {
+                let raw = match &parsed {
+                    Value::Object(m) => m.get("verdicts").cloned().unwrap_or(json!([])),
+                    _ => json!([]),
+                };
+                Ok(match raw {
+                    Value::Array(items) => items,
+                    _ => Vec::new(),
+                })
+            }
+        };
+        (Some(served), result)
     }
 
     /// `extract` (`memory/dream.py:1286-1397`): claims, then the events the
@@ -1686,6 +1749,20 @@ fn envelope_content(data: &Value) -> Result<&Value, Raised> {
     match message {
         Value::Object(m) if m.contains_key("content") => Ok(&m["content"]),
         other => Err(key(other, "content")),
+    }
+}
+
+/// `data["choices"][0]["message"]["content"] or ""`, which must then be a
+/// string (`.find` is called on it).
+fn content_of(data: &Value) -> Result<String, Raised> {
+    let content = envelope_content(data)?;
+    match content {
+        c if !truthy(c) => Ok(String::new()),
+        Value::String(s) => Ok(s.clone()),
+        other => Err(Raised::other(
+            "AttributeError",
+            format!("{} object has no attribute 'find'", type_name(other)),
+        )),
     }
 }
 

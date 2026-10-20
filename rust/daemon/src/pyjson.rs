@@ -293,3 +293,41 @@ mod tests {
         }
     }
 }
+
+fn write_sorted_compact(out: &mut String, v: &Value) {
+    match v {
+        Value::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_sorted_compact(out, item);
+            }
+            out.push(']');
+        }
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            out.push('{');
+            for (i, k) in keys.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                string(out, k);
+                out.push(':');
+                write_sorted_compact(out, &map[k]);
+            }
+            out.push('}');
+        }
+        other => write_value(out, other),
+    }
+}
+
+/// `json.dumps(v, sort_keys=True, separators=(",", ":"))` (the review
+/// fingerprints, `memory/review_judgments.py:25-27`).
+pub fn dumps_sorted_compact(v: &Value) -> String {
+    let mut out = String::new();
+    write_sorted_compact(&mut out, v);
+    out
+}

@@ -708,11 +708,16 @@ async fn write_graph_snapshot(
     client: &Client,
     snapshot_keep: i64,
 ) -> Result<Option<String>, ToolError> {
-    let keep = snapshot_keep.max(1) as usize;
     let tables = crate::txn::with_client(client, |c| async move { dump_graph_tables(c).await })
         .await
         .map_err(internal)?;
-    let text = crate::pyjson::dumps(&tables);
+    Ok(write_snapshot_file(data_dir, &tables, snapshot_keep))
+}
+
+/// The snapshot file write and rotation; `None` on an OS error.
+fn write_snapshot_file(data_dir: &Path, tables: &Value, snapshot_keep: i64) -> Option<String> {
+    let keep = snapshot_keep.max(1) as usize;
+    let text = crate::pyjson::dumps(tables);
     let dir = data_dir.join("graph_snapshots");
     let name = format!("{}.json", chrono::Utc::now().format("graph-%Y%m%d-%H%M%S"));
     let written = (|| -> std::io::Result<()> {
@@ -743,7 +748,7 @@ async fn write_graph_snapshot(
         }
         Ok(())
     })();
-    Ok(written.ok().map(|()| name))
+    written.ok().map(|()| name)
 }
 
 /// The orphan sweep's census (`_unreachable_orphans`): zero-evidence
@@ -1671,4 +1676,209 @@ mod tests {
             HashSet::from([("x|y".to_string(), "z|w".to_string())])
         );
     }
+}
+
+// ── the merge judge's evidence pack (`service_dream.py:4396-4428`) ────────
+
+/// The storage reads behind the merge-judge evidence pack
+/// (`_judge_evidence_locked`): the graph, scopes, traces, entry TEXTS and
+/// fact counts. No embedding is read.
+pub(crate) struct JudgeEvidence {
+    entities: Vec<Entity>,
+    etype: HashMap<i64, Option<String>>,
+    edges: Vec<GEdge>,
+    scope_map: BTreeMap<i64, Vec<String>>,
+    traces: HashMap<String, Vec<i64>>,
+    entries: Vec<DEntry>,
+    fact_counts: HashMap<i64, i64>,
+}
+
+/// `_judge_evidence_locked` on a borrowed client (the caller holds the
+/// writer lock).
+pub(crate) async fn judge_evidence_body(c: &Client) -> anyhow::Result<JudgeEvidence> {
+    let g = graph::load_graph_body(c).await?;
+    let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
+    let mut entities = Vec::new();
+    let mut etype = HashMap::new();
+    for e in g["entities"].as_array().into_iter().flatten() {
+        let id = e["id"].as_i64().unwrap_or(0);
+        entities.push(Entity {
+            id,
+            canonical: s(&e["canonical"]),
+            display: s(&e["display"]),
+        });
+        etype.insert(id, e["etype"].as_str().map(str::to_string));
+    }
+    let edges = g["edges"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| GEdge {
+            id: e["id"].as_i64().unwrap_or(0),
+            src_id: e["src_id"].as_i64().unwrap_or(0),
+            relation: s(&e["relation"]),
+            dst_id: e["dst_id"].as_i64().unwrap_or(0),
+            confidence: e["confidence"].as_f64().unwrap_or(0.0),
+            origin: e["origin"].as_str().map(str::to_string),
+        })
+        .collect();
+    let mut scope_map: BTreeMap<i64, Vec<String>> = BTreeMap::new();
+    for r in c
+        .query(
+            "SELECT entity_id, source FROM entity_sources ORDER BY entity_id, source",
+            &[],
+        )
+        .await?
+    {
+        scope_map.entry(r.get(0)).or_default().push(r.get(1));
+    }
+    let mut traces: HashMap<String, Vec<i64>> = HashMap::new();
+    for r in c
+        .query(
+            "SELECT entity_norm, entry_id FROM memory_traces ORDER BY entity_norm, entry_id",
+            &[],
+        )
+        .await?
+    {
+        traces.entry(r.get(0)).or_default().push(r.get(1));
+    }
+    // `load_entry_texts` (1447-1455).
+    let entries = c
+        .query("SELECT id, text, source FROM entries ORDER BY id", &[])
+        .await?
+        .iter()
+        .map(|r| DEntry {
+            id: r.get(0),
+            text: r.get(1),
+            source: r.get(2),
+            embedding: None,
+        })
+        .collect();
+    let fact_counts = c
+        .query(
+            "SELECT entity_id, COUNT(*) FROM facts \
+             WHERE status = 'current' AND entity_id IS NOT NULL GROUP BY entity_id",
+            &[],
+        )
+        .await?
+        .iter()
+        .map(|r| (r.get(0), r.get(1)))
+        .collect();
+    Ok(JudgeEvidence {
+        entities,
+        etype,
+        edges,
+        scope_map,
+        traces,
+        entries,
+        fact_counts,
+    })
+}
+
+/// `entity_context_vectors(..., with_vectors=False)`: the mentions alone,
+/// over entries that need no embedding (every listed entry counts).
+fn context_mentions(
+    entities: &[&Entity],
+    entries: &[DEntry],
+    entry_tokens: &[(i64, BTreeSet<String>)],
+    traces: &HashMap<String, Vec<i64>>,
+    min_mentions: i64,
+    max_fallback: Option<i64>,
+) -> HashMap<i64, BTreeSet<i64>> {
+    let ids_known: HashSet<i64> = entries.iter().map(|e| e.id).collect();
+    let mut out = HashMap::new();
+    for ent in entities {
+        let mut ids: Vec<i64> = traces.get(&ent.canonical).cloned().unwrap_or_default();
+        if ids.is_empty() {
+            let want = token_set(&ent.display);
+            if !want.is_empty() {
+                ids = entry_tokens
+                    .iter()
+                    .filter(|(_, toks)| want.is_subset(toks))
+                    .map(|(id, _)| *id)
+                    .collect();
+                if max_fallback.is_some_and(|cap| (ids.len() as i64) > cap) {
+                    continue;
+                }
+            }
+        }
+        let valid: BTreeSet<i64> = ids.into_iter().filter(|i| ids_known.contains(i)).collect();
+        if (valid.len() as i64) < min_mentions {
+            continue;
+        }
+        out.insert(ent.id, valid);
+    }
+    out
+}
+
+/// `_judge_enrich_from` (4407-4428): the merge-judge evidence pack for
+/// `pending`, built at the JUDGE's snippet cap. Pure over `ev`.
+#[allow(clippy::result_large_err)]
+pub(crate) fn judge_enrich_from(
+    pending: &[EntityProposal],
+    ev: &JudgeEvidence,
+    cfg: &DeepDreamConfig,
+) -> Result<Vec<Value>, ToolError> {
+    let ids: HashSet<Option<i64>> = pending
+        .iter()
+        .flat_map(|p| [p.entity_id, p.into_id])
+        .collect();
+    let own: Vec<&Entity> = ev
+        .entities
+        .iter()
+        .filter(|e| ids.contains(&Some(e.id)))
+        .collect();
+    let entry_tokens: Vec<(i64, BTreeSet<String>)> = ev
+        .entries
+        .iter()
+        .map(|e| (e.id, token_set(&e.text)))
+        .collect();
+    let mentions = context_mentions(
+        &own,
+        &ev.entries,
+        &entry_tokens,
+        &ev.traces,
+        cfg.min_entity_mentions,
+        (cfg.max_fallback_mentions != 0).then_some(cfg.max_fallback_mentions),
+    );
+    let review_edges: Vec<gr::Edge> = ev.edges.iter().map(GEdge::review_edge).collect();
+    let deg = gr::degree_counts(&review_edges);
+    let snippets = Snippets {
+        by_id: ev.entries.iter().map(|e| (e.id, e)).collect(),
+        canon: ev
+            .entities
+            .iter()
+            .map(|e| (e.id, e.canonical.as_str()))
+            .collect(),
+        disp: ev
+            .entities
+            .iter()
+            .map(|e| (e.id, e.display.as_str()))
+            .collect(),
+        traces: &ev.traces,
+        mentions: &mentions,
+        entry_tokens: &entry_tokens,
+        k: cfg.max_context_snippets,
+        max_chars: cfg.judge_snippet_max_chars,
+    };
+    let enrich = Enrich {
+        deg: &deg,
+        facts: &ev.fact_counts,
+        display: snippets.disp.clone(),
+        etype: &ev.etype,
+        scope_map: &ev.scope_map,
+        snippets: &snippets,
+    };
+    enrich.rows(pending, true)
+}
+
+/// `_write_graph_snapshot_locked` on a borrowed client, inside the
+/// caller's transaction (the merge judge's snapshot-first accept).
+pub(crate) async fn write_graph_snapshot_body(
+    c: &Client,
+    data_dir: &Path,
+    snapshot_keep: i64,
+) -> Result<Option<String>, ToolError> {
+    let tables = dump_graph_tables(c).await.map_err(internal)?;
+    Ok(write_snapshot_file(data_dir, &tables, snapshot_keep))
 }
