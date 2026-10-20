@@ -15,11 +15,13 @@ normalizers, which replace nondeterministic values by rule, never by hand:
 from __future__ import annotations
 
 import json
+import time as clock
 import uuid
 from datetime import date, datetime, time
 from decimal import Decimal
 
 import psycopg
+from psycopg import sql
 
 # (table, column) -> why its value is not reproducible across two runs.
 NONDETERMINISTIC: dict[tuple[str, str], str] = {}
@@ -113,18 +115,52 @@ def _order_columns(conn, schema: str, table: str) -> list[str]:
     return [r[0] for r in cols]
 
 
-def dump(dsn: str) -> dict:
-    """Every query reads one REPEATABLE READ snapshot, so a write committing
-    mid-dump (a prune cascading from dream_runs to dream_run_slots) cannot
-    show one table before it and the next after. Sequence ``last_value`` is
-    not transactional and can still be newer than the rows."""
+class _Busy(Exception):
+    """A dump attempt gave way to a concurrent lock holder; retry it."""
+
+
+def dump(dsn: str, timeout: float = 60.0) -> dict:
+    """Every row and catalog query reads one REPEATABLE READ snapshot, so a
+    write committing mid-dump (a prune cascading from dream_runs to
+    dream_run_slots) cannot show one table before it and the next after.
+
+    The snapshot's locks last until the dump ends, and a daemon's startup
+    schema transaction takes ACCESS EXCLUSIVE locks in its own order, so a
+    dump that waited while holding a lock could deadlock it. Every table is
+    therefore locked NOWAIT before the snapshot exists, any other wait is
+    cut at 100 ms, and a conflict releases everything and retries: the dump
+    gives way and never holds a lock while waiting. Sequence ``last_value``
+    and the ``pg_get_*def`` functions are not transactional and can still be
+    newer than the rows."""
+    deadline = clock.monotonic() + timeout
+    while True:
+        try:
+            return _dump_once(dsn)
+        except (_Busy, psycopg.errors.LockNotAvailable, psycopg.errors.DeadlockDetected,
+                psycopg.errors.UndefinedTable):
+            if clock.monotonic() > deadline:
+                raise
+            clock.sleep(0.05)
+
+
+def _dump_once(dsn: str) -> dict:
     out: dict = {"catalog": {}, "rows": {}}
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        tables = _tables(conn)
     with psycopg.connect(dsn) as conn:
         conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
         conn.read_only = True
+        # Neither statement takes the snapshot; the first catalog query does,
+        # after every table lock is held.
+        conn.execute("SET LOCAL lock_timeout = '100ms'")
+        if tables:
+            conn.execute(sql.SQL("LOCK TABLE {} IN ACCESS SHARE MODE NOWAIT").format(
+                sql.SQL(", ").join(sql.Identifier(s, t) for s, t in tables)))
         for key, query in _CATALOG.items():
             out["catalog"][key] = [_plain(list(r)) for r in conn.execute(query).fetchall()]
-        for schema, table in _tables(conn):
+        if _tables(conn) != tables:
+            raise _Busy("tables changed between listing and locking")
+        for schema, table in tables:
             order = _order_columns(conn, schema, table)
             # Vectors and other non-JSON types read as text: exact and comparable.
             cols = conn.execute(

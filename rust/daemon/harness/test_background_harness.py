@@ -147,7 +147,60 @@ def test_dump_reads_every_table_from_one_snapshot(monkeypatch):
         state = dbstate.dump(dsn)
         runs = state["rows"]["public.dream_runs"]["rows"]
         slots = state["rows"]["public.dream_run_slots"]["rows"]
+        assert len(runs) == 4, "the dump's snapshot must predate the prune"
         assert {r[0] for r in runs} == {s[1] for s in slots}, (runs, slots)
+    finally:
+        pg.drop(name)
+
+
+def test_dump_never_deadlocks_a_concurrent_schema_transaction(monkeypatch):
+    # A daemon's ensure_schema is one transaction taking ACCESS EXCLUSIVE
+    # locks in schema order; the harness polls dumps (table-name order)
+    # during it. The dump must give way, never hold a lock while it waits.
+    import threading
+    import dbstate
+    import psycopg
+    import pgdisposable as pg
+    name = pg.name(pg.PREFIX + "dump_ddl")
+    dsn = pg.create(name)
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            # No indexes: the catalog phase cannot block first, so an unsafe
+            # dump reaches the row reads holding dream_run_slots.
+            conn.execute("CREATE TABLE dream_runs (id bigint)")
+            conn.execute("CREATE TABLE dream_run_slots (id bigint, run_id bigint)")
+            conn.execute("INSERT INTO dream_runs VALUES (1)")
+            conn.execute("INSERT INTO dream_run_slots VALUES (1, 1)")
+        slots_read = threading.Event()
+        order_columns = dbstate._order_columns
+
+        def mark(conn, schema, table):
+            if table == "dream_runs":
+                slots_read.set()
+            return order_columns(conn, schema, table)
+
+        monkeypatch.setattr(dbstate, "_order_columns", mark)
+        result = {}
+
+        def run_dump():
+            try:
+                result["state"] = dbstate.dump(dsn)
+            except Exception as exc:  # reported by the assertion below
+                result["error"] = exc
+
+        with psycopg.connect(dsn) as ddl:
+            ddl.execute("SET lock_timeout = '10s'")
+            ddl.execute("ALTER TABLE dream_runs ADD COLUMN IF NOT EXISTS note text")
+            dumper = threading.Thread(target=run_dump)
+            dumper.start()
+            slots_read.wait(2)  # an unsafe dump now holds dream_run_slots and waits on dream_runs
+            ddl.execute("ALTER TABLE dream_run_slots ADD COLUMN IF NOT EXISTS note text")
+            ddl.commit()
+        dumper.join(30)
+        assert not dumper.is_alive()
+        assert "error" not in result, result.get("error")
+        columns = result["state"]["rows"]["public.dream_runs"]["columns"]
+        assert "note" in columns, "the dump read the bank after the schema transaction"
     finally:
         pg.drop(name)
 
