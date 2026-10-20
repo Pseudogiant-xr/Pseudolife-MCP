@@ -2,7 +2,9 @@
 # (ops/wsl-suite.ps1) or a second Linux machine over SSH.
 #
 #   pwsh ops/remote-suite.ps1                 # the full suite, wherever is free
-#   pwsh ops/remote-suite.ps1 -q -x           # any pytest arguments
+#   pwsh ops/remote-suite.ps1 -q -n 2         # still the full suite (display
+#                                             # and worker options only)
+#   pwsh ops/remote-suite.ps1 tests/x.py -x   # any other pytest arguments
 #   $env:PSEUDOLIFE_SUITE_WHERE='remote'      # force a machine: local | remote
 #
 # Each machine allows one full suite (its own lock), so two machines give
@@ -46,8 +48,9 @@
 #
 # Output streams here and is kept as a log plus a JSON result (machine,
 # commit, pytest arguments, exit code, pytest's summary line) under
-# ~/.pseudolife-mcp/suite-results. The exit code is pytest's. Empty `args`
-# means the full suite; ops/integrate.py open accepts only that.
+# ~/.pseudolife-mcp/suite-results. The exit code is pytest's. Only a result
+# with empty `args` counts as full-suite evidence for ops/integrate.py open,
+# even though display and worker options alone still run the full suite.
 
 $ErrorActionPreference = 'Stop'
 # Refusals exit 2 (usage); Write-Error would throw under Stop and exit 1.
