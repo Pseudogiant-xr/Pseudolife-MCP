@@ -252,7 +252,7 @@
     "ops/prune-rollbacks.sh": "8c126a14674839c891048cab020d9bf637c09387e516f08e9614067eddbe78e5",
     "ops/pytest_retry_once.py": "213f6297068459a9296bbba26fc7e4d19fbce78b85819e61b70349b7e86b5e2a",
     "ops/register_claude_desktop.py": "a653438874cb1af0ec859083239ba35adc5e74747d3aceae055640f80ee37534",
-    "ops/remote-suite.ps1": "513520ada034ab0f6ea77dbe3c4c5fdb7256fea903f7356a91ae6deaae42b827",
+    "ops/remote-suite.ps1": "003e04513c035f0252d7dcc5646e59ec0fe49591c84b833a4a754349553187e1",
     "ops/requirements.lock.txt": "3f7e4da9bd9a92781a8de83d4304a39270a381c60414e7c28215ec3a8ad13e0e",
     "ops/restore.ps1": "96cd7f5920736c975fa0cf415d4674b9ca0e2a99f1eb0a3e26e9ab857b6703f5",
     "ops/restore.sh": "56286c9a5b191821f670fdcd497e2472dd95cec4094521f03587e2d20c0bac2f",
@@ -267,8 +267,8 @@
     "ops/update.py": "9372b56743396c26f7684749e756db787a570d454ec1550a46bf0f90cbfa0844",
     "ops/update.sh": "05e9a441782b384a90a417b0c458fc1e6b82cbcd544dfec4787f912f8766d740",
     "ops/update_clients.py": "ace386b85e2c610414c52afdc8dbf46270bfca05e72d22da60259c6745a6e417",
-    "ops/wsl-suite.ps1": "4edc48889be31623b06aed69a394fb22f494bd16218b5feae0566efc2d89c3f1",
-    "ops/wsl-suite.sh": "3bf17ab8758e099d67f72734092dcf4d9488ee8ce6a7da5e25cee5d0b5a73f97",
+    "ops/wsl-suite.ps1": "67c14179b734a7294003349e1c86584c0bdffcdd3678118ff280bd8bac86ad77",
+    "ops/wsl-suite.sh": "ee90264725903552d27927b44c77745d0967f0dc77605c26bf2688920a29f57a",
     "ops/wslconfig.example": "3f5fe471082489b2efe1a68b3ddee60138a00f7cb75dbd179b6f550e3b898720",
     "plugin/.claude-plugin/plugin.json": "026758428663d17b6345b2a614f856487f79bee078cfd29077ae154f4e863d6e",
     "plugin/README.md": "6f84889a12b25a3621d9e527e97268660a1e68cf4d61f27f7a35580244ca36dc",
@@ -21400,7 +21400,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:52",
+          "location": "ops/wsl-suite.ps1:59",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28707,7 +28707,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:52",
+          "location": "ops/wsl-suite.ps1:59",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29403,7 +29403,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:141",
+          "location": "ops/remote-suite.ps1:144",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -33706,7 +33706,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:140",
+          "location": "ops/remote-suite.ps1:143",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33784,7 +33784,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:52",
+          "location": "ops/wsl-suite.ps1:59",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -33797,7 +33797,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:65",
+          "location": "ops/wsl-suite.ps1:72",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -35992,7 +35992,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:65",
+          "location": "ops/wsl-suite.ps1:72",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36005,7 +36005,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:66",
+          "location": "ops/wsl-suite.ps1:73",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38006,7 +38006,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:55",
+          "location": "ops/wsl-suite.ps1:62",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38672,7 +38672,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:89",
+          "location": "ops/wsl-suite.ps1:105",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38685,33 +38685,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:98",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/wsl-suite.sh:102",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/wsl-suite.sh:103",
+          "location": "ops/wsl-suite.ps1:96",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38750,7 +38724,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.sh:395",
+          "location": "ops/wsl-suite.sh:265",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38763,7 +38737,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.sh:403",
+          "location": "ops/wsl-suite.sh:266",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38776,7 +38750,33 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.sh:86",
+          "location": "ops/wsl-suite.sh:281",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/wsl-suite.sh:282",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/wsl-suite.sh:574",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38789,7 +38789,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.sh:87",
+          "location": "ops/wsl-suite.sh:582",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38801,7 +38801,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:169",
+          "location": "ops/remote-suite.ps1:172",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38838,7 +38838,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:154",
+          "location": "ops/remote-suite.ps1:157",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38851,7 +38851,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:38",
+          "location": "ops/remote-suite.ps1:40",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38891,7 +38891,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:161",
+          "location": "ops/remote-suite.ps1:164",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -38915,7 +38915,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:95",
+          "location": "ops/wsl-suite.ps1:102",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38928,7 +38928,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:96",
+          "location": "ops/wsl-suite.ps1:103",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38954,7 +38954,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.sh:407",
+          "location": "ops/wsl-suite.sh:586",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38967,7 +38967,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.sh:408",
+          "location": "ops/wsl-suite.sh:587",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -38988,7 +38988,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:90",
+          "location": "ops/wsl-suite.ps1:97",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39001,7 +39001,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:92",
+          "location": "ops/wsl-suite.ps1:99",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39040,7 +39040,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.sh:87",
+          "location": "ops/wsl-suite.sh:266",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39052,7 +39052,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:169",
+          "location": "ops/remote-suite.ps1:172",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39162,7 +39162,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:56",
+          "location": "ops/wsl-suite.ps1:63",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39288,7 +39288,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:91",
+          "location": "ops/wsl-suite.ps1:105",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39314,6 +39314,19 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
+          "location": "ops/wsl-suite.sh:257",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-$(basename \"$root\")}\"",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
           "location": "ops/wsl-suite.sh:28",
           "shape": {
             "channel": "environment",
@@ -39325,21 +39338,8 @@
           "usage": "reference"
         },
         {
-          "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.sh:78",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "-$(basename \"$root\")}\"",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "assignment-candidate"
-        },
-        {
-          "evidence": "static",
-          "location": "ops/remote-suite.ps1:169",
+          "location": "ops/remote-suite.ps1:172",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39363,7 +39363,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:57",
+          "location": "ops/wsl-suite.ps1:64",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39389,7 +39389,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.sh:416",
+          "location": "ops/wsl-suite.sh:595",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39423,7 +39423,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:25",
+          "location": "ops/remote-suite.ps1:27",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39436,7 +39436,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:72",
+          "location": "ops/remote-suite.ps1:75",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39457,7 +39457,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:56",
+          "location": "ops/wsl-suite.ps1:63",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39478,7 +39478,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:57",
+          "location": "ops/wsl-suite.ps1:64",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39487,19 +39487,6 @@
             "parameters": {}
           },
           "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "ops/wsl-suite.sh:132",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "-$venv_root/$key}\"",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "assignment-candidate"
         },
         {
           "dynamic": "unresolved",
@@ -39513,6 +39500,19 @@
             "parameters": {}
           },
           "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "ops/wsl-suite.sh:311",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "-$venv_root/$key}\"",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "assignment-candidate"
         }
       ]
     },
@@ -39525,7 +39525,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:75",
+          "location": "ops/remote-suite.ps1:78",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39538,7 +39538,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:76",
+          "location": "ops/remote-suite.ps1:79",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39595,7 +39595,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/remote-suite.ps1:6",
+          "location": "ops/remote-suite.ps1:8",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -39634,7 +39634,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:26",
+          "location": "ops/wsl-suite.ps1:30",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39655,7 +39655,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:56",
+          "location": "ops/wsl-suite.ps1:63",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39741,7 +39741,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:34",
+          "location": "ops/remote-suite.ps1:36",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39754,7 +39754,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:54",
+          "location": "ops/wsl-suite.ps1:61",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39857,7 +39857,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:55",
+          "location": "ops/wsl-suite.ps1:62",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39917,7 +39917,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:159",
+          "location": "ops/remote-suite.ps1:162",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39930,7 +39930,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:160",
+          "location": "ops/remote-suite.ps1:163",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39943,7 +39943,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:33",
+          "location": "ops/remote-suite.ps1:35",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39956,7 +39956,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:53",
+          "location": "ops/wsl-suite.ps1:60",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40070,7 +40070,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:19",
+          "location": "ops/remote-suite.ps1:21",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40083,7 +40083,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:53",
+          "location": "ops/wsl-suite.ps1:60",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41194,7 +41194,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/remote-suite.ps1:93",
+          "location": "ops/remote-suite.ps1:96",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41207,7 +41207,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:27",
+          "location": "ops/wsl-suite.ps1:34",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41220,7 +41220,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:41",
+          "location": "ops/wsl-suite.ps1:48",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41241,7 +41241,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:82",
+          "location": "ops/wsl-suite.ps1:89",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -41253,7 +41253,7 @@
         },
         {
           "evidence": "documented",
-          "location": "ops/wsl-suite.ps1:21",
+          "location": "ops/wsl-suite.ps1:25",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -41268,7 +41268,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/wsl-suite.ps1:87",
+          "location": "ops/wsl-suite.ps1:94",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58717,7 +58717,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:163",
+      "location": "ops/remote-suite.ps1:166",
       "name": "PSEUDOLIFE_SUITE_KEEP",
       "shape": {
         "channel": "environment",
@@ -58731,7 +58731,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:163",
+      "location": "ops/remote-suite.ps1:166",
       "name": "PSEUDOLIFE_SUITE_PRUNE",
       "shape": {
         "channel": "environment",
@@ -58745,7 +58745,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:163",
+      "location": "ops/remote-suite.ps1:166",
       "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
       "shape": {
         "channel": "environment",
@@ -58759,7 +58759,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:164",
+      "location": "ops/remote-suite.ps1:167",
       "name": "PSEUDOLIFE_SUITE_PROFILE",
       "shape": {
         "channel": "environment",
@@ -58773,7 +58773,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:164",
+      "location": "ops/remote-suite.ps1:167",
       "name": "PSEUDOLIFE_SUITE_WORKERS",
       "shape": {
         "channel": "environment",
@@ -58787,7 +58787,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:165",
+      "location": "ops/remote-suite.ps1:168",
       "name": "PSEUDOLIFE_SUITE_PROFILE_INTERVAL",
       "shape": {
         "channel": "environment",
@@ -58801,7 +58801,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:18",
+      "location": "ops/remote-suite.ps1:20",
       "name": "PSEUDOLIFE_TEST_PG_USER",
       "shape": {
         "channel": "environment",
@@ -58815,7 +58815,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/remote-suite.ps1:19",
+      "location": "ops/remote-suite.ps1:21",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -58829,7 +58829,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.ps1:31",
+      "location": "ops/wsl-suite.ps1:38",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -58843,7 +58843,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.ps1:53",
+      "location": "ops/wsl-suite.ps1:60",
       "name": "PSEUDOLIFE_TEST_PG_USER",
       "shape": {
         "channel": "environment",
@@ -58857,7 +58857,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.ps1:57",
+      "location": "ops/wsl-suite.ps1:64",
       "name": "PSEUDOLIFE_SUITE_PRUNE",
       "shape": {
         "channel": "environment",
@@ -58871,7 +58871,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.ps1:58",
+      "location": "ops/wsl-suite.ps1:65",
       "name": "PSEUDOLIFE_SUITE_KEEP",
       "shape": {
         "channel": "environment",
@@ -58885,7 +58885,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.ps1:58",
+      "location": "ops/wsl-suite.ps1:65",
       "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
       "shape": {
         "channel": "environment",
@@ -58899,7 +58899,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.ps1:58",
+      "location": "ops/wsl-suite.ps1:65",
       "name": "PSEUDOLIFE_SUITE_WORKERS",
       "shape": {
         "channel": "environment",
@@ -58913,7 +58913,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.ps1:59",
+      "location": "ops/wsl-suite.ps1:66",
       "name": "PSEUDOLIFE_SUITE_PROFILE",
       "shape": {
         "channel": "environment",
@@ -58927,36 +58927,8 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.ps1:59",
+      "location": "ops/wsl-suite.ps1:66",
       "name": "PSEUDOLIFE_SUITE_PROFILE_INTERVAL",
-      "shape": {
-        "channel": "environment",
-        "complete": false,
-        "expression": "reference",
-        "parameters": {}
-      },
-      "usage": "reference"
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/wsl-suite.ps1:73",
-      "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
-      "shape": {
-        "channel": "environment",
-        "complete": false,
-        "expression": "reference",
-        "parameters": {}
-      },
-      "usage": "reference"
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/wsl-suite.ps1:79",
-      "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -58983,8 +58955,8 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:149",
-      "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
+      "location": "ops/wsl-suite.ps1:86",
+      "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -58997,8 +58969,8 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:150",
-      "name": "PSEUDOLIFE_SUITE_KEEP",
+      "location": "ops/wsl-suite.ps1:87",
+      "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -59011,26 +58983,12 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:181",
-      "name": "PSEUDOLIFE_SUITE_PRUNE",
+      "location": "ops/wsl-suite.sh:230",
+      "name": "PSEUDOLIFE_SUITE_WORKERS",
       "shape": {
         "channel": "environment",
         "complete": false,
-        "expression": "reference",
-        "parameters": {}
-      },
-      "usage": "reference"
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/wsl-suite.sh:182",
-      "name": "PSEUDOLIFE_SUITE_KEEP",
-      "shape": {
-        "channel": "environment",
-        "complete": false,
-        "expression": "-8}\"",
+        "expression": "-}\" ]] && source=\"PSEUDOLIFE_SUITE_WORKERS\"",
         "parameters": {}
       },
       "usage": "assignment-candidate"
@@ -59039,36 +58997,8 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:182",
-      "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
-      "shape": {
-        "channel": "environment",
-        "complete": false,
-        "expression": "-3}\" keep=\"${PSEUDOLIFE_SUITE_KEEP:-8}\"",
-        "parameters": {}
-      },
-      "usage": "assignment-candidate"
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/wsl-suite.sh:184",
-      "name": "PSEUDOLIFE_SUITE_KEEP",
-      "shape": {
-        "channel": "environment",
-        "complete": false,
-        "expression": "reference",
-        "parameters": {}
-      },
-      "usage": "reference"
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/wsl-suite.sh:184",
-      "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
+      "location": "ops/wsl-suite.sh:232",
+      "name": "PSEUDOLIFE_SUITE_WORKERS",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -59097,6 +59027,34 @@
       "kind": "environment",
       "location": "ops/wsl-suite.sh:32",
       "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/wsl-suite.sh:328",
+      "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/wsl-suite.sh:329",
+      "name": "PSEUDOLIFE_SUITE_KEEP",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -59151,6 +59109,76 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
+      "location": "ops/wsl-suite.sh:360",
+      "name": "PSEUDOLIFE_SUITE_PRUNE",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/wsl-suite.sh:361",
+      "name": "PSEUDOLIFE_SUITE_KEEP",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-8}\"",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/wsl-suite.sh:361",
+      "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-3}\" keep=\"${PSEUDOLIFE_SUITE_KEEP:-8}\"",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/wsl-suite.sh:363",
+      "name": "PSEUDOLIFE_SUITE_KEEP",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/wsl-suite.sh:363",
+      "name": "PSEUDOLIFE_SUITE_PRUNE_DAYS",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
       "location": "ops/wsl-suite.sh:39",
       "name": "PSEUDOLIFE_SUITE_PROFILE",
       "shape": {
@@ -59179,49 +59207,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:436",
-      "name": "PSEUDOLIFE_SUITE_WORKERS",
-      "shape": {
-        "channel": "environment",
-        "complete": false,
-        "expression": "-}\" ]]; then",
-        "parameters": {}
-      },
-      "usage": "assignment-candidate"
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/wsl-suite.sh:437",
-      "name": "PSEUDOLIFE_SUITE_WORKERS",
-      "shape": {
-        "channel": "environment",
-        "complete": false,
-        "expression": "reference",
-        "parameters": {}
-      },
-      "usage": "reference"
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/wsl-suite.sh:469",
-      "name": "PSEUDOLIFE_SUITE_WORKERS",
-      "shape": {
-        "channel": "environment",
-        "complete": false,
-        "expression": "reference",
-        "parameters": {}
-      },
-      "usage": "reference"
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "environment",
-      "location": "ops/wsl-suite.sh:486",
+      "location": "ops/wsl-suite.sh:621",
       "name": "PSEUDOLIFE_SUITE_PROFILE",
       "shape": {
         "channel": "environment",
@@ -59235,7 +59221,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:489",
+      "location": "ops/wsl-suite.sh:624",
       "name": "PSEUDOLIFE_SUITE_PROFILE_DIR",
       "shape": {
         "channel": "environment",
@@ -59249,7 +59235,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:509",
+      "location": "ops/wsl-suite.sh:651",
       "name": "PSEUDOLIFE_SUITE_RUN_ID",
       "shape": {
         "channel": "environment",
@@ -59263,8 +59249,36 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:511",
+      "location": "ops/wsl-suite.sh:653",
       "name": "PSEUDOLIFE_SUITE_RUN_ID",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/wsl-suite.sh:85",
+      "name": "PSEUDOLIFE_SUITE_WORKERS",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "-}\" ]]; then",
+        "parameters": {}
+      },
+      "usage": "assignment-candidate"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "environment",
+      "location": "ops/wsl-suite.sh:86",
+      "name": "PSEUDOLIFE_SUITE_WORKERS",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -63388,6 +63402,22 @@
     {
       "evidence": "documented",
       "kind": "environment",
+      "location": "ops/wsl-suite.ps1:11",
+      "name": "PSEUDOLIFE_SUITE_PROFILE",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "1"
+          }
+        }
+      },
+      "usage": "assignment-example"
+    },
+    {
+      "evidence": "documented",
+      "kind": "environment",
       "location": "ops/wsl-suite.ps1:5",
       "name": "PSEUDOLIFE_SUITE_WORKERS",
       "shape": {
@@ -63404,23 +63434,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "ops/wsl-suite.ps1:7",
-      "name": "PSEUDOLIFE_SUITE_PROFILE",
-      "shape": {
-        "channel": "environment",
-        "complete": true,
-        "parameters": {
-          "value": {
-            "literal": "1"
-          }
-        }
-      },
-      "usage": "assignment-example"
-    },
-    {
-      "evidence": "documented",
-      "kind": "environment",
-      "location": "ops/wsl-suite.sh:152",
+      "location": "ops/wsl-suite.sh:331",
       "name": "PSEUDOLIFE_SUITE_PRUNE",
       "shape": {
         "channel": "environment",
@@ -64115,7 +64129,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:491",
+      "location": "ops/wsl-suite.sh:626",
       "name": "PSEUDOLIFE_SUITE_PROFILE_DIR",
       "shape": {
         "channel": "environment",
@@ -64131,7 +64145,7 @@
     {
       "evidence": "static",
       "kind": "environment",
-      "location": "ops/wsl-suite.sh:516",
+      "location": "ops/wsl-suite.sh:658",
       "name": "PSEUDOLIFE_SUITE_RUN_ID",
       "shape": {
         "channel": "environment",
@@ -80915,127 +80929,127 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:140",
+      "location": "ops/remote-suite.ps1:143",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:154",
+      "location": "ops/remote-suite.ps1:157",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_DISPATCHED"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:159",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:160",
+      "location": "ops/remote-suite.ps1:162",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/remote-suite.ps1:163",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/remote-suite.ps1:166",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:163",
+      "location": "ops/remote-suite.ps1:166",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:163",
+      "location": "ops/remote-suite.ps1:166",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:164",
+      "location": "ops/remote-suite.ps1:167",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:164",
+      "location": "ops/remote-suite.ps1:167",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:165",
+      "location": "ops/remote-suite.ps1:168",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE_INTERVAL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:18",
+      "location": "ops/remote-suite.ps1:20",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_USER"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:19",
+      "location": "ops/remote-suite.ps1:21",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_PASSWORD"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:19",
+      "location": "ops/remote-suite.ps1:21",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:25",
+      "location": "ops/remote-suite.ps1:27",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_REMOTE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:33",
+      "location": "ops/remote-suite.ps1:35",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:34",
+      "location": "ops/remote-suite.ps1:36",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:38",
+      "location": "ops/remote-suite.ps1:40",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_DISPATCHED"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:72",
+      "location": "ops/remote-suite.ps1:75",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_REMOTE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:75",
+      "location": "ops/remote-suite.ps1:78",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_WHERE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:76",
+      "location": "ops/remote-suite.ps1:79",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_WHERE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/remote-suite.ps1:93",
+      "location": "ops/remote-suite.ps1:96",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WSL_DISTRO"
     },
@@ -81506,177 +81520,189 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:26",
+      "location": "ops/wsl-suite.ps1:102",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_ENV_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.ps1:103",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_ENV_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.ps1:105",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.ps1:105",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_NAME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.ps1:30",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_WINDOWS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:27",
+      "location": "ops/wsl-suite.ps1:34",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WSL_DISTRO"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:31",
+      "location": "ops/wsl-suite.ps1:38",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:41",
+      "location": "ops/wsl-suite.ps1:48",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WSL_DISTRO"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:52",
+      "location": "ops/wsl-suite.ps1:59",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_PROJECT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:52",
+      "location": "ops/wsl-suite.ps1:59",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:52",
+      "location": "ops/wsl-suite.ps1:59",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:53",
+      "location": "ops/wsl-suite.ps1:60",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:53",
+      "location": "ops/wsl-suite.ps1:60",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_PASSWORD"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:53",
+      "location": "ops/wsl-suite.ps1:60",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_USER"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:54",
+      "location": "ops/wsl-suite.ps1:61",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:55",
+      "location": "ops/wsl-suite.ps1:62",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_REQUIRE_TEST_POSTGRES"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:55",
+      "location": "ops/wsl-suite.ps1:62",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_EMBEDDER"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:56",
+      "location": "ops/wsl-suite.ps1:63",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_LOCK"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:56",
+      "location": "ops/wsl-suite.ps1:63",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_SLOTS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:56",
+      "location": "ops/wsl-suite.ps1:63",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_CUDA"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:57",
+      "location": "ops/wsl-suite.ps1:64",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_PYTHON"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:57",
+      "location": "ops/wsl-suite.ps1:64",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_VENV"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:57",
+      "location": "ops/wsl-suite.ps1:64",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:58",
+      "location": "ops/wsl-suite.ps1:65",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:58",
+      "location": "ops/wsl-suite.ps1:65",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:58",
+      "location": "ops/wsl-suite.ps1:65",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:59",
+      "location": "ops/wsl-suite.ps1:66",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:59",
+      "location": "ops/wsl-suite.ps1:66",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE_INTERVAL"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:65",
+      "location": "ops/wsl-suite.ps1:72",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:65",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:66",
+      "location": "ops/wsl-suite.ps1:72",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/wsl-suite.ps1:73",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:79",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
@@ -81686,51 +81712,33 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:82",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_WSL_SUITE_SOURCE"
+      "location": "ops/wsl-suite.ps1:86",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.ps1:87",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/wsl-suite.ps1:89",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:90",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_GIT_COMMON"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:91",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_NAME"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:92",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_GIT_COMMON"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:95",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_ENV_FILE"
+      "surface": "environment:PSEUDOLIFE_WSL_SUITE_SOURCE"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/wsl-suite.ps1:96",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_ENV_FILE"
+      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.ps1:98",
+      "location": "ops/wsl-suite.ps1:97",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
+      "surface": "environment:PSEUDOLIFE_SUITE_GIT_COMMON"
     },
     {
       "dynamic": "unresolved",
@@ -81740,15 +81748,9 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:102",
+      "location": "ops/wsl-suite.ps1:99",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:103",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
+      "surface": "environment:PSEUDOLIFE_SUITE_GIT_COMMON"
     },
     {
       "dynamic": "unresolved",
@@ -81761,54 +81763,6 @@
       "location": "ops/wsl-suite.sh:13",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_GIT_COMMON"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:132",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_VENV"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:149",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:150",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:181",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:182",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:182",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:184",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:184",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
     },
     {
       "dynamic": "unresolved",
@@ -81830,15 +81784,63 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:230",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:232",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/wsl-suite.sh:25",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:257",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_NAME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:265",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:266",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:266",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_GIT_COMMON"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/wsl-suite.sh:28",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_NAME"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:281",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:282",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
     },
     {
       "dynamic": "unresolved",
@@ -81854,9 +81856,27 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:311",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_VENV"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/wsl-suite.sh:32",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:328",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:329",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
     },
     {
       "dynamic": "unresolved",
@@ -81878,39 +81898,39 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:360",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:361",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:361",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:363",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_KEEP"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:363",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PRUNE_DAYS"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/wsl-suite.sh:39",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:395",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:403",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:407",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_ENV_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:408",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_ENV_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:416",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_PYTHON"
     },
     {
       "dynamic": "unresolved",
@@ -81920,51 +81940,33 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:436",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:437",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:469",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:486",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:489",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE_DIR"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:509",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_RUN_ID"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:511",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_RUN_ID"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "ops/wsl-suite.sh:56",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:574",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:582",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:586",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_ENV_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:587",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_ENV_FILE"
     },
     {
       "dynamic": "unresolved",
@@ -81974,15 +81976,45 @@
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:595",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SUITE_PYTHON"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/wsl-suite.sh:62",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
     },
     {
       "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:621",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:624",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_PROFILE_DIR"
+    },
+    {
+      "dynamic": "unresolved",
       "location": "ops/wsl-suite.sh:65",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_PG_HOST_PORT"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:651",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_RUN_ID"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "ops/wsl-suite.sh:653",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_RUN_ID"
     },
     {
       "dynamic": "unresolved",
@@ -82004,27 +82036,15 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:78",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_NAME"
+      "location": "ops/wsl-suite.sh:85",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
     },
     {
       "dynamic": "unresolved",
       "location": "ops/wsl-suite.sh:86",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:87",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_COMMIT"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "ops/wsl-suite.sh:87",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SUITE_GIT_COMMON"
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_WORKERS"
     },
     {
       "dynamic": "unresolved",
