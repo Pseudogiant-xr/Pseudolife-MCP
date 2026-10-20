@@ -8,30 +8,35 @@ independent batches run at the same time, and every decision that is the
 maintainer's to make is named. Nothing here authorizes a default switch, a
 release, an update, a deploy or any live-bank change.
 
-Plan audit: master `98c5d6bf`, 2026-10-19, updated for #832 (`2ce04a7d`). The surface counts come from the
-refreshed checklists in [PARITY.md](PARITY.md). The acceptance checklists
-after the plan are the 2026-10-10 draft's per-item evidence rules, unchanged.
+Plan audit: master `98c5d6bf`, 2026-10-19, updated for #832 (`2ce04a7d`);
+revised 2026-10-20 over master `2092e7b1` with what landed since, what sets
+the pace, and three proposals that wait on the maintainer (P1 to P3, below).
+The surface counts come from the refreshed checklists in
+[PARITY.md](PARITY.md). The acceptance checklists after the plan are the
+2026-10-10 draft's per-item evidence rules, unchanged.
 
 ## Decisions this plan rests on
 
 | Date | Decision | Effect on the plan |
 |---|---|---|
-| 2026-10-19 | Maintainer: "Let's do graph and dream after all". | Reverses the 2026-10-12 deferral recorded in PARITY.md ("Graph traversal deferred by decision"). Graph expansion in recall, `memory_graph` traversal, the deep-dream edge pass and the graph-insight refresh return to scope with the rest of the W3-H graph and dream engine, as tasks M to P (batch B1). Task N's PR updates PARITY.md's decision section, the READ-CORE and GRAPH-REVIEW rows and the matching `daemon/divergences.md` rows together with the traversal code, as agreed with the Rust port session on 2026-10-19. Until then those lines still read "deferred by decision". |
+| 2026-10-19 | Maintainer: "Let's do graph and dream after all". | Reverses the 2026-10-12 deferral recorded in PARITY.md ("Graph traversal deferred by decision"). Graph expansion in recall, `memory_graph` traversal, the deep-dream edge pass and the graph-insight refresh return to scope with the rest of the W3-H graph and dream engine, as tasks M to P (batch B1). Task N2's PR (`memory_recall`'s graph expansion, after #847) updates PARITY.md's decision section, the READ-CORE and GRAPH-REVIEW rows and the matching `daemon/divergences.md` rows together with the traversal code, as agreed with the Rust port session on 2026-10-19. Until then those lines still read "deferred by decision". |
+| 2026-10-19 | Maintainer, relayed by the delegate: graph insight takes **Option B** for task P2b. The Rust daemon computes communities, and the sampled betweenness behind god nodes and surprises, with a deterministic Rust algorithm (no RNG, stable tie-breaking) instead of porting NetworkX's Louvain and Python's Mersenne Twister. | P2b's PR records it in `daemon/divergences.md` as an accepted divergence and compares it structurally, not byte for byte: community count and size distribution, a partition-agreement measure, and the god-node and surprise sets, with the agreement threshold stated in the PR. No NetworkX pin. Betweenness sampling gets the same treatment unless exact betweenness is cheap at bank sizes; the PR states the choice and why. |
+| 2026-10-19 | Maintainer: PRs land in integration batches built by `ops/integrate.py` (#851), because GitHub's merge queue is not available on a user-owned repository. | One CI run per batch instead of one per PR per master move. This is the pace model under "What sets the pace" below. |
 | 2026-10-12 | Maintainer: graph expansion in recall and the deep-dream edge pass are not ported (reaffirmed 2026-10-16). | Superseded by the 2026-10-19 decision. The eval evidence behind it stays recorded in PARITY.md. |
 | 2026-10-09 | Maintainer: documents move from the Chroma reference store to a pgvector table with exact cosine search. | The two document tools and the reference pool in search wait for that Python table (batch B7). Schema v56 shipped judge votes (#807), not the table. |
 | 2026-10-09 | Delegate ruling: an MCP tool whose body has not landed answers the declared `not_implemented` stub, as unserved routes answer their declared 501. | Every unserved surface below is a declared stub or 501, never a silent success. |
 
 ## Where the port stands
 
-| Surface | On master `98c5d6bf` | Left to do |
+| Surface | On master `2092e7b1` (2026-10-20) | Left to do |
 |---|---|---|
-| MCP tools (38) | 26 served (`memory_forget` landed in #832). Open stack: #833 `memory_consolidation_candidates`, then #836 `memory_consolidate` (task L). | 10 after the stack: the 8 graph and dream tools (`memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`, `memory_relation_define`, `memory_graph`, `memory_recall`, `memory_graph_review`, `memory_dream`), and `document_ingest` and `document_search`, blocked on the Python document table. `memory_search` still refuses `explain=true`. |
-| Console routes (72 `ConsoleRoutes`, plus `POST /api/pair`) | 2 served (`GET /api/search`, `POST /api/daemon-notice`), 1 partly (`GET /api/agents`: the coordination view). `/api/pair` serves its refusals; redemption is 501. | 69 routes answer 501: 32 GET and 37 POST ([Console checklist](PARITY.md#complete-console-registration-checklist)). |
+| MCP tools (38) | 31 served (`mcp_compare.py`'s `UNSERVED` lists the other 7). Since the first audit: `memory_consolidation_candidates` (#833, batch #850) and the four graph write tools `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias` and `memory_relation_define` (#842, task M, batch #866). In flight: #836 `memory_consolidate` (task L), #847 `memory_graph` (task N1, stacked on #842), #864 and #867 `memory_dream` (task P1: the consolidation pass, then outcome inference, lesson synthesis and digests). | 7: `memory_consolidate`, `memory_graph`, `memory_recall` (graph expansion, task N2), `memory_graph_review` (task O), `memory_dream` (after P1, the graph-insight refresh P2b under Option B), and `document_ingest` and `document_search`, blocked on the Python document table. `memory_search` still refuses `explain=true`. |
+| Console routes (72 `ConsoleRoutes`, plus `POST /api/pair`) | 2 served (`GET /api/search`, `POST /api/daemon-notice`), 1 partly (`GET /api/agents`: the coordination view). `/api/pair` serves its refusals; redemption is 501. | 69 routes answer 501: 32 GET and 37 POST ([Console checklist](PARITY.md#complete-console-registration-checklist)). Proposal P1 below would retire, or move off the Console's REST surface, 12 of them. |
 | Hook endpoints (8) | 4 served (coordination-start, park-gate, woke, subagent). memory-changes and session-end serve their gates and refusals. | 4: session-start and memory-policy (501 for every caller), the authorized memory-changes body and the session-end close. |
 | Coordination actions (15) | All served and compared by the board harness. | Three declared cutover blockers (below). |
 | CLI modes (29) | 9 native, 15 partly native, 5 defer by name ([CLI checklist](PARITY.md#cli-mode-acceptance-checklist)). | The deferred sub-rows and modes in batch B10, plus the lite-tier rows (D1). |
 | Background duties | The scheduler, session reaper, dream-journal and log pruning, heap trim, release check and stored-principal refresh are implemented. | Autosave and the clean-exit flush are scheduled no-ops. The compaction policy is ported and golden-tested but never invoked. The reaper's automatic titles are absent. Automatic dreams, graph sweeps and the session-end dream trigger are absent or a declared no-op. |
-| Evidence | Every `ported` body rests on recorded Linux dev-lane differential runs (`w2d_search.py`, `w2e.py`, `board/run.py`). | Hosted CI compares no served MCP or REST body other than `memory_toolset`'s. It runs the MCP wire, binding and stub corpus, HTTP admission, security and body limits, static files, sweep pruning, dream cursors, the graph store and graph read model, and the CLI harness rows. No Windows runtime run of the daemon exists (batch B13). |
+| Evidence | Every `ported` body rests on recorded Linux dev-lane differential runs (`w2d_search.py`, `w2e.py`, `board/run.py`). | Hosted CI compares no served MCP or REST body other than `memory_toolset`'s. It runs the MCP wire, binding and stub corpus, HTTP admission, security and body limits, static files, sweep pruning, dream cursors, the graph store and graph read model, and the CLI harness rows. No Windows runtime run of the daemon exists (batch B13). Since 2026-10-19 a local full suite runs in 9 to 12 minutes on four workers (#846, batch #850), and the CI reshape in batch #868 (#859, #862, #863) keeps the live Python-versus-Rust comparisons out of the required gate on hosted Windows (still required on Linux), runs only the parity shards a PR's diff reaches, and narrows the required Windows Python lane to Windows-specific product paths. Proposal P3 below would move the body differentials to a nightly dev-box run. |
 | Declared divergences | About 150 rows in `daemon/divergences.md`, 9 in `daemon/spec.md` (W2-F) and a few dozen across the CLI harness rows and specs. | Each closed, or accepted by the maintainer (batch B14). |
 
 ### Named cutover blockers
@@ -63,10 +68,74 @@ takes. Each batch below names the ones it waits on.
 | D6 | Evidence bar for `ported`: is a recorded Linux dev-lane differential run enough, or must hosted CI compare bodies on both OSes? This refresh applies the existing rule (a recorded run). | It decides how much of B13 is required before the switch. | B13, G2 |
 | D7 | Accept or close each remaining declared divergence, including the two sent-YAML presentation deferrals below. | CUTOVER requires the union to be empty or accepted by the maintainer. | B14, G2 |
 | D8 | Port or retire `delegate-watch` and the remaining operator-only CLI modes (`coordination-recovery`, `channel`'s remainder, `maintainer setup`). | Retiring a mode removes a supported command. | B10e |
+| D9 | **Proposal P1: Console scope cut.** Retire, or serve only to their CLI callers, the 12 unserved Console routes that no Console code calls (listed under "Proposals awaiting the maintainer"). | It removes or narrows public REST routes that the guides document. | The sizes of B2a, B2b and B2c |
+| D10 | **Proposal P2: a soft Python freeze now.** Fixes only, no new Python surfaces, pending schema changes batched into one bump: G4's "fixes only" half brought forward, without the retirement half. | It stops feature work on the daemon users run today. | Every batch's oracle stays still |
+| D11 | **Proposal P3: nightly dev-box evidence.** Run `w2e.py`, `w2d_search.py` and `board/run.py` nightly on a Linux dev box and publish the JSON, instead of putting the body comparisons into hosted CI. | With D6 it sets the evidence bar for `ported` and for the switch. | B13's scope, G2 |
 | G1 | Start the live-bank shadow and the soak (B16). | Live-bank access. | B16 |
 | G2 | Switch the default: installers and release-mode `update` select the Rust daemon. | Default switch. | B17 |
 | G3 | Release on the four public surfaces, then deploy. | Release and deploy. | B17 |
 | G4 | Freeze Python daemon development (fixes only), and later retire the Python oracle, source and packaging. | Oracle retirement. | B17 |
+
+## Proposals awaiting the maintainer (2026-10-20)
+
+These three came out of the 2026-10-19 review of this plan. None is decided;
+each is a row in the decisions table above (D9 to D11), and the batches
+below say what changes if it is accepted.
+
+**P1 (D9): cut the Console scope.** A static search of master `2092e7b1`
+(`git grep` over `frontend/src`, `pseudolife_memory`, `plugin`, `rust/shim`,
+`ops`, `evals` and `examples`, excluding tests and `web/routes.py` itself)
+finds no Console caller for 12 of the 69 unserved routes. The 8 below have no
+caller at all outside `routes.py`, their tests and the guides that document
+them (`docs/guide/episodes.md`, `dreaming.md`, `memory-model.md`,
+`configuration.md`, `docs/runbooks/deep-dream.md`); the Console reaches the
+same behavior through other routes or MCP (`/api/graph/insight` serves the
+Insight view's communities; `memory_graph_review` restores slots). Retiring
+one is a documented REST API removal and needs a deprecation note.
+
+- `GET /api/curation/retired`
+- `GET /api/graph/communities`
+- `GET /api/graph/proposal-evidence`
+- `POST /api/episodes/merge`
+- `POST /api/episodes/prune`
+- `POST /api/episodes/rename`
+- `POST /api/lessons/restore`
+- `POST /api/world/restore`
+
+The other 4 have CLI or shim callers only, no Console caller. They stay
+served, but belong to the hooks and CLI batches (B3, B10) rather than to the
+Console batches, and could move onto MCP for the CLI if the maintainer
+prefers one surface:
+
+- `GET /api/briefing` (briefing CLI, session hook, shim briefing hook)
+- `GET /api/stats` (`move` CLI, shim `sent` serve)
+- `POST /api/episode/start` and `POST /api/episode/end` (episode CLI,
+  `service.py`, `shim.py`, shim lifecycle)
+
+If accepted, B2b loses the five episode routes and the two restores, B2a
+loses `/api/stats`, and B2c loses `/api/curation/retired`,
+`/api/graph/communities` and `/api/graph/proposal-evidence`: 1 to 2 PRs
+fewer, and 12 fewer Python route contracts for the Rust side to match.
+
+**P2 (D10): a soft Python freeze now.** Every new Python surface widens the
+oracle the Rust side chases, and every schema bump moves the parity pin and
+the harness goldens on both OSes (the v56 lesson in CLAUDE.md). The proposal
+brings G4's "fixes only" half forward to now: fixes and the document table
+(B7) continue; no new Python tools, routes, hooks or CLI modes; pending
+schema changes (B7's table, D2 if it picks a table) land in one bump. The
+retirement half of G4 stays at stage 4.
+
+**P3 (D11): nightly evidence on a Linux dev box instead of hosted body
+comparisons.** B13 as written puts `w2e.py`, `w2d_search.py` and
+`board/run.py` into hosted CI on both OSes through portable goldens or a
+provisioned oracle: 3 to 5 PRs, Windows runners that are already the slowest
+lane, and real-model runs hosted CI cannot afford. The proposal runs the
+three differentials nightly on a Linux dev box against master, publishes the
+JSON (counts, differences, the compared head) where PRs can cite it, and
+keeps hosted CI on what it does now. D6's bar is then "a published nightly
+run on the current master" rather than a hosted job. B13 shrinks to the
+stale tokenless `woke` case, Windows daemon runtime runs if D1 keeps lite,
+and whatever hosted comparison D6 still requires.
 
 ## Ordered plan
 
@@ -76,11 +145,11 @@ files do not overlap can run in parallel sessions.
 
 Shared hot spots, and how batches share them:
 
-- `rust/daemon/src/http.rs`. B2-0 moves the route fall-through (the dispatch
-  tail that ends in `not_implemented`), the hook arm, `pair()` and the `/mcp`
-  mount into per-family modules, with no behavior change, so B2a to B2d, B3,
-  B5 and B6 each edit their own module. Until B2-0 lands, B3, B5 and B6
-  serialize on `http.rs`.
+- `rust/daemon/src/http.rs`. B2-0 is the plan's first PR: it moves the route
+  fall-through (the dispatch tail that ends in `not_implemented`), the hook
+  arm, `pair()` and the `/mcp` mount into per-family modules, with no
+  behavior change, so B2a to B2d, B3, B5 and B6 each edit their own module.
+  B3, B5 and B6 start after it rather than serializing on `http.rs`.
 - `rust/daemon/src/mcp/dispatch.rs` (the tool registry) and
   `daemon/harness/mcp_compare.py` (`UNSERVED`): only B1 and B7 add tools, one
   PR at a time. B6 also edits `mcp_compare.py` (the tokenless cases) and
@@ -100,8 +169,8 @@ Shared hot spots, and how batches share them:
 
 | Batch | Work | Owns | Waits on | Size |
 |---|---|---|---|---|
-| B1 | Graph and dream engine, tasks L to P, in flight in the Rust port session. L: `memory_consolidate` (#836). M: graph store writes (`memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`, `memory_relation_define`). N: graph reads (`memory_graph` traversal and `memory_recall` with graph expansion) plus the decision record. O: `memory_graph_review` (queue, merge, duplicate and junk proposals, fold direction, vetoes, three-judge path, audit). P: `memory_dream` and deep dream (consolidation with a stub or recorded extractor, edge re-scoring, hard-violation cleanup, link discovery, graph-insight refresh), then the automatic dream and graph-sweep ticks. Also the credential-bearing extractor and recall redirect refusal. | graph, dream and recall modules under `rust/daemon/src/`; `mcp/dispatch.rs`; `daemon/harness/graph_*.py`, `w2e.py` scenarios; PARITY MCP rows; the graph rows of `divergences.md` | #833 merged | 6 to 9 (L 1, M 1, N 1 to 2, O 1 to 2, P 2 to 3) |
-| B2-0 | Move the Console route fall-through, the hook arm, `pair()` and the `/mcp` mount out of `http.rs` into per-family modules, with no behavior change; the 501 list stays exactly `routes.json`. | `http.rs`, new `rust/daemon/src/routes/` modules | none | 1 |
+| B2-0 | **The first PR of the plan.** Move the Console route fall-through, the hook arm, `pair()` and the `/mcp` mount out of `http.rs` into per-family modules, with no behavior change; the 501 list stays exactly `routes.json`. Open it before any other batch touches `http.rs`. | `http.rs`, new `rust/daemon/src/routes/` modules | none | 1 |
+| B1 | Graph and dream engine, tasks L to P, in flight in the Rust port session. L: `memory_consolidate` (#836, open). M: graph store writes (`memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`, `memory_relation_define`): landed, #842 in batch #866. N: graph reads: N1 `memory_graph` traversal (#847, open, stacked on #842), then N2 `memory_recall` with graph expansion plus the decision record. O: `memory_graph_review` (queue, merge, duplicate and junk proposals, fold direction, vetoes, three-judge path, audit). P: `memory_dream` and deep dream: P1 the consolidation pass (#864, open) and the outcome, lesson and digest stages (#867, open); P2 edge re-scoring, hard-violation cleanup, link discovery and the graph-insight refresh (P2b under Option B, a structurally compared declared divergence); then the automatic dream and graph-sweep ticks. Also the credential-bearing extractor and recall redirect refusal. | graph, dream and recall modules under `rust/daemon/src/`; `mcp/dispatch.rs`; `daemon/harness/graph_*.py`, `w2e.py` scenarios; PARITY MCP rows; the graph rows of `divergences.md` | none (#833 landed) | 6 to 9 (L 1, M 1, N 1 to 2, O 1 to 2, P 2 to 3); 1 landed, 4 open |
 | B3 | Hooks: `/api/briefing`, `/api/hook/session-start` and `/api/hook/memory-policy` (briefing composition, session-start registration, policy logging, the release offer), the authorized memory-changes note and the session-end close. | the hook arm of `http.rs`, a new briefing module, hook cases in `daemon/harness/run.py` | none | 2 to 3 |
 | B5 | Board blockers: W2F-SHARED-HLC (board onto `Ready::tick_hlc`), W2F-PAIRING-HTTP (two-slot gate, refunds, disconnect ownership, principal-cache publication; CLI-PAIRING-ENDPOINT), then W2F-CLOCK-RETRY once B4's writer-session refresh lands. | `rust/daemon/src/board/`, `hlc.rs`, `principals.rs`, `auth.rs`, the `pair()` handler; board, clock-retry and security harness cases | B4 for the clock retry | 3 |
 | B6 | Tokenless MCP Host/Origin rebinding: wire the allowlist into the tokenless mount, then run the rebinding cases with a tokenless daemon pair. | the `/mcp` mount (in `http.rs` until B2-0), `mcp/mod.rs`, `mcp_ci.py`, `mcp_compare.py` (queued with B1), `spec-http-security.md` | D3 to accept | 1 to 2 |
@@ -115,9 +184,9 @@ Shared hot spots, and how batches share them:
 
 | Batch | Work | Owns | Waits on | Size |
 |---|---|---|---|---|
-| B2a | Console read projections: 14 of the 15 `w2d-console-projections` GETs (all but `/api/config`, which B2d takes), the standalone canonical-search `/api` shapes, the `/api/agents` default view and the three maintainer GETs. | `routes/` read modules, `rust/daemon/src/read/`; `w2d_*.py` harness | B2-0 | 3 to 4 |
-| B2b | Console writes over bodies already served on MCP: facts set, resolve and forget, reinforce, delete, supersede, consolidate, the five episode routes, and the lesson and world restores (the restore path first). | `routes/` write modules; REST scenarios in `w2e.py` | B2-0; #836 for consolidate | 3 to 4 |
-| B2c | Graph, review, curation and dream routes: 13 GETs and 15 POSTs over B1's services. | `routes/` graph modules | B1's matching task | 3 to 5 |
+| B2a | Console read projections: 14 of the 15 `w2d-console-projections` GETs (all but `/api/config`, which B2d takes), the standalone canonical-search `/api` shapes, the `/api/agents` default view and the three maintainer GETs. Under P1, `/api/stats` moves to the CLI batches. | `routes/` read modules, `rust/daemon/src/read/`; `w2d_*.py` harness | B2-0 | 3 to 4 |
+| B2b | Console writes over bodies already served on MCP: facts set, resolve and forget, reinforce, delete, supersede, consolidate, the five episode routes, and the lesson and world restores (the restore path first). Under P1 the five episode routes and the two restores leave this batch (retired, or `episode/start` and `episode/end` served for the CLI in B10). | `routes/` write modules; REST scenarios in `w2e.py` | B2-0; #836 for consolidate | 3 to 4 |
+| B2c | Graph, review, curation and dream routes: 13 GETs and 15 POSTs over B1's services; under P1, 10 GETs (no `/api/curation/retired`, `/api/graph/communities`, `/api/graph/proposal-evidence`). | `routes/` graph modules | B1's matching task | 3 to 5 |
 | B2d | Maintainer POSTs (7) and `/api/config` GET and POST, behind the operator gate. | `routes/` maintainer and config modules | B2-0 | 2 to 3 |
 | B4 | Durability and background: the writer-session probe and reconnect, autosave and the clean-exit flush (D2), compaction mutation with slot sync, the reaper's automatic titles, the unemitted `/health` keys (`stall`, `migration_partial`, `capacity_warning` and the rest), and the shutdown deadline. | `service.rs`, `background.rs`, `background_sessions.rs`, `maintenance.rs`, `health.rs`, resident stores | D2 for autosave; serialize with B1-P on `service.rs` | 3 to 5 |
 | B9 | Storage tiers, per D1. If lite is ported: native embedded-PostgreSQL lifecycle (start or attach, first-boot lock, major-version refusal, Windows non-ASCII guard, per-user data dir), the daemon's storage resolution, then the lite halves of CLI-BACKUP-LITE, CLI-TRANSFER-LITE, CLI-AUDIT-TRANSPORT, CLI-PAIRING-CONTAINER, CLI-MAINTAINER-TRANSPORT and the lease's embedded refusal, with native Windows daemon runs (lite runs the daemon on Windows). If embedded and file mode retire: a deprecation release first, then their removal, keeping a `.pt` import. | a shared embedded-PG module, daemon startup storage resolution, the CLI transports | D1 | 3 to 7 |
@@ -128,7 +197,7 @@ Shared hot spots, and how batches share them:
 | Batch | Work | Owns | Waits on | Size |
 |---|---|---|---|---|
 | B11 | Ops cutover: every OPS-CUTOVER, OPS-IMAGES, OPS-INSTALL-RESTORE and SHIM-CLIENT-UPDATES item below. That covers the opt-in Rust compose file, the container contract, release and checkout `update`, the installers, backup and restore, unattended updates, and client runtimes. The shim's `update` mode lands here. The installers do the whole setup themselves (CLAUDE.md "Install and update experience"). | `ops/`, `pseudolife_memory/update_cli.py` and the installers, `rust/shim/src/cli/update` | B7, B8, and B9 per D1 | 6 to 10 |
-| B13 | Hosted evidence: run the body differentials (`w2e.py`, `w2d_search.py`, `board/run.py`) in hosted CI on both OSes, through portable goldens (`w2d-portable-goldens`) or a provisioned real-model oracle; add Windows daemon runtime runs if D1 keeps lite; fix the stale tokenless `woke` case in `daemon/harness/run.py` (declared 501, now served). | `.github/workflows/rust.yml`, `rust/ci/`, harness goldens | D6 for scope | 3 to 5 |
+| B13 | Hosted evidence: run the body differentials (`w2e.py`, `w2d_search.py`, `board/run.py`) in hosted CI on both OSes, through portable goldens (`w2d-portable-goldens`) or a provisioned real-model oracle; add Windows daemon runtime runs if D1 keeps lite; fix the stale tokenless `woke` case in `daemon/harness/run.py` (declared 501, now served). Under P3 the differentials run nightly on a Linux dev box with published JSON instead, and this batch keeps only the `woke` case, the Windows runtime runs if D1 keeps lite, and whatever hosted comparison D6 still requires: 1 to 2 PRs. | `.github/workflows/rust.yml`, `rust/ci/`, harness goldens; under P3 a dev-box nightly script and its published results | D6 and D11 for scope | 3 to 5 (1 to 2 under P3) |
 | B14b | Divergence acceptance: the maintainer accepts the residue from B14a after the other batches close their rows (D7). | `divergences.md` | every other batch | 1 |
 | B12 | Docs cutover: every DOCS-CUTOVER item below, once B11 fixes the installed entry points. | `docs/`, READMEs and translations, `llms*.txt`, atlas | B11 | 2 to 3 |
 
@@ -137,11 +206,36 @@ Shared hot spots, and how batches share them:
 | Batch | Work | Gate | Size |
 |---|---|---|---|
 | B16 | Shadow and soak on the live bank. First, restore the newest live backup into a disposable bank and replay recorded read traffic (search, fact and lesson reads) through both daemons, comparing answers. The Rust daemon is a writer even when it only serves reads: it takes the bank's writer lease, searches log retrieval events and access counts, and background sweeps prune logs and close idle sessions. Beside the live daemon it starts `not_ready` and keeps retrying (`rust/daemon/src/storage/mod.rs`, `LeaseHeld`; `service.rs`, `ensure_storage`), so it would take the writer lease the moment the live daemon let go of it, for example during a restart or an update. It must not run against the live DSN until a read-only mode exists. A live shadow therefore needs a read-only mode the daemon does not have yet (no lease, no telemetry, no sweeps, a read-only PostgreSQL role); build it, then compare its reads with the Python daemon's on the live bank. Then soak Rust as the maintainer host's live daemon behind a rollback tag, watching health, the board and dreams. | G1 | 2 to 3, plus the soak window |
-| B17 | Default switch, release and freeze: installers and release-mode `update` select the Rust daemon (G2); release on the four surfaces (G3); Python daemon development freezes to fixes only (G4). The Python oracle, its tests and the eval harnesses stay until a separate retirement decision. | G2, G3, G4 | 1 to 2 |
+| B17 | Default switch, release and freeze: installers and release-mode `update` select the Rust daemon (G2); release on the four surfaces (G3); Python daemon development freezes to fixes only (G4; under P2 that half is already in force). The Python oracle, its tests and the eval harnesses stay until a separate retirement decision. | G2, G3, G4 | 1 to 2 |
 
-Total: about 65 to 95 PRs. The longest chains are B7 (the Python document
-table, then the Rust document tools, then the image), B1 then B2c, and B4
-then B5's clock retry. All three feed B11 and B13, then B16.
+Total: about 65 to 95 PRs (1 to 2 fewer under P1, 2 to 3 fewer under P3). The
+longest chains are B7 (the Python document table, then the Rust document
+tools, then the image), B1 then B2c, and B4 then B5's clock retry. All three
+feed B11 and B13, then B16.
+
+### What sets the pace
+
+The PR count is not the constraint; writing the code is the cheap part. Each
+PR costs two reviews (an Opus reviewer and the Codex second review), their
+fixes and re-review, and then a hosted CI pass of about an hour, with the
+Windows parity shard the long pole; until 2026-10-19 every master move also
+sent every open PR back through CI. So the pace is sessions × review × CI
+queue: how many Rust sessions run at once without colliding on the hot-spot
+files above (three or four), how fast each PR's two reviews turn around
+(hours when a reviewer session is available), and how many CI passes a day
+the gate takes. Measured in the 36 hours to 2026-10-20: 27 PRs merged, 13 of
+them as members of the two integration batches #850 and #866, with 14 open.
+
+Three changes since 2026-10-19 widen that queue: integration batches (#851)
+make one CI run land several PRs, the CI reshape in batch #868 cuts the
+required hosted Windows lanes to what differs on Windows, and the 4-worker
+local suite (#846) gates a batch head in about ten minutes before CI sees
+it. The calendar estimate that follows is an estimate, not a commitment, and
+moves with the session count: at one reviewed PR per session per day, three
+to four sessions and two batches a day, 65 to 95 PRs is about three to six
+weeks of calendar time to the end of stage 3, with the longest chain (B7,
+then B8 and B11, then the B16 soak) as the floor the count cannot beat.
+Stage 4 is maintainer-gated and adds the soak window.
 
 ## Acceptance checklists
 

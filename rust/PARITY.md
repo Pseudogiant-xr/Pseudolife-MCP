@@ -559,7 +559,7 @@ The Rust column, after Status, says what the Rust daemon answers on master after
 
 | Method | Path | Phase | Status | Rust | Evidence |
 |---|---|---:|---|---|---|
-| GET | /api/stats | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D); declared case in `daemon/harness/run.py` |
+| GET | /api/stats | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D); declared case in `daemon/harness/run.py`; CLI or shim callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal P1 (D9) moves it to the CLI batches |
 | GET | /api/overview | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
 | GET | /api/facts | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
 | GET | /api/facts/history | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
@@ -568,15 +568,15 @@ The Rust column, after Status, says what the Rust daemon answers on master after
 | POST | /api/facts/forget | 4 | deferred | 501 | 501 (writes, W2-E) |
 | GET | /api/world | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
 | GET | /api/lessons | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
-| GET | /api/briefing | 3 | deferred | 501 | 501 (`w2d-briefing-hooks`, W2-D) |
+| GET | /api/briefing | 3 | deferred | 501 | 501 (`w2d-briefing-hooks`, W2-D); CLI or shim callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal P1 (D9) moves it to the CLI batches |
 | GET | /api/agents | 3 | deferred | partly | The coordination view (`?view=coordination`, `board/http.rs`) is served and compared by the board harness's `console` scenario (recorded run as for the coordination actions below); the default view answers 501 (`w2d-board-projections`, W2-F) |
 | GET | /api/episodes | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
 | GET | /api/episodes/summary | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
-| POST | /api/episode/start | 4 | deferred | 501 | 501 (writes, W2-E) |
-| POST | /api/episode/end | 4 | deferred | 501 | 501 (writes, W2-E) |
-| POST | /api/episodes/prune | 4 | deferred | 501 | 501 (writes, W2-E) |
-| POST | /api/episodes/rename | 4 | deferred | 501 | 501 (writes, W2-E) |
-| POST | /api/episodes/merge | 4 | deferred | 501 | 501 (writes, W2-E) |
+| POST | /api/episode/start | 4 | deferred | 501 | 501 (writes, W2-E); CLI or shim callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal P1 (D9) moves it to the CLI batches |
+| POST | /api/episode/end | 4 | deferred | 501 | 501 (writes, W2-E); CLI or shim callers only, no Console caller on master `2092e7b1`: CUTOVER.md proposal P1 (D9) moves it to the CLI batches |
+| POST | /api/episodes/prune | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal P1 (D9) lists it to retire |
+| POST | /api/episodes/rename | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal P1 (D9) lists it to retire |
+| POST | /api/episodes/merge | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal P1 (D9) lists it to retire |
 | GET | /api/recent | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
 | GET | /api/search | 3 | ported | served | `read/search_route.rs`; `daemon/harness/w2d_search.py live`: recorded Linux run, 11 scenarios, 118 cases, zero response and bank-state differences ([W2-D evidence](daemon/FORWARD-w2d.md)); hosted CI runs only the offline controls. Declared: no reference pool (cutover blocker), `explain` refused (MCP-SEARCH-EXPLAIN), resident-only access counts |
 | GET | /api/trace | 3 | deferred | 501 | 501 (`w2d-console-projections`, W2-D) |
@@ -588,10 +588,10 @@ The Rust column, after Status, says what the Rust daemon answers on master after
 | GET | /api/graph | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
 | GET | /api/graph/projects | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
 | GET | /api/graph/digest | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
-| GET | /api/graph/communities | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/graph/communities | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal P1 (D9) lists it to retire |
 | GET | /api/graph/path | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
 | GET | /api/graph/review | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
-| GET | /api/graph/proposal-evidence | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
+| GET | /api/graph/proposal-evidence | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal P1 (D9) lists it to retire |
 | POST | /api/graph/rejudge | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
 | GET | /api/wiki | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
 | GET | /api/graph/entity-provenance | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
@@ -602,9 +602,9 @@ The Rust column, after Status, says what the Rust daemon answers on master after
 | POST | /api/graph/dismiss-duplicate | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
 | GET | /api/curation/duplicates | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
 | POST | /api/curation/dismiss-duplicate | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
-| GET | /api/curation/retired | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H) |
-| POST | /api/lessons/restore | 4 | deferred | 501 | 501 (writes, W2-E) |
-| POST | /api/world/restore | 4 | deferred | 501 | 501 (writes, W2-E) |
+| GET | /api/curation/retired | 3 | deferred | 501 | 501 (`w2d-recall-graph`, W3-H); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal P1 (D9) lists it to retire |
+| POST | /api/lessons/restore | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal P1 (D9) lists it to retire |
+| POST | /api/world/restore | 4 | deferred | 501 | 501 (writes, W2-E); no caller outside `routes.py` on master `2092e7b1`: CUTOVER.md proposal P1 (D9) lists it to retire |
 | POST | /api/graph/delete-entity | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
 | POST | /api/graph/merge | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
 | POST | /api/graph/accept-proposal | 4 | deferred | 501 | 501 (graph and review writes, W3-H) |
