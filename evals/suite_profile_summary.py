@@ -16,8 +16,9 @@ test server's wait events and checkpoint progress over the same interval,
 and the run's peak memory, pressure and checkpoint / fsync totals. The
 manifest's run description is carried over as ``run``.
 
-Records from an xdist controller (profile-main.jsonl next to gw* files) are
-ignored: they repeat the workers' reports without the counters. Writes a
+An xdist controller writes no per-test records; a profile-main.jsonl next
+to gw* files (from an older plugin) is ignored, since it repeats the
+workers' reports without the counters. Writes a
 JSON artifact by default; a number without a committed artifact was never
 really measured.
 """
@@ -75,8 +76,10 @@ def _span(r: dict, when: str) -> tuple[float, float] | None:
     return None
 
 
-def timeline(records: list[dict]) -> dict | None:
-    """Per-worker busy and idle time from the phases' monotonic spans."""
+def timeline(records: list[dict], workers_started: list[str] = ()) -> dict | None:
+    """Per-worker busy and idle time from the phases' monotonic spans. A
+    worker in ``workers_started`` that ran nothing is idle for the whole
+    span (xdist starts workers before it knows each has a file to run)."""
     by_worker: dict[str, list[tuple[float, float]]] = collections.defaultdict(list)
     last_file: dict[str, tuple[float, str]] = {}
     for r in records:
@@ -102,6 +105,11 @@ def timeline(records: list[dict]) -> dict | None:
             "last_file": last_file[worker][1],
         }
     ends = [w["finished_after_s"] for w in workers.values()]
+    for worker in workers_started:
+        if worker not in workers:
+            workers[worker] = {"busy_s": 0.0, "idle_s": round(end - start, 1),
+                               "finished_after_s": None, "last_file": None}
+    workers = dict(sorted(workers.items()))
     return {
         "span_s": round(end - start, 1),
         "start": start,
@@ -296,7 +304,8 @@ def summarise(profile_dir: Path, top: int) -> dict:
         "top_files": [{"file": f, **{k: round(v, 1) for k, v in c.items()}}
                       for f, c in files],
     }
-    line = timeline(records)
+    started = [Path(p).name[len("profile-"):-len(".jsonl")] for p in workers]
+    line = timeline(records, started)
     if line is not None:
         result["timeline"] = {k: v for k, v in line.items() if k not in ("start", "end")}
     if samples is not None:

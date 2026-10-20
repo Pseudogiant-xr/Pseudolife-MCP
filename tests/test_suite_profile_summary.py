@@ -201,3 +201,19 @@ def test_the_test_a_worker_died_in_is_named(tmp_path):
 
     assert out["tests"] == 2
     assert out["unfinished"] == ["tests/test_a.py::t2"]
+
+
+def test_a_worker_that_ran_nothing_counts_as_idle(tmp_path):
+    _write(tmp_path / "profile-gw0.jsonl", [
+        {"id": "tests/test_a.py::t1", "worker": "gw0", "setup": 0.0, "call": 10.0,
+         "teardown": 0.0, "setup_t": [0.0, 0.0], "call_t": [0.0, 10.0],
+         "teardown_t": [10.0, 10.0]},
+    ])
+    (tmp_path / "profile-gw1.jsonl").write_text("", encoding="utf-8")
+
+    line = sps.summarise(tmp_path, top=10)["timeline"]
+
+    assert line["busy_share_pct"] == 50.0
+    assert line["workers"]["gw1"] == {"busy_s": 0.0, "idle_s": 10.0,
+                                      "finished_after_s": None, "last_file": None}
+    assert line["tail_s"] == 0.0

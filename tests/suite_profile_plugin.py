@@ -148,6 +148,15 @@ def _patch_execute(cls) -> None:
     cls.execute = execute
 
 
+def _spawn_head(argv: list) -> str:
+    """The program a spawn ran, plus the module for ``python -m``; never any
+    other argument (``git commit -m <message>`` is just ``git``)."""
+    head = os.path.basename(str(argv[0])).lower()
+    if head.startswith("python") and "-m" in argv[1:-1]:
+        head += ":" + str(argv[argv.index("-m") + 1])
+    return head
+
+
 def _install_patches() -> None:
     # Each group is optional: a lane without the embedding stack (or without
     # the service) still gets the timeline and the other counters.
@@ -204,11 +213,8 @@ def _install_patches() -> None:
         _bump("spawn_n")
         try:
             argv = [args] if isinstance(args, (str, bytes)) else list(args)
-            head = os.path.basename(str(argv[0])).lower()
-            if "-m" in argv:
-                head += ":" + str(argv[argv.index("-m") + 1])
             _counters.setdefault("_spawns", [])  # type: ignore[arg-type]
-            _counters["_spawns"].append(head)  # type: ignore[union-attr]
+            _counters["_spawns"].append(_spawn_head(argv))  # type: ignore[union-attr]
         except Exception:  # noqa: BLE001 — attribution only
             pass
         return real_popen_init(self, args, *a, **kw)
@@ -241,24 +247,32 @@ _PG_SETTINGS = ("fsync", "synchronous_commit", "full_page_writes", "shared_buffe
                 "checkpoint_timeout", "max_wal_size", "track_io_timing",
                 "wal_level", "max_connections")
 _ABS = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]|~)")
-_PATHISH = re.compile(r"""[^\s=,;'"]*[\\/][^\s=,;'"]*""")
+_SECRETISH = re.compile(r"://|password=|\S+:\S*@[\w.-]+(?::\d+)?")
+_KEY = re.compile(r"^[A-Za-z_][\w.-]*=")
 
 
-def _scrub(text: str) -> str:
-    """``text`` with every absolute path, and every relative one passing
-    through a home directory, reduced to its last component
-    (``--junitxml=/home/<user>/x.xml`` -> ``--junitxml=<abs>/x.xml``), and
-    every URL withheld (it may carry a password)."""
-    def repl(match: re.Match) -> str:
-        path = match.group(0)
-        if "://" in path:
-            return "<url>"
-        parts = [p for p in re.split(r"[\\/]", path) if p]
-        if _ABS.match(path) or any(p.lower() in ("users", "home") for p in parts):
-            return "<abs>/" + (parts[-1] if parts else "")
-        return path
-    return _PATHISH.sub(repl, text)
-
+def _scrub(arg: str) -> str:
+    """One argument with its value withheld when it is a URL or connection
+    string (it may carry a password), and reduced to its last component
+    when it is an absolute path or a relative one through a home directory
+    (``--junitxml=/home/<user>/x.xml`` -> ``--junitxml=<abs>/x.xml``). The
+    whole value is judged, spaces included: a path through ``First Last``
+    is still a path. Option and ``key=`` prefixes are kept; node ids,
+    keyword expressions and relative paths pass unchanged."""
+    prefix, value = "", arg
+    if arg.startswith("-") and "=" in arg:
+        option, _, value = arg.partition("=")
+        prefix = option + "="
+    elif _KEY.match(arg) and not _ABS.match(arg):
+        key, _, value = arg.partition("=")
+        prefix = key + "="
+    if _SECRETISH.search(value):
+        return prefix + "<url>"
+    parts = [p for p in re.split(r"[\\/]", value) if p]
+    if ("/" in value or "\\" in value) and (
+            _ABS.match(value) or any(p.lower() in ("users", "home") for p in parts)):
+        return prefix + "<abs>/" + (parts[-1] if parts else "")
+    return prefix + value
 
 
 def _read(path: str) -> str | None:
@@ -649,12 +663,20 @@ def pytest_configure(config: pytest.Config) -> None:
         if login is not None:
             _run.data["login_source"] = login
         _run.write(_out_dir)
-        _sampler = _Sampler(_out_dir, _run, _run.data["interval_s"], admin_url)
-        _sampler.start()
+        try:
+            _sampler = _Sampler(_out_dir, _run, _run.data["interval_s"], admin_url)
+            _sampler.start()
+        except Exception as exc:  # noqa: BLE001 - run on without samples
+            _sampler = None
+            _run.data["sampler_error"] = type(exc).__name__
+            _run.write(_out_dir)
     # An xdist controller's per-test records would repeat its workers'
     # without the counters; it keeps only the manifest and the samples.
     if not (_worker == "main" and getattr(config.option, "numprocesses", None)):
-        _out = open(_out_dir / f"profile-{_worker}.jsonl", "w", encoding="utf-8")
+        try:
+            _out = open(_out_dir / f"profile-{_worker}.jsonl", "w", encoding="utf-8")
+        except OSError:
+            _out = None  # run on without per-test records
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
@@ -728,6 +750,21 @@ def pytest_runtest_teardown(item, nextitem):
     yield from _phase_span("teardown")
 
 
+def _emit(record: dict) -> None:
+    """Append one line; a failed write (a full disk) stops the records, never
+    the run."""
+    global _out
+    try:
+        _out.write(json.dumps(record) + "\n")
+        _out.flush()
+    except Exception:  # noqa: BLE001
+        try:
+            _out.close()
+        except Exception:  # noqa: BLE001
+            pass
+        _out = None
+
+
 def pytest_runtest_logstart(nodeid, location) -> None:
     _counters.clear()
     _phase.clear()
@@ -737,9 +774,7 @@ def pytest_runtest_logstart(nodeid, location) -> None:
     if _out is not None:
         # A start line: the last one without its record names the test a
         # killed or hung worker was in.
-        _out.write(json.dumps({"start": nodeid, "worker": _worker,
-                               "t": round(_mono(), 4)}) + "\n")
-        _out.flush()
+        _emit({"start": nodeid, "worker": _worker, "t": round(_mono(), 4)})
 
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
@@ -749,7 +784,10 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     if report.when == "teardown" and report.outcome == "failed":
         _phase["outcome"] = "error"  # type: ignore[assignment]
     if _run is not None:
-        worker = getattr(report, "worker_id", None) or _worker
+        # A crash report carries the node, not a worker id.
+        node = getattr(report, "node", None)
+        worker = (getattr(report, "worker_id", None)
+                  or getattr(getattr(node, "gateway", None), "id", None) or _worker)
         _run.workers.add(worker)
         if report.when == "???":
             # xdist's report for a test whose worker died under it.
@@ -765,13 +803,16 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
 def _skip_location(longrepr: tuple) -> str:
     """``file:line`` of a skip, relative to the rootdir when inside it."""
     path, line = str(longrepr[0]), longrepr[1]
-    if _root is not None and os.path.isabs(path):
-        try:
-            rel = os.path.relpath(path, _root)
-            if not rel.startswith(".."):
-                path = rel.replace(os.sep, "/")
-        except ValueError:  # another drive
-            pass
+    if os.path.isabs(path):
+        rel = None
+        if _root is not None:
+            try:
+                rel = os.path.relpath(path, _root)
+            except ValueError:  # another drive
+                rel = None
+        if rel is None or rel.startswith(".."):
+            return f"<abs>/{os.path.basename(path)}:{line}"
+        path = rel.replace(os.sep, "/")
     return f"{_scrub(path)}:{line}"
 
 
@@ -795,8 +836,7 @@ def pytest_runtest_logfinish(nodeid, location) -> None:
     if _slow_teardowns:
         record["slow_teardowns"] = list(_slow_teardowns)
     record.update(_rss())
-    _out.write(json.dumps(record) + "\n")
-    _out.flush()
+    _emit(record)
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:
@@ -810,7 +850,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
             return {name: {"n": int(n), "s": round(s, 3)}
                     for name, (n, s) in sorted(totals.items(), key=lambda kv: -kv[1][1])}
 
-        if _out_dir is not None:
+        if _out_dir is not None and (_fixture_totals or _teardown_totals):
             (_out_dir / f"fixtures-{_worker}.json").write_text(
                 json.dumps({"setup": table(_fixture_totals),
                             "teardown": table(_teardown_totals)}, indent=1),

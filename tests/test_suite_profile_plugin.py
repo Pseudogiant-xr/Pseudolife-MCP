@@ -243,6 +243,15 @@ def test_composed_statements_are_classified_without_a_connection():
     ("../home/someone/repo", "<abs>/repo"),
     ("--dsn=postgresql://u:pw@db.example.com:5432/x", "--dsn=<url>"),
     ("tests/test_a.py::test_b[x y]", "tests/test_a.py::test_b[x y]"),
+    ("--junitxml=D:\\Work Files\\Jane Doe\\j.xml", "--junitxml=<abs>/j.xml"),
+    ("/home/jane doe/x/junit.xml", "<abs>/junit.xml"),
+    ("--base=https://x.example.com/a?password=secret", "--base=<url>"),
+    ("host=db.example.com password=pw", "host=<url>"),
+    ("u:pw@db.example.com:5432", "<url>"),
+    ("-k", "-k"),
+    ("a or b", "a or b"),
+    ("--deselect=tests/x.py::t", "--deselect=tests/x.py::t"),
+    ("tests/x.py::test[a/b]", "tests/x.py::test[a/b]"),
     ("--rootdir=~/repo/", "--rootdir=<abs>/repo"),
     ("-k", "-k"),
     ("not slow", "not slow"),
@@ -266,6 +275,7 @@ def test_a_worker_crash_is_counted_and_its_test_named(tmp_path):
     assert proc.returncode != 0
     manifest = _manifest(out)
     assert manifest["outcomes"].get("crashed") == 1
+    assert "main" not in manifest["workers_seen"]
     starts = [json.loads(line) for p in out.glob("profile-gw*.jsonl")
               for line in p.read_text(encoding="utf-8").splitlines() if line]
     assert [s["start"].split("::")[1] for s in starts if "start" in s] == ["test_dies"]
@@ -371,3 +381,34 @@ def test_no_session_is_counted_when_the_bank_cannot_be_identified(tmp_path, monk
         assert sampler._sessions() is None
     finally:
         sampler.out.close()
+
+
+def test_a_sampler_that_cannot_start_never_stops_the_run(tmp_path):
+    out = tmp_path / "profile"
+    (out / "samples.jsonl").mkdir(parents=True)  # opening it fails
+    proc, _ = _session(tmp_path, "def test_ok():\n    pass\n")
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "INTERNALERROR" not in proc.stdout + proc.stderr
+    assert _manifest(out)["complete"] is True
+
+
+def test_a_profile_that_cannot_be_written_never_stops_the_run(tmp_path):
+    out = tmp_path / "profile"
+    (out / "profile-main.jsonl").mkdir(parents=True)  # opening it fails
+    proc, _ = _session(tmp_path, "def test_ok():\n    pass\n")
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "INTERNALERROR" not in proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("argv, head", [
+    (["python3", "-m", "pytest", "-q"], "python3:pytest"),
+    (["/usr/bin/python3.11", "-m", "pip"], "python3.11:pip"),
+    (["git", "commit", "-m", "private message"], "git"),
+    (["pwsh", "-File", "x.ps1"], "pwsh"),
+])
+def test_a_spawn_is_named_by_its_program_never_its_arguments(argv, head):
+    from tests import suite_profile_plugin as plugin
+
+    assert plugin._spawn_head(argv) == head
