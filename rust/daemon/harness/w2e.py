@@ -143,7 +143,8 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("memory_trace_invalidations", "invalidated_at"),
          ("entry_reinstatement_decisions", "decided_at"),
          ("lessons", "superseded_at"), ("edges", "superseded_at"),
-         ("store_decisions", "decided_at"), ("slot_reads", "last_read_at")}
+         ("store_decisions", "decided_at"), ("slot_reads", "last_read_at"),
+         ("edges", "asserted_at"), ("relations", "created_at")}
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
 RECENT_CLOCK = {("world_facts", "retrieved_at")}
@@ -215,7 +216,12 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # scenarios.
            "mcp-consolidate-no-dedupe", "mcp-consolidate-first-error-only",
            "mcp-consolidate-labels-first-only", "mcp-consolidate-victim-first-only",
-           "mcp-consolidate-derived-keys", "mcp-consolidate-default-source"]
+           "mcp-consolidate-derived-keys", "mcp-consolidate-default-source",
+           # the graph store's write tools (spec GW1-GW12): caught by the
+           # graph-writes and graph-relations scenarios.
+           "mcp-graph-no-etype-backfill", "mcp-graph-no-slot-fold", "mcp-graph-no-warnings",
+           "mcp-graph-unrelate-missing-dst", "mcp-graph-alias-canonical",
+           "mcp-graph-redefine-builtin", "mcp-graph-inverse-unchecked"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1905,6 +1911,143 @@ SCENARIOS.update({
     },
 })
 
+
+def relate(src, relation, dst, **kw) -> dict:
+    return tool("memory_graph_relate", src=src, relation=relation, dst=dst, **kw)
+
+
+def unrelate(src, relation, dst) -> dict:
+    return tool("memory_graph_unrelate", src=src, relation=relation, dst=dst)
+
+
+def alias(entity, name) -> dict:
+    return tool("memory_alias", entity=entity, alias=name)
+
+
+def define(name, description, **kw) -> dict:
+    return {"op": "tool", "name": "memory_relation_define",
+            "args": {"name": name, "description": description, **kw}, "headers": []}
+
+
+SCENARIOS.update({
+    "graph-writes": {
+        "config": None,
+        "seed": [
+            # fact_set mints the subject entities; the Kettle fact's value
+            # names no entity yet, so its object link is empty
+            fact("Postgres", "port", "5432"),
+            fact("Kettle", "brand", "Breville"),
+            fact("Redis", "role", "cache"),
+            # a current fact whose owner node is gone: the fold mints it
+            fact("Nginx", "port", "80"),
+            sql("UPDATE facts SET entity_id = NULL WHERE entity = 'Nginx'; "
+                "DELETE FROM entities WHERE canonical = 'nginx'", after_stop=True),
+        ],
+        "ops": [
+            # an unknown relation: suggestions, nothing minted
+            relate("pgbouncer", "dependz-on", "Postgres"),
+            relate("pgbouncer", "zzzz", "Postgres"),
+            # a fresh source, an existing target
+            relate("PgBouncer", "depends-on", "Postgres"),
+            # the slot-key fold: "postgres.port" is the Postgres port slot
+            relate("postgres.port", "related-to", "Kettle"),
+            # a typed fold: the owner is backfilled; an owner without a node
+            # is minted under its own name and type, relinking its fact
+            relate("postgres.port", "uses", "Kettle", src_type="database"),
+            relate("nginx.port", "related-to", "Kettle", src_type="proxy"),
+            # minting Breville relinks the Kettle fact's object; a later
+            # cortex save must keep the link
+            relate("Breville", "related-to", "Kettle"),
+            fact("Kettle", "colour", "red"),
+            # re-assertion: the confidence bump, capped, and the origin rank
+            relate("PgBouncer", "depends-on", "Postgres", confidence=0.5),
+            relate("PgBouncer", "depends-on", "Postgres", confidence=0.97, origin="user"),
+            relate("PgBouncer", "depends-on", "Postgres", origin="agent"),
+            relate("Redis", "uses", "Postgres", confidence=0.123456, origin="action"),
+            relate("Redis", "uses", "Kettle", confidence=1.0),
+            relate("Redis", "uses", "Breville", confidence=0),
+            # types: a fresh node takes its type, an untyped one is
+            # backfilled, a typed one keeps its own
+            relate("Memcached", "uses", "Postgres", src_type="cache", dst_type="database"),
+            relate("Memcached", "uses", "Postgres", src_type="store", dst_type="other"),
+            # an empty name, a self-loop, a final sigma
+            relate("   ", "related-to", "Kettle"),
+            relate("Kettle", "related-to", "kettle"),
+            relate("\u039f\u0394\u03a5\u03a3\u03a3\u0395\u03a5\u03a3", "related-to", "Kettle"),
+            # unrelate: unknown relation (no hint), unknown entities
+            # (the source is named first), then a live edge twice
+            unrelate("PgBouncer", "dependz-on", "Postgres"),
+            unrelate("Nobody", "depends-on", "Postgres"),
+            unrelate("PgBouncer", "depends-on", "Nobody"),
+            unrelate("Nobody", "depends-on", "Nothing"),
+            unrelate("pgbouncer", "Depends On", "postgres"),
+            unrelate("pgbouncer", "depends-on", "postgres"),
+            # a superseded edge revives on re-assertion
+            relate("PgBouncer", "depends-on", "Postgres"),
+            # aliases: empty, alias of an alias, the canonical refused (a
+            # node minted on the way stays), reassignment, a slot-key owner,
+            # an alias that is another node's canonical
+            alias("Postgres", "  "),
+            alias("Postgres", "pg"),
+            alias("pg", "PostgreSQL"),
+            alias("Postgres", "POSTGRES"),
+            alias("New Thing", "new_thing"),
+            alias("Redis", "pg"),
+            alias("postgres.port", "pgsql"),
+            alias("Redis", "kettle"),
+            # unrelate and relate through aliases
+            relate("pgsql", "stores-data-in", "Redis"),
+            unrelate("PostgreSQL", "stores-data-in", "pg"),
+        ],
+    },
+    "graph-relations": {
+        "config": None,
+        "seed": [
+            fact("Postgres", "port", "5432"),
+            fact("Kettle", "brand", "Breville"),
+        ],
+        "ops": [
+            # refusals: no name, no description, a builtin, an unknown
+            # inverse (the known list sorted), a blank inverse; punctuation
+            # survives normalization, so "!!" is a name
+            define("", "a relation"),
+            define("!!", "a relation"),
+            define("serves", "   "),
+            define("Related To", "redefined"),
+            define("hosted-on", "src runs on host dst", inverse_of="hosts-of"),
+            define("mirrors", "src mirrors dst", inverse_of="   "),
+            # code-point order differs from a collation's for these two
+            define("ab-z", "a relation"),
+            define("abc", "a relation"),
+            define("cycles-with", "src cycles with dst", inverse_of="nope"),
+            # definitions: types, an inverse, a self-inverse, an empty
+            # inverse (none), a redefinition overwriting
+            define("Hosted On", "  src runs on host dst  ", src_type="service",
+                   dst_type="host"),
+            define("hosts-service", "src hosts dst", inverse_of="hosted_on"),
+            define("mirrors", "src mirrors dst", inverse_of="mirrors", transitive=True),
+            define("peers-with", "src peers with dst", inverse_of=""),
+            define("hosted-on", "src is deployed to host dst", src_type="service",
+                   dst_type="host", transitive=True),
+            # typed relations warn on a mismatch and store anyway
+            relate("Redis", "hosted-on", "Postgres", src_type="service", dst_type="database"),
+            relate("Redis", "hosted-on", "box-1", dst_type="host"),
+            relate("Kettle", "Hosted_On", "box-1"),
+            # an empty-string type is stored and stays: a later hint is
+            # answered but not backfilled
+            relate("Toaster", "related-to", "Kettle", src_type=""),
+            relate("Toaster", "hosted-on", "Kettle", src_type="appliance"),
+            relate("Toaster", "hosted-on", "Kettle"),
+            # the new names resolve in relate and unrelate
+            relate("Postgres", "mirrors", "Redis"),
+            relate("box-1", "hosts-service", "Redis"),
+            unrelate("Redis", "hosted-on", "box-1"),
+            relate("Postgres", "hosted on", "box-2"),
+        ],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -2502,7 +2645,7 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
 WRITE_TABLES = ("entries", "episodes", "meta", "client_sessions", "facts", "entities",
                 "outcome_signals", "world_facts", "memory_trace_invalidations",
                 "entry_reinstatement_decisions", "lessons", "edges", "store_decisions",
-                "slot_reads")
+                "slot_reads", "entity_aliases", "relations")
 
 
 def pack(state: dict, full: bool) -> dict:

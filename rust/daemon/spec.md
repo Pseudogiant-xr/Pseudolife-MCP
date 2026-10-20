@@ -1107,6 +1107,64 @@ under the caller's `user` source. The
 caught, and the `supersede-*` scenarios still agree after the
 generalization.
 
+### The graph store's write tools over MCP (2026-10-19)
+
+`graph_write_tools.rs` (the four tools, entity resolution with the slot-key
+fold), on the ported store layer (`storage/graph.rs`: `ensure_entity` with
+its mint-only relink, `find_entity`, `add_alias`, `load_relations`,
+`upsert_relation`, `upsert_edge`, `supersede_edge`) and
+`graph_read::resolve_relation`; registered in `mcp::dispatch::registry`.
+Python: `mcp_server.py` `memory_graph_relate` (2583-2618),
+`memory_graph_unrelate` (2621-2631), `memory_alias` (2634-2644),
+`memory_relation_define` (2955-2981); `service.py`
+`_resolve_or_create_entity` (7570-7599), `graph_relate` (7659-7713),
+`graph_unrelate` (7729-7750), `graph_alias` (8146-8163), `relation_define`
+(8165-8200); `graph.py` `norm_name` (34-39), `resolve_relation` (76-88);
+`storage/postgres.py` 2743-2904, 3017-3148.
+
+| # | Exact item | Source |
+|---|---|---|
+| GW1 | Bound arguments: `memory_graph_relate(src, relation, dst, origin=None, confidence=0.8, src_type=None, dst_type=None)` (`confidence` a float in [0, 1]); `memory_graph_unrelate(src, relation, dst)`; `memory_alias(entity, alias)`; `memory_relation_define(name, description, transitive=False, inverse_of=None, src_type=None, dst_type=None)`. Each body runs under the service lock (the writer lock), detached from the request. There is no outer transaction: each store call commits on its own. | `mcp_server.py:2583-2644,2955-2981`; `service.py:7659-8200` |
+| GW2 | Entity resolution (`_resolve_or_create_entity`, without the dream's write-dedup proposals): `find_entity(norm_name(name))`, canonical first, then alias. A found node with a truthy requested type and a falsy stored one (`None` or `""`) is backfilled through `ensure_entity` (`COALESCE`, so a stored `""` stays), and the answer carries the requested type either way. | `service.py:7570-7584` |
+| GW3 | On a miss, the slot-key fold: when a current fact's `entity_norm || '-' || attribute_norm` equals the normalized name (`LIMIT 1`, no order), and that fact's entity normalizes differently, resolution restarts on the fact's entity with the same type. Otherwise `ensure_entity(n, display=name.strip(), etype=type)` mints the node (an empty display stores the canonical; an empty type stores `""`), relinking orphaned fact and lesson rows in the same commit; the answer's display is the stripped name. No junk-name guard applies on this explicit path. | `service.py:7585-7599`; `storage/postgres.py:2743-2838,2885-2894` |
+| GW4 | `memory_graph_relate`: the registry (`ORDER BY name`) and `resolve_relation`; an unknown relation answers `{"error": "unknown_relation", "relation": <as given>, "suggestions": <difflib's top 3 at cutoff 0.5>, "hint": "Define it with memory_relation_define, or use 'related-to' as the lawful fallback."}` before any node is touched. | `service.py:7679-7688`; `graph.py:76-88` |
+| GW5 | Then `src` and `dst` resolve in that order (GW2-GW3), and for each side whose relation declares a type, a node with a truthy type that differs warns `"{side} '{display}' has type '{etype}' but relation '{relation}' expects '{want}' — edge stored anyway"`. | `service.py:7689-7702` |
+| GW6 | The edge: `upsert_edge(src, relation, dst, confidence, origin)` with revival and no evidence (insert, or bump to `LEAST(0.99, GREATEST(new, old + 0.05))`, keep the higher-ranked origin of user > action > agent > other, clear `superseded_at`, restamp `asserted_at`). The answer: `{src, relation, dst, confidence: round(stored REAL, 4), warnings}` with the nodes' displays. | `service.py:7703-7713`; `storage/postgres.py:3051-3116` |
+| GW7 | `memory_graph_unrelate`: an unknown relation answers `{"error": "unknown_relation", "relation", "suggestions"}` (no hint). Both names resolve without minting; a missing one answers `{"removed": false, "reason": "unknown_entity", "entity": <src as given if src is missing, else dst as given>}`. | `service.py:7729-7747` |
+| GW8 | Else `supersede_edge` stamps a live edge's `superseded_at` (kept for audit, revived by a later relate): `{"removed": <a live edge was stamped>, "src", "relation", "dst"}` with the displays. | `service.py:7748-7750`; `storage/postgres.py:3138-3148` |
+| GW9 | `memory_alias`: an alias that normalizes to `""` answers `{"error": "empty_alias"}` first. The owner then resolves (and may mint, GW2-GW3); an alias equal to its canonical answers `{"error": "alias_is_canonical", "entity": <display>}`, with a node minted on the way kept. | `service.py:8146-8159` |
+| GW10 | Else `add_alias` binds it (`ON CONFLICT (alias)` reassigns it from another node; an alias equal to another node's canonical is stored and stays dead for resolution) and the owner is re-read: `{"entity": display, "canonical", "aliases": <ORDER BY alias>}`. | `service.py:8160-8163`; `storage/postgres.py:2896-2904` |
+| GW11 | `memory_relation_define`: a name that normalizes to `""` or a blank description answers `{"error": "name_and_description_required"}`; a builtin name `{"error": "builtin_relation", "hint": "'<name>' is a builtin and cannot be redefined."}`. A non-empty `inverse_of` normalizes; one neither registered nor equal to the name answers `{"error": "unknown_inverse", "inverse_of": <normalized>, "known": <registry names, sorted by code point>}` (an empty one is no inverse; a blank one normalizes to `""` and is refused). | `service.py:8181-8193` |
+| GW12 | Else `upsert_relation` writes the normalized name, the stripped description, the types as given, the inverse and `bool(transitive)` (a custom redefinition overwrites; `builtin` and `created_at` stay): `{"defined", "transitive", "inverse_of", "src_type", "dst_type"}`. Python keeps no resident graph, so no tool publishes anything. | `service.py:8194-8200`; `storage/postgres.py:3026-3047` |
+
+`harness/w2e.py live --only graph-writes graph-relations` compares every
+answer and the full bank (entities, aliases, edges, relations, facts) after
+each call, on templates whose facts the Python daemon's own `fact_set`
+wrote. `graph-writes`: unknown relations with and without suggestions; a
+fresh source onto an existing target; the slot-key fold; a mint that
+relinks a fact's object, then a fact save that must keep the link;
+re-assertion through the bump, the cap and the origin ranks; a 6-digit
+confidence, 1.0 and 0; a fresh typed node, a backfill, and a typed node
+keeping its type; an empty name, a self-loop and a final sigma; unrelate
+through each refusal, a live edge twice, and a revival; aliases empty,
+chained, refused as canonical (keeping a minted node), reassigned, through
+a slot key, and dead behind another canonical; relate and unrelate through
+aliases. `graph-relations`: each define refusal; a typed definition, an
+inverse, a self-inverse, an empty inverse and an overwriting redefinition;
+typed warnings on both sides; a stored empty type that a later hint answers
+but does not backfill; the new names in relate and unrelate; an inverse
+refusal whose known list sorts differently by code point and by collation.
+`graph-writes` also folds a typed slot key onto a node it backfills, and
+onto an owner whose node is gone (the fold mints it, relinking the fact).
+The stamp columns (`edges.asserted_at`, `relations.created_at`) compare as
+present or absent, so a restamp or a kept creation time is the store
+differential's to show (`harness/graph_store.py`). The
+`mcp-graph-no-etype-backfill`, `mcp-graph-no-slot-fold`,
+`mcp-graph-no-warnings`, `mcp-graph-unrelate-missing-dst`,
+`mcp-graph-alias-canonical`, `mcp-graph-redefine-builtin` and
+`mcp-graph-inverse-unchecked` mutants must be caught. The store layer's
+own differential (`harness/graph_store.py`) keeps its eight mutants.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
