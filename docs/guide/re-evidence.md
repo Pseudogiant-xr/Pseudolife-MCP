@@ -82,7 +82,7 @@ Graph views, and the Console cannot create or mutate RE evidence.
 
 ## Upgrading the fork
 
-This fork includes upstream **v0.18.1**, with the upstream **v55** schema and
+This fork includes upstream **v0.19.0**, with the upstream **v56** schema and
 the independent **`v34-rehub`** extension. Follow the ordinary upgrade and
 backup instructions for the chosen durable or lite installation; use this
 fork's checkout when rebuilding so the RE extension remains installed.
@@ -132,6 +132,29 @@ existing block, and compact session hooks do not load the RE template. Adding
 this protocol to the fork therefore does not refresh already installed files
 or sessions, change client configuration, or enable a wake listener. Use the
 RE protocol only for an authorized RE task with the fork's tools available.
+
+Each independent Codex or Claude Code author session needs its own authenticated
+Python stdio shim (`pseudolife-mcp shim`) against the same daemon. A shared HTTP
+registration alone does not supply the per-session board identity required for
+mail and status updates. Client tool allowlists must include `memory_agents`,
+`memory_message` and `re_evidence`; a disabled server or an allowlist exposing
+only evidence tools cannot coordinate sessions. Expanding the daemon's toolset
+does not override a client allowlist. Keep daemon origin and authentication in
+the existing private client configuration; this protocol changes neither.
+
+After authorized client or instruction changes, start fresh sessions and verify
+that both appear as distinct agents in the agreed project, can receive and ack
+addressed mail, and can reply. The Evidence Hub companion profile uses this
+existing shim path; older checkouts may still carry a shared HTTP profile or
+omit the two board tools. A checked-in profile is not proof that a running client
+loaded it. These checks do not establish a live wake listener; inspect the wake
+receipt and keep the documented next-turn checks when no path is armed.
+
+The shared protocol covers user-designated coordinators and delegates assigning
+bounded RE tasks. Workers explicitly accept or report a blocker after reading,
+keep scope and status current, and send exact evidence references for the
+coordinator to re-query. Independent author sessions exchange this mail;
+subagents report through their parent as described in the protocol.
 
 First capture JSON using the project's existing terminal-only evidence helper.
 For the SRFN recreation repository, the checked-in wrapper is:

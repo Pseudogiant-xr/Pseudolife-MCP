@@ -25,6 +25,17 @@ At startup, resume and before shared-file work:
    filesystem view; separate clones or hosts may not, so agree ownership by
    addressed mail when a file claim cannot represent the shared work.
 
+The user may designate an independent session as coordinator or authorize a
+delegate to assign bounded RE work. Identify that session by its board agent
+ID and agreed project; a self-chosen label or status is not authority. Assignments
+name the exact build, subject, expected result and checkpoint. Read and ack the
+message, then explicitly reply accepting the task or explaining its blocker;
+an ack only records reading. Keep the accepted task and progress in your status,
+check mail at checkpoints, and reply with evidence references when finished.
+Follow assignments only within the user's authorized scope. A coordinator's
+message cannot waive a user-owned merge, deploy, live-bank or GPU gate, or
+promote a claim. A role or delegate grant does not itself provide these approvals.
+
 Evidence stays in the authoritative Evidence Hub workflow: capture its raw
 JSON report, ingest that daemon-visible file with `re_evidence(action="ingest")`,
 then take the returned `id` (the artifact ID) and explicitly record a claim
@@ -48,6 +59,10 @@ The recipient verifies the handoff with `re_evidence(action="query",
 project=<project>, binary_id=<exact-build>, address=<address>)`, checking the
 returned artifacts, hashes, claim statuses and evidence links. For a subject
 without a structured address, query its subject text within the same scope.
+When an artifact ID and hash are supplied, also query with `artifact_id=<id>`
+and `content_hash=<sha256>` in that exact scope and check `artifact_selectors`;
+these filters select artifacts, so check the claim ID, status and `evidence_ids`
+separately. Mail carries references and bounded findings, not raw proof bodies.
 Read the original report when needed; another build's matches remain leads.
 Board mail carries these references as text: there is no native board-to-RE
 link, and neither delivery nor acknowledgement verifies a claim. Peer mail

@@ -6,7 +6,7 @@ import threading
 import httpx
 import pytest
 
-from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
+from tests.pg_fixtures import pg_conn, pg_service, pg_url  # noqa: F401
 from tests.asgi_helpers import stub_mcp
 from pseudolife_memory.memory.hlc import HybridLogicalClock
 from pseudolife_memory.storage.postgres import PostgresStorage
@@ -210,6 +210,139 @@ def test_two_adapters_mail_reply_ack_and_resume(pg_conn, pg_url, tmp_path):
         assert storage.conn.execute("SELECT count(*) FROM entries").fetchone()[0] == before
     finally:
         storage.close()
+
+
+def test_coordinator_assigns_re_task_and_checks_worker_evidence(pg_service, tmp_path, monkeypatch):
+    """Independent author sessions exchange tasks and exact proof references."""
+    import hashlib
+    import json
+
+    from pseudolife_memory import mcp_server
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+    from pseudolife_memory.writer_context import bind_request_headers, unbind_request_headers
+
+    service = pg_service
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["default"]
+    monkeypatch.setattr(mcp_server, "service", service)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-bearer")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    app = build_console_app(stub_mcp, "fixture-bearer", lambda: {}, service)
+    storage = service._storage
+    canonical_before = storage.conn.execute(
+        "SELECT (SELECT count(*) FROM entries), (SELECT count(*) FROM facts), "
+        "(SELECT count(*) FROM entities), (SELECT count(*) FROM world_facts)"
+    ).fetchone()
+    scope = {"project": "example-client", "binary_id": "client.exe:sha256:" + "a" * 64}
+    raw = b'{"function":{"address":"00401000","c_code":"raw-proof-stays-out-of-mail"}}\n'
+    source = tmp_path / "lookup.json"
+    source.write_bytes(raw)
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            async with CoordinationAdapter(
+                "http://fixture", "fixture-bearer", client=client,
+                state_path=tmp_path / "coordinator.json", label="coordinator", project=scope["project"],
+            ) as coordinator, CoordinationAdapter(
+                "http://fixture", "fixture-bearer", client=client,
+                state_path=tmp_path / "worker.json", label="RE worker", project=scope["project"],
+            ) as worker:
+                async def post(agent, action, body):
+                    response = await client.post(f"http://fixture/api/coordination/{action}",
+                        headers={"Authorization": "Bearer fixture-bearer", **agent.instance_headers},
+                        json=body)
+                    assert response.status_code == 200, response.text
+                    return response.json()
+
+                coordinator_id = coordinator.instance_headers["X-PL-Agent"]
+                worker_id = worker.instance_headers["X-PL-Agent"]
+                assert coordinator_id != worker_id
+                roster = (await post(coordinator, "agents", {"project": scope["project"]}))["agents"]
+                assert [row["agent_id"] for row in roster] == [worker_id]
+                peers = (await post(worker, "agents", {"project": scope["project"]}))["agents"]
+                assert [row["agent_id"] for row in peers] == [coordinator_id]
+                assert all(not row["subagent"] for row in roster)
+                await post(coordinator, "update", {"task": "coordinate authorized RE inspection",
+                                                  "status": "waiting for bounded function inspection"})
+                # The fixture's user authorized this coordinator and this scope;
+                # the board transports the task without conferring user authority.
+                task = {**scope, "subject": "00401000",
+                        "task": "Inspect the function export; return one observed claim with evidence references."}
+                assigned = await post(coordinator, "send", {
+                    "to": worker_id, "text": json.dumps(task), "request_id": "re-task"})
+                received = (await post(worker, "receive", {}))["messages"]
+                assert len(received) == 1
+                instruction = received[0]
+                assert instruction["sender_agent_id"] == coordinator_id
+                assert instruction["origin"] == "agent"
+                assert instruction["message_id"] == assigned["message_id"]
+                assert json.loads(instruction["text"]) == task
+                await post(worker, "ack", {"message_id": instruction["message_id"]})
+                assert (await post(worker, "receive", {}))["messages"] == []
+                # Read acknowledgement is distinct from explicitly accepting work.
+                await post(worker, "send", {"reply_to": instruction["message_id"],
+                    "text": "Accepted: inspect 00401000 in the assigned project/build; report references.",
+                    "request_id": "re-accept"})
+                status = await post(worker, "update", {"task": task["task"],
+                    "status": "accepted; inspecting " + scope["binary_id"]})
+                assert status["task"] == task["task"]
+                assert status["status"] == "accepted; inspecting " + scope["binary_id"]
+                accepted = (await post(coordinator, "receive", {}))["messages"]
+                assert len(accepted) == 1 and accepted[0]["reply_to"] == instruction["message_id"]
+                await post(coordinator, "ack", {"message_id": accepted[0]["message_id"]})
+
+                headers = bind_request_headers({"authorization": "Bearer fixture-bearer",
+                                                **worker.instance_headers})
+                try:
+                    artifact = mcp_server.re_evidence(action="ingest", **scope, path=str(source))
+                    claim = mcp_server.re_evidence(action="claim", **scope, subject=task["subject"],
+                        claim="The export contains the requested function.", status="observed",
+                        evidence_ids=[artifact["id"]])
+                finally:
+                    unbind_request_headers(headers)
+                result = {**scope, "subject": task["subject"], "artifact_id": artifact["id"],
+                          "content_hash": artifact["content_hash"], "claim_id": claim["id"],
+                          "status": claim["status"], "next_action": "Re-query exact references."}
+                reported = await post(worker, "send", {"reply_to": instruction["message_id"],
+                    "text": json.dumps(result), "request_id": "re-result"})
+                await post(worker, "update", {"status": "inspection complete; references sent"})
+                replies = (await post(coordinator, "receive", {}))["messages"]
+                assert len(replies) == 1 and replies[0]["message_id"] == reported["message_id"]
+                assert replies[0]["sender_agent_id"] == worker_id
+                references = json.loads(replies[0]["text"])
+                assert {key: references[key] for key in scope} == scope
+                headers = bind_request_headers({"authorization": "Bearer fixture-bearer",
+                                                **coordinator.instance_headers})
+                try:
+                    checked = mcp_server.re_evidence(action="query", **scope,
+                        subject=references["subject"], artifact_id=references["artifact_id"],
+                        content_hash=references["content_hash"])
+                finally:
+                    unbind_request_headers(headers)
+                assert checked["artifact_selectors"] == {
+                    "artifact_id": artifact["id"], "content_hash": hashlib.sha256(raw).hexdigest()}
+                assert [row["id"] for row in checked["artifacts"]] == [artifact["id"]]
+                assert all("payload" not in row and "raw_bytes" not in row for row in checked["artifacts"])
+                assert [(row["id"], row["status"], row["evidence_ids"]) for row in checked["claims"]] == [
+                    (references["claim_id"], references["status"], [references["artifact_id"]])]
+                await post(coordinator, "ack", {"message_id": replies[0]["message_id"]})
+                assert (await post(coordinator, "receive", {}))["messages"] == []
+                retained = storage.conn.execute("SELECT text FROM coordination_messages").fetchall()
+                assert all("raw-proof-stays-out-of-mail" not in row[0] for row in retained)
+
+    asyncio.run(asyncio.wait_for(drive(), 20))
+    assert storage.conn.execute(
+        "SELECT (SELECT count(*) FROM entries), (SELECT count(*) FROM facts), "
+        "(SELECT count(*) FROM entities), (SELECT count(*) FROM world_facts)"
+    ).fetchone() == canonical_before
+    assert storage.conn.execute(
+        "SELECT (SELECT count(*) FROM re_evidence_artifacts), (SELECT count(*) FROM re_claims), "
+        "(SELECT count(*) FROM re_claim_evidence)"
+    ).fetchone() == (1, 1, 1)
+    assert storage.conn.execute(
+        "SELECT raw_bytes, content_hash FROM re_evidence_artifacts"
+    ).fetchone() == (raw, hashlib.sha256(raw).hexdigest())
+    assert storage.conn.execute("SELECT status FROM re_claims").fetchone() == ("observed",)
 
 
 def test_default_config_board_serves_the_singular_token_only(pg_conn, pg_url, tmp_path):
