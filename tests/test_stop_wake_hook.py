@@ -42,16 +42,20 @@ STARTED = []
 
 
 def test_stop_wait_has_a_short_listener_lease_and_disarms_at_exit(tmp_path):
+    """The record advertises at most LISTENER_LEASE seconds however long the
+    wait. A 5 s wait used to end this watcher, which under load could pass
+    before the record was written or read; the digest's removal ends it."""
     _digest(tmp_path, 1, "")
     lease = tmp_path / "digests" / f"{_key()}.wake"
-    process = _start(_env(tmp_path, wait=5))
+    process = _start(_env(tmp_path, wait=3540))
     assert _wait_until(lambda: lease.exists())
     token = lease.read_text().strip()
     armed = lease.with_name(f"{_key()}.{token}.wake-armed")
     assert _wait_until(lambda: armed.exists() and len(armed.read_text().splitlines()) == 2)
     token, expiry = armed.read_text().splitlines()
     assert token == lease.read_text().strip()
-    assert token and 0 < float(expiry) - time.time() <= 61
+    assert token and 0 < float(expiry) - time.time() <= _constant("LISTENER_LEASE")
+    (tmp_path / "digests" / f"{_key()}.txt").unlink()
     code, out, err = _finish(process)
     assert (code, out, err) == (0, "", "")
     assert lease.read_text().strip() == token
@@ -410,18 +414,51 @@ def test_a_digest_that_appears_mid_wait_still_wakes(tmp_path):
     assert code == 2 and _woke(err)
 
 
-def test_a_digest_that_vanishes_ends_the_watch(tmp_path):
+def _held_at_renewal(tmp_path, renewal):
+    """Settings that pause the watcher at its ``renewal``-th listener record
+    write, which each poll makes just before it looks at the digest: the
+    first is the gap between arming and the first look, the second comes
+    after one look. Returns the settings and a ``(held, release)`` pair of
+    paths: the pause creates ``held`` and waits until ``release`` exists.
+    A non-interactive bash sources BASH_ENV first, and a function there
+    wins over PATH, which Git for Windows' bash.exe launcher rewrites."""
+    hold = tmp_path / "hold"
+    hold.mkdir()
+    (hold / "mv.sh").write_bytes(
+        b'mv() {\n'
+        b'    case "$*" in *.wake-armed)\n'
+        b'        HELD_COUNT=$((${HELD_COUNT:-0} + 1))\n'
+        b'        if [ "$HELD_COUNT" = "$HOLD_AT" ]; then\n'
+        b'            : > "$HOLD/held"\n'
+        b'            while [ ! -e "$HOLD/release" ]; do command sleep 0.05; done\n'
+        b'        fi ;;\n'
+        b'    esac\n'
+        b'    command mv "$@"\n'
+        b'}\n')
+    settings = {"BASH_ENV": (hold / "mv.sh").as_posix(),
+                "HOLD": hold.as_posix(), "HOLD_AT": str(renewal)}
+    return settings, (hold / "held", hold / "release")
+
+
+@pytest.mark.parametrize("renewal", [1, 2], ids=["before-the-first-look", "after-a-look"])
+def test_a_digest_that_vanishes_ends_the_watch(tmp_path, renewal):
     """The shim removes its digest when it exits: on Windows that is the only
     sign a watcher gets that Claude Code is gone, and a watcher that outlived
-    its session must not mark a resumed session's mail as seen."""
+    its session must not mark a resumed session's mail as seen. A digest
+    present at the Stop counts as present even when it is gone by the first
+    look: the hook used to take that look as the start of the watch, and on
+    a loaded Windows host (2 of 3 native runs, 2026-10-20) the shim's exit
+    landed in between, so the watcher waited for the digest to come back."""
     _digest(tmp_path, 3, BODY)
     _seen(tmp_path, 3)
-    process = _start(_env(tmp_path, wait=3540))
-    assert _wait_until((tmp_path / "digests" / f"{_key()}.wake").exists)
+    settings, (held, release) = _held_at_renewal(tmp_path, renewal)
+    process = _start(_env(tmp_path, wait=3540, **settings))
+    assert _wait_until(held.exists)
     (tmp_path / "digests" / f"{_key()}.txt").unlink()
-    code, out, err = _finish(process, timeout=20)
+    release.touch()
+    code, out, err = _finish(process)
     assert (code, out, err) == (0, "", "")
-    _digest(tmp_path, 1, LATER)
+    _digest(tmp_path, 4, LATER)
     assert _read_seen(tmp_path) == "3"
 
 
