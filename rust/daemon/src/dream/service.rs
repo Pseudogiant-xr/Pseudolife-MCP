@@ -935,11 +935,17 @@ fn mcp_memory_dream<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFu
             .and_then(Value::as_bool)
             .unwrap_or(true);
         let service = app.service.clone();
-        return crate::graph_write_tools::spawn_locked(
-            app,
-            call.args,
-            move |ready, _| async move { super::deep::deep(&service, &ready, apply, snippets).await },
-        );
+        // Detached (a disconnect must not cancel a half-applied write); the
+        // deep dream takes the writer lock itself, in Python's windows.
+        return Box::pin(async move {
+            let ready = app.service.ensure_init().await.map_err(internal)?;
+            let r2 = ready.clone();
+            ready
+                .writes
+                .spawn(async move { super::deep::deep(&service, &r2, apply, snippets).await })
+                .await
+                .map_err(internal)?
+        });
     }
     if !matches!(action.as_str(), "status" | "pull" | "commit" | "runs") {
         return Box::pin(async move {

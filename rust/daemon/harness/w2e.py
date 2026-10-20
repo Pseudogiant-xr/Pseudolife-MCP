@@ -137,8 +137,9 @@ graph snapshot (``graph_snapshots/graph-*.json``: the name's shape, the file
 count, every table's columns and rows with CLOCK columns null-or-not), and
 ``block_snapshots`` puts a plain file where that directory goes so the next
 snapshot write fails. In a ``memory_dream`` answer the snapshot name
-compares by shape, ``would_orphan[].age_days`` by rank, and
-``last_apply_at`` (like the meta ``deep_last_apply.ts``) by presence.
+compares by shape, ``would_orphan[].age_days`` numerically within 0.1 day
+(``orphan_age_diffs``), and ``last_apply_at`` (like the meta
+``deep_last_apply.ts``) by presence.
 
 A scenario may carry ``"extractor": {...}``, the spec of a stub
 OpenAI-style chat-completions endpoint (``stub_extractor.py``: health,
@@ -370,7 +371,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-dream-deep-no-rescore", "mcp-dream-deep-supersede-unsafe",
            "mcp-dream-deep-tombstone-any-degree", "mcp-dream-deep-dropped-merge-filed",
            "mcp-dream-deep-no-rollup", "mcp-dream-deep-no-stamp", "mcp-dream-deep-unbounded",
-           "mcp-dream-deep-kept-refiled"]
+           "mcp-dream-deep-kept-refiled",
+           # junk-owned and lesson-only ids reach the link candidates
+           # (dream-deep-exclusion).
+           "mcp-dream-deep-no-exclusion"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -3824,11 +3828,17 @@ DEEP_SEED = [
     sql("INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) VALUES "
         "('lesson:rotate-keys|owner', 'lesson:ship-release|checklist', 1), "
         "('junk:kk', 'junk:kk', 1)", after_stop=True),
-    # junk tombstones (accepted junk verdicts)
+    # junk tombstones (accepted junk verdicts), one with a NULL display
+    # (norm_name(None) is "", the norm of the "-" entity below: at degree 1
+    # only that tombstone lets the apply delete it)
     sql("INSERT INTO merge_decisions (proposal_id, entity_display, into_display, status, score, "
         "reason, decided_by, decided_at) VALUES (NULL, 'ZZ', NULL, 'accepted', NULL, 'junk: x', "
-        "'agent', 1), (NULL, 'alpha, beta', NULL, 'accepted', NULL, 'junk: y', 'agent', 2)",
-        after_stop=True),
+        "'agent', 1), (NULL, 'alpha, beta', NULL, 'accepted', NULL, 'junk: y', 'agent', 2), "
+        "(NULL, NULL, NULL, 'accepted', NULL, 'junk: z', 'agent', 3)", after_stop=True),
+    sql("INSERT INTO entities (canonical, display, etype, created_at) VALUES "
+        "('dash-node', '-', NULL, 1700000000.0)", after_stop=True),
+    sql("INSERT INTO edges (src_id, relation, dst_id, confidence, origin, asserted_at) VALUES "
+        f"({eid('dash-node')}, 'related-to', {eid('ocean')}, 0.8, NULL, 1.0)", after_stop=True),
     # scope attribution (only the dream writes it): disjoint scopes drop a pair
     sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
         f"VALUES ({eid('harbor-registry')}, 'proj-a', 1, 'derived', 0), "
@@ -3863,6 +3873,40 @@ DEEP_LONG = [
         ("Alder Node", "alder"), ("Birch Node", "birch"), ("Cedar Node", "cedar"),
         ("Dogwood Node", "dogwood"), ("Elm Node", "elm"), ("Fir Node", "fir"),
         ("Alder Node and Birch Node", "pair"), ("Cedar Node with Elm Node", "duo")])
+]
+
+# Junk-owned and lesson-only entities WITH context vectors (a note mentions
+# each), on a graph small enough that every candidate pair fits top_k: the
+# exclusion alone keeps them out of the candidates.
+DEEP_EXCLUSION_NOTES = [
+    ("Harbor Crane lifts containers at dawn.", "proj-a"),
+    ("Tide Gauge readings land in the warehouse.", "proj-a"),
+    ("Kelp Farm sensors report every hour.", "proj-a"),
+    ("The alpha, beta rollout reached the fleet.", "proj-a"),
+    ("The release checklist gained a smoke test step.", "proj-a"),
+    ("The backup window moved to Sunday night.", "proj-a"),
+]
+
+DEEP_EXCLUSION_SEED = [
+    *[store(t, source=s) for t, s in DEEP_EXCLUSION_NOTES],
+    relate("Harbor Crane", "related-to", "Ocean"),
+    relate("Tide Gauge", "related-to", "Ocean"),
+    relate("Kelp Farm", "related-to", "Ocean"),
+    # junk at any degree (a list artifact)
+    relate("alpha, beta", "related-to", "Ocean"),
+    # lesson-only, both ways: "release checklist" has only a prefers edge
+    # (as a lesson's task-type link mints it); "Backup Window" is a lesson's
+    # entity_id
+    sql("INSERT INTO entities (canonical, display, etype, created_at) VALUES "
+        "('ship-the-release', 'ship the release', NULL, 1700000000.0), "
+        "('release-checklist', 'release checklist', NULL, 1700000000.0), "
+        "('backup-window', 'Backup Window', NULL, 1700000000.0)", after_stop=True),
+    sql("INSERT INTO edges (src_id, relation, dst_id, confidence, origin, asserted_at) VALUES "
+        f"({eid('ship-the-release')}, 'prefers', {eid('release-checklist')}, 0.7, 'action', 1.0)",
+        after_stop=True),
+    deep_lesson("Backup Window", "Day", "Sunday night.", 9),
+    sql(f"UPDATE lessons SET entity_id = {eid('backup-window')} WHERE attribute = 'Day'",
+        after_stop=True),
 ]
 
 DEEP_BOUND_SEED = [
@@ -3912,6 +3956,11 @@ SCENARIOS.update({
         "config": deep_config(),
         "seed": DEEP_SEED,
         "ops": [block_snapshots(), dream("deep", apply=True), dream("status"), dream("deep")],
+    },
+    "dream-deep-exclusion": {
+        "config": deep_config(),
+        "seed": DEEP_EXCLUSION_SEED,
+        "ops": [dream("deep"), dream("deep", apply=True, snippets=False)],
     },
 })
 
@@ -4267,28 +4316,44 @@ def dream_tokens(value, ts_map: dict[float, str]):
         if key == "snapshot" and isinstance(v, str) and SNAPSHOT_NAME.fullmatch(v):
             return "<snapshot>"
         return v
-    return walk(deep_orphan_ages(value))
+    return walk(value)
 
 
-def deep_orphan_ages(value):
+# ``age_days`` is rounded to 0.1 day and each side reads its own clock: two
+# reads straddling a rounding boundary differ by one unit.
+ORPHAN_AGE_TOL_DAYS = 0.1
+
+
+def orphan_age_diffs(py, rs) -> list[str]:
     """A deep dry run's ``would_orphan[].age_days`` (wall-clock days since
-    each orphan's creation) becomes ``<age#N>``, N its rank among the
-    distinct ages in that answer: equality and order compare, the clock
-    does not."""
-    if isinstance(value, dict):
-        out = {}
-        for k, x in value.items():
-            if k == "would_orphan" and isinstance(x, list):
-                ages = sorted({o["age_days"] for o in x if isinstance(o, dict)
-                               and _number(o.get("age_days"))})
-                rank = {a: f"<age#{i}>" for i, a in enumerate(ages)}
-                x = [{**o, "age_days": rank.get(o.get("age_days"), o.get("age_days"))}
-                     if isinstance(o, dict) else o for o in x]
-            out[k] = deep_orphan_ages(x)
-        return out
-    if isinstance(value, list):
-        return [deep_orphan_ages(x) for x in value]
-    return value
+    each orphan's creation), compared pairwise by position within
+    ``ORPHAN_AGE_TOL_DAYS``, then masked as ``<age>`` on both sides in place
+    so the answer comparison checks the rest of each entry. An unpaired
+    entry or a non-number is left to that comparison."""
+    out: list[str] = []
+
+    def walk(a, b, path):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in a.keys() & b.keys():
+                if k == "would_orphan" and isinstance(a[k], list) and isinstance(b[k], list):
+                    for i, (x, y) in enumerate(zip(a[k], b[k])):
+                        if not (isinstance(x, dict) and isinstance(y, dict)):
+                            continue
+                        u, v = x.get("age_days"), y.get("age_days")
+                        if not (_number(u) and _number(v)):
+                            continue
+                        if abs(u - v) > ORPHAN_AGE_TOL_DAYS + 1e-9:
+                            out.append(f"{path}would_orphan[{i}].age_days: python {u} vs "
+                                       f"rust {v} (apart by more than {ORPHAN_AGE_TOL_DAYS} d)")
+                        x["age_days"] = y["age_days"] = "<age>"
+                else:
+                    walk(a[k], b[k], f"{path}{k}.")
+        elif isinstance(a, list) and isinstance(b, list):
+            for i, (x, y) in enumerate(zip(a, b)):
+                walk(x, y, f"{path}[{i}].")
+
+    walk(py, rs, "")
+    return out
 
 
 def _values_at(v, key: str):
@@ -5025,6 +5090,7 @@ def _run_live(name: str, scn: dict, tag: str, binary: Path, root: Path, record: 
                 if op.get("name") == "memory_dream":
                     row["diffs"] += idle_diffs(row["python"], row["rust"],
                                                max_wall + IDLE_SLACK_S)
+                    row["diffs"] += orphan_age_diffs(row["python"], row["rust"])
                     row["python"] = dream_tokens(row["python"], tsm_py)
                     row["rust"] = dream_tokens(row["rust"], tsm_rs)
                 row["python"] = rename_prefixes(row["python"], ep)

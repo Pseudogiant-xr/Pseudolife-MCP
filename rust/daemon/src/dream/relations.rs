@@ -86,7 +86,13 @@ pub(crate) async fn upsert_entity_source_at(
 ) -> Res<()> {
     crate::txn::run(client, |c| async move {
         c.execute(
-            "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at)              VALUES ($1, $2, 1, 'derived', $3)              ON CONFLICT (entity_id, source) DO UPDATE SET                count = entity_sources.count + 1,                updated_at = EXCLUDED.updated_at,                origin = CASE WHEN entity_sources.origin = 'manual'                              THEN 'manual' ELSE EXCLUDED.origin END",
+            "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) \
+             VALUES ($1, $2, 1, 'derived', $3) \
+             ON CONFLICT (entity_id, source) DO UPDATE SET \
+               count = entity_sources.count + 1, \
+               updated_at = EXCLUDED.updated_at, \
+               origin = CASE WHEN entity_sources.origin = 'manual' \
+                             THEN 'manual' ELSE EXCLUDED.origin END",
             &[&id, &source, &t],
         )
         .await
@@ -157,7 +163,8 @@ pub(crate) async fn insert_entity_proposal_row(
     let score = score.map(|s| s as f32);
     let r = crate::txn::run(client, |c| async move {
         c.query_opt(
-            "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at)              VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING RETURNING id",
+            "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING RETURNING id",
             &[&kind, &entity, &into, &score, &reason, &created_at],
         )
         .await

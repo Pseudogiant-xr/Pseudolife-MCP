@@ -9,8 +9,14 @@ and cosines (bit patterns), ``candidate_pairs`` + ``partition_candidates``,
 ``slot_duplicate_candidates``, ``variant_tokens``, ``_name_contains``,
 ``_compound_halves``, ``junk_entities`` and ``exact_duplicate_pairs``.
 
-The float32 goldens pin the host's OpenBLAS ``sdot`` kernel: they were
-recorded on an AVX-512 host (the SkylakeX kernel the Rust port reproduces).
+The float32 goldens depend on which OpenBLAS ``sdot`` kernel numpy runs.
+numpy's wheels bundle a DYNAMIC_ARCH OpenBLAS that picks a kernel per CPU
+and honours ``OPENBLAS_CORETYPE``, so every float32-dependent case is
+recorded once per distinct kernel in that build (``KERNELS``), each in a
+child process with the core type forced, and filed under ``kernels``. The
+Rust tests replay each kernel's cases against that kernel's port, whatever
+the host. The host must be able to execute every kernel (AVX-512 for
+SkylakeX).
 
 Output: ``goldens/w2e-deep-dream.json``.
 
@@ -19,13 +25,34 @@ usage: python gen_w2e_deep_dream_goldens.py
 from __future__ import annotations
 
 import json
+import os
 import random
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 TARGET = Path(__file__).resolve().parent / "goldens" / "w2e-deep-dream.json"
+
+# Golden key -> (OPENBLAS_CORETYPE value, the core name OpenBLAS then reports).
+# One entry per distinct sdot kernel in numpy's scipy-openblas build: its
+# DYNAMIC_LIST builds Prescott (generic C dot, reported as "Katmai"), Nehalem,
+# Sandybridge, Haswell and SkylakeX; every other core type aliases to one of
+# these (``src/openblas_sdot.rs``).
+KERNELS = {
+    "prescott": ("Prescott", "Katmai"),
+    "nehalem": ("Nehalem", "Nehalem"),
+    "sandybridge": ("Sandybridge", "Sandybridge"),
+    "haswell": ("Haswell", "Haswell"),
+    "skylakex": ("SkylakeX", "SkylakeX"),
+}
+
+# Vector lengths for the raw sdot cases: every kernel's blocking boundary
+# (4, 16, 32, 64) on both sides, plus the 1024-dim embedding width.
+SDOT_LENGTHS = (0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 40, 47, 48, 63, 64,
+                65, 95, 96, 97, 100, 127, 128, 129, 160, 191, 192, 255, 256, 257, 383,
+                384, 1000, 1023, 1024, 1025, 1056, 1087, 1088, 2047, 2048)
 
 
 def bits(v) -> list[str]:
@@ -42,33 +69,47 @@ def synthetic(np, i: int, dim: int):
     return np.asarray(out, dtype=np.float32)
 
 
+def sdot_input(np, seed: int, n: int):
+    """A float32 vector with a wide exponent spread (so the summation order
+    shows in the result) that both languages build exactly: a 23-bit signed
+    integer times a power of two."""
+    out = []
+    for j in range(n):
+        h = (seed * 2654435761 + j * 40503 + 12345) % 2**32
+        m = (h % (1 << 23)) - (1 << 22)
+        e = (h >> 23) % 24
+        out.append(np.float32(m) * np.float32(2.0 ** -(e + 10)))
+    return np.asarray(out, dtype=np.float32)
+
+
 def digest(v) -> str:
     import hashlib
     return hashlib.sha256(b"".join(struct.pack("<f", float(x)) for x in v)).hexdigest()
 
 
-def main() -> int:
+def kernel_payload() -> dict:
+    """Every case whose value depends on the sdot kernel, computed under the
+    core type this process was started with."""
     sys.path.insert(0, str(REPO))
     import numpy as np
 
     from pseudolife_memory.memory import graph_consolidation as gc
 
-    rng = random.Random(20261020)
+    rng = random.Random(20261021)
     out: dict = {}
 
-    # CPython set iteration order over ints.
-    orders = []
-    for n in (0, 1, 5, 9, 20, 47, 130):
-        for scale in (60, 5000, 10**9):
-            items = [rng.randint(1, scale) for _ in range(n)]
-            orders.append([items, list({i for i in items})])
-    out["set_order"] = orders
+    # Raw np.dot results (OpenBLAS cblas_sdot) over every blocking boundary.
+    sdot = []
+    for n in SDOT_LENGTHS:
+        x, y = sdot_input(np, 2 * n + 1, n), sdot_input(np, 2 * n + 2, n)
+        sdot.append({"n": n, "xy": bits([np.dot(x, y)])[0], "xx": bits([np.dot(x, x)])[0],
+                     "norm": bits([np.float32(np.linalg.norm(y))])[0]})
+    out["sdot"] = sdot
 
     # Context vectors and cosines over synthetic float32 embeddings both
     # sides generate (``synthetic``), pinned by digest and bit pattern.
     numeric = []
-    # Multiples of 32 only: the kernel's scalar tail is not reproduced (declared).
-    for dim in (1024, 96):
+    for dim in (1024, 96, 1000, 77):
         entries = [{"id": i * 7 % 61 + 1, "text": f"note {i}",
                     "embedding": synthetic(np, i, dim)} for i in range(1, 41)]
         entities = [{"id": k, "canonical": f"e{k}", "display": f"Entity {k}"} for k in range(1, 9)]
@@ -119,11 +160,23 @@ def main() -> int:
                                excluded_ids=set())
     merges, links = gc.partition_candidates(pairs, ents, edges, merge_min_similarity=0.0,
                                             fact_counts={2: 3})
+    # Junk-owned / lesson-only exclusion and pending proposals: dropped
+    # before the ranking, so a later pair takes the freed slot.
+    excluded = []
+    for excl, pending, top_k in (({2}, set(), 50), ({1, 5}, {frozenset((3, 4))}, 50),
+                                 ({3}, {frozenset((1, 2))}, 2), ({1, 2, 3, 4, 5, 6, 7}, set(), 50)):
+        got = gc.candidate_pairs(vecs, edges, ents, scope, mentions, min_similarity=0.0,
+                                 top_k=top_k, max_support_overlap=0.8,
+                                 dismissed={("harbor", "kelp-farm")}, pending_pairs=pending,
+                                 excluded_ids=excl)
+        excluded.append({"excluded_ids": sorted(excl),
+                         "pending_pairs": sorted(sorted(p) for p in pending),
+                         "top_k": top_k, "pairs": got})
     out["partition"] = {
         "entities": ents, "vectors": {str(k): bits(v) for k, v in vecs.items()},
         "mentions": {str(k): sorted(v) for k, v in mentions.items()}, "edges": edges,
         "scope": {str(k): v for k, v in scope.items()}, "pairs": pairs,
-        "merges": merges, "links": links,
+        "merges": merges, "links": links, "excluded": excluded,
     }
 
     # slot_duplicate_candidates.
@@ -143,6 +196,62 @@ def main() -> int:
                     for r in recs],
         "expected": dups,
     }
+    return out
+
+
+def child_main(kernel: str) -> int:
+    """Print this kernel's payload as JSON, after checking OpenBLAS really
+    runs the forced core type."""
+    import numpy  # noqa: F401  (loads OpenBLAS for threadpoolctl)
+    import threadpoolctl
+
+    want = KERNELS[kernel][1]
+    info = [i for i in threadpoolctl.threadpool_info() if i.get("internal_api") == "openblas"]
+    got = info[0]["architecture"] if info else None
+    if got != want:
+        print(f"OPENBLAS_CORETYPE={KERNELS[kernel][0]} gave core {got!r}, not {want!r}",
+              file=sys.stderr)
+        return 2
+    sys.stdout.write(json.dumps({"core": got, "version": info[0]["version"],
+                                 "payload": kernel_payload()}, default=list))
+    return 0
+
+
+def main() -> int:
+    sys.path.insert(0, str(REPO))
+    import numpy  # noqa: F401  (loads OpenBLAS for threadpoolctl)
+    import threadpoolctl
+
+    from pseudolife_memory.memory import graph_consolidation as gc
+
+    rng = random.Random(20261020)
+    out: dict = {}
+
+    # CPython set iteration order over ints.
+    orders = []
+    for n in (0, 1, 5, 9, 20, 47, 130):
+        for scale in (60, 5000, 10**9):
+            items = [rng.randint(1, scale) for _ in range(n)]
+            orders.append([items, list({i for i in items})])
+    out["set_order"] = orders
+
+    info = [i for i in threadpoolctl.threadpool_info() if i.get("internal_api") == "openblas"]
+    out["openblas"] = {"version": info[0]["version"], "host_core": info[0]["architecture"]}
+    kernels = {}
+    for name, (coretype, _) in KERNELS.items():
+        env = {**os.environ, "OPENBLAS_CORETYPE": coretype}
+        res = subprocess.run([sys.executable, __file__, "--kernel", name], env=env,
+                             capture_output=True, text=True, check=False)
+        if res.returncode != 0:
+            sys.stderr.write(res.stderr)
+            return res.returncode
+        child = json.loads(res.stdout)
+        if child["version"] != out["openblas"]["version"]:
+            print(f"{name}: OpenBLAS {child['version']} != {out['openblas']['version']}",
+                  file=sys.stderr)
+            return 2
+        kernels[name] = child["payload"]
+    out["kernels"] = kernels
 
     names = ["Gemma 3 E4B", "gemma-3-e2b", "Qwen3-8B", "qwen3 8b", "Q4_K_M", "q4_k_xl",
              "UD-Q4_K_XL", "model q4_0", "v0.2.0", "release 3.6", "26B", "4.5MB", "1.2KB",
@@ -203,4 +312,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--kernel":
+        raise SystemExit(child_main(sys.argv[2]))
     raise SystemExit(main())

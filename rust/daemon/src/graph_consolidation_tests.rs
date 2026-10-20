@@ -2,6 +2,7 @@
 //! (`harness/gen_w2e_deep_dream_goldens.py`).
 
 use super::*;
+use crate::openblas_sdot::Kernel;
 use sha2::{Digest, Sha256};
 
 const GOLDEN: &str = include_str!("../harness/goldens/w2e-deep-dream.json");
@@ -76,9 +77,22 @@ fn set_order_matches_cpython() {
     }
 }
 
+/// Run `f` once per sdot kernel with that kernel forced and its goldens.
+fn per_kernel(f: impl Fn(&Value)) {
+    let g = golden();
+    for k in Kernel::ALL {
+        crate::openblas_sdot::with_kernel(k, || f(&g["kernels"][k.name()]));
+    }
+}
+
 #[test]
 fn context_vectors_and_cosines_are_numpy_bit_exact() {
-    for case in golden()["numeric"].as_array().unwrap() {
+    per_kernel(context_vectors_case);
+}
+
+fn context_vectors_case(g: &Value) {
+    let kernel = crate::openblas_sdot::active();
+    for case in g["numeric"].as_array().unwrap() {
         let dim = case["dim"].as_u64().unwrap();
         let entries: Vec<DEntry> = case["entry_ids"]
             .as_array()
@@ -111,7 +125,7 @@ fn context_vectors_and_cosines_are_numpy_bit_exact() {
             .iter()
             .map(|(k, v)| (k.to_string(), digest(v)))
             .collect();
-        assert_eq!(got, want, "dim {dim} vectors");
+        assert_eq!(got, want, "{kernel:?} dim {dim} vectors");
         let mentions: BTreeMap<String, Vec<i64>> =
             serde_json::from_value(case["mentions"].clone()).unwrap();
         let got: BTreeMap<String, Vec<i64>> = ctx
@@ -129,7 +143,7 @@ fn context_vectors_and_cosines_are_numpy_bit_exact() {
             assert_eq!(
                 hex::encode(c.to_le_bytes()),
                 bits.as_str().unwrap(),
-                "dim {dim} {pair}"
+                "{kernel:?} dim {dim} {pair}"
             );
         }
         let none = HashSet::new();
@@ -154,14 +168,17 @@ fn context_vectors_and_cosines_are_numpy_bit_exact() {
         assert_eq!(
             Value::Array(got),
             case["candidates"],
-            "dim {dim} candidates"
+            "{kernel:?} dim {dim} candidates"
         );
     }
 }
 
 #[test]
 fn candidate_filters_and_partition_match_python() {
-    let g = golden();
+    per_kernel(partition_case);
+}
+
+fn partition_case(g: &Value) {
     let p = &g["partition"];
     let entities: Vec<Entity> = p["entities"]
         .as_array()
@@ -222,11 +239,43 @@ fn candidate_filters_and_partition_match_python() {
     assert_eq!(Value::Array(merges), p["merges"]);
     let links: Vec<Value> = links.iter().map(candidate_json).collect();
     assert_eq!(Value::Array(links), p["links"]);
+    // Excluded ids (junk-owned, lesson-only) and pending pairs drop before
+    // the top-k cut.
+    let excluded = p["excluded"].as_array().unwrap();
+    assert!(excluded.len() >= 3);
+    for case in excluded {
+        let excl: HashSet<i64> = serde_json::from_value(case["excluded_ids"].clone()).unwrap();
+        let pending: HashSet<(i64, i64)> =
+            serde_json::from_value::<Vec<(i64, i64)>>(case["pending_pairs"].clone())
+                .unwrap()
+                .into_iter()
+                .collect();
+        let got = candidate_pairs(
+            &ctx,
+            &edges,
+            &entities,
+            &scope,
+            &dups,
+            &CandidateOpts {
+                min_similarity: 0.0,
+                top_k: case["top_k"].as_i64().unwrap(),
+                dismissed: &dismissed,
+                max_support_overlap: 0.8,
+                pending_pairs: &pending,
+                excluded_ids: &excl,
+            },
+        );
+        let got: Vec<Value> = got.iter().map(candidate_json).collect();
+        assert_eq!(Value::Array(got), case["pairs"], "excluded {excl:?}");
+    }
 }
 
 #[test]
 fn slot_duplicates_match_python() {
-    let g = golden();
+    per_kernel(slot_duplicates_case);
+}
+
+fn slot_duplicates_case(g: &Value) {
     let s = &g["slot_duplicates"];
     let records: Vec<SlotRecord> = s["records"]
         .as_array()
@@ -322,4 +371,61 @@ fn python_slices_and_rounding() {
     assert_eq!(py_round(0.98285, 4), 0.9829);
     assert_eq!(py_round(0.98275, 4), 0.9828);
     assert_eq!(py_round(-0.04, 1), -0.0);
+    // Python's sort keys tie -0.0 with 0.0; total_cmp would not.
+    assert_eq!(py_float_cmp(-0.0, 0.0), std::cmp::Ordering::Equal);
+    assert_eq!(py_float_cmp(0.5, -0.0), std::cmp::Ordering::Greater);
+}
+
+#[test]
+fn signed_zero_similarities_tie_and_ids_decide() {
+    // Two orthogonal pairs, one rounding to -0.0 and one to 0.0: Python's
+    // `(-similarity, src_id, dst_id)` key orders them by id alone.
+    let entities: Vec<Entity> = (1..=4)
+        .map(|k| Entity {
+            id: k,
+            canonical: format!("c{k}"),
+            display: format!("Name {k}"),
+        })
+        .collect();
+    let v = |a: f32, b: f32| vec![a, b];
+    let vectors = HashMap::from([
+        (1, v(1.0, 0.0)),
+        (2, v(-0.00001, 1.0)),
+        (3, v(0.0, -1.0)),
+        (4, v(0.00001, 1.0)),
+    ]);
+    let ctx = Contexts {
+        vectors,
+        mentions: HashMap::new(),
+    };
+    let (none, pending, dismissed) = (HashSet::new(), HashSet::new(), HashSet::new());
+    let got = candidate_pairs(
+        &ctx,
+        &[],
+        &entities,
+        &BTreeMap::new(),
+        &[],
+        &CandidateOpts {
+            min_similarity: -0.5,
+            top_k: 10,
+            dismissed: &dismissed,
+            max_support_overlap: 1.0,
+            pending_pairs: &pending,
+            excluded_ids: &none,
+        },
+    );
+    let zeros: Vec<(i64, i64, u64)> = got
+        .iter()
+        .filter(|c| c.similarity == 0.0)
+        .map(|c| (c.src_id, c.dst_id, c.similarity.to_bits()))
+        .collect();
+    assert!(
+        zeros.iter().any(|z| z.2 == (-0.0f64).to_bits()),
+        "{zeros:?}"
+    );
+    assert!(zeros.iter().any(|z| z.2 == 0f64.to_bits()), "{zeros:?}");
+    let ids: Vec<(i64, i64)> = zeros.iter().map(|z| (z.0, z.1)).collect();
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    assert_eq!(ids, sorted);
 }

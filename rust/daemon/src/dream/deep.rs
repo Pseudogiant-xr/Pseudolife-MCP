@@ -3,18 +3,20 @@
 //! Python: `service_dream.py` `deep_dream` (3355-3675) and its helpers
 //! `_file_analyzer_duplicates` (6095-6156), `_unreachable_orphans` /
 //! `_sweep_unreachable_orphans` (6158-6203), `_write_graph_snapshot[_locked]`
-//! (6205-6229), `_edge_label`, `_merge_labels`, `_attach_candidate_snippets`
-//! (6253-6340) and `_enrich_merge_proposals` (6342-6420); `service.py`
+//! (6205-6228), `_edge_label`, `_merge_labels`, `_attach_candidate_snippets`
+//! (6253-6340) and `_enrich_merge_proposals` (6342-6413); `service.py`
 //! `_kept_junk_norms` (499-503), `_slot_duplicate_listings` (7989-8001) and
 //! `_curation_records` (8766-8785); the pure half in `graph_consolidation.rs`.
 //!
-//! The tool runs detached under the writer lock (`spawn_locked`), held for
-//! the whole call: Python takes its service lock in windows (the read
-//! snapshot; then the snapshot file; then the apply writes; then the stamp
-//! and the re-read) and computes between them, tolerating a concurrent edit
-//! there. Here the windows run in the same order and nothing interleaves
-//! (declared). Every apply write is its own statement or transaction, as
-//! each `storage/postgres.py` call is.
+//! The tool runs detached. Python takes its service lock in windows (the
+//! read snapshot; a dry run's orphan census; an apply's snapshot file, then
+//! its writes, then the stamp and the re-read) and computes between them.
+//! Here the writer lock is held for the read snapshot and the computation
+//! runs on a blocking thread; a dry run releases the lock for it and takes
+//! it again for the census, as Python does, while an apply keeps it from
+//! the read to the end, so nothing interleaves with its writes (declared).
+//! Every apply write is its own statement or transaction, as each
+//! `storage/postgres.py` call is.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -951,19 +953,88 @@ fn edge_label(e: &GEdge, disp: &HashMap<i64, String>) -> Value {
            "confidence": e.confidence})
 }
 
-/// `service_dream.deep_dream` (3355-3675), unbounded.
-async fn deep_dream(
-    service: &Service,
-    ready: &Ready,
-    apply: bool,
+/// What the lock-free half of `deep_dream` computes from the read snapshot.
+struct Plan {
+    ld: Loaded,
+    disp: HashMap<i64, String>,
+    deg: BTreeMap<i64, usize>,
+    review_edges: Vec<gr::Edge>,
+    rescore: Vec<(i64, f64)>,
+    violations: Vec<GEdge>,
+    dups: Vec<(i64, i64)>,
+    junk: Vec<gc::Junk>,
+    junk_owned: HashSet<i64>,
+    entry_tokens: Vec<(i64, BTreeSet<String>)>,
+    contexts: Contexts,
+    merge_cands: Vec<MergeCand>,
+    candidates: Vec<Value>,
+    merge_proposals: Vec<Value>,
+    lesson_dups: Vec<Value>,
+    world_dups: Vec<Value>,
+    totals: Value,
+    facts_by_norm: HashMap<String, i64>,
+}
+
+/// `_enrich_merge_proposals` over `pending`, with the snapshot's evidence.
+#[allow(clippy::result_large_err)]
+fn merge_rows(
+    ld: &Loaded,
+    contexts: &Contexts,
+    entry_tokens: &[(i64, BTreeSet<String>)],
+    deg: &BTreeMap<i64, usize>,
+    cfg: &DeepDreamConfig,
+    pending: &[EntityProposal],
     include_snippets: bool,
-) -> Result<Map<String, Value>, ToolError> {
-    let cfg = &service.config.memory.deep_dream;
-    let client = ready.storage.client();
-    let ld = crate::txn::with_client(client, |c| async move { load(c).await })
-        .await
-        .map_err(internal)?;
-    let (lesson_recs, world_recs) = curation_records(ready, cfg.snippet_max_chars);
+) -> Result<Vec<Value>, ToolError> {
+    let snippets = snippets_for(ld, contexts, entry_tokens, cfg);
+    let enrich = Enrich {
+        deg,
+        facts: &ld.fact_counts,
+        display: snippets.disp.clone(),
+        etype: &ld.etype,
+        scope_map: &ld.scope_map,
+        snippets: &snippets,
+    };
+    enrich.rows(pending, include_snippets)
+}
+
+fn snippets_for<'a>(
+    ld: &'a Loaded,
+    contexts: &'a Contexts,
+    entry_tokens: &'a [(i64, BTreeSet<String>)],
+    cfg: &DeepDreamConfig,
+) -> Snippets<'a> {
+    Snippets {
+        by_id: ld.entries.iter().map(|e| (e.id, e)).collect(),
+        canon: ld
+            .entities
+            .iter()
+            .map(|e| (e.id, e.canonical.as_str()))
+            .collect(),
+        disp: ld
+            .entities
+            .iter()
+            .map(|e| (e.id, e.display.as_str()))
+            .collect(),
+        traces: &ld.traces,
+        mentions: &contexts.mentions,
+        entry_tokens,
+        k: cfg.max_context_snippets,
+        max_chars: cfg.snippet_max_chars,
+    }
+}
+
+/// Steps A and B, the candidate evidence, the merge-queue enrichment and
+/// the curation listings: pure computation over the read snapshot, which
+/// Python runs outside its service lock (`service_dream.py:3385-3466`).
+#[allow(clippy::result_large_err)]
+fn plan(
+    ld: Loaded,
+    lesson_recs: Vec<SlotRecord>,
+    world_recs: Vec<SlotRecord>,
+    cfg: &DeepDreamConfig,
+    include_snippets: bool,
+) -> Result<Plan, ToolError> {
     let entities = &ld.entities;
     let edges = &ld.edges;
     let disp: HashMap<i64, String> = entities.iter().map(|e| (e.id, e.display.clone())).collect();
@@ -975,7 +1046,10 @@ async fn deep_dream(
     let deg = gr::degree_counts(&review_edges);
 
     let rescore = gc::rescore_edges(edges, &disp);
-    let violations = gc::hard_violation_edges(edges, &disp);
+    let violations: Vec<GEdge> = gc::hard_violation_edges(edges, &disp)
+        .into_iter()
+        .cloned()
+        .collect();
     let dups = gc::exact_duplicate_pairs(entities, &deg);
     let mut known_norms: HashSet<String> = entities.iter().map(|e| e.canonical.clone()).collect();
     known_norms.extend(ld.aliases.iter().map(|a| norm_name(a)));
@@ -1010,6 +1084,9 @@ async fn deep_dream(
     .map_err(internal)?;
     let mut excluded: HashSet<i64> = junk_owned.clone();
     excluded.extend(gr::lesson_only_ids(&review_edges, &ld.lesson_refs));
+    if crate::mutants::active("mcp-dream-deep-no-exclusion") {
+        excluded.clear();
+    }
     let near = gc::candidate_pairs(
         &contexts,
         edges,
@@ -1035,19 +1112,7 @@ async fn deep_dream(
     merge_cands.retain(|m| gr::merge_veto(&m.from, &m.into).is_none());
     merge_cands.retain(|m| !junk_owned.contains(&m.from_id) && !junk_owned.contains(&m.into_id));
 
-    let snippets = Snippets {
-        by_id: ld.entries.iter().map(|e| (e.id, e)).collect(),
-        canon: canon.clone(),
-        disp: entities
-            .iter()
-            .map(|e| (e.id, e.display.as_str()))
-            .collect(),
-        traces: &ld.traces,
-        mentions: &contexts.mentions,
-        entry_tokens: &entry_tokens,
-        k: cfg.max_context_snippets,
-        max_chars: cfg.snippet_max_chars,
-    };
+    let snippets = snippets_for(&ld, &contexts, &entry_tokens, cfg);
     let candidates: Vec<Value> = link_cands
         .iter()
         .map(|c| {
@@ -1060,15 +1125,15 @@ async fn deep_dream(
             Value::Object(m)
         })
         .collect();
-    let enrich = Enrich {
-        deg: &deg,
-        facts: &ld.fact_counts,
-        display: snippets.disp.clone(),
-        etype: &ld.etype,
-        scope_map: &ld.scope_map,
-        snippets: &snippets,
-    };
-    let mut merge_proposals = enrich.rows(&ld.pending_props, include_snippets)?;
+    let merge_proposals = merge_rows(
+        &ld,
+        &contexts,
+        &entry_tokens,
+        &deg,
+        cfg,
+        &ld.pending_props,
+        include_snippets,
+    )?;
     let lesson_dups = gc::slot_duplicate_candidates(
         &lesson_recs,
         cfg.curation_min_similarity,
@@ -1091,16 +1156,101 @@ async fn deep_dream(
         }
     }
 
+    Ok(Plan {
+        ld,
+        disp,
+        deg,
+        review_edges,
+        rescore,
+        violations,
+        dups,
+        junk,
+        junk_owned,
+        entry_tokens,
+        contexts,
+        merge_cands,
+        candidates,
+        merge_proposals,
+        lesson_dups,
+        world_dups,
+        totals,
+        facts_by_norm,
+    })
+}
+
+/// `service_dream.deep_dream` (3355-3675), unbounded. The writer lock is
+/// held for the read snapshot; the computation then runs on a blocking
+/// thread. The dry run computes with the lock released and takes it again
+/// for the orphan census alone, as Python does; the apply keeps it from the
+/// snapshot read to the end (Python releases it between its windows;
+/// declared).
+#[allow(clippy::result_large_err)]
+async fn deep_dream(
+    service: &Service,
+    ready: &Ready,
+    apply: bool,
+    include_snippets: bool,
+) -> Result<Map<String, Value>, ToolError> {
+    let cfg = service.config.memory.deep_dream.clone();
+    let client = ready.storage.client();
+    let read_lock = ready.write.lock().await;
+    let ld = crate::txn::with_client(client, |c| async move { load(c).await })
+        .await
+        .map_err(internal)?;
+    let (lesson_recs, world_recs) = curation_records(ready, cfg.snippet_max_chars);
+    let _apply_lock = if apply {
+        Some(read_lock)
+    } else {
+        drop(read_lock);
+        None
+    };
+    let Plan {
+        ld,
+        disp,
+        deg,
+        review_edges,
+        rescore,
+        violations,
+        dups,
+        junk,
+        junk_owned,
+        entry_tokens,
+        contexts,
+        merge_cands,
+        candidates,
+        merge_proposals,
+        lesson_dups,
+        world_dups,
+        totals,
+        facts_by_norm,
+    } = {
+        let cfg = cfg.clone();
+        tokio::task::spawn_blocking(move || {
+            plan(ld, lesson_recs, world_recs, &cfg, include_snippets)
+        })
+        .await
+        .map_err(internal)??
+    };
+    let entities = &ld.entities;
+    let canon: HashMap<i64, &str> = entities
+        .iter()
+        .map(|e| (e.id, e.canonical.as_str()))
+        .collect();
+
     if !apply {
-        let would_orphan = unreachable_orphans(
-            client,
-            cfg,
-            &entry_tokens,
-            &contexts.mentions,
-            &facts_by_norm,
-            &HashSet::new(),
-        )
-        .await?;
+        // The census reads the bank: Python takes its lock again for it.
+        let would_orphan = {
+            let _census = ready.write.lock().await;
+            unreachable_orphans(
+                client,
+                &cfg,
+                &entry_tokens,
+                &contexts.mentions,
+                &facts_by_norm,
+                &HashSet::new(),
+            )
+            .await?
+        };
         let census: Vec<Value> = would_orphan
             .iter()
             .take(200)
@@ -1235,7 +1385,8 @@ async fn deep_dream(
     .await
     .map_err(internal)?
     .iter()
-    .map(|r| norm_name(&r.get::<_, String>(0)))
+    // `entity_display` is nullable; `norm_name(None)` is "".
+    .map(|r| norm_name(r.get::<_, Option<String>>(0).as_deref().unwrap_or("")))
     .collect();
     let pending =
         crate::txn::with_client(client, |c| async move { pending_entity_proposals(c).await })
@@ -1391,7 +1542,7 @@ async fn deep_dream(
         let cap = cfg.orphan_max_per_apply;
         let census = unreachable_orphans(
             client,
-            cfg,
+            &cfg,
             &entry_tokens,
             &contexts.mentions,
             &facts_by_norm,
@@ -1431,7 +1582,22 @@ async fn deep_dream(
         crate::txn::with_client(client, |c| async move { pending_entity_proposals(c).await })
             .await
             .map_err(internal)?;
-    merge_proposals = enrich.rows(&pending, include_snippets)?;
+    let merge_proposals = {
+        let cfg = cfg.clone();
+        tokio::task::spawn_blocking(move || {
+            merge_rows(
+                &ld,
+                &contexts,
+                &entry_tokens,
+                &deg,
+                &cfg,
+                &pending,
+                include_snippets,
+            )
+        })
+        .await
+        .map_err(internal)??
+    };
     let mut out = Map::new();
     out.insert("applied".into(), json!(true));
     out.insert("rescored".into(), json!(rescore.len()));

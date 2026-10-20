@@ -7,11 +7,9 @@
 //! * a context vector is `np.mean(np.stack(embs), axis=0)`: a float32 sum in
 //!   row order (the iteration order of the Python `set` of entry ids, which
 //!   [`py_int_set_order`] reproduces), divided by the count;
-//! * `np.dot` and `np.linalg.norm` on float32 vectors call OpenBLAS `sdot`;
-//!   [`sdot`] is its AVX-512 (SkylakeX) kernel, fused multiply-adds into
-//!   four 16-lane accumulators, folded as the kernel folds them. An
-//!   AVX2-only host runs OpenBLAS's Haswell kernel instead and can differ
-//!   from this in the last float32 bit (declared).
+//! * `np.dot` and `np.linalg.norm` on float32 vectors call OpenBLAS `sdot`,
+//!   whose summation order depends on the kernel numpy's OpenBLAS picks for
+//!   the CPU; [`sdot`] is `crate::openblas_sdot`'s port of that choice.
 //!
 //! Python string semantics carried over: `str.lower()` is
 //! `storage::graph::py_lower`, `str.strip()`/`\s` is `str.isspace`,
@@ -26,6 +24,7 @@ use serde_json::{Map, Value, json};
 use crate::graph_review::{Entity, ci_eq, round3, token_set};
 use crate::graph_review_tools::actions::{edge_confidence, is_hard_type_violation};
 use crate::junk_names::{is_concat_artifact, is_list_artifact, is_metric_reading};
+use crate::openblas_sdot::sdot;
 use crate::storage::graph::{norm_name, py_lower};
 use crate::stores::cortex::{py_casefold, py_isspace};
 
@@ -59,6 +58,16 @@ fn py_strip(s: &str) -> &str {
 /// Python `round(x, n)`: correctly rounded on the exact binary value.
 pub(crate) fn py_round(x: f64, n: usize) -> f64 {
     format!("{x:.n$}").parse().unwrap_or(x)
+}
+
+/// A Python sort key's float comparison: `-0.0` and `0.0` tie (so the next
+/// key decides), otherwise IEEE order (NaN, which the keys never hold, last).
+pub(crate) fn py_float_cmp(a: f64, b: f64) -> std::cmp::Ordering {
+    if a == b {
+        std::cmp::Ordering::Equal
+    } else {
+        a.total_cmp(&b)
+    }
 }
 
 /// `seq[:n]` for a Python int `n` (a negative `n` counts from the end).
@@ -250,78 +259,6 @@ pub(crate) fn py_int_set_order(items: impl IntoIterator<Item = i64>) -> Vec<i64>
         }
     }
     table.into_iter().flatten().collect()
-}
-
-/// OpenBLAS `sdot` (x86_64, SkylakeX kernel), unit strides.
-pub(crate) fn sdot(x: &[f32], y: &[f32]) -> f32 {
-    let n = x.len().min(y.len());
-    let n1 = n & !31;
-    let mut dot = if n1 > 0 {
-        sdot_kernel(&x[..n1], &y[..n1])
-    } else {
-        0.0
-    };
-    for i in n1..n {
-        dot = y[i].mul_add(x[i], dot);
-    }
-    dot
-}
-
-/// `sdot_kernel_16` (`sdot_microk_skylakex-2.c`) for `n` a multiple of 32.
-fn sdot_kernel(x: &[f32], y: &[f32]) -> f32 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if std::arch::is_x86_feature_detected!("fma") {
-            // SAFETY: the FMA feature was detected at runtime.
-            return unsafe { sdot_kernel_fma(x, y) };
-        }
-    }
-    sdot_kernel_body(x, y)
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "fma,avx2")]
-unsafe fn sdot_kernel_fma(x: &[f32], y: &[f32]) -> f32 {
-    sdot_kernel_body(x, y)
-}
-
-#[inline(always)]
-fn sdot_kernel_body(x: &[f32], y: &[f32]) -> f32 {
-    let n = x.len();
-    let n64 = n & !63;
-    let mut wide = [[0f32; 16]; 4];
-    let mut i = 0;
-    while i < n64 {
-        for (k, acc) in wide.iter_mut().enumerate() {
-            let base = i + 16 * k;
-            for (l, a) in acc.iter_mut().enumerate() {
-                *a = x[base + l].mul_add(y[base + l], *a);
-            }
-        }
-        i += 64;
-    }
-    // The 512-bit accumulators fold into the 256-bit ones (low + high).
-    let mut acc = [[0f32; 8]; 4];
-    for k in 0..4 {
-        for l in 0..8 {
-            acc[k][l] = wide[k][l] + wide[k][l + 8];
-        }
-    }
-    while i < n {
-        for (k, a8) in acc.iter_mut().enumerate() {
-            let base = i + 8 * k;
-            for (l, a) in a8.iter_mut().enumerate() {
-                *a = x[base + l].mul_add(y[base + l], *a);
-            }
-        }
-        i += 32;
-    }
-    let mut s = [0f32; 8];
-    for l in 0..8 {
-        s[l] = ((acc[0][l] + acc[1][l]) + acc[2][l]) + acc[3][l];
-    }
-    let h = [s[0] + s[4], s[1] + s[5], s[2] + s[6], s[3] + s[7]];
-    (h[0] + h[1]) + (h[2] + h[3])
 }
 
 /// `_l2`: `v / float(np.linalg.norm(v))` in float32, unchanged at norm 0.
@@ -553,8 +490,7 @@ pub(crate) fn candidate_pairs(
         }
     }
     scored.sort_by(|a, b| {
-        b.similarity
-            .total_cmp(&a.similarity)
+        py_float_cmp(b.similarity, a.similarity)
             .then(a.src_id.cmp(&b.src_id))
             .then(a.dst_id.cmp(&b.dst_id))
     });
@@ -654,7 +590,7 @@ pub(crate) fn slot_duplicate_candidates(
         }
     }
     scored.sort_by(|x, y| {
-        y.0.total_cmp(&x.0)
+        py_float_cmp(y.0, x.0)
             .then_with(|| x.1.cmp(&y.1))
             .then_with(|| x.2.cmp(&y.2))
     });
