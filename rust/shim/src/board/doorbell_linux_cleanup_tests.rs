@@ -203,6 +203,31 @@ fn stat_of_a_process_reaped_after_open_counts_as_absent() {
     );
 }
 
+#[test]
+fn group_scan_treats_a_task_being_released_as_dead() {
+    // Captured on Linux 6.6 mid-scan: once release_task drops the signal struct,
+    // the kernel prints state X with ppid 0 and process group and session -1.
+    let releasing = b"611857 (true) X 0 -1 -1 0 -1 4227084 82 0 0 0 0 0 0 0 20 0 0 0 12629729 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 17 6 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+    assert!(stat_from_read(Ok(releasing.to_vec()), 611857).unwrap().is_none());
+    assert!(stat_from_read(Ok(releasing.to_vec()), 611858).is_err());
+    let home = Home::new();
+    let leader = stat(400, b'S', 400, 400, 123);
+    fs::create_dir(home.0.join("400")).unwrap();
+    fs::write(home.0.join("400/stat"), &leader).unwrap();
+    fs::create_dir(home.0.join("611857")).unwrap();
+    fs::write(home.0.join("611857/stat"), releasing).unwrap();
+    let leader = parse_stat(&leader, 400).unwrap();
+    assert!(group_is_terminal(&home.0, &leader).unwrap());
+    // The unreaped leader can never be X, so its read still fails closed.
+    fs::write(
+        home.0.join("400/stat"),
+        b"400 (leader) X 0 -1 -1 0 -1 4227084 82 0 0 0 0 0 0 0 20 0 0 0 123 0\n",
+    )
+    .unwrap();
+    assert!(group_is_terminal(&home.0, &leader).is_err());
+    fs::remove_dir_all(&home.0).unwrap();
+}
+
 fn stat(pid: u32, state: u8, group: u32, session: u32, started: u64) -> Vec<u8> {
     let mut fields = vec![
         char::from(state).to_string(),
