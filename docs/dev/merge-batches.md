@@ -93,12 +93,19 @@ the batch head with a pull request event naming the batch's base. If the
 check would fail, `build` drops every member whose own diff changes those
 inputs, naming the other members that change them too, and merges the rest
 again from master. `open` comments on and unlabels each dropped member, as
-it does after a conflict. Its author merges master forward once the batch
-lands, regenerates the census with `python rust/producer_census.py`, waits
+it does after a conflict. Its author merges master forward once master
+holds the rest of the batch, regenerates the census with `python rust/producer_census.py`, waits
 for CI and re-applies the label. A census that is stale while no member
 touches its inputs is printed as report-only and left alone, as CI leaves
 it. Before the push, `open` runs the same check and refuses if it would
 fail, so a plan built without it cannot reach CI.
+
+That check runs the batch head's census script, which is member code, so
+`build` (including `--dry-run`) executes it on this machine, as the full
+suite will. It runs with only the environment Python and git need to start,
+without tokens such as `GH_TOKEN`. The list of inputs is read from master's
+copy of the script; a member that changes the script changes one of the
+inputs, so it is caught either way.
 
 The script never resolves a conflict (it merges with `rerere` off, so a
 remembered resolution is not replayed either) and never force-pushes. If

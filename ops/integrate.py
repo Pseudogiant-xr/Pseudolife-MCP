@@ -316,11 +316,26 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
         print(f"  dropped #{m.number}: {reason}")
 
 
-def _census_inputs(root: Path) -> set[str]:
-    """The census module's own CURRENCY_INPUTS, as the checked-out tree has it."""
-    spec = importlib.util.spec_from_file_location("_batch_producer_census", root / CENSUS)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+# The census script is member code, so it runs without the operator's
+# credentials: only what Python and git need to start, on Windows or POSIX.
+CENSUS_ENV = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
+              "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "LANG", "LC_ALL",
+              "PYTHONUTF8", "PYTHONIOENCODING")
+
+
+def _census_inputs(root: Path, base_sha: str) -> set[str]:
+    """The census module's own CURRENCY_INPUTS, read from master's copy of
+    it (trusted, and a member changing the script is caught because the
+    script is one of them); the batch head's copy only when master has none."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = root / CENSUS
+        shown = git("show", f"{base_sha}:{CENSUS}", check=False)
+        if shown.returncode == 0:
+            path = Path(tmp) / "producer_census.py"
+            path.write_text(shown.stdout, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("_batch_producer_census", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
     return set(module.CURRENCY_INPUTS)
 
 
@@ -334,13 +349,17 @@ def _census_ci_fails(root: Path, base_sha: str) -> bool:
         event = Path(tmp) / "event.json"
         event.write_text(json.dumps({"pull_request": {"base": {"sha": base_sha}}}),
                          encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k.upper() in CENSUS_ENV}
         proc = _run([sys.executable, CENSUS, "--ci-check"], check=False, cwd=root,
-                    env={**os.environ, "GITHUB_EVENT_PATH": str(event)})
+                    env={**env, "GITHUB_EVENT_PATH": str(event)})
     if proc.returncode == 1 and "producer census is stale" in proc.stderr:
         return True
     if proc.returncode != 0:
         raise Refusal(f"`python {CENSUS} --ci-check` failed ({proc.returncode}) on "
-                      f"the batch head: {proc.stderr.strip() or proc.stdout.strip()}")
+                      f"the batch head: {proc.stderr.strip() or proc.stdout.strip()}\n"
+                      "CI would fail the same way. Run it on a checkout of each "
+                      "member's head to find the one that breaks it, remove that "
+                      "member's label, and build again")
     if "report only" in proc.stdout:
         print("  producer census is stale on the batch head (report only, as in "
               "CI: no member changes its inputs)")
@@ -354,7 +373,7 @@ def _census_culprits(plan: Plan) -> list[tuple[Member, list[str]]]:
     root = Path(_out("rev-parse", "--show-toplevel"))
     if not (root / CENSUS).is_file() or not _census_ci_fails(root, plan.base_sha):
         return []
-    inputs = _census_inputs(root)
+    inputs = _census_inputs(root, plan.base_sha)
     culprits = [(m, sorted(_changed(m.sha, plan.base_sha) & inputs)) for m in plan.merged]
     culprits = [(m, files) for m, files in culprits if files]
     if not culprits:
@@ -370,9 +389,9 @@ def _census_reason(member: Member, files: list[str], culprits: list[Member]) -> 
             "them and left this batch too" if others else "")
     return (f"changes the producer census inputs ({', '.join(files)}) while the "
             "committed census is stale on the batch head, so CI's census check "
-            f"(`python {CENSUS} --ci-check`) would fail{also}; once this batch "
-            f"merges, merge {BASE} forward, regenerate it with `python {CENSUS}`, "
-            "let CI pass, then re-apply the label")
+            f"(`python {CENSUS} --ci-check`) would fail{also}; once {BASE} holds "
+            f"the rest of the batch, merge {BASE} forward, regenerate the census "
+            f"with `python {CENSUS}`, let CI pass, then re-apply the label")
 
 
 def _merge_batch(plan: Plan, members: list[Member]) -> None:
@@ -587,12 +606,11 @@ def open_(args: argparse.Namespace) -> int:
         culprits = _census_culprits(plan)
         if culprits:
             who = ", ".join(f"#{m.number} ({', '.join(files)})" for m, files in culprits)
-            numbers = ", ".join(f"#{m.number}" for m, _ in culprits)
             raise Refusal(f"CI's producer census check would fail on {plan.head[:12]}: "
-                          f"the census is stale and {who} change its inputs. Nothing "
-                          f"is fixed inside a batch: remove `{plan.label}` from "
-                          f"{numbers}, switch back with `git switch --detach "
-                          f"{REMOTE}/{BASE}`, remove the local branch and build again")
+                          f"the census is stale and its inputs are changed by {who}. "
+                          f"Nothing is fixed inside a batch: switch back with `git "
+                          f"switch --detach {REMOTE}/{BASE}`, remove the local branch "
+                          "and build again, which drops them with a comment")
     if url is None:
         try:
             git("push", "-q", "-u", REMOTE, plan.branch)

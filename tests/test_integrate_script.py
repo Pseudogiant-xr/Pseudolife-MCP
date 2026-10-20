@@ -771,10 +771,12 @@ def test_open_takes_a_stated_suite_result_and_says_it_was_not_checked(world, cap
 # decision: drift is fatal only when the diff from the event's base touches
 # CURRENCY_INPUTS.
 _CENSUS_STUB = """\
-import functools, hashlib, importlib.util
+import functools, hashlib, importlib.util, os
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("census_real", {real!r})
+if __name__ == "__main__" and "GH_TOKEN" in os.environ:
+    raise SystemExit("the census ran with the operator's GH_TOKEN")
+spec =importlib.util.spec_from_file_location("census_real", {real!r})
 census = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(census)
 ROOT = Path(__file__).resolve().parents[1]
@@ -913,12 +915,48 @@ def test_open_refuses_a_batch_whose_census_ci_would_fail(world, capsys, monkeypa
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
-def test_census_inputs_come_from_the_census_module():
+def test_the_census_runs_without_the_operators_credentials(world, capsys, monkeypatch):
+    # Member code: the stub exits non-zero (a crash, not "stale") if it sees
+    # GH_TOKEN, which `build` would report as a refusal.
+    monkeypatch.setenv("GH_TOKEN", "operator-secret")
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _publish(world) == 0, capsys.readouterr()
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+
+
+def test_a_census_drop_that_leaves_no_batch_is_reported_at_once(world, capsys):
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    world.advance_master({"ops/other.sh": "o\n"})
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _build() == 0
+    out = capsys.readouterr().out
+
+    assert world.remote_branches() == [] and world.gh.bodies("create") == []
+    assert "#11" in out and "directly" in out
+    (args, body), = world.gh.bodies("comment")
+    assert args[2] == "10" and body.startswith("Could not join an integration batch")
+    assert "once master holds the rest of the batch" in body
+    assert _git(world.work, "branch", "--list", "integrate/*") == ""
+
+
+def test_census_inputs_come_from_masters_census_module(monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "census_for_test", ROOT / "rust" / "producer_census.py")
     census = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(census)
-    assert integrate._census_inputs(ROOT) == set(census.CURRENCY_INPUTS)
+    monkeypatch.chdir(ROOT)
+    assert integrate._census_inputs(ROOT, "HEAD") == set(census.CURRENCY_INPUTS)
 
 
 @pytest.mark.parametrize("rollup, expected", [
