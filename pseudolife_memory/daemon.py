@@ -406,6 +406,16 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     last_backup = _last_backup(svc)
     if last_backup is not None:
         payload["last_backup"] = last_backup
+    # The readiness contract (pseudolife_memory/readiness.py): the startup
+    # stages still unfinished, and whether the daemon can serve now. Last,
+    # after `status` is final, and with the same refusal to touch `status`
+    # as migration_partial: a daemon still warming up is not one the
+    # healthcheck should restart.
+    from pseudolife_memory import readiness
+
+    pending = readiness.pending(svc)
+    payload["ready"] = payload["status"] == "ok" and not pending
+    payload["pending"] = pending
     return payload
 
 

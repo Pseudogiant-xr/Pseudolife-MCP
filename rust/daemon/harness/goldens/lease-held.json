@@ -931,7 +931,11 @@
      "source": "unavailable"
     },
     "not_ready": "another process holds the writer lease on bank 'pl_cf_w1a_le: <free>",
+    "pending": [
+     "init"
+    ],
     "persist_errors": 0,
+    "ready": false,
     "schema": 55,
     "status": "degraded",
     "storage": "postgres",
@@ -983,7 +987,11 @@
      "source": "unavailable"
     },
     "not_ready": "another process holds the writer lease on bank 'pl_cf_w1a_le: <free>",
+    "pending": [
+     "init"
+    ],
     "persist_errors": 0,
+    "ready": false,
     "schema": 55,
     "status": "degraded",
     "storage": "postgres",
@@ -1029,7 +1037,9 @@
     "memory": {
      "source": "unavailable"
     },
+    "pending": [],
     "persist_errors": 0,
+    "ready": true,
     "schema": 55,
     "status": "ok",
     "storage": "postgres",

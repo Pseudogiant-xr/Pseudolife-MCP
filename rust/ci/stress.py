@@ -131,6 +131,10 @@ def environment(kind: str, names: list[str], candidates: Path, scratch: Path) ->
             "PL_SECURITY_DEFAULT_BIN": str(binary(candidates, "pseudolife-daemon-static")),
             "PL_SECURITY_RELEASE_MUTANTS_BIN": str(binary(candidates, "pseudolife-daemon")),
             "PL_DREAM_CONTRACT_BINARY": str(binary(candidates, "dream-contract")),
+            # The eval shard's episode executable nodes: a JSON list of the
+            # absolute stdio candidate, as its "Run every eval harness test"
+            # step exports it.
+            "PSEUDOLIFE_PORT_EPISODE_JSON": json.dumps([str(binary(candidates, "pseudolife-stdio").resolve())]),
         })
     return env
 

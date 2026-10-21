@@ -215,7 +215,10 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            # graph-writes and graph-relations scenarios.
            "mcp-graph-no-etype-backfill", "mcp-graph-no-slot-fold", "mcp-graph-no-warnings",
            "mcp-graph-unrelate-missing-dst", "mcp-graph-alias-canonical",
-           "mcp-graph-redefine-builtin", "mcp-graph-inverse-unchecked"]
+           "mcp-graph-redefine-builtin", "mcp-graph-inverse-unchecked",
+           # memory_graph (spec GR1-GR10): caught by graph-read.
+           "mcp-graph-no-relation-filter", "mcp-graph-tag-no-ambiguous",
+           "mcp-graph-facts-no-alias", "mcp-graph-no-labels"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1899,6 +1902,98 @@ SCENARIOS.update({
 })
 
 
+def graph_read(entity, **kw) -> dict:
+    return tool("memory_graph", entity=entity, **kw)
+
+
+SCENARIOS.update({
+    "graph-read": {
+        "config": None,
+        "seed": [
+            fact("Postgres", "port", "5432", authority="directive",
+                 distortion_tolerance="constraint"),
+            fact("Web App", "framework", "Django"),
+            relate("Web App", "runs-on", "host-1", origin="user"),
+            relate("host-2", "hosts", "Web App"),
+            relate("Web App", "depends-on", "Postgres", origin="action"),
+            relate("Postgres", "depends-on", "Disk", confidence=0.9),
+            relate("Cache", "uses", "Web App", origin="agent"),
+            relate("Crawler", "related-to", "Web App", confidence=0.3),
+            relate("Spider", "related-to", "Crawler"),
+            relate("Moth", "related-to", "Spider"),
+            relate("Island", "related-to", "Atoll"),
+            # a transitive relation with an inverse: mirrors of asserted
+            # edges (hash order) and of a transitive one (exact)
+            define("inside", "src is inside dst", transitive=True),
+            define("encloses", "src encloses dst", inverse_of="inside"),
+            relate("Web App", "inside", "Pod"),
+            relate("Pod", "inside", "Node"),
+            alias("Postgres", "pg"),
+            # a node without edges, and an alias that is another node's
+            # canonical (dropped from the alias map)
+            alias("Lonely", "lonely-one"),
+            alias("Disk", "web-app"),
+            # a fact written under the alias lands on the node
+            fact("pg", "version", "16"),
+            # an overwritten fact: only the current one is projected
+            fact("Web App", "framework", "Flask"),
+            # what only the dream writes: communities and source attribution
+            sql("INSERT INTO entity_communities (entity_id, community_id, computed_at) "
+                "SELECT id, CASE WHEN canonical IN ('island', 'atoll') THEN 2 ELSE 1 END, 0 "
+                "FROM entities WHERE canonical IN ('web-app', 'postgres', 'disk', 'island', "
+                "'atoll')", after_stop=True),
+            sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+                "SELECT id, s, 1, 'derived', 0 FROM entities, "
+                "(VALUES ('claude-code'), ('agent')) v(s) WHERE canonical IN ('web-app', "
+                "'postgres')", after_stop=True),
+        ],
+        "ops": [
+            # the default neighborhood: asserted edges with tags, a transitive
+            # and inverse-derived edges, facts with labels and the alias fact
+            graph_read("web app"),
+            graph_read("Web App", depth=2),
+            graph_read("Web App", depth=3),
+            graph_read("Web App", depth=0),
+            graph_read("Web App", depth=9),
+            graph_read("Web App", depth=10 ** 20),
+            graph_read("Web App", depth=-(10 ** 20)),
+            graph_read("Web App", include_facts=False),
+            # through an alias, and from a leaf
+            graph_read("pg", depth=2),
+            graph_read("Moth", depth=3),
+            # the path: found, to the root, an unknown target, an empty one,
+            # and a target in another component
+            graph_read("Moth", to="Disk"),
+            graph_read("Web App", to="web-app"),
+            graph_read("Web App", to="Nobody"),
+            graph_read("Web App", to=""),
+            graph_read("Web App", to="Atoll"),
+            graph_read("Web App", to="Lonely"),
+            graph_read("Pod", to="Node", depth=2),
+            # the relation filter: a case-folded substring, empty (no filter),
+            # one that empties the edges
+            graph_read("Web App", relation_filter="DEPENDS"),
+            graph_read("Web App", relation_filter=""),
+            graph_read("Web App", relation_filter="zzz"),
+            graph_read("Nobody", relation_filter="uses"),
+            # not found: unknown, blank after normalization
+            graph_read("Nobody"),
+            graph_read("   "),
+            # an empty entity is the whole graph, with sources
+            graph_read(""),
+            graph_read("", include_facts=False, relation_filter="relat"),
+            # the answers follow writes: a superseded edge leaves, a new
+            # alias resolves, a revived edge returns
+            unrelate("Web App", "depends-on", "Postgres"),
+            graph_read("Web App"),
+            alias("Web App", "frontend"),
+            relate("Web App", "depends-on", "Postgres"),
+            graph_read("frontend", to="Disk"),
+        ],
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -2310,8 +2405,46 @@ def generic_titles(v):
     return v
 
 
+def _hash_ordered_mirror(e, edges) -> bool:
+    """An inverse-derived edge mirroring an asserted one: Python's
+    ``derive_edges`` walks those over a set of ``(src, relation, dst)``
+    tuples, in per-process string-hash order. Mirrors of transitive edges
+    follow insertion order and stay exact. A mirror whose source edge a
+    relation filter removed is taken as hash-ordered."""
+    via = e.get("via") or [] if isinstance(e, dict) else []
+    if not e.get("derived") or len(via) != 1 or not str(via[0]).startswith("inverse:"):
+        return False
+    rel = str(via[0])[len("inverse:"):]
+    source = [x for x in edges if isinstance(x, dict) and x.get("src") == e.get("dst")
+              and x.get("relation") == rel and x.get("dst") == e.get("src")]
+    return not source or not source[0].get("derived")
+
+
+def graph_answer_free(v) -> None:
+    """In a graph answer: hash-ordered mirrors compare as a multiset in their
+    slots (divergences.md, memory_graph), and a node's ``created_at`` (a
+    float of wall-clock seconds) compares as present."""
+    if isinstance(v, dict):
+        edges = v.get("edges")
+        if isinstance(edges, list):
+            slots = [i for i, e in enumerate(edges)
+                     if isinstance(e, dict) and _hash_ordered_mirror(e, edges)]
+            for i, e in zip(slots, sorted((edges[i] for i in slots),
+                                          key=lambda e: json.dumps(e, sort_keys=True))):
+                edges[i] = e
+        if "canonical" in v and isinstance(v.get("created_at"), float):
+            v["created_at"] = "<clock>"
+        for x in v.values():
+            graph_answer_free(x)
+    elif isinstance(v, list):
+        for x in v:
+            graph_answer_free(x)
+
+
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     a, b = generic_titles(json.loads(json.dumps(py))), generic_titles(json.loads(json.dumps(rs)))
+    graph_answer_free(a)
+    graph_answer_free(b)
     normalize_records(a, b, stats)
     out = []
     va, vb = a.get("value"), b.get("value")
@@ -2491,8 +2624,7 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
             renv["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
         home = daemons.make_home(root, f"{tag}-rs", scn.get("config"))
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
-        for d in procs.values():
-            d.start(300)
+        daemons.start_all(procs, 300)
         w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
         warmup_diffs = wait_warmups(dsns, before) if warmup_expected(scn) else []
         clients = {side: Mcp(d.port) for side, d in procs.items()}

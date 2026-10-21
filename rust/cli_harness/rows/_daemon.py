@@ -18,6 +18,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -32,6 +33,33 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _health_started(status: int, body) -> bool:
+    """A /health answer from a daemon these rows can use: status ok, and
+    the stored-principal view loaded where the daemon reports its startup
+    stages (``pending``); an oracle older than that contract reports none."""
+    if status != 200 or not isinstance(body, dict) or body.get("status") != "ok":
+        return False
+    if "ready" not in body and "pending" not in body:
+        return True
+    pending = body.get("pending")
+    return isinstance(pending, list) and "principals" not in pending
+
+
+def _read_health(opener, url: str):
+    """One GET /health: ``(status, parsed JSON or None)``. A 503 is read
+    like a 200 (urlopen raises it as HTTPError); any failure to read the
+    whole answer raises, for the caller's retry."""
+    try:
+        with opener.open(url + "/health", timeout=2) as r:
+            status, raw = r.status, r.read()
+    except urllib.error.HTTPError as exc:
+        status, raw = exc.code, exc.read()
+    try:
+        return status, json.loads(raw)
+    except ValueError:
+        return status, None
 
 
 def _hf_home() -> str:
@@ -90,18 +118,32 @@ class RealDaemon:
             time.sleep(0.25)
 
     def _await_health(self) -> None:
-        deadline = time.time() + 180
-        while time.time() < deadline:
+        """Until /health is ok with the stored-principal view loaded (the
+        readiness contract: ``principals`` not in ``pending``). Not
+        ``ready``: CI runs these rows without an embedding model, so init
+        never finishes; the warmup wait covers the model where there is one.
+
+        Self-contained, never ``pseudolife_memory.readiness``: with
+        ``--oracle-source`` the oracle checkout is first on ``sys.path``
+        (producers.use_oracle), and one older than the contract has neither
+        that module nor the keys, so its ok /health starts it."""
+        deadline = time.monotonic() + 180
+        last = "no HTTP answer"
+        # No proxy: a caller's HTTP_PROXY must never carry a loopback probe.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        while time.monotonic() < deadline:
             if self.proc.poll() is not None:
-                raise RuntimeError("daemon exited:\n" + self.tail())
+                raise RuntimeError(f"daemon exited (last answer: {last}):\n" + self.tail())
             try:
-                with urllib.request.urlopen(self.url + "/health", timeout=2) as r:
-                    if json.loads(r.read()).get("status") == "ok":
-                        return
-            except Exception:  # noqa: BLE001 — not up yet
-                pass
-            time.sleep(0.5)
-        raise RuntimeError("daemon never became healthy:\n" + self.tail())
+                status, body = _read_health(opener, self.url)
+            except Exception:  # noqa: BLE001 — not up yet, or cut off mid-answer
+                time.sleep(0.25)
+                continue
+            last = f"HTTP {status}: {body!r}"[:300]
+            if _health_started(status, body):
+                return
+            time.sleep(0.25)
+        raise RuntimeError(f"daemon never became healthy (last answer: {last}):\n" + self.tail())
 
     def settle(self, fast: float = 0.08, streak: int = 5, limit: float = 90.0) -> None:
         """Wait until ``/health`` answers well inside the CLIs' 0.25 s probe
