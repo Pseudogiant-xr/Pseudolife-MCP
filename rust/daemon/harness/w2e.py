@@ -2519,6 +2519,56 @@ def wait_landed(dsn: str, text: str, deadline_s: float = 30.0) -> None:
             time.sleep(0.25)
 
 
+def warmup_expected(scn: dict) -> bool:
+    """Whether the startup warmup probe (spec S17) writes its retrieval
+    event: ``memory.retrieval_log.enabled`` (default on) gates every event
+    row on both daemons."""
+    import yaml
+    memory = (yaml.safe_load(scn.get("config") or "") or {}).get("memory") or {}
+    return bool((memory.get("retrieval_log") or {}).get("enabled", True))
+
+
+def warmup_landed(dsn: str, before: dict) -> bool:
+    """The warmup probe's event row is committed: a ``warmup probe`` search
+    event whose id the pre-start state did not hold (a template may keep its
+    seeding daemon's probe)."""
+    import psycopg
+    t = before["rows"].get("public.retrieval_events", {})
+    prior = [r[t["columns"].index("id")] for r in t.get("rows", [])]
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        return conn.execute(
+            "SELECT 1 FROM retrieval_events WHERE query_text = 'warmup probe' "
+            "AND origin = 'search' AND NOT (id = ANY(%s::bigint[]))", (prior,)).fetchone() is not None
+
+
+def wait_warmups(dsns: dict, before: dict, deadline_s: float = 300.0,
+                 landed=warmup_landed) -> list[str]:
+    """Wait until each side's warmup probe event has landed, up to the
+    deadline, and return a difference for each side whose never did.
+
+    ``wait_settled`` returns once init is done, but each daemon runs the
+    probe after init on its own task. Before ``dbstate.dump`` read every row
+    from one snapshot, it read sequences before rows, so a probe committing
+    between the two reads showed its row without its ``nextval``;
+    ``scrub_declared_rows`` rightly refused that pair and step 0 reported
+    ``retrieval_events[...]: row only in`` one side (fact-set-tuned,
+    dream-deep-dry, review-actions, 2026-10-19/20). The snapshot dump turns
+    that around, since sequence values are not transactional: a probe that
+    took its ``nextval`` before the dump's sequence read but committed after
+    the snapshot began shows the sequence moved without its row. A probe
+    still running at step 1 could also take an id the step's own search
+    would have had. Waiting for the probe to land covers both."""
+    pending = set(dsns)
+    end = time.monotonic() + deadline_s
+    while pending:
+        pending = {side for side in pending if not landed(dsns[side], before[side])}
+        if not pending or time.monotonic() >= end:
+            break
+        time.sleep(0.25)
+    return [f"warmup: {side}'s startup probe event did not land within {deadline_s:g}s"
+            for side in sorted(pending)]
+
+
 def prepare_template(scn: dict, tag: str, root: Path, owned: list[str]) -> str:
     template = pg.name(f"pl_cf_w2e_{tag}_t")
     owned.append(template)
@@ -2580,11 +2630,12 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
         daemons.start_all(procs, 300)
         w1a.wait_settled([d.port for d in procs.values()], token=TOKEN)
+        warmup_diffs = wait_warmups(dsns, before) if warmup_expected(scn) else []
         clients = {side: Mcp(d.port) for side, d in procs.items()}
         for client in clients.values():
             client.init()
         for i, op in enumerate([{"op": "init"}] + scn["ops"]):
-            row = {"step": i, "op": op, "diffs": []}
+            row = {"step": i, "op": op, "diffs": [] if i else list(warmup_diffs)}
             if op["op"] != "init":
                 py = run_op(op, procs["python"].port, clients["python"], dsns["python"])
                 rs = run_op(op, procs["rust"].port, clients["rust"], dsns["rust"])
