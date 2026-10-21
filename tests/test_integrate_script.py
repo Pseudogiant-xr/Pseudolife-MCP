@@ -1383,6 +1383,21 @@ def test_merge_counts_only_the_latest_run_of_each_check(world, capsys):
     assert integrate.main(["merge"]) == 0, capsys.readouterr()
 
 
+@pytest.mark.parametrize("started", ["", "0001-01-01T00:00:00Z", None])
+def test_merge_waits_for_a_queued_rerun_beside_an_older_success(world, capsys, started):
+    # A queued rerun may carry no start time yet; it still supersedes the
+    # older completed run, so the batch waits instead of merging.
+    _, batch = _opened(world, capsys)
+    queued = _run("test", None, status="QUEUED")
+    queued["startedAt"] = started
+    batch["statusCheckRollup"] = _green(queued)
+
+    assert integrate.main(["merge"]) == 2
+    err = capsys.readouterr().err
+    assert "wait" in err and "test" in err
+    assert _merge_calls(world) == []
+
+
 def test_merge_refuses_when_the_latest_run_of_a_check_failed(world, capsys):
     _, batch = _opened(world, capsys)
     batch["statusCheckRollup"] = _green(

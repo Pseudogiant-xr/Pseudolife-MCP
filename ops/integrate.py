@@ -864,19 +864,33 @@ def _merge_plan() -> Plan:
 def _latest_checks(rollup: list[dict] | None) -> list[dict]:
     """The latest result of each check, so a rerun that superseded a failure
     counts: a CheckRun is keyed by workflow and name, a StatusContext by its
-    context, and the later start (then completion) wins, list order on a tie."""
+    context. An unfinished run always wins, since a queued rerun may carry
+    no start time yet and must not lose to the older result it replaces;
+    among finished runs the later start (then completion) wins, list order
+    on a tie."""
     latest: dict[tuple, dict] = {}
     for check in rollup or []:
         if check.get("__typename") == "StatusContext" or "context" in check:
             key = ("status", check.get("context", ""))
         else:
             key = ("check", check.get("workflowName", ""), check.get("name", ""))
-        when = (check.get("startedAt") or "", check.get("completedAt") or "")
         held = latest.get(key)
-        if held is None or when >= (held.get("startedAt") or "",
-                                    held.get("completedAt") or ""):
+        if held is None or _unfinished(check) or (
+                not _unfinished(held) and _when(check) >= _when(held)):
             latest[key] = check
     return list(latest.values())
+
+
+def _unfinished(check: dict) -> bool:
+    if check.get("__typename") == "StatusContext" or "context" in check or (
+            "status" not in check):
+        return (check.get("state") or "").upper() in ("", "PENDING", "EXPECTED")
+    return ((check.get("status") or "").upper() != "COMPLETED"
+            or not check.get("conclusion"))
+
+
+def _when(check: dict) -> tuple[str, str]:
+    return (check.get("startedAt") or "", check.get("completedAt") or "")
 
 
 def _merge_checks(rollup: list[dict] | None) -> tuple[list[str], list[str]]:
