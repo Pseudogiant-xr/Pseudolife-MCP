@@ -12,6 +12,7 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
     python ops/integrate.py build             # merge the batch locally
     python ops/integrate.py open --suite <result.json> --harness-note "<result>"
                                               # push it, open its PR
+    python ops/integrate.py merge             # merge the open batch PR, once green
 
 A pull request joins by carrying the `ready-to-batch` label. `build` runs
 in a clean checkout whose HEAD is origin/master, merges each labelled head
@@ -25,8 +26,11 @@ comments on each dropped member naming what it collided with (removing its
 label). A member whose own diff changes the producer census inputs is
 dropped the same way when the batch head would fail CI's census check
 (`rust/producer_census.py --ci-check`). Nothing resolves a conflict and
-nothing force-pushes. Needs git 2.38+ (`git merge-tree --write-tree`) and an
-authenticated `gh`.
+nothing force-pushes. `merge` merges the batch pull request `open` published,
+with a merge commit, only while its head is the built head, every check on
+it finished without a failure and master has not moved past it; every merge
+is an admin bypass, so this is the check GitHub does not make. Needs git
+2.38+ (`git merge-tree --write-tree`) and an authenticated `gh`.
 """
 
 from __future__ import annotations
@@ -135,6 +139,7 @@ class Plan:
     base_sha: str
     label: str = LABEL
     head: str = ""
+    pr: int = 0      # the batch pull request, once `open` published it
     merged: list[Member] = field(default_factory=list)
     dropped: list[Dropped] = field(default_factory=list)
     markers: list[str] = field(default_factory=list)
@@ -168,21 +173,36 @@ class Plan:
         return Plan(**raw)
 
 
+FAILED = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED",
+          "STARTUP_FAILURE", "ERROR"}
+
+
+def _check_state(check: dict) -> str:
+    """A CheckRun's conclusion or a StatusContext's state, upper-cased."""
+    return (check.get("conclusion") or check.get("state") or "").upper()
+
+
 def _checks(rollup: list[dict] | None) -> str:
     """One word for a head's CI: green, pending, failing or none."""
     if not rollup:
         return "none"
-    failed = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED",
-              "STARTUP_FAILURE", "ERROR"}
     pending = False
     for check in rollup:
-        state = (check.get("conclusion") or check.get("state") or "").upper()
-        if state in failed:
+        state = _check_state(check)
+        if state in FAILED:
             return "failing"
-        if (check.get("status") not in (None, "COMPLETED")
-                or state in ("", "PENDING", "EXPECTED")):
+        if _unfinished(check):
             pending = True
     return "pending" if pending else "green"
+
+
+def _unfinished(check: dict) -> bool:
+    return (check.get("status") not in (None, "COMPLETED")
+            or _check_state(check) in ("", "PENDING", "EXPECTED"))
+
+
+def _check_name(check: dict) -> str:
+    return check.get("name") or check.get("context") or "an unnamed check"
 
 
 def _labeled_at(number: int, label: str) -> str | None:
@@ -743,13 +763,17 @@ def open_(args: argparse.Namespace) -> int:
         print(f"opened {url}: {plan.title}")
     else:
         print(f"resuming {url}: {plan.title}")
+    # `merge` reads the plan to know which pull request is the batch.
+    plan.pr = int(url.rstrip("/").rsplit("/", 1)[-1])
+    plan.save()
     try:
         _report_drops(plan, url, False, persist=True)
     except Refusal as exc:
         raise Refusal(f"{exc}\nThe batch pull request is open at {url}; rerun "
                       "`open` with the same arguments to finish reporting the "
                       "dropped members.") from None
-    Plan.path(plan.branch).unlink(missing_ok=True)
+    print(f"Once its CI is green and it has its review: python ops/integrate.py "
+          f"merge   (on this checkout; it merges #{plan.pr} and nothing else)")
     return 0
 
 
@@ -796,6 +820,129 @@ def _report_drops(plan: Plan, url: str | None, dry_run: bool, *,
             plan.save()
 
 
+def _merge_plan() -> Plan:
+    """The plan of the batch `open` published from this checkout."""
+    branch = git("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
+    plan = Plan.load(branch) if branch else None
+    if plan is None:
+        raise Refusal(f"this checkout holds no batch plan ({branch or 'detached HEAD'}); "
+                      "run `merge` on the checkout where `build` and `open` ran, which "
+                      "stays on the batch branch. A pull request from any other branch "
+                      f"is never merged directly: label it `{LABEL}` and let a batch "
+                      "carry it")
+    if not plan.branch.startswith(PREFIX) or plan.branch != branch:
+        raise Refusal(f"the plan on {branch} is for {plan.branch}, not this checkout's "
+                      f"`{PREFIX}` batch branch; only a batch pull request merges. A pull "
+                      "request from any other branch is never merged directly: label it "
+                      f"`{plan.label}` and let a batch carry it")
+    if not plan.pr:
+        raise Refusal(f"{plan.branch} was built but not published; run `python "
+                      "ops/integrate.py open` first, then wait for its CI")
+    return plan
+
+
+def _refuse_unmergeable(plan: Plan, view: dict) -> None:
+    """Refuse unless the pull request is this plan's batch at the built head,
+    with every check finished and none failed, and master not past it."""
+    n = plan.pr
+    head_ref = view.get("headRefName", "")
+    if (head_ref != plan.branch or not head_ref.startswith(PREFIX)
+            or view.get("isCrossRepository")):
+        raise Refusal(f"#{n} comes from {head_ref or 'an unknown branch'}"
+                      f"{' in a fork' if view.get('isCrossRepository') else ''}, not "
+                      f"this batch's {plan.branch}; nothing was merged. Find the batch's "
+                      f"pull request with `gh pr list --head {plan.branch}`, and rerun "
+                      "`open` with the same arguments to record it")
+    if view.get("baseRefName") != BASE:
+        raise Refusal(f"#{n} targets {view.get('baseRefName')}, not {BASE}; a batch "
+                      f"merges into {BASE} only. Close it and build again")
+    if view.get("state") != "OPEN":
+        raise Refusal(f"#{n} is {str(view.get('state')).lower()}, not open; nothing "
+                      "to merge. Switch back with `git switch --detach "
+                      f"{REMOTE}/{BASE}`, remove the local branch and build again")
+    if view.get("headRefOid") != plan.head:
+        raise Refusal(f"#{n}'s head is {str(view.get('headRefOid'))[:12]}, not the head "
+                      f"`build` made and the suite passed on ({plan.head[:12]}); nothing "
+                      f"is fixed inside a batch. Close #{n}, switch back with `git switch "
+                      f"--detach {REMOTE}/{BASE}`, remove the local branch and build "
+                      "again (a batch forwarded under the `merge-forward` skill is the "
+                      "maintainer's to merge)")
+    rollup = view.get("statusCheckRollup") or []
+    red = [_check_name(c) for c in rollup if _check_state(c) in FAILED]
+    if red:
+        raise Refusal(f"CI failed on #{n} at {plan.head[:12]}: {', '.join(red)}. Nothing "
+                      "is fixed inside a batch: rerun once only for the flake classes "
+                      "CLAUDE.md names (issues #830 and #855); otherwise drop the member "
+                      "the failing job covers, or bisect, then close the batch and build "
+                      "again (docs/dev/merge-batches.md, \"Validating it\")")
+    if _checks(rollup) != "green":
+        waiting = [_check_name(c) for c in rollup if _unfinished(c)]
+        raise Refusal(f"CI on #{n} has not finished ("
+                      f"{', '.join(waiting) or 'no checks reported yet'}); wait for "
+                      "every check to complete, then rerun `python ops/integrate.py merge`")
+    git("fetch", "-q", REMOTE, BASE)
+    master = _out("rev-parse", f"{REMOTE}/{BASE}")
+    if (master != plan.base_sha and git("merge-base", "--is-ancestor", master,
+                                        plan.head, check=False).returncode != 0):
+        raise Refusal(f"{REMOTE}/{BASE} moved since {plan.branch} was built "
+                      f"({plan.base_sha[:12]} -> {master[:12]}) and #{n}'s head does not "
+                      f"contain it, so its CI did not test what {BASE} would get. Close "
+                      f"#{n}, switch back with `git switch --detach {REMOTE}/{BASE}`, "
+                      "remove the local branch and build the next batch; only the "
+                      "`merge-forward` skill's exceptions let it merge instead, and that "
+                      "merge is the maintainer's")
+
+
+def merge(args: argparse.Namespace) -> int:
+    plan = _merge_plan()
+    n = plan.pr
+    view = json.loads(gh("pr", "view", str(n), "--json",
+                         "headRefName,headRefOid,baseRefName,state,"
+                         "isCrossRepository,statusCheckRollup"))
+    if view.get("state") == "MERGED" and view.get("headRefName") == plan.branch:
+        # A rerun after the merge went through: only the confirmation is left.
+        print(f"#{n} is already merged; confirming its members")
+    else:
+        _refuse_unmergeable(plan, view)
+        try:
+            gh("pr", "merge", str(n), "--merge", "--admin",
+               "--match-head-commit", plan.head)
+        except Refusal as exc:
+            raise Refusal(f"{exc}\nIf #{n} still reads open, nothing was merged: fix the "
+                          "cause and rerun `merge`; if it merged, rerun `merge` to "
+                          "confirm its members") from None
+    after = json.loads(gh("pr", "view", str(n), "--json", "state,mergeCommit"))
+    if after.get("state") != "MERGED":
+        print(f"integrate: `gh pr merge` returned, but #{n} reads "
+              f"{after.get('state')}; check it on GitHub, then rerun `merge`",
+              file=sys.stderr)
+        return 1
+    commit = (after.get("mergeCommit") or {}).get("oid", "")
+    print(f"merged #{n} into {BASE} as {commit or '<merge commit unknown>'}")
+    unmerged = []
+    for m in plan.merged:
+        state = json.loads(gh("pr", "view", str(m.number), "--json", "state"))["state"]
+        print(f"  #{m.number} {state} {m.title}")
+        if state != "MERGED":
+            unmerged.append(m)
+    for m in unmerged:
+        print(f"integrate: #{m.number} does not read MERGED. GitHub marks a member "
+              f"merged once its head ({m.sha[:12]}) is reachable from {BASE}: check "
+              f"with `git merge-base --is-ancestor {m.sha[:12]} {commit[:12] or BASE}` "
+              f"after a fetch, and if it is, close #{m.number} with a comment naming "
+              f"#{n}; then rerun `merge`", file=sys.stderr)
+    if unmerged:
+        return 1
+    Plan.path(plan.branch).unlink(missing_ok=True)
+    print("Next:\n"
+          f"  1. Watch CI on master at {commit[:12] or 'the merge commit'}: `gh run list "
+          f"--branch {BASE} --commit {commit or '<merge commit>'}`. A red run gets a "
+          "revert or fix pull request, landed as a batch of one.\n"
+          f"  2. Free this checkout: `git switch --detach {REMOTE}/{BASE}` after a "
+          f"`git fetch`, then `git branch -D {plan.branch}`.")
+    return 0
+
+
 def status(args: argparse.Namespace) -> int:
     git("fetch", "-q", REMOTE, BASE)
     base_sha = _out("rev-parse", f"{REMOTE}/{BASE}")
@@ -838,8 +985,11 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--harness-note",
                    help="the Rust harness Python tests' result in words, naming "
                         "this head (the command `build` printed)")
+    sub.add_parser("merge", help="merge the published batch pull request once every "
+                                 "check on its built head passed; the one path to "
+                                 "master")
     args = parser.parse_args(argv)
-    commands = {"status": status, "build": build, "open": open_}
+    commands = {"status": status, "build": build, "open": open_, "merge": merge}
     try:
         return commands[args.command](args)
     except Refusal as exc:

@@ -57,6 +57,7 @@ class FakeGh:
         self.fail_create: str | None = None   # "before" or "after" creating
         self.fail_comments = 0
         self.fail_edits = 0
+        self.unmerged: set[int] = set()   # members `pr merge` leaves open
 
     def add(self, number: int, sha: str, *, title: str | None = None,
             labeled_at: str | None = None, **extra) -> None:
@@ -69,9 +70,20 @@ class FakeGh:
         if labeled_at:
             self.labeled_at[number] = labeled_at
 
+    VIEW_FIELDS = {"headRefOid", "statusCheckRollup", "headRefName", "baseRefName",
+                   "state", "isCrossRepository", "url", "mergeCommit"}
+    VIEW_DEFAULTS = {"baseRefName": "master", "state": "OPEN", "isCrossRepository": False,
+                     "mergeCommit": None,
+                     "statusCheckRollup": [{"name": "test", "status": "COMPLETED",
+                                            "conclusion": "SUCCESS"}]}
+
+    def pr(self, number: int) -> dict:
+        return next(r for r in self.ready + self.history if r["number"] == number)
+
     def mutations(self) -> list[list[str]]:
         return [args for args, _ in self.calls
-                if args[:2] in (["pr", "create"], ["pr", "comment"], ["pr", "edit"])]
+                if args[:2] in (["pr", "create"], ["pr", "comment"], ["pr", "edit"],
+                                ["pr", "merge"])]
 
     def bodies(self, verb: str) -> list[tuple[list[str], str]]:
         return [(args, body) for args, body in self.calls if args[:2] == ["pr", verb]]
@@ -89,11 +101,20 @@ class FakeGh:
             return json.dumps([r for r in self.history
                                if state == "all" or r["state"].lower() == state])
         if args[:2] == ["pr", "view"]:
-            assert args[3:] in (["--json", "headRefOid"],
-                                ["--json", "headRefOid,statusCheckRollup"])
-            pr = next(r for r in self.ready if r["number"] == int(args[2]))
-            return json.dumps({"headRefOid": pr["headRefOid"],
-                               "statusCheckRollup": pr["statusCheckRollup"]})
+            assert args[3] == "--json" and len(args) == 5, args
+            fields = args[4].split(",")
+            assert set(fields) <= self.VIEW_FIELDS, fields
+            pr = self.pr(int(args[2]))
+            return json.dumps({f: pr.get(f, self.VIEW_DEFAULTS.get(f)) for f in fields})
+        if args[:2] == ["pr", "merge"]:
+            pr = self.pr(int(args[2]))
+            assert pr["state"] == "OPEN"
+            pr["state"] = "MERGED"
+            pr["mergeCommit"] = {"oid": "d" * 40}
+            for member in self.ready:
+                if member["number"] not in self.unmerged:
+                    member["state"] = "MERGED"
+            return ""
         if args[0] == "api":
             number = int(next(a for a in args if "/issues/" in a).split("/")[-2])
             return self.labeled_at.get(number, "") + "\n"
@@ -795,7 +816,8 @@ def test_build_alone_publishes_nothing_so_the_suite_runs_before_ci(world, capsys
     (_, body), = world.gh.bodies("create")
     head = _git(world.work, "rev-parse", "HEAD")
     assert f"Local full suite: passed at `{head}` on local-wsl: 18868 passed" in body
-    assert not (world.work / plan).exists()
+    # The plan outlives `open`: `merge` reads it, and removes it once merged.
+    assert json.loads((world.work / plan).read_text(encoding="utf-8"))["pr"] == 900
 
 
 @pytest.mark.parametrize("case", ["no-evidence", "other-commit", "failed",
@@ -1164,3 +1186,179 @@ def test_census_inputs_come_from_masters_census_module(world):
 ])
 def test_ci_rollup_summary(rollup, expected):
     assert integrate._checks(rollup) == expected
+
+
+# `merge`: the one path from an open batch pull request to master. Every
+# merge is an admin bypass, so GitHub would merge an ordinary pull request
+# just as readily; the subcommand merges only the batch `open` published.
+
+def _opened(world, capsys) -> tuple[str, dict]:
+    """A published batch of two clean members: (its head, its pull request)."""
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+    assert _publish(world) == 0, capsys.readouterr()
+    capsys.readouterr()
+    return _git(world.work, "rev-parse", "HEAD"), world.gh.pr(900)
+
+
+def _plan_file(world) -> Path:
+    return world.work / _git(world.work, "rev-parse", "--git-path",
+                             f"integrate-plans/{DATE}-batch-1.json")
+
+
+def _merge_calls(world) -> list[list[str]]:
+    return [args for args, _ in world.gh.calls if args[:2] == ["pr", "merge"]]
+
+
+def test_merge_merges_a_green_batch_and_confirms_its_members(world, capsys):
+    head, batch = _opened(world, capsys)
+
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+    out = capsys.readouterr().out
+
+    (args,) = _merge_calls(world)
+    assert args == ["pr", "merge", "900", "--merge", "--admin",
+                    "--match-head-commit", head]
+    assert batch["state"] == "MERGED"
+    assert "d" * 40 in out                                   # the merge commit
+    assert "#10" in out and "#11" in out and "MERGED" in out
+    assert "git switch --detach origin/master" in out
+    assert f"git branch -D integrate/{DATE}-batch-1" in out
+    assert "CI on master" in out                             # watch master's run
+    assert not _plan_file(world).exists()
+
+
+def test_merge_uses_a_merge_commit_never_a_squash(world, capsys):
+    _opened(world, capsys)
+
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+
+    (args,) = _merge_calls(world)
+    assert "--merge" in args
+    assert "--squash" not in args and "--rebase" not in args
+
+
+@pytest.mark.parametrize("rollup", [
+    [{"name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"},
+     {"name": "test-lite-macos", "status": "IN_PROGRESS", "conclusion": None}],
+    [{"context": "CodeQL", "state": "PENDING"}],
+    [],
+], ids=["in-progress", "status-pending", "no-checks-yet"])
+def test_merge_waits_for_every_check_to_finish(world, capsys, rollup):
+    _, batch = _opened(world, capsys)
+    batch["statusCheckRollup"] = rollup
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "wait" in err and "rerun" in err
+    assert _merge_calls(world) == [] and _plan_file(world).exists()
+
+
+def test_merge_refuses_a_red_check_and_names_it(world, capsys):
+    _, batch = _opened(world, capsys)
+    batch["statusCheckRollup"] = [
+        {"name": "guards", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "test-lite-windows", "status": "COMPLETED", "conclusion": "FAILURE"},
+        {"name": "Parity / ubuntu-latest", "status": "COMPLETED",
+         "conclusion": "CANCELLED"}]
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "test-lite-windows" in err and "Parity / ubuntu-latest" in err
+    assert "guards" not in err                     # the green one is not named
+    assert "bisect" in err
+    assert _merge_calls(world) == []
+
+
+def test_merge_accepts_skipped_and_neutral_checks(world, capsys):
+    # The near miss: a batch skips the lanes its diff does not reach.
+    _, batch = _opened(world, capsys)
+    batch["statusCheckRollup"] = [
+        {"name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "Parity / windows-latest", "status": "COMPLETED", "conclusion": "SKIPPED"},
+        {"name": "label-check", "status": "COMPLETED", "conclusion": "NEUTRAL"},
+        {"context": "CodeQL", "state": "SUCCESS"}]
+
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+    assert len(_merge_calls(world)) == 1
+
+
+def test_merge_refuses_a_head_the_plan_did_not_build(world, capsys):
+    head, batch = _opened(world, capsys)
+    batch["headRefOid"] = "e" * 40          # a commit pushed after `open`
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "eeeeeeeeeeee" in err and head[:12] in err
+    assert "nothing is fixed inside a batch" in err
+    assert _merge_calls(world) == []
+
+
+def test_merge_refuses_when_master_moved_past_the_batch(world, capsys):
+    _opened(world, capsys)
+    _git(world.seed, "fetch", "-q", "origin")
+    _git(world.seed, "switch", "-q", "-C", "master", "origin/master")
+    (world.seed / "m.txt").write_text("m\n", encoding="utf-8")
+    _git(world.seed, "add", "-A")
+    _git(world.seed, "commit", "-q", "-m", "master moves")
+    _git(world.seed, "push", "-q", "origin", "master")
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "moved since" in err and "merge-forward" in err and "build" in err
+    assert _merge_calls(world) == []
+
+
+def test_merge_refuses_a_plan_for_an_ordinary_branch(world, capsys):
+    # The accident the subcommand exists to stop: an ordinary pull request.
+    sha = world.pr(861, {"b.txt": "b\n"})
+    world.gh.history = [{"number": 861, "headRefName": "claude/feature", "state": "OPEN",
+                         "url": "https://github.example/pr/861",
+                         "isCrossRepository": False, "headRefOid": sha}]
+    _git(world.work, "fetch", "-q", "origin", "pull/861/head")
+    _git(world.work, "switch", "-q", "-c", "claude/feature", "FETCH_HEAD")
+    base = _git(world.work, "rev-parse", "origin/master")
+    integrate.Plan(branch="claude/feature", base_sha=base, head=sha, pr=861).save()
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "claude/feature" in err and "integrate/" in err
+    assert world.gh.mutations() == []
+
+
+def test_merge_refuses_a_batch_plan_whose_pr_comes_from_another_branch(world, capsys):
+    _, batch = _opened(world, capsys)
+    batch["headRefName"] = "claude/feature"
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "claude/feature" in err and f"integrate/{DATE}-batch-1" in err
+    assert _merge_calls(world) == []
+
+
+def test_merge_refuses_without_a_plan(world, capsys):
+    _git(world.work, "switch", "-q", "--detach", "origin/master")
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "`open`" in capsys.readouterr().err
+    assert world.gh.mutations() == []
+
+
+def test_merge_reports_a_member_github_did_not_mark_merged(world, capsys):
+    _opened(world, capsys)
+    world.gh.unmerged = {11}
+
+    assert integrate.main(["merge"]) == 1
+
+    captured = capsys.readouterr()
+    assert "#11" in captured.err and "d" * 40 in captured.out
+    assert len(_merge_calls(world)) == 1
