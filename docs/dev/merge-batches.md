@@ -8,6 +8,27 @@ branch, validates that branch once and merges it once. The rule is in
 `CLAUDE.md` ("Running tests", the integration-batch bullet); this page is
 the procedure behind it.
 
+## What CI runs where
+
+Each change waits for hosted CI once, on its batch:
+
+- **An ordinary pull request** (any head branch but `integrate/*`) runs the
+  fast lanes only. In `ci.yml`: `scope`, `guards`, `lock-resolve` and
+  `frontend`; the `test` job and the lite OS lanes are skipped. In
+  `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest),
+  the disposable-image check and the `Parity` gate; the candidate build
+  and the parity matrix are skipped. Both `scope` jobs decide this from
+  `github.head_ref` (an absent one runs everything). The required `test`
+  check reports its skip, which GitHub counts as success, and the required
+  `Parity / <os>` gate runs and accepts the skipped candidate and parity
+  jobs only on a pull request its `scope` marked not full; the `Rust` job
+  must still pass.
+- **A batch pull request** (from `integrate/*`) runs everything its diff
+  needs, exactly as every pull request did before 2026-10-21 (the
+  Rust-only and documentation-only scope skips still apply).
+- **Master pushes, the nightly and manual runs** run everything, as
+  before.
+
 ## Joining a batch
 
 A pull request is ready when it has its reviews and its own local targeted
@@ -96,7 +117,9 @@ it up again; a dropped member whose head moved since `build` keeps its
 label and gets no comment. Its author merges master forward once the collision has
 landed, reruns its targeted tests, and re-applies the label. If fewer than two members
 merge cleanly, no batch is built, the collisions are reported at once and
-the local branch is deleted; merge a lone ready pull request directly.
+the local branch is deleted; a lone ready pull request keeps its label and
+joins the next batch, since its own pull request runs only the fast CI
+lanes (below).
 
 The producer census gets the same treatment, because the local full suite
 does not run CI's census check. CI's Rust jobs run `python

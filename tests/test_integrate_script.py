@@ -403,7 +403,7 @@ def test_fewer_than_two_clean_members_opens_no_batch(world, capsys):
 
     assert world.remote_branches() == []
     assert world.gh.bodies("create") == []
-    assert "#10" in out and "directly" in out
+    assert "#10" in out and "joins the next batch" in out
     (args, _), = world.gh.bodies("comment")  # the collision is still reported
     assert args[2] == "11"
     assert _git(world.work, "symbolic-ref", "-q", "HEAD") == before
@@ -1031,7 +1031,7 @@ def test_a_census_drop_that_leaves_no_batch_is_reported_at_once(world, capsys):
     out = capsys.readouterr().out
 
     assert world.remote_branches() == [] and world.gh.bodies("create") == []
-    assert "#11" in out and "directly" in out
+    assert "#11" in out and "joins the next batch" in out
     (args, body), = world.gh.bodies("comment")
     assert args[2] == "10" and body.startswith("Could not join an integration batch")
     assert "once master holds the rest of the batch" in body

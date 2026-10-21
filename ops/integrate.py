@@ -47,8 +47,12 @@ LABEL = "ready-to-batch"
 BASE = "master"
 REMOTE = "origin"
 PREFIX = "integrate/"
-# A batch of one is just its pull request; merge that directly instead.
+# Below this no batch is built. A lone ready pull request keeps its label and
+# waits: its own pull request runs only the fast CI lanes, so a batch is
+# where it gets full CI.
 MIN_MEMBERS = 2
+LONE = ("A lone ready pull request keeps its label and joins the next batch: "
+        "its own pull request runs only the fast CI lanes.")
 BATCH_RE = re.compile(r"^integrate/(\d{4}-\d{2}-\d{2})-batch-(\d+)$")
 MARKER_RE = r"^(<<<<<<<|>>>>>>>)( |$)"
 CENSUS = "rust/producer_census.py"
@@ -475,7 +479,9 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
         f"- Local full suite: {suite or '<filled in by `open`>'}",
         f"- Rust harness Python tests (`{RUST_HARNESS_COMMAND}`, which the full "
         f"suite does not collect): {harness or '<filled in by `open`>'}",
-        "- CI: this pull request's run is the combined check of its members.",
+        "- CI: this pull request's run is the combined check of its members, "
+        "and their first full one: a pull request from any branch but "
+        "`integrate/*` runs only the fast lanes.",
         "- A red batch is bisected locally (master plus half the members); the "
         f"culprit is dropped with a comment and loses `{plan.label}`, and nothing "
         "is fixed inside the batch.",
@@ -499,8 +505,7 @@ def build(args: argparse.Namespace) -> int:
     if len(members) - len(waiting) < MIN_MEMBERS:
         print(f"{len(members) - len(waiting)} of {len(members)} pull request(s) "
               f"carrying `{args.label}` are ready (not a draft, CI on the head not "
-              f"failing); a batch needs {MIN_MEMBERS}. Merge a lone ready pull "
-              "request directly.")
+              f"failing); a batch needs {MIN_MEMBERS}. {LONE}")
         for m, reason in waiting:
             print(f"  #{m.number} {reason}")
         return 0
@@ -533,8 +538,7 @@ def build(args: argparse.Namespace) -> int:
         print(f"  left out #{d.member.number}: {d.reason}")
     if len(plan.merged) < MIN_MEMBERS:
         merged = ", ".join(f"#{m.number}" for m in plan.merged) or "none"
-        print(f"only {merged} merged cleanly; no batch built. Merge a lone "
-              "ready pull request directly.")
+        print(f"only {merged} merged cleanly; no batch built. {LONE}")
         # No `open` follows, so the collisions are reported now.
         _report_drops(plan, None, args.dry_run)
         return 0
