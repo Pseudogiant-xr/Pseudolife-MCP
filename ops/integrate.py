@@ -830,11 +830,14 @@ def _merge_plan() -> Plan:
                       "stays on the batch branch. A pull request from any other branch "
                       f"is never merged directly: label it `{LABEL}` and let a batch "
                       "carry it")
-    if not plan.branch.startswith(PREFIX) or plan.branch != branch:
-        raise Refusal(f"the plan on {branch} is for {plan.branch}, not this checkout's "
-                      f"`{PREFIX}` batch branch; only a batch pull request merges. A pull "
-                      "request from any other branch is never merged directly: label it "
-                      f"`{plan.label}` and let a batch carry it")
+    if not branch.startswith(PREFIX) or not plan.branch.startswith(PREFIX):
+        raise Refusal(f"{branch} is not an `{PREFIX}` batch branch; only a batch pull "
+                      "request merges. A pull request from any other branch is never "
+                      f"merged directly: label it `{plan.label}` and let a batch carry it")
+    if plan.branch != branch:
+        raise Refusal(f"the plan found for {branch} is for {plan.branch}; nothing was "
+                      "merged. Run `merge` on the checkout where that batch was built "
+                      "and opened")
     if not plan.pr:
         raise Refusal(f"{plan.branch} was built but not published; run `python "
                       "ops/integrate.py open` first, then wait for its CI")
