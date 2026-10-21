@@ -73,7 +73,10 @@ divergence without blocking a merge or holding a pull request's checks open.
 ### Parity shards on a pull request
 
 Master pushes, the nightly, manual CI and merge groups run every parity
-suite. A pull request runs only the suites its diff reaches, and never fewer
+suite. Since 2026-10-21 a pull request from any branch but `integrate/*`
+skips the candidate build and the matrix unless it changes CI or dependency
+inputs (`docs/dev/merge-batches.md`, "What CI runs where"). Any other pull
+request runs only the suites its diff reaches, and never fewer
 than the floor: `eval`, `cli`, `cli-daemon`, `cli-live` and `h5-w1a`. The
 `cli` suite was split into those three shards. The scope job's
 `rust/ci/parity_scope.py` maps each changed file to suites:
@@ -231,7 +234,8 @@ queue as on, not before:
   checklist, "CI before merge"). The queue's group run is the integrated check, provided
   every lane is a required check (see "Required checks" above). Without
   that, this rule must stay for the lanes the ruleset does not require. A PR
-  needs green CI on its own head before it is queued. It no longer needs to
+  needs its fast lanes (and no red check) on its own head before it is
+  queued, as it does to join a batch today. It no longer needs to
   be updated and rerun each time master moves.
 - **Disjoint merge-forward** (the `merge-forward` skill, section A). It exists to skip a fresh CI
   run after a master forward-merge. With the queue, nothing waits on that

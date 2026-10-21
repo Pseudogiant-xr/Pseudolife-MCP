@@ -89,9 +89,11 @@ class FakeGh:
             return json.dumps([r for r in self.history
                                if state == "all" or r["state"].lower() == state])
         if args[:2] == ["pr", "view"]:
-            assert args[3:] == ["--json", "headRefOid"]
+            assert args[3:] in (["--json", "headRefOid"],
+                                ["--json", "headRefOid,statusCheckRollup"])
             pr = next(r for r in self.ready if r["number"] == int(args[2]))
-            return json.dumps({"headRefOid": pr["headRefOid"]})
+            return json.dumps({"headRefOid": pr["headRefOid"],
+                               "statusCheckRollup": pr["statusCheckRollup"]})
         if args[0] == "api":
             number = int(next(a for a in args if "/issues/" in a).split("/")[-2])
             return self.labeled_at.get(number, "") + "\n"
@@ -194,8 +196,14 @@ def _suite_result(world, *, commit: str | None = None, exit_code: int = 0,
     return path
 
 
+def _harness_note(world) -> str:
+    head = _git(world.work, "rev-parse", "HEAD")
+    return f"767 passed at {head[:8]} on the maintainer's Windows host"
+
+
 def _open(world, **result) -> int:
-    return integrate.main(["open", "--suite", str(_suite_result(world, **result))])
+    return integrate.main(["open", "--suite", str(_suite_result(world, **result)),
+                           "--harness-note", _harness_note(world)])
 
 
 def _publish(world) -> int:
@@ -385,23 +393,80 @@ def test_a_head_that_moved_after_listing_is_skipped_not_merged(world, capsys):
     assert world.gh.bodies("comment") == []
 
 
-def test_fewer_than_two_clean_members_opens_no_batch(world, capsys):
+def test_a_lone_clean_member_is_a_batch_of_one(world, capsys):
+    # A lone ready PR's own CI ran only the fast lanes, so it gets its full
+    # CI as a batch of one rather than merging directly.
     sha10 = world.pr(10, {"a.txt": "one\nTEN\nthree\n"})
     sha11 = world.pr(11, {"a.txt": "one\nELEVEN\nthree\n"})
     world.gh.add(10, sha10)
     world.gh.add(11, sha11)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    branch = f"integrate/{DATE}-batch-1"
+    assert world.remote_branches() == [branch]
+    assert _second_parents(world.origin, branch) == [sha10]
+    (args, _), = world.gh.bodies("create")
+    assert args[args.index("--title") + 1] == f"integrate: {DATE} batch 1 (#10)"
+    (args, _), = world.gh.bodies("comment")  # the collision is still reported
+    assert args[2] == "11"
+
+
+def test_no_clean_member_builds_nothing_and_reports_at_once(world, capsys):
+    sha10 = world.pr(10, {"a.txt": "one\nTEN\nthree\n"})
+    world.advance_master({"a.txt": "one\nMASTER\nthree\n"})
+    world.gh.add(10, sha10)
     before = _git(world.work, "symbolic-ref", "-q", "HEAD")
 
     assert _build() == 0
     out = capsys.readouterr().out
 
-    assert world.remote_branches() == []
-    assert world.gh.bodies("create") == []
-    assert "#10" in out and "directly" in out
-    (args, _), = world.gh.bodies("comment")  # the collision is still reported
-    assert args[2] == "11"
+    assert world.remote_branches() == [] and world.gh.bodies("create") == []
+    assert "no batch built" in out
+    (args, _), = world.gh.bodies("comment")
+    assert args[2] == "10"
     assert _git(world.work, "symbolic-ref", "-q", "HEAD") == before
     assert _git(world.work, "branch", "--list", "integrate/*") == ""
+
+
+def _cut(version: str) -> str:
+    return f'[project]\nname = "x"\nversion = "{version}"\n'
+
+
+@pytest.mark.parametrize("cut_first", [True, False])
+def test_a_release_cut_is_batched_alone(world, capsys, cut_first):
+    # oracle_selection.release_cut() accepts a cut only when nothing else
+    # changes, so a cut batched with code would run parity against the old
+    # release; the others keep their labels and join the next batch.
+    world.advance_master({"pyproject.toml": _cut("0.19.0")})
+    sha10 = world.pr(10, {"pyproject.toml": _cut("0.19.1")})
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, labeled_at="2026-10-19T09:00:00Z" if cut_first else
+                 "2026-10-19T10:00:00Z")
+    world.gh.add(11, sha11, labeled_at="2026-10-19T09:30:00Z")
+
+    assert _publish(world) == 0, capsys.readouterr()
+    out = capsys.readouterr().out
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10]
+    assert "#11" in out and "release cut" in out
+    assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
+
+
+def test_open_refuses_when_a_members_own_ci_went_red_after_build(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[{"status": "IN_PROGRESS", "conclusion": None}])
+    assert _build() == 0
+    capsys.readouterr()
+    world.gh.ready[1]["statusCheckRollup"] = [{"status": "COMPLETED", "conclusion": "FAILURE"}]
+
+    assert _open(world) == 2
+
+    err = capsys.readouterr().err
+    assert "#11" in err and "failing" in err and "build again" in err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
 def test_conflict_markers_a_member_committed_are_flagged_in_the_body(world, capsys):
@@ -449,32 +514,56 @@ def test_status_lists_each_labelled_pr_and_its_mergeability(world, capsys):
     assert world.gh.mutations() == []
 
 
-def test_a_member_without_green_ci_on_its_head_sits_out_and_keeps_its_label(world, capsys):
+@pytest.mark.parametrize("rollup", [
+    [{"status": "IN_PROGRESS", "conclusion": None}],   # pending
+    [{"state": "PENDING"}],                            # a pending StatusContext
+    [],                                                # no checks yet
+    [{"status": "COMPLETED", "conclusion": "SUCCESS"}],  # green
+], ids=["in-progress", "status-pending", "none", "green"])
+def test_a_member_whose_own_ci_is_not_red_joins_the_batch(world, capsys, rollup):
+    # The batch's CI is its members' CI, so a member waits on no run of its own.
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=rollup)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+    (_, body), = world.gh.bodies("create")
+    assert f"`{sha11}`" in body and f"| {integrate._checks(rollup)} |" in body
+
+
+def test_a_member_with_red_ci_on_its_head_sits_out_and_keeps_its_label(world, capsys):
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
     sha12 = world.pr(12, {"d.txt": "d\n"})
     world.gh.add(10, sha10)
-    world.gh.add(11, sha11, statusCheckRollup=[{"status": "IN_PROGRESS", "conclusion": None}])
-    world.gh.add(12, sha12)
+    world.gh.add(11, sha11, statusCheckRollup=[
+        {"status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"status": "COMPLETED", "conclusion": "FAILURE"}])
+    world.gh.add(12, sha12, statusCheckRollup=[{"status": "IN_PROGRESS", "conclusion": None}])
 
     assert _publish(world) == 0
     out = capsys.readouterr().out
 
     assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha12]
-    assert "#11" in out and "pending" in out
+    assert "left out #11: CI on its head is failing" in out
+    # A rerun of the failed job clears it as well as a new push.
+    assert "rerun" in out and "push" in out
     assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
 
 
-def test_too_few_green_members_builds_nothing_and_says_why(world, capsys):
+def test_no_member_without_red_ci_builds_nothing_and_says_why(world, capsys):
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
-    world.gh.add(10, sha10)
-    world.gh.add(11, sha11, statusCheckRollup=[])
+    world.gh.add(10, sha10, statusCheckRollup=[{"status": "COMPLETED", "conclusion": "FAILURE"}])
+    world.gh.add(11, sha11, statusCheckRollup=[{"state": "ERROR"}])
 
     assert _build() == 0
     out = capsys.readouterr().out
 
-    assert "1 of 2" in out and "#11 CI on its head is none" in out
+    assert "0 of 2" in out and "#11 CI on its head is failing" in out
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
@@ -760,10 +849,101 @@ def test_open_takes_a_stated_suite_result_and_says_it_was_not_checked(world, cap
 
     head = _git(world.work, "rev-parse", "HEAD")
     note = f"passed at {head[:8]} on the Linux dev box, 18868 passed"
-    assert integrate.main(["open", "--suite-note", note]) == 0, capsys.readouterr()
+    assert integrate.main(["open", "--suite-note", note,
+                           "--harness-note", _harness_note(world)]) == 0, capsys.readouterr()
 
     (_, body), = world.gh.bodies("create")
     assert f"Local full suite: {note} (stated by the operator, not checked)" in body
+
+
+def test_build_names_the_rust_harness_run_the_suite_does_not_cover(world, capsys):
+    _three_with_a_collision(world)
+
+    assert _build() == 0
+    out = capsys.readouterr().out
+
+    assert integrate.RUST_HARNESS_COMMAND in out and "--harness-note" in out
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+@pytest.mark.parametrize("note", [None, "767 passed, trust me"])
+def test_open_refuses_without_the_rust_harness_result_for_this_head(world, capsys, note):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+
+    argv = ["open", "--suite", str(_suite_result(world))]
+    assert integrate.main(argv + (["--harness-note", note] if note else [])) == 2
+
+    err = capsys.readouterr().err
+    head = _git(world.work, "rev-parse", "HEAD")
+    assert head[:8] in err and ("--harness-note" in err)
+    if note is None:
+        assert integrate.RUST_HARNESS_COMMAND in err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+@pytest.mark.parametrize("result", ["passed at {head}", "0 passed at {head}",
+                                    "3 failed, 764 passed at {head}",
+                                    "764 passed, 1 error at {head}",
+                                    "764 passed, 2 errors at {head}"])
+def test_open_refuses_a_harness_note_without_a_clean_pass_count(world, capsys, result):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+    head = _git(world.work, "rev-parse", "HEAD")
+
+    assert integrate.main(["open", "--suite", str(_suite_result(world)),
+                           "--harness-note", result.format(head=head[:8])]) == 2
+
+    assert "passed" in capsys.readouterr().err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+@pytest.mark.parametrize("result", ["767 passed at {head} (error-free)",
+                                    "767 passed at {head}; log logs/errors.log",
+                                    "767 passed, 0 failed at {head}"])
+def test_open_accepts_a_clean_harness_note_that_mentions_errors_in_prose(world, capsys, result):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+    head = _git(world.work, "rev-parse", "HEAD")
+
+    assert integrate.main(["open", "--suite", str(_suite_result(world)),
+                           "--harness-note", result.format(head=head[:8])]) == 0, \
+        capsys.readouterr()
+
+
+def test_open_records_the_rust_harness_result_beside_the_suite(world, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+
+    assert _open(world) == 0, capsys.readouterr()
+
+    (_, body), = world.gh.bodies("create")
+    assert (f"Rust harness Python tests (`{integrate.RUST_HARNESS_COMMAND}`, which the "
+            f"full suite does not collect): {_harness_note(world)} (stated by the "
+            "operator, not checked)") in body
+
+
+def test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips():
+    # The local full suite collects only tests/, so nothing under rust/.
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'testpaths = ["tests"]' in pyproject
+    workflow = (ROOT / ".github" / "workflows" / "rust.yml").read_text(encoding="utf-8")
+    paths = [a for a in integrate.RUST_HARNESS if not a.startswith("--")
+             and "::" not in a]
+    for path in paths:
+        assert (ROOT / path).exists(), path
+        # Each one is a path CI's own pytest steps name.
+        assert f" {path} " in workflow or f" {path}\n" in workflow, path
+    # Without w2e lifecycle this would miss #877's break again.
+    assert "rust/daemon/harness/test_w2e_lifecycle.py" in paths
+    # CI deselects the census currency test and runs --ci-check instead.
+    assert "-k 'not committed_census_matches_current_tree'" in workflow
+    deselected = integrate.RUST_HARNESS[integrate.RUST_HARNESS.index("--deselect") + 1]
+    module, name = deselected.split("::")
+    assert f"def {name}(" in (ROOT / module).read_text(encoding="utf-8")
 
 
 # The real census module with only its snapshot faked (a hash of each
@@ -930,7 +1110,7 @@ def test_the_census_runs_without_the_operators_credentials(world, capsys, monkey
     assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
 
 
-def test_a_census_drop_that_leaves_no_batch_is_reported_at_once(world, capsys):
+def test_a_census_drop_leaves_a_batch_of_the_rest(world, capsys):
     _with_census(world)
     sha10 = world.pr(10, {"ops/ten.sh": "10\n",
                           "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
@@ -939,15 +1119,12 @@ def test_a_census_drop_that_leaves_no_batch_is_reported_at_once(world, capsys):
     world.gh.add(10, sha10)
     world.gh.add(11, sha11)
 
-    assert _build() == 0
-    out = capsys.readouterr().out
+    assert _publish(world) == 0, capsys.readouterr()
 
-    assert world.remote_branches() == [] and world.gh.bodies("create") == []
-    assert "#11" in out and "directly" in out
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha11]
     (args, body), = world.gh.bodies("comment")
-    assert args[2] == "10" and body.startswith("Could not join an integration batch")
+    assert args[2] == "10" and body.startswith("Left out of integration batch")
     assert "once master holds the rest of the batch" in body
-    assert _git(world.work, "branch", "--list", "integrate/*") == ""
 
 
 def test_census_inputs_come_from_masters_census_module(world):

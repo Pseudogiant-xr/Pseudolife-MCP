@@ -10,15 +10,17 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
     python ops/integrate.py status            # labelled PRs, CI, mergeability
     python ops/integrate.py build --dry-run   # what a build would do
     python ops/integrate.py build             # merge the batch locally
-    python ops/integrate.py open --suite <result.json>   # push it, open its PR
+    python ops/integrate.py open --suite <result.json> --harness-note "<result>"
+                                              # push it, open its PR
 
 A pull request joins by carrying the `ready-to-batch` label. `build` runs
 in a clean checkout whose HEAD is origin/master, merges each labelled head
 with `git merge --no-ff` in the order the label was applied (pull request
 number when unknown) onto a new local branch, and drops a member that
 conflicts, aborting that merge. It pushes nothing, so the local full suite
-runs on the batch head before any CI. `open` then checks the suite passed
-on that exact head, pushes the branch, opens the batch pull request, and
+runs on the batch head before any CI, with the Python tests under rust/ the
+suite does not collect (`RUST_HARNESS`). `open` then checks the suite passed
+on that exact head, records both results, pushes the branch, opens the batch pull request, and
 comments on each dropped member naming what it collided with (removing its
 label). A member whose own diff changes the producer census inputs is
 dropped the same way when the batch head would fail CI's census check
@@ -45,11 +47,34 @@ LABEL = "ready-to-batch"
 BASE = "master"
 REMOTE = "origin"
 PREFIX = "integrate/"
-# A batch of one is just its pull request; merge that directly instead.
-MIN_MEMBERS = 2
+# A batch of one is allowed: a pull request's own CI runs only the fast lanes,
+# so a lone ready one (an urgent fix, a revert, a release cut) gets its full
+# CI as a batch of one instead of merging directly.
+MIN_MEMBERS = 1
+# A release cut (a member changing project.version in pyproject.toml) is
+# batched alone: evals/rust_port/oracle_selection.py release_cut() accepts a
+# cut only when nothing else changes, so a cut batched with code would run
+# parity against the old release.
+VERSION_LINE_RE = re.compile(r'version\s*=\s*"([^"]*)"\s*$')
 BATCH_RE = re.compile(r"^integrate/(\d{4}-\d{2}-\d{2})-batch-(\d+)$")
 MARKER_RE = r"^(<<<<<<<|>>>>>>>)( |$)"
 CENSUS = "rust/producer_census.py"
+# The Python tests under rust/ that the local full suite never collects
+# (pytest's testpaths is tests/) and that need no built Rust binary: the
+# pytest steps of rust.yml's `rust` job plus the eval parity shard's
+# `pytest rust/ci`. #877 broke rust/daemon/harness/test_w2e_lifecycle.py and
+# passed its batch's local suite this way (2026-10-21). The census currency
+# test is deselected as CI deselects it: `build` runs CI's own verdict,
+# `producer_census.py --ci-check`. 767 tests, about 140 s natively on
+# Windows (2026-10-21).
+RUST_HARNESS = (
+    "rust/test_contract_inventory.py", "rust/test_producer_census.py",
+    "rust/daemon/harness/test_w2e_lifecycle.py",
+    "rust/daemon/harness/board/test_norm.py", "rust/daemon/harness/board/test_run.py",
+    "rust/ci",
+    "--deselect", "rust/test_producer_census.py::test_committed_census_matches_current_tree",
+)
+RUST_HARNESS_COMMAND = "python -m pytest -q -p no:cacheprovider " + " ".join(RUST_HARNESS)
 
 
 class Refusal(Exception):
@@ -265,23 +290,64 @@ def _collision(member: Member, conflicted: list[str], merged: list[Member],
     clean, files = _merge_tree(base_sha, member.sha)
     if not clean:
         return (f"conflicts with {BASE} itself in {', '.join(files)}; merge "
-                f"{BASE} forward, let CI pass, then re-apply the label")
+                f"{BASE} forward, rerun its targeted tests, then re-apply the label")
     culprits = [f"#{m.number}" for m in merged
                 if _changed(m.sha, base_sha) & set(conflicted)]
     who = ", ".join(culprits) or ("the batch so far ("
                                   + ", ".join(f"#{m.number}" for m in merged) + ")")
     return (f"conflicts with {who} in {', '.join(conflicted)}; once that "
-            f"merges, merge {BASE} forward, let CI pass, then re-apply the label")
+            f"merges, merge {BASE} forward, rerun its targeted tests, then re-apply the label")
 
 
 def _not_ready(m: Member) -> str | None:
-    """Why a labelled pull request sits this batch out, keeping its label."""
+    """Why a labelled pull request sits this batch out, keeping its label.
+
+    Its own CI need not be green: the batch's CI is its CI, so pending or
+    absent checks admit it. A failing head is a known failure and waits."""
     if m.draft:
         return "is a draft"
-    if m.checks != "green":
-        return (f"CI on its head is {m.checks}; it joins a batch once that "
-                "head is green")
+    if m.checks == "failing":
+        return ("CI on its head is failing; it joins a batch once a rerun of "
+                "the failed job passes or a push replaces that head")
     return None
+
+
+def _project_version(rev: str) -> str | None:
+    """`project.version` in pyproject.toml at `rev`, read as text (no tomllib
+    on Python 3.10): the first `version = "..."` line of the [project] table."""
+    shown = git("show", f"{rev}:pyproject.toml", check=False)
+    if shown.returncode != 0:
+        return None
+    in_project = False
+    for line in shown.stdout.splitlines():
+        if line.startswith("["):
+            in_project = line.strip() == "[project]"
+        elif in_project and (match := VERSION_LINE_RE.match(line)):
+            return match.group(1)
+    return None
+
+
+def _release_cut_alone(plan: Plan, members: list[Member]) -> list[Member]:
+    """The members to merge: all of them, or only the first ready release cut
+    (a member whose own diff changes project.version), with the others
+    left out keeping their labels."""
+    for m in members:
+        if _not_ready(m) or _fetch_head(m.number) != m.sha:
+            continue
+        base = _out("merge-base", plan.base_sha, m.sha)
+        if _project_version(m.sha) == _project_version(base):
+            continue
+        for other in members:
+            if other is not m:
+                plan.dropped.append(Dropped(
+                    other, f"#{m.number} is a release cut, which is batched alone: "
+                           "parity tests a cut against its own head only when nothing "
+                           "else changes (release_cut() in "
+                           "evals/rust_port/oracle_selection.py); this joins the next "
+                           "batch", comment=False))
+        print(f"  #{m.number} is a release cut; it is batched alone")
+        return [m]
+    return members
 
 
 def _merge_members(plan: Plan, members: list[Member]) -> None:
@@ -394,12 +460,14 @@ def _census_reason(member: Member, files: list[str], culprits: list[Member]) -> 
             "committed census is stale on the batch head, so CI's census check "
             f"(`python {CENSUS} --ci-check`) would fail{also}; once {BASE} holds "
             f"the rest of the batch, merge {BASE} forward, regenerate the census "
-            f"with `python {CENSUS}`, let CI pass, then re-apply the label")
+            f"with `python {CENSUS}`, rerun its targeted tests, then re-apply the label")
 
 
 def _merge_batch(plan: Plan, members: list[Member]) -> None:
     """Merge the members, then drop any whose census CI would fail on and
     merge the rest again from the base; nothing is fixed inside a batch."""
+    members = _release_cut_alone(plan, members)
+    cut_drops = list(plan.dropped)
     census_drops: list[Dropped] = []
     _merge_members(plan, members)
     while culprits := _census_culprits(plan):
@@ -410,7 +478,7 @@ def _merge_batch(plan: Plan, members: list[Member]) -> None:
         out = {d.member.number for d in census_drops}
         print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
         git("reset", "-q", "--hard", plan.base_sha)
-        plan.merged, plan.dropped = [], list(census_drops)
+        plan.merged, plan.dropped = [], cut_drops + census_drops
         _merge_members(plan, [m for m in members if m.number not in out])
 
 
@@ -426,7 +494,7 @@ def _cell(text: str) -> str:
     return " ".join(text.split()).replace("|", "\\|").replace("`", "'")
 
 
-def body(plan: Plan, suite: str | None = None) -> str:
+def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> str:
     lines = [
         f"Integration batch of {len(plan.merged)} reviewed pull requests, built by "
         f"`python ops/integrate.py build` from `{BASE}` at `{plan.base_sha}`. "
@@ -452,7 +520,11 @@ def body(plan: Plan, suite: str | None = None) -> str:
     lines += [
         "", "## Validation", "",
         f"- Local full suite: {suite or '<filled in by `open`>'}",
-        "- CI: this pull request's run is the combined check of its members.",
+        f"- Rust harness Python tests (`{RUST_HARNESS_COMMAND}`, which the full "
+        f"suite does not collect): {harness or '<filled in by `open`>'}",
+        "- CI: this pull request's run is the combined check of its members, "
+        "and their first full one: a pull request from any branch but "
+        "`integrate/*` runs only the fast lanes.",
         "- A red batch is bisected locally (master plus half the members); the "
         f"culprit is dropped with a comment and loses `{plan.label}`, and nothing "
         "is fixed inside the batch.",
@@ -475,9 +547,8 @@ def build(args: argparse.Namespace) -> int:
     waiting = [(m, _not_ready(m)) for m in members if _not_ready(m)]
     if len(members) - len(waiting) < MIN_MEMBERS:
         print(f"{len(members) - len(waiting)} of {len(members)} pull request(s) "
-              f"carrying `{args.label}` are ready (not a draft, CI green on the "
-              f"head); a batch needs {MIN_MEMBERS}. Merge a lone ready pull "
-              "request directly.")
+              f"carrying `{args.label}` are ready (not a draft, CI on the head not "
+              f"failing); a batch needs {MIN_MEMBERS}.")
         for m, reason in waiting:
             print(f"  #{m.number} {reason}")
         return 0
@@ -510,8 +581,7 @@ def build(args: argparse.Namespace) -> int:
         print(f"  left out #{d.member.number}: {d.reason}")
     if len(plan.merged) < MIN_MEMBERS:
         merged = ", ".join(f"#{m.number}" for m in plan.merged) or "none"
-        print(f"only {merged} merged cleanly; no batch built. Merge a lone "
-              "ready pull request directly.")
+        print(f"{merged} merged cleanly; no batch built.")
         # No `open` follows, so the collisions are reported now.
         _report_drops(plan, None, args.dry_run)
         return 0
@@ -525,7 +595,11 @@ def build(args: argparse.Namespace) -> int:
           "has started. Next, on this checkout:\n"
           "  1. PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1   "
           "(the local WSL full suite; writes ~/.pseudolife-mcp/suite-results/*.json)\n"
-          "  2. python ops/integrate.py open --suite <that .json>\n"
+          f"  2. {RUST_HARNESS_COMMAND}   (the Rust harness Python tests the "
+          "suite does not collect; natively is fine, with the project's dev "
+          "dependencies)\n"
+          "  3. python ops/integrate.py open --suite <that .json> --harness-note "
+          f"\"<count> passed at {plan.head[:8]}\"\n"
           "A red suite: bisect locally, drop the culprit, switch back with "
           f"`git switch --detach {REMOTE}/{BASE}`, remove the local branch and build "
           "again.")
@@ -568,6 +642,43 @@ def _suite_line(args: argparse.Namespace, head: str) -> str:
             f"{result.get('summary', '')}")
 
 
+def _harness_line(args: argparse.Namespace, head: str) -> str:
+    """The "Rust harness Python tests" line: the operator's statement of the
+    run `build` printed, naming the batch head it ran on."""
+    if not args.harness_note:
+        raise Refusal("give the Rust harness Python tests' result for this head: "
+                      f"run `{RUST_HARNESS_COMMAND}` on this checkout, then "
+                      f"`--harness-note \"<count> passed at {head[:8]}\"`; the local "
+                      "full suite does not collect them")
+    if head[:8] not in args.harness_note:
+        raise Refusal(f"a --harness-note must name the batch head it ran on "
+                      f"(at least `{head[:8]}`) with its result")
+    note = args.harness_note.lower()
+    passed = re.search(r"\b(\d+) passed\b", note)
+    # Only pytest's own non-zero counts ("3 failed", "1 error") mark a red
+    # run; the words alone also appear in prose and log paths.
+    if (not passed or int(passed.group(1)) == 0
+            or re.search(r"\b0*[1-9]\d*\s+(failed|errors?)\b", note)):
+        raise Refusal("a --harness-note must state a clean pass, pytest's own "
+                      f"`<count> passed` with no failed or error count, at {head[:8]}; "
+                      "a red run is bisected and its culprit dropped")
+    return f"{args.harness_note} (stated by the operator, not checked)"
+
+
+def _refuse_red_members(plan: Plan) -> None:
+    """Refuse when a merged member's own CI turned red after `build`: a
+    known failure the batch would carry. A member whose head moved since is
+    left to its next batch; the batch holds the head that was listed."""
+    for m in plan.merged:
+        view = json.loads(gh("pr", "view", str(m.number), "--json",
+                             "headRefOid,statusCheckRollup"))
+        if view["headRefOid"] == m.sha and _checks(view.get("statusCheckRollup")) == "failing":
+            raise Refusal(f"#{m.number}'s own CI is now failing on {m.sha[:12]}, a known "
+                          "failure this batch would carry. Drop it: switch back with "
+                          f"`git switch --detach {REMOTE}/{BASE}`, remove the local "
+                          "branch and build again (it sits out while its head is red)")
+
+
 def open_(args: argparse.Namespace) -> int:
     if _out("status", "--porcelain", "--untracked-files=no"):
         raise Refusal("the checkout has uncommitted changes to tracked files; "
@@ -587,7 +698,7 @@ def open_(args: argparse.Namespace) -> int:
     if others:
         raise Refusal("a batch is already open: " + ", ".join(
             f"#{n} ({name})" for n, name in others))
-    text = body(plan, _suite_line(args, head))
+    text = body(plan, _suite_line(args, head), _harness_line(args, head))
     # A rerun after a failure past the push resumes: this branch's own pull
     # request is the one to finish, not a second batch, but only while it
     # still points at the head the suite passed on. Once it is open, a moved
@@ -614,6 +725,7 @@ def open_(args: argparse.Namespace) -> int:
                           f"Nothing is fixed inside a batch: switch back with `git "
                           f"switch --detach {REMOTE}/{BASE}`, remove the local branch "
                           "and build again, which drops them with a comment")
+        _refuse_red_members(plan)
     if url is None:
         try:
             git("push", "-q", "-u", REMOTE, plan.branch)
@@ -723,6 +835,9 @@ def main(argv: list[str] | None = None) -> int:
     evidence.add_argument("--suite", help="the passing suite result JSON for this head")
     evidence.add_argument("--suite-note",
                           help="the suite result in words, for a run without a JSON")
+    o.add_argument("--harness-note",
+                   help="the Rust harness Python tests' result in words, naming "
+                        "this head (the command `build` printed)")
     args = parser.parse_args(argv)
     commands = {"status": status, "build": build, "open": open_}
     try:
