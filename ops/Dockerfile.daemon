@@ -63,6 +63,10 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
 #    coupling constraint no longer binds. It matches the lock, so the line
 #    below is a belt-and-braces no-op.
 #
+#    CI's lock-resolve job (ops/check_lock_resolves.py) replays this install
+#    as a pip dry run, so a lock whose pins contradict each other fails on its
+#    pull request instead of in this build.
+#
 #    This layer intentionally precedes the application-source COPY. A CSS, JS,
 #    or Python edit must not invalidate the multi-GB dependency/model layers.
 COPY ops/requirements.lock.txt /app/requirements.lock.txt

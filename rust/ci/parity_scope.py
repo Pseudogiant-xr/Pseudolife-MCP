@@ -58,22 +58,26 @@ SHARDS = [
      "job_timeout": 40},
     {"suite": "w1c-connection", "w1c_rows": "'test_login', 'connect', 'maintainer', 'move', 'tunnel'",
      "w1c_timeout": 42, "job_timeout": 66},
-    # Linux 2026-10-11, live + oracle capture + replay: audit 112s, backup
-    # 34s, W1-A 435s, daemon controls 189s, graph controls 394s. Linux step
-    # budgets are about twice these. Windows budgets are provisional until
-    # the first hosted run; each new job stays inside the existing
-    # ~56-minute slowest job. Hosted ubuntu 2026-10-12: the audit step's
-    # live phase alone took 201s and the step hit its 4-minute budget on
-    # three runs (PRs #661 and #737) with every compared case matching;
-    # 10 minutes is about twice the observed ~5-minute step.
-    {"suite": "h5-audit", "h5_timeout": 10, "h5_windows_timeout": 20, "job_timeout": 30},
-    {"suite": "h5-backup", "h5_timeout": 2, "h5_windows_timeout": 10, "job_timeout": 20},
-    {"suite": "h5-w1a", "h5_timeout": 15, "h5_windows_timeout": 40, "job_timeout": 56},
-    # Linux 2026-10-11: six background scenarios, 9 live cases, 110s
-    # combined; 4m allows about twice measured CPU work.
-    {"suite": "h5-background", "h5_timeout": 4, "h5_windows_timeout": 20, "job_timeout": 30},
-    {"suite": "h5-daemon-mutants", "h5_timeout": 6, "h5_windows_timeout": 20, "job_timeout": 35},
-    {"suite": "h5-graph-mutants", "h5_timeout": 14, "h5_windows_timeout": 30, "job_timeout": 45},
+    # Hosted step timings for rust.yml runs 2026-10-11 to 10-20, about 300
+    # successful steps per suite and OS (h5_linux_measurements.json
+    # "hosted_step_distribution"). Linux step budgets are five times each
+    # suite's ubuntu p99 (minutes: audit 4.2, backup 1.6, W1-A 7.9,
+    # background 2.0, daemon controls 4.3, graph controls 9.3): master
+    # f82141c4's ubuntu runner ran 4.6-5.4x slow and timed graph controls
+    # out at 14 minutes with no mutant surviving, while no other step ran
+    # past 1.6x its median. Graph controls get 50, above the 44-46 minutes
+    # that runner would have needed. It spent 9 minutes outside the step, so
+    # each job keeps 15 minutes beyond its Linux step budget. Windows
+    # budgets stay at 1.5-6.7x the hosted Windows maximum (13.5 and 19.9
+    # minutes for the two mutant suites): no slow Windows runner was seen,
+    # but one is not ruled out, and five times p99 there would mean 68- and
+    # 91-minute steps.
+    {"suite": "h5-audit", "h5_timeout": 21, "h5_windows_timeout": 20, "job_timeout": 36},
+    {"suite": "h5-backup", "h5_timeout": 9, "h5_windows_timeout": 10, "job_timeout": 24},
+    {"suite": "h5-w1a", "h5_timeout": 40, "h5_windows_timeout": 40, "job_timeout": 56},
+    {"suite": "h5-background", "h5_timeout": 10, "h5_windows_timeout": 20, "job_timeout": 30},
+    {"suite": "h5-daemon-mutants", "h5_timeout": 22, "h5_windows_timeout": 20, "job_timeout": 37},
+    {"suite": "h5-graph-mutants", "h5_timeout": 50, "h5_windows_timeout": 30, "job_timeout": 65},
 ]
 
 # Every pull request that runs parity at all runs these: the CLI rows most
