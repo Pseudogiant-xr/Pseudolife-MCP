@@ -438,6 +438,22 @@ def test_h5_step_budgets_fit_their_jobs():
     assert shards["h5-audit"]["h5_timeout"] >= 10
 
 
+def test_h5_linux_step_budgets_cover_the_slow_hosted_runner():
+    # Master f82141c4's ubuntu runner ran 4.6-5.4x slower than usual and
+    # timed out h5-graph-mutants with every finished mutant caught, so each
+    # Linux step allows five times its hosted p99, and its job keeps the 15
+    # minutes test_h5_step_budgets_fit_their_jobs asks for around it.
+    hosted = json.loads((ROOT / "rust/ci/h5_linux_measurements.json").read_text(encoding="utf-8"))
+    suites = hosted["hosted_step_distribution"]["suites"]
+    assert set(suites) == set(H5_SUITES)
+    shards = {shard["suite"]: shard for shard in workflow()["jobs"]["parity-checks"]["strategy"]["matrix"]["include"]
+              if shard["suite"] in H5_SUITES}
+    slow = hosted["hosted_step_distribution"]["slow_runner"]
+    assert shards[slow["suite"]]["h5_timeout"] > slow["projected_step_minutes"]
+    for name, cells in suites.items():
+        assert shards[name]["h5_timeout"] * 60 >= 5 * cells["linux"]["p99_s"], name
+
+
 def test_shards_cover_both_systems_and_build_once():
     jobs = workflow()["jobs"]
     for name in ("rust", "candidate", "parity-checks", "parity"):
