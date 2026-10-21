@@ -2554,10 +2554,10 @@ def wait_warmups(dsns: dict, before: dict, deadline_s: float = 300.0,
     ``retrieval_events[...]: row only in`` one side (fact-set-tuned,
     dream-deep-dry, review-actions, 2026-10-19/20). The snapshot dump turns
     that around, since sequence values are not transactional: a probe that
-    took its ``nextval`` after the snapshot but committed later shows the
-    sequence moved without its row. A probe still running at step 1 could
-    also take an id the step's own search would have had. Waiting for the
-    probe to land covers all three."""
+    took its ``nextval`` before the dump's sequence read but committed after
+    the snapshot began shows the sequence moved without its row. A probe
+    still running at step 1 could also take an id the step's own search
+    would have had. Waiting for the probe to land covers both."""
     pending = set(dsns)
     end = time.monotonic() + deadline_s
     while pending:
