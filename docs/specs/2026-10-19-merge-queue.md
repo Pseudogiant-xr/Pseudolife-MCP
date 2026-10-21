@@ -73,10 +73,10 @@ divergence without blocking a merge or holding a pull request's checks open.
 ### Parity shards on a pull request
 
 Master pushes, the nightly, manual CI and merge groups run every parity
-suite. Since 2026-10-21 only a pull request from an `integrate/*` batch
-branch runs parity shards at all; any other pull request skips the
-candidate build and the matrix (`docs/dev/merge-batches.md`, "What CI runs
-where"). A batch pull request runs only the suites its diff reaches, and never fewer
+suite. Since 2026-10-21 a pull request from any branch but `integrate/*`
+skips the candidate build and the matrix unless it changes CI or dependency
+inputs (`docs/dev/merge-batches.md`, "What CI runs where"). Any other pull
+request runs only the suites its diff reaches, and never fewer
 than the floor: `eval`, `cli`, `cli-daemon`, `cli-live` and `h5-w1a`. The
 `cli` suite was split into those three shards. The scope job's
 `rust/ci/parity_scope.py` maps each changed file to suites:

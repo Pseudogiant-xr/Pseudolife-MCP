@@ -18,7 +18,11 @@ Each change waits for hosted CI once, on its batch:
   `rust.yml`: `Scope`, the `Rust` job (format, clippy, builds, nextest),
   the disposable-image check and the `Parity` gate; the candidate build
   and the parity matrix are skipped. Both `scope` jobs decide this from
-  `github.head_ref` (an absent one runs everything). The required `test`
+  `github.head_ref` (an absent one runs everything). An ordinary pull
+  request that changes CI or dependency inputs (`.github/workflows/`,
+  `pyproject.toml`, a lock file, the Rust toolchain pin) or whose diff
+  cannot be read runs as a batch would, so a workflow edit is tested by the
+  lanes it changes before it can switch them off. The required `test`
   check reports its skip, which GitHub counts as success, and the required
   `Parity / <os>` gate runs and accepts the skipped candidate and parity
   jobs only on a pull request its `scope` marked not full; the `Rust` job

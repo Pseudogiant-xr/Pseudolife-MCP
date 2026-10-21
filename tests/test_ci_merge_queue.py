@@ -192,13 +192,49 @@ ORDINARY_REFS = ["claude/some-change", "fix/x", "integrate", "integrated/x",
 PYTHON_CHANGE = ["pseudolife_memory/service.py", "tests/test_x.py"]
 
 
+# Files whose change must be tested by the full lanes on its own pull request:
+# a workflow edit could otherwise switch off its own check.
+CI_INPUTS = [".github/workflows/ci.yml", ".github/workflows/rust.yml",
+             ".github/workflows/release.yml", "pyproject.toml", "ops/requirements.lock.txt",
+             "rust/Cargo.lock", "evals/rust_port/users_comparison/Cargo.lock",
+             "frontend/package-lock.json", "rust/rust-toolchain.toml"]
+# Near misses that are not CI or dependency inputs.
+NOT_CI_INPUTS = ["docs/pyproject.toml.md", "ops/requirements.lock.txt.bak",
+                 "docs/Cargo.lock.md", "github/workflows/x.yml", "rust/Cargo.toml",
+                 "frontend/package.json", "tests/test_package-lock.json.py"]
+
+
 @pytest.mark.parametrize("head_ref", ORDINARY_REFS)
-@pytest.mark.parametrize("files, diff_exit", [(PYTHON_CHANGE, 0), (RUST_ONLY, 0), ([], 0),
-                                              (PYTHON_CHANGE, 128)])
-def test_an_ordinary_pull_request_runs_the_fast_lanes_only(tmp_path, head_ref, files, diff_exit):
-    # Decided before any diff, so no git call is made (the stub records one).
+@pytest.mark.parametrize("files", [PYTHON_CHANGE, ["rust/daemon/src/main.rs"], ["README.md"],
+                                   NOT_CI_INPUTS])
+def test_an_ordinary_pull_request_runs_the_fast_lanes_only(tmp_path, head_ref, files):
+    assert run_scope(tmp_path, "pull_request", files, head_ref=head_ref) == ["python=false"]
+
+
+@pytest.mark.parametrize("ci_input", CI_INPUTS)
+def test_an_ordinary_pull_request_changing_ci_inputs_runs_every_lane(tmp_path, ci_input):
+    assert run_scope(tmp_path, "pull_request", PYTHON_CHANGE + [ci_input],
+                     head_ref="claude/some-change") == ["python=true"]
+
+
+@pytest.mark.parametrize("files, diff_exit", [([], 0), (PYTHON_CHANGE, 128)])
+def test_an_ordinary_pull_request_with_an_unreadable_diff_runs_everything(tmp_path, files,
+                                                                          diff_exit):
     assert run_scope(tmp_path, "pull_request", files, diff_exit=diff_exit,
-                     head_ref=head_ref) == ["python=false"]
+                     head_ref="claude/some-change") == ["python=true"]
+
+
+def test_both_scopes_name_the_same_ci_inputs():
+    import re
+    ci = next(s for s in load("ci.yml")["jobs"]["scope"]["steps"] if s.get("id") == "scope")
+    rust = next(s for s in load("rust.yml")["jobs"]["scope"]["steps"] if s.get("id") == "scope")
+    ci_pattern, = re.findall(r"^\s*ci_inputs='([^']+)'$", ci["run"], re.MULTILINE)
+    rust_pattern, = re.findall(r"^\s*\$ciInputs = '([^']+)'$", rust["run"], re.MULTILINE)
+    assert ci_pattern == rust_pattern
+    for path in CI_INPUTS:
+        assert re.search(ci_pattern, path), path
+    for path in NOT_CI_INPUTS:
+        assert not re.search(ci_pattern, path), path
 
 
 @pytest.mark.parametrize("head_ref", [BATCH_REF, "integrate/2026-10-07-rust-modes"])

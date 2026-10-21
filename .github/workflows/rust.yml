@@ -101,9 +101,11 @@ jobs:
       # `full` (2026-10-21): a pull request from any branch but integrate/*
       # skips the candidate build and so the parity matrix; its full CI is
       # its integration batch's (docs/dev/merge-batches.md), and the Rust
-      # job (format, clippy, builds, nextest) still runs. Every other event,
-      # and a pull request whose head ref Actions did not supply, runs
-      # everything.
+      # job (format, clippy, builds, nextest) still runs. One whose diff
+      # changes CI or dependency inputs ($ciInputs, the same pattern as
+      # ci.yml's scope) stays full, so a workflow edit cannot switch off its
+      # own check. Every other event, a pull request whose head ref Actions
+      # did not supply, and an empty or unreadable diff run everything.
       - name: Classify the change
         id: scope
         shell: pwsh
@@ -112,10 +114,9 @@ jobs:
           MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
+          $ciInputs = '^(\.github/workflows/|pyproject\.toml$|ops/requirements\.lock\.txt$|rust/rust-toolchain\.toml$)|(^|/)(Cargo\.lock|package-lock\.json)$'
+          $ordinary = $env:EVENT_NAME -ceq 'pull_request' -and $env:HEAD_REF -and -not $env:HEAD_REF.StartsWith('integrate/', [System.StringComparison]::Ordinal)
           $full = 'true'
-          if ($env:EVENT_NAME -ceq 'pull_request' -and $env:HEAD_REF -and -not $env:HEAD_REF.StartsWith('integrate/', [System.StringComparison]::Ordinal)) { $full = 'false' }
-          Write-Output "full=$full"
-          "full=$full" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           $docs = '^(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)))$'
           $rust = 'true'
           $base = $null
@@ -133,14 +134,18 @@ jobs:
             if ($LASTEXITCODE -eq 0 -and $files.Count -gt 0) {
               $files | Write-Output
               if (@($files | Where-Object { $_ -cnotmatch $docs }).Count -eq 0) { $rust = 'false' }
+              if ($ordinary -and @($files | Where-Object { $_ -cmatch $ciInputs }).Count -eq 0) { $full = 'false' }
             }
           }
+          Write-Output "full=$full"
+          "full=$full" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Output "rust=$rust"
           "rust=$rust" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           exit 0
       # The parity matrix (rust/ci/parity_scope.py). Master pushes, the
       # nightly, manual CI and merge groups run every suite. A pull request
-      # (one from integrate/*: the others skip the matrix, see `full` above)
+      # that scope marks full (one from integrate/*, or one changing CI or
+      # dependency inputs; the others skip the matrix, see `full` above)
       # runs the floor (eval, cli, cli-daemon, cli-live, h5-w1a) plus the
       # suites its diff reaches: a row, its golden or its command's shim code
       # reaches the shard that runs the row, the daemon crate its daemon
@@ -1417,7 +1422,7 @@ jobs:
     # matrix. The nightly (and ordinary manual CI) require its success, never
     # a skip or failure. A PR or merge group that scope classified as
     # documentation-only skips the Rust, candidate and parity jobs, and a PR
-    # scope marked not full (any branch but integrate/*) skips the candidate
+    # scope marked not full (an ordinary branch changing no CI input) skips the candidate
     # and parity jobs; any other skip still fails.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')
     name: Parity / ${{ matrix.os }}

@@ -808,6 +808,24 @@ def test_scope_marks_an_ordinary_pull_request_not_full(tmp_path, head_ref, files
     assert run_scope(tmp_path, "pull_request", files, head_ref=head_ref) == ["full=false", f"rust={rust}"]
 
 
+@pytest.mark.parametrize("ci_input", [".github/workflows/rust.yml", ".github/workflows/ci.yml",
+                                      "pyproject.toml", "ops/requirements.lock.txt",
+                                      "rust/Cargo.lock", "frontend/package-lock.json",
+                                      "rust/rust-toolchain.toml"])
+def test_scope_keeps_an_ordinary_pull_request_changing_ci_inputs_full(tmp_path, ci_input):
+    # A workflow or dependency edit is tested by the full lanes on its own
+    # pull request, so it cannot switch off its own check.
+    assert run_scope(tmp_path, "pull_request", ["rust/daemon/src/main.rs", ci_input],
+                     head_ref="claude/some-change") == ["full=true", "rust=true"]
+
+
+@pytest.mark.parametrize("files, git_exit", [([], 0), (["rust/daemon/src/main.rs"], 128)])
+def test_scope_keeps_an_ordinary_pull_request_with_an_unreadable_diff_full(tmp_path, files,
+                                                                          git_exit):
+    assert run_scope(tmp_path, "pull_request", files, git_exit,
+                     head_ref="claude/some-change") == ["full=true", "rust=true"]
+
+
 @pytest.mark.parametrize("head_ref", [BATCH_REF, "integrate/2026-10-07-rust-modes", ""])
 def test_scope_runs_everything_for_a_batch_or_unnamed_pull_request(tmp_path, head_ref):
     # An empty head ref (Actions did not supply one) fails safe to full.

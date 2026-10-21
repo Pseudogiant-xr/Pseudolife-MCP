@@ -41,9 +41,11 @@
 # Ordinary pull requests (2026-10-21): a PR merges through
 # an integration batch (docs/dev/merge-batches.md), whose own PR from an
 # integrate/* branch runs every lane, so a push to any other PR branch runs
-# only the fast lanes: scope, guards, lock-resolve and frontend. The `test`
-# job is skipped there, which reports success to its required check. Master
-# pushes, the nightly and manual runs are unchanged.
+# only the fast lanes: scope, guards, lock-resolve and frontend, unless it
+# changes CI or dependency inputs (workflows, pyproject.toml, a lock file,
+# the Rust toolchain pin), which run as before. The `test` job is skipped
+# there, which reports success to its required check. Master pushes, the
+# nightly and manual runs are unchanged.
 #
 # Merge queue (docs/specs/2026-10-19-merge-queue.md): `merge_group` runs the
 # same jobs under the same check names, so the ruleset's required `test` check
@@ -80,8 +82,8 @@ concurrency:
 jobs:
   scope:
     # Decides whether this run needs the Python suite lanes. A pull request
-    # from any branch but integrate/* skips them (fast lanes only; its batch
-    # runs them). Otherwise only a pull request or merge group whose net
+    # from any branch but integrate/* that changes no CI or dependency input
+    # skips them (fast lanes only; its batch runs them). Otherwise only a pull request or merge group whose net
     # change is entirely under rust/, or is
     # .github/workflows/rust.yml, CHANGELOG.md or a changelog.d/ fragment,
     # skips them; an empty or unreadable diff runs everything. A pull
@@ -105,16 +107,7 @@ jobs:
         shell: bash
         run: |
           case "$EVENT_NAME" in
-            pull_request)
-              # An ordinary pull request runs the fast lanes only (guards and
-              # the unscoped jobs): its full CI is its integration batch's
-              # (docs/dev/merge-batches.md). A batch branch, or a head ref
-              # Actions did not supply, is classified as before.
-              if [ -n "$HEAD_REF" ] && [[ "$HEAD_REF" != integrate/* ]]; then
-                echo "not an integrate/ batch branch: fast lanes only"
-                echo "python=false" >> "$GITHUB_OUTPUT"; exit 0
-              fi
-              base=HEAD^1 ;;
+            pull_request) base=HEAD^1 ;;
             merge_group)
               # Master's current tip, not merge_group.base_sha: that may be the
               # queue entry ahead, which need not pass on its own, so every
@@ -130,6 +123,20 @@ jobs:
             echo "python=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           printf '%s\n' "$files"
+          # An ordinary pull request runs the fast lanes only (guards and the
+          # unscoped jobs): its full CI is its integration batch's
+          # (docs/dev/merge-batches.md). One that changes CI or dependency
+          # inputs (workflows, pyproject.toml, a lock file, the Rust
+          # toolchain pin) is classified as before, so a workflow edit
+          # cannot switch off its own check. rust.yml's scope uses the same
+          # pattern. A batch branch, or a head ref Actions did not supply, is
+          # classified as before too.
+          ci_inputs='^(\.github/workflows/|pyproject\.toml$|ops/requirements\.lock\.txt$|rust/rust-toolchain\.toml$)|(^|/)(Cargo\.lock|package-lock\.json)$'
+          if [ "$EVENT_NAME" = pull_request ] && [ -n "$HEAD_REF" ] \
+             && [[ "$HEAD_REF" != integrate/* ]] && ! grep -qE "$ci_inputs" <<<"$files"; then
+            echo "not an integrate/ batch branch: fast lanes only"
+            echo "python=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
           # Skip only when nothing falls outside the allowlist AND the PR
           # touches rust/ (a CHANGELOG-only docs PR keeps the full suite).
           # Here-strings, not pipes: under pipefail an early-exiting grep -q
