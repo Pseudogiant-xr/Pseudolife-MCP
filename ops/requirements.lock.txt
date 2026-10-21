@@ -76,7 +76,7 @@ anyio==4.14.2
 attrs==26.1.0
 bcrypt==5.0.0
 build==1.5.0
-certifi==2026.6.17
+certifi==2026.10.19
 cffi==2.0.0
 charset-normalizer==3.4.7
 chromadb==1.5.9
