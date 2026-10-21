@@ -48,7 +48,9 @@ python ops/integrate.py status
 python ops/integrate.py build --dry-run
 python ops/integrate.py build
 PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1 > <log> 2>&1
-python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json
+python -m pytest -q -p no:cacheprovider <the RUST_HARNESS paths build prints> > <log> 2>&1
+python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json \
+  --harness-note "<count> passed at <head short sha>"
 ```
 
 - **`status`** lists the labelled pull requests in batch order, each with
@@ -73,15 +75,17 @@ python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json
   (`ops/wsl-suite.ps1` alone); the note must name the head's short sha,
   and the body says it was not checked. A result for a selected run, or
   one from a launcher too old to record its pytest arguments, is refused.
-  If any step after the push fails, rerunning `open` with the same
+  `--harness-note` takes the Rust harness run's result in words (next
+  section); it must name the head's short sha, and the body records it
+  beside the suite as not checked. If any step after the push fails, rerunning `open` with the same
   arguments resumes on the batch's own pull request without repeating a
   comment, even if master has moved since. Before the batch pull request
   exists, it refuses if the branch gained commits or master moved since
   `build`. It
   then pushes the branch, opens the batch pull request titled `integrate:
   <date> batch N (#a, #b)`, whose body lists each member's merged head,
-  review link and CI plus the suite result, and comments on each dropped
-  member.
+  review link and CI plus the suite and Rust harness results, and comments
+  on each dropped member.
 
 Drafts, heads with failing CI and heads that moved after listing are left
 out without a comment. A member that conflicts is dropped: the script
@@ -131,15 +135,30 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    10 minutes, a fraction of one CI run. Use `PSEUDOLIFE_SUITE_WHERE=local`
    so it runs in WSL on the unpushed branch; a run on the Linux box needs
    the commit pushed.
-2. A red suite is bisected locally: test master plus half the members,
-   then the half that fails, until one member is left. Drop that culprit
-   with a comment on its pull request and remove its label, switch back to
-   `origin/master`, remove the local batch branch and build again. Nothing
-   is fixed inside a batch.
-3. CI on the batch pull request is the combined check of its members, and
+2. The Rust harness Python tests run on the same head, because the full
+   suite collects only `tests/` and never runs the Python tests under
+   `rust/`: #877 broke `rust/daemon/harness/test_w2e_lifecycle.py`, passed
+   its batch's local suite, and was caught only by a reviewer's targeted
+   run. `build` prints the command (`RUST_HARNESS` in `ops/integrate.py`):
+   the pytest steps of `rust.yml`'s `rust` job plus the eval shard's
+   `pytest rust/ci`, with CI's census-currency deselect, since `build`
+   already runs CI's census verdict. These need no built Rust binary; the
+   parity shards' other harness files drive the release candidates and stay
+   CI's. Run it natively from the batch checkout (a targeted run, about
+   140 s on Windows; `rust/ci/test_workflow.py` needs `pwsh`) in any
+   Python with the project's dev dependencies, for example `uv run
+   --no-project --python 3.11 --with mcp==2.2.0 --with pytest --with
+   psycopg --with psutil --with httpx --with pyyaml python -m pytest ...`,
+   and pass its result to `open --harness-note`.
+3. A red suite or harness run is bisected locally: test master plus half
+   the members, then the half that fails, until one member is left. Drop
+   that culprit with a comment on its pull request and remove its label,
+   switch back to `origin/master`, remove the local batch branch and build
+   again. Nothing is fixed inside a batch.
+4. CI on the batch pull request is the combined check of its members, and
    the `merge-forward` skill's exceptions do not apply to it. If master
    moves before the merge, close the batch and build the next one.
-4. The batch pull request gets the usual review pass before the merge
+5. The batch pull request gets the usual review pass before the merge
    click and the ruleset's approving review. Its members were reviewed on
    their own, so the batch review checks that its members and merged heads
    match the body, that no conflict was resolved in it, and any

@@ -10,15 +10,17 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
     python ops/integrate.py status            # labelled PRs, CI, mergeability
     python ops/integrate.py build --dry-run   # what a build would do
     python ops/integrate.py build             # merge the batch locally
-    python ops/integrate.py open --suite <result.json>   # push it, open its PR
+    python ops/integrate.py open --suite <result.json> --harness-note "<result>"
+                                              # push it, open its PR
 
 A pull request joins by carrying the `ready-to-batch` label. `build` runs
 in a clean checkout whose HEAD is origin/master, merges each labelled head
 with `git merge --no-ff` in the order the label was applied (pull request
 number when unknown) onto a new local branch, and drops a member that
 conflicts, aborting that merge. It pushes nothing, so the local full suite
-runs on the batch head before any CI. `open` then checks the suite passed
-on that exact head, pushes the branch, opens the batch pull request, and
+runs on the batch head before any CI, with the Python tests under rust/ the
+suite does not collect (`RUST_HARNESS`). `open` then checks the suite passed
+on that exact head, records both results, pushes the branch, opens the batch pull request, and
 comments on each dropped member naming what it collided with (removing its
 label). A member whose own diff changes the producer census inputs is
 dropped the same way when the batch head would fail CI's census check
@@ -50,6 +52,22 @@ MIN_MEMBERS = 2
 BATCH_RE = re.compile(r"^integrate/(\d{4}-\d{2}-\d{2})-batch-(\d+)$")
 MARKER_RE = r"^(<<<<<<<|>>>>>>>)( |$)"
 CENSUS = "rust/producer_census.py"
+# The Python tests under rust/ that the local full suite never collects
+# (pytest's testpaths is tests/) and that need no built Rust binary: the
+# pytest steps of rust.yml's `rust` job plus the eval parity shard's
+# `pytest rust/ci`. #877 broke rust/daemon/harness/test_w2e_lifecycle.py and
+# passed its batch's local suite this way (2026-10-21). The census currency
+# test is deselected as CI deselects it: `build` runs CI's own verdict,
+# `producer_census.py --ci-check`. 767 tests, about 140 s natively on
+# Windows (2026-10-21).
+RUST_HARNESS = (
+    "rust/test_contract_inventory.py", "rust/test_producer_census.py",
+    "rust/daemon/harness/test_w2e_lifecycle.py",
+    "rust/daemon/harness/board/test_norm.py", "rust/daemon/harness/board/test_run.py",
+    "rust/ci",
+    "--deselect", "rust/test_producer_census.py::test_committed_census_matches_current_tree",
+)
+RUST_HARNESS_COMMAND = "python -m pytest -q -p no:cacheprovider " + " ".join(RUST_HARNESS)
 
 
 class Refusal(Exception):
@@ -429,7 +447,7 @@ def _cell(text: str) -> str:
     return " ".join(text.split()).replace("|", "\\|").replace("`", "'")
 
 
-def body(plan: Plan, suite: str | None = None) -> str:
+def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> str:
     lines = [
         f"Integration batch of {len(plan.merged)} reviewed pull requests, built by "
         f"`python ops/integrate.py build` from `{BASE}` at `{plan.base_sha}`. "
@@ -455,6 +473,8 @@ def body(plan: Plan, suite: str | None = None) -> str:
     lines += [
         "", "## Validation", "",
         f"- Local full suite: {suite or '<filled in by `open`>'}",
+        f"- Rust harness Python tests (`{RUST_HARNESS_COMMAND}`, which the full "
+        f"suite does not collect): {harness or '<filled in by `open`>'}",
         "- CI: this pull request's run is the combined check of its members.",
         "- A red batch is bisected locally (master plus half the members); the "
         f"culprit is dropped with a comment and loses `{plan.label}`, and nothing "
@@ -528,7 +548,11 @@ def build(args: argparse.Namespace) -> int:
           "has started. Next, on this checkout:\n"
           "  1. PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1   "
           "(the local WSL full suite; writes ~/.pseudolife-mcp/suite-results/*.json)\n"
-          "  2. python ops/integrate.py open --suite <that .json>\n"
+          f"  2. {RUST_HARNESS_COMMAND}   (the Rust harness Python tests the "
+          "suite does not collect; natively is fine, with the project's dev "
+          "dependencies)\n"
+          "  3. python ops/integrate.py open --suite <that .json> --harness-note "
+          f"\"<count> passed at {plan.head[:8]}\"\n"
           "A red suite: bisect locally, drop the culprit, switch back with "
           f"`git switch --detach {REMOTE}/{BASE}`, remove the local branch and build "
           "again.")
@@ -571,6 +595,20 @@ def _suite_line(args: argparse.Namespace, head: str) -> str:
             f"{result.get('summary', '')}")
 
 
+def _harness_line(args: argparse.Namespace, head: str) -> str:
+    """The "Rust harness Python tests" line: the operator's statement of the
+    run `build` printed, naming the batch head it ran on."""
+    if not args.harness_note:
+        raise Refusal("give the Rust harness Python tests' result for this head: "
+                      f"run `{RUST_HARNESS_COMMAND}` on this checkout, then "
+                      f"`--harness-note \"<count> passed at {head[:8]}\"`; the local "
+                      "full suite does not collect them")
+    if head[:8] not in args.harness_note:
+        raise Refusal(f"a --harness-note must name the batch head it ran on "
+                      f"(at least `{head[:8]}`) with its result")
+    return f"{args.harness_note} (stated by the operator, not checked)"
+
+
 def open_(args: argparse.Namespace) -> int:
     if _out("status", "--porcelain", "--untracked-files=no"):
         raise Refusal("the checkout has uncommitted changes to tracked files; "
@@ -590,7 +628,7 @@ def open_(args: argparse.Namespace) -> int:
     if others:
         raise Refusal("a batch is already open: " + ", ".join(
             f"#{n} ({name})" for n, name in others))
-    text = body(plan, _suite_line(args, head))
+    text = body(plan, _suite_line(args, head), _harness_line(args, head))
     # A rerun after a failure past the push resumes: this branch's own pull
     # request is the one to finish, not a second batch, but only while it
     # still points at the head the suite passed on. Once it is open, a moved
@@ -726,6 +764,9 @@ def main(argv: list[str] | None = None) -> int:
     evidence.add_argument("--suite", help="the passing suite result JSON for this head")
     evidence.add_argument("--suite-note",
                           help="the suite result in words, for a run without a JSON")
+    o.add_argument("--harness-note",
+                   help="the Rust harness Python tests' result in words, naming "
+                        "this head (the command `build` printed)")
     args = parser.parse_args(argv)
     commands = {"status": status, "build": build, "open": open_}
     try:

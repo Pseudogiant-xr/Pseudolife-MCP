@@ -194,8 +194,14 @@ def _suite_result(world, *, commit: str | None = None, exit_code: int = 0,
     return path
 
 
+def _harness_note(world) -> str:
+    head = _git(world.work, "rev-parse", "HEAD")
+    return f"767 passed at {head[:8]} on the maintainer's Windows host"
+
+
 def _open(world, **result) -> int:
-    return integrate.main(["open", "--suite", str(_suite_result(world, **result))])
+    return integrate.main(["open", "--suite", str(_suite_result(world, **result)),
+                           "--harness-note", _harness_note(world)])
 
 
 def _publish(world) -> int:
@@ -782,10 +788,70 @@ def test_open_takes_a_stated_suite_result_and_says_it_was_not_checked(world, cap
 
     head = _git(world.work, "rev-parse", "HEAD")
     note = f"passed at {head[:8]} on the Linux dev box, 18868 passed"
-    assert integrate.main(["open", "--suite-note", note]) == 0, capsys.readouterr()
+    assert integrate.main(["open", "--suite-note", note,
+                           "--harness-note", _harness_note(world)]) == 0, capsys.readouterr()
 
     (_, body), = world.gh.bodies("create")
     assert f"Local full suite: {note} (stated by the operator, not checked)" in body
+
+
+def test_build_names_the_rust_harness_run_the_suite_does_not_cover(world, capsys):
+    _three_with_a_collision(world)
+
+    assert _build() == 0
+    out = capsys.readouterr().out
+
+    assert integrate.RUST_HARNESS_COMMAND in out and "--harness-note" in out
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+@pytest.mark.parametrize("note", [None, "767 passed, trust me"])
+def test_open_refuses_without_the_rust_harness_result_for_this_head(world, capsys, note):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+
+    argv = ["open", "--suite", str(_suite_result(world))]
+    assert integrate.main(argv + (["--harness-note", note] if note else [])) == 2
+
+    err = capsys.readouterr().err
+    head = _git(world.work, "rev-parse", "HEAD")
+    assert head[:8] in err and ("--harness-note" in err)
+    if note is None:
+        assert integrate.RUST_HARNESS_COMMAND in err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+def test_open_records_the_rust_harness_result_beside_the_suite(world, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+
+    assert _open(world) == 0, capsys.readouterr()
+
+    (_, body), = world.gh.bodies("create")
+    assert (f"Rust harness Python tests (`{integrate.RUST_HARNESS_COMMAND}`, which the "
+            f"full suite does not collect): {_harness_note(world)} (stated by the "
+            "operator, not checked)") in body
+
+
+def test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips():
+    # The local full suite collects only tests/, so nothing under rust/.
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'testpaths = ["tests"]' in pyproject
+    workflow = (ROOT / ".github" / "workflows" / "rust.yml").read_text(encoding="utf-8")
+    paths = [a for a in integrate.RUST_HARNESS if not a.startswith("--")
+             and "::" not in a]
+    for path in paths:
+        assert (ROOT / path).exists(), path
+        # Each one is a path CI's own pytest steps name.
+        assert f" {path} " in workflow or f" {path}\n" in workflow, path
+    # Without w2e lifecycle this would miss #877's break again.
+    assert "rust/daemon/harness/test_w2e_lifecycle.py" in paths
+    # CI deselects the census currency test and runs --ci-check instead.
+    assert "-k 'not committed_census_matches_current_tree'" in workflow
+    deselected = integrate.RUST_HARNESS[integrate.RUST_HARNESS.index("--deselect") + 1]
+    module, name = deselected.split("::")
+    assert f"def {name}(" in (ROOT / module).read_text(encoding="utf-8")
 
 
 # The real census module with only its snapshot faked (a hash of each
