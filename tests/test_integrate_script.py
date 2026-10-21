@@ -449,32 +449,54 @@ def test_status_lists_each_labelled_pr_and_its_mergeability(world, capsys):
     assert world.gh.mutations() == []
 
 
-def test_a_member_without_green_ci_on_its_head_sits_out_and_keeps_its_label(world, capsys):
+@pytest.mark.parametrize("rollup", [
+    [{"status": "IN_PROGRESS", "conclusion": None}],   # pending
+    [{"state": "PENDING"}],                            # a pending StatusContext
+    [],                                                # no checks yet
+    [{"status": "COMPLETED", "conclusion": "SUCCESS"}],  # green
+], ids=["in-progress", "status-pending", "none", "green"])
+def test_a_member_whose_own_ci_is_not_red_joins_the_batch(world, capsys, rollup):
+    # The batch's CI is its members' CI, so a member waits on no run of its own.
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=rollup)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+    (_, body), = world.gh.bodies("create")
+    assert f"`{sha11}`" in body and f"| {integrate._checks(rollup)} |" in body
+
+
+def test_a_member_with_red_ci_on_its_head_sits_out_and_keeps_its_label(world, capsys):
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
     sha12 = world.pr(12, {"d.txt": "d\n"})
     world.gh.add(10, sha10)
-    world.gh.add(11, sha11, statusCheckRollup=[{"status": "IN_PROGRESS", "conclusion": None}])
-    world.gh.add(12, sha12)
+    world.gh.add(11, sha11, statusCheckRollup=[
+        {"status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"status": "COMPLETED", "conclusion": "FAILURE"}])
+    world.gh.add(12, sha12, statusCheckRollup=[{"status": "IN_PROGRESS", "conclusion": None}])
 
     assert _publish(world) == 0
     out = capsys.readouterr().out
 
     assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha12]
-    assert "#11" in out and "pending" in out
+    assert "left out #11: CI on its head is failing" in out
     assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
 
 
-def test_too_few_green_members_builds_nothing_and_says_why(world, capsys):
+def test_too_few_members_without_red_ci_builds_nothing_and_says_why(world, capsys):
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
-    world.gh.add(10, sha10)
-    world.gh.add(11, sha11, statusCheckRollup=[])
+    world.gh.add(10, sha10, statusCheckRollup=[])
+    world.gh.add(11, sha11, statusCheckRollup=[{"state": "ERROR"}])
 
     assert _build() == 0
     out = capsys.readouterr().out
 
-    assert "1 of 2" in out and "#11 CI on its head is none" in out
+    assert "1 of 2" in out and "#11 CI on its head is failing" in out
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 

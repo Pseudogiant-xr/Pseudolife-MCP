@@ -10,8 +10,11 @@ the procedure behind it.
 
 ## Joining a batch
 
-A pull request is ready when it has its reviews and green CI on a head of
-its own. Mark it with the `ready-to-batch` label:
+A pull request is ready when it has its reviews and its own local targeted
+validation (the touched and dependent tests, recorded in its body), and CI
+on its head is not failing. It does not wait for green CI of its own: the
+batch's CI is its CI, so pending or absent checks are fine. Mark it with
+the `ready-to-batch` label:
 
 ```bash
 gh pr edit <number> --add-label ready-to-batch
@@ -21,10 +24,18 @@ The label is the claim that the reviews are done; only someone with triage
 or write access can apply it. The script does not check reviews, since
 this repository records them in the pull request body rather than as
 GitHub approvals, but `status` shows the review decision. It does check
-CI: a labelled pull request whose current head is not green (pending,
-failing or no checks, for example after a new push) sits the batch out
-without a comment and keeps its label, and joins a later batch once that
-head is green.
+CI, only for a known failure: a labelled pull request whose current head
+has a failing check sits the batch out without a comment and keeps its
+label, and joins a later batch once a push replaces that head. Pending,
+green or no checks all admit it.
+
+Why not wait for green on the member's own head: on 2026-10-20/21 four
+things held batches up (#877 broke only against a newer master; an
+h5-background harness race, fixed by #883; a stale producer census; #875's
+dependency lock that could not resolve), and green CI on the member's own
+head caught none of them. Each was caught by the batch, by its local checks
+or by a reviewer's targeted run, so waiting for a member's own CI only
+doubled the wait.
 
 ## Building one
 
@@ -72,14 +83,14 @@ python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json
   review link and CI plus the suite result, and comments on each dropped
   member.
 
-Drafts, heads without green CI and heads that moved after listing are left
+Drafts, heads with failing CI and heads that moved after listing are left
 out without a comment. A member that conflicts is dropped: the script
 aborts that merge, and `open` comments on the pull request naming what it
 collided with (master itself, or the earlier members that touch the
 conflicted files) and removes its label, so the next batch does not pick
 it up again; a dropped member whose head moved since `build` keeps its
 label and gets no comment. Its author merges master forward once the collision has
-landed, waits for CI, and re-applies the label. If fewer than two members
+landed, reruns its targeted tests, and re-applies the label. If fewer than two members
 merge cleanly, no batch is built, the collisions are reported at once and
 the local branch is deleted; merge a lone ready pull request directly.
 
@@ -94,8 +105,8 @@ check would fail, `build` drops every member whose own diff changes those
 inputs, naming the other members that change them too, and merges the rest
 again from master. `open` comments on and unlabels each dropped member, as
 it does after a conflict. Its author merges master forward once master
-holds the rest of the batch, regenerates the census with `python rust/producer_census.py`, waits
-for CI and re-applies the label. A census that is stale while no member
+holds the rest of the batch, regenerates the census with `python rust/producer_census.py`, reruns
+its targeted tests and re-applies the label. A census that is stale while no member
 touches its inputs is printed as report-only and left alone, as CI leaves
 it. Before the push, `open` runs the same check and refuses if it would
 fail, so a plan built without it cannot reach CI.

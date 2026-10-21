@@ -265,22 +265,25 @@ def _collision(member: Member, conflicted: list[str], merged: list[Member],
     clean, files = _merge_tree(base_sha, member.sha)
     if not clean:
         return (f"conflicts with {BASE} itself in {', '.join(files)}; merge "
-                f"{BASE} forward, let CI pass, then re-apply the label")
+                f"{BASE} forward, rerun its targeted tests, then re-apply the label")
     culprits = [f"#{m.number}" for m in merged
                 if _changed(m.sha, base_sha) & set(conflicted)]
     who = ", ".join(culprits) or ("the batch so far ("
                                   + ", ".join(f"#{m.number}" for m in merged) + ")")
     return (f"conflicts with {who} in {', '.join(conflicted)}; once that "
-            f"merges, merge {BASE} forward, let CI pass, then re-apply the label")
+            f"merges, merge {BASE} forward, rerun its targeted tests, then re-apply the label")
 
 
 def _not_ready(m: Member) -> str | None:
-    """Why a labelled pull request sits this batch out, keeping its label."""
+    """Why a labelled pull request sits this batch out, keeping its label.
+
+    Its own CI need not be green: the batch's CI is its CI, so pending or
+    absent checks admit it. A failing head is a known failure and waits."""
     if m.draft:
         return "is a draft"
-    if m.checks != "green":
-        return (f"CI on its head is {m.checks}; it joins a batch once that "
-                "head is green")
+    if m.checks == "failing":
+        return ("CI on its head is failing; it joins a batch once a push "
+                "replaces that head")
     return None
 
 
@@ -394,7 +397,7 @@ def _census_reason(member: Member, files: list[str], culprits: list[Member]) -> 
             "committed census is stale on the batch head, so CI's census check "
             f"(`python {CENSUS} --ci-check`) would fail{also}; once {BASE} holds "
             f"the rest of the batch, merge {BASE} forward, regenerate the census "
-            f"with `python {CENSUS}`, let CI pass, then re-apply the label")
+            f"with `python {CENSUS}`, rerun its targeted tests, then re-apply the label")
 
 
 def _merge_batch(plan: Plan, members: list[Member]) -> None:
@@ -475,8 +478,8 @@ def build(args: argparse.Namespace) -> int:
     waiting = [(m, _not_ready(m)) for m in members if _not_ready(m)]
     if len(members) - len(waiting) < MIN_MEMBERS:
         print(f"{len(members) - len(waiting)} of {len(members)} pull request(s) "
-              f"carrying `{args.label}` are ready (not a draft, CI green on the "
-              f"head); a batch needs {MIN_MEMBERS}. Merge a lone ready pull "
+              f"carrying `{args.label}` are ready (not a draft, CI on the head not "
+              f"failing); a batch needs {MIN_MEMBERS}. Merge a lone ready pull "
               "request directly.")
         for m, reason in waiting:
             print(f"  #{m.number} {reason}")
