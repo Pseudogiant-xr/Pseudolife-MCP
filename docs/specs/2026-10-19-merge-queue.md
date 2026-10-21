@@ -142,6 +142,7 @@ would still merge. Before enabling the queue, add these jobs to the
 | `test-lite-windows` | CI | the change is Rust-only |
 | `test-lite-macos` | CI | the change is Rust-only |
 | `frontend` | CI | never |
+| `lock-resolve` | CI | never |
 | `Rust daemon / disposable image` | Rust shim | the change is documentation-only |
 
 A job skipped by its `if:` reports success, so requiring these never blocks

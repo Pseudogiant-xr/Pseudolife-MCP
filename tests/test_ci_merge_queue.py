@@ -29,7 +29,7 @@ REQUIRED_CHECKS = {"test", "Parity / ubuntu-latest", "Parity / windows-latest"}
 # The checks docs/specs/2026-10-19-merge-queue.md asks the maintainer to add
 # before enabling the queue, which waits only for required checks.
 ADDED_CHECKS = {"guards", "test-lite-linux", "test-lite-windows", "test-lite-macos",
-                "frontend", "Rust daemon / disposable image"}
+                "frontend", "lock-resolve", "Rust daemon / disposable image"}
 SPEC = ROOT / "docs" / "specs" / "2026-10-19-merge-queue.md"
 
 
