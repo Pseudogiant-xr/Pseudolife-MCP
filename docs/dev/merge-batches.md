@@ -87,6 +87,7 @@ PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1 > <log> 2>&1
 python -m pytest -q -p no:cacheprovider <the RUST_HARNESS paths build prints> > <log> 2>&1
 python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json \
   --harness-note "<count> passed at <head short sha>"
+python ops/integrate.py merge   # once its CI is green and it has its review
 ```
 
 - **`status`** lists the labelled pull requests in batch order, each with
@@ -219,8 +220,58 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
 The batch pull request merges with a **merge commit, never squash**: only
 then are the members' head commits reachable from master, so GitHub marks
 each member merged. A squash would leave every member open with its work
-already on master. Check afterwards that each member shows as merged and
-its branch is gone; delete a leftover branch by hand.
+already on master.
 
-The maintainer clicks merge, or the session the maintainer delegated
-merging to.
+Merge it with the script, on the checkout where `build` and `open` ran:
+
+```bash
+python ops/integrate.py merge
+```
+
+Every merge here uses the admin bypass, so GitHub would merge an ordinary
+pull request as readily as a batch; `merge` is the check it does not
+make. It reads the plan `open` left in the worktree's git directory and
+merges only the pull request that plan names, and only when all of these
+hold:
+
+- its head branch is `integrate/*` and is the plan's branch;
+- its head is the head `build` made and the suite passed on;
+- the ruleset's required checks (`test`, `Parity / ubuntu-latest`,
+  `Parity / windows-latest`) have all reported, so a head where only the
+  fast `scope` or `guards` finished never passes;
+- the latest run of every check on that head has finished as `SUCCESS`,
+  `SKIPPED` or `NEUTRAL` (a docs-only batch skips lanes, a required one
+  included, and reports the skip). A run still going, or a required lane
+  not reported yet, refuses with "wait"; any other conclusion, `STALE` and
+  `TIMED_OUT` included, refuses naming the check. A rerun that superseded
+  a failure counts;
+- master has not moved since `build`, or the head contains current master.
+
+It then runs `gh pr merge <N> --merge --admin --match-head-commit <head>`,
+so GitHub merges nothing but that head, and checks each member by its
+current head: `MERGED`, or a head on master whatever the state (an open
+one is asked again for up to two minutes while GitHub catches up), is
+done. A member that pushed after `build` has commits the batch did not
+carry: it stays open with its label and joins a later batch. It prints
+the merge commit and the next steps: watch CI on master at that commit,
+then free the checkout with `git switch --detach origin/master` and `git
+branch -D <batch branch>`. Each refusal names what to do next and changes
+nothing, and a rerun of `merge` after the merge went through only
+confirms the members and finishes. Check that each member's branch is
+gone; delete a leftover by hand.
+
+A batch whose head moved after `open` (a merge-forward under the
+`merge-forward` skill included) is refused, because its head is not the
+one the suite passed on. Merging it under that skill's exceptions is an
+admin bypass the maintainer makes, outside the script.
+
+On the maintainer's Windows host a local Claude Code hookify rule blocks a
+raw `gh pr merge`, so this script is the only path there. That rule lives
+in the maintainer's own configuration, not in this repository: a Codex
+session, or any other harness, has no such block and relies on the written
+rule (CLAUDE.md, "Shipping checklist" item 4): a batch merges through
+`python ops/integrate.py merge`, and only a merge under the
+`merge-forward` skill's exceptions is made by hand, by the maintainer.
+
+The maintainer runs it, or the session the maintainer delegated merging
+to.
