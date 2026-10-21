@@ -204,9 +204,10 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    otherwise drop the attributed member with a comment, close the batch
    and build again. If no member can be attributed, bisect by building
    smaller batches.
-4. CI on the batch pull request is the combined check of its members, and
-   the `merge-forward` skill's exceptions do not apply to it. If master
-   moves before the merge, close the batch and build the next one.
+4. CI on the batch pull request is the combined check of its members and
+   their only full CI; no member is ever merged directly. If master moves
+   before the merge, merge it forward only under the `merge-forward`
+   skill's exceptions; otherwise close the batch and build the next one.
 5. The batch pull request gets the usual review pass before the merge
    click and the ruleset's approving review. Its members were reviewed on
    their own, so the batch review checks that its members and merged heads

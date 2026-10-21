@@ -5,12 +5,15 @@ description: Use before merging a PR whose branch was updated from master withou
 
 # Merging without fresh CI on the updated head
 
-Every PR normally needs passing CI for its current head integrated with
-current master (CLAUDE.md, "Shipping checklist"). These two exceptions
-let a PR merge on the CI an earlier head passed. Both are to be removed
-when the GitHub merge queue is enabled. Neither applies to `integrate/*`
-branches: their CI is the only combined check of their PRs. When in doubt,
-wait for CI.
+Ordinary PRs never merge directly: they land through an `integrate/*`
+batch (`docs/dev/merge-batches.md`), because a push to any other branch
+runs only the fast CI lanes. A batch PR normally needs passing CI for its
+current head integrated with current master (CLAUDE.md, "Shipping
+checklist"). These two exceptions let a batch PR merge on the CI an
+earlier head of it passed, after master moved; "the PR" below is that
+batch PR and "either side" is the batch against master. Both are to be
+removed when the GitHub merge queue is enabled. When in doubt, close the
+batch and build the next one.
 
 Merging before CI reports on the new head is a ruleset bypass (admin
 merge), so only the maintainer or the maintainer's delegate does it.
@@ -20,10 +23,10 @@ merge), so only the maintainer or the maintainer's delegate does it.
 Added after #592 waited 25 minutes on a CHANGELOG-only conflict. All of
 these must hold:
 
-1. **The previous head passed** `test`, `test-lite-linux`,
-   `test-lite-windows`, `test-lite-macos`, `frontend` and CodeQL, and the
-   merge-forward commit is the only commit pushed since. A review fix
-   pushed with it needs its own CI.
+1. **The previous batch head passed** every lane a batch runs: `test`,
+   `test-lite-linux`, `test-lite-windows`, `test-lite-macos`, `frontend`,
+   CodeQL and both `Parity` gates. The merge-forward commit is the only
+   commit pushed since, since nothing is fixed inside a batch.
 2. **The two sides share no file except docs-only files** (as CLAUDE.md's
    "Docs-only changes" defines them). Compute it, don't eyeball it:
    `base=$(git merge-base <previous head> origin/master)`. Master's set is
@@ -53,7 +56,9 @@ Added after squash-merging #771 left #772 in conflict with master.
 Squash-merging the bottom PR of a stack gives master one new commit whose
 content the next PR already holds; git does not see that, so the next PR
 conflicts wherever both added lines in the same place. The PR may merge on
-the CI its earlier head passed when all of these hold:
+the CI its earlier head passed when all of these hold (batches merge with
+merge commits, so for a batch PR this arises only when master took a
+squash of a PR the batch already contains):
 
 1. **Before forwarding,** master's only commits since the PR's previous
    merge base are squashes of its parent PRs, each squashed from a head
@@ -80,6 +85,6 @@ CI runs again on the push to master. That run is the check, and a cancelled
 run is not a pass: a later master push cancels an earlier run
 (`cancel-in-progress`). Watch the first master run that completes on a
 commit containing the merge: `ci.yml` for rule A, both `ci.yml` and
-`rust.yml` for rule B. If it fails, open a revert PR at once, or a fix PR
+`rust.yml` for rule B. If it fails, open a revert PR at once (landed as a batch of one), or a fix PR
 when the fix is obvious, and make no more such merges until master is green
 again.

@@ -234,7 +234,8 @@ queue as on, not before:
   checklist, "CI before merge"). The queue's group run is the integrated check, provided
   every lane is a required check (see "Required checks" above). Without
   that, this rule must stay for the lanes the ruleset does not require. A PR
-  needs green CI on its own head before it is queued. It no longer needs to
+  needs its fast lanes (and no red check) on its own head before it is
+  queued, as it does to join a batch today. It no longer needs to
   be updated and rerun each time master moves.
 - **Disjoint merge-forward** (the `merge-forward` skill, section A). It exists to skip a fresh CI
   run after a master forward-merge. With the queue, nothing waits on that
