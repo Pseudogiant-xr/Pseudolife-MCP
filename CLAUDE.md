@@ -43,6 +43,9 @@ the memory bank; procedures belong in a skill or doc this file points to.
    because pushes to other branches run only the fast lanes (what runs
    where, and the `merge-forward` skill's exceptions:
    `docs/dev/merge-batches.md`).
+   A batch merges through `python ops/integrate.py merge`, which refuses
+   anything but a green batch at its built head, except a merge under the
+   `merge-forward` skill's exceptions, which the maintainer makes by hand.
    Independent review is still required, and the maintainer owns the merge.
    **Merge queue: CI ready, queue off** (2026-10-19): both workflows run on
    `merge_group`, but enabling GitHub's merge queue is a ruleset change only
@@ -217,9 +220,9 @@ current merge ref, except as the `merge-forward` skill allows):
   than one CI run and the suite never collects `rust/`; nothing
   is fixed inside a batch (a conflicting member, or the culprit a red
   batch's local bisection finds, is dropped with a comment), and the
-  maintainer or the delegated session merges it only with `python
-  ops/integrate.py merge` (a merge commit, never squash, so GitHub marks
-  its members merged). Procedure:
+  maintainer or the delegated session merges it with a merge commit, never
+  squash, so GitHub marks its members merged (the command: item 4).
+  Procedure:
   `docs/dev/merge-batches.md`.
 - These suite-gate rules (the 2026-09-28 trial with its 2026-10-05
   amendments) are permanent by maintainer decision of 2026-10-19.
