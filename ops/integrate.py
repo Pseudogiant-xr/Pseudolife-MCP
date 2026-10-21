@@ -655,7 +655,10 @@ def _harness_line(args: argparse.Namespace, head: str) -> str:
                       f"(at least `{head[:8]}`) with its result")
     note = args.harness_note.lower()
     passed = re.search(r"\b(\d+) passed\b", note)
-    if not passed or int(passed.group(1)) == 0 or re.search(r"\b(failed|errors?)\b", note):
+    # Only pytest's own non-zero counts ("3 failed", "1 error") mark a red
+    # run; the words alone also appear in prose and log paths.
+    if (not passed or int(passed.group(1)) == 0
+            or re.search(r"\b0*[1-9]\d*\s+(failed|errors?)\b", note)):
         raise Refusal("a --harness-note must state a clean pass, pytest's own "
                       f"`<count> passed` with no failed or error count, at {head[:8]}; "
                       "a red run is bisected and its culprit dropped")

@@ -900,6 +900,20 @@ def test_open_refuses_a_harness_note_without_a_clean_pass_count(world, capsys, r
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
+@pytest.mark.parametrize("result", ["767 passed at {head} (error-free)",
+                                    "767 passed at {head}; log logs/errors.log",
+                                    "767 passed, 0 failed at {head}"])
+def test_open_accepts_a_clean_harness_note_that_mentions_errors_in_prose(world, capsys, result):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+    head = _git(world.work, "rev-parse", "HEAD")
+
+    assert integrate.main(["open", "--suite", str(_suite_result(world)),
+                           "--harness-note", result.format(head=head[:8])]) == 0, \
+        capsys.readouterr()
+
+
 def test_open_records_the_rust_harness_result_beside_the_suite(world, capsys):
     _three_with_a_collision(world)
     assert _build() == 0
