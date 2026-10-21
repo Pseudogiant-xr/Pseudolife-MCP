@@ -87,6 +87,7 @@ PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1 > <log> 2>&1
 python -m pytest -q -p no:cacheprovider <the RUST_HARNESS paths build prints> > <log> 2>&1
 python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json \
   --harness-note "<count> passed at <head short sha>"
+python ops/integrate.py merge   # once its CI is green and it has its review
 ```
 
 - **`status`** lists the labelled pull requests in batch order, each with
@@ -219,8 +220,48 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
 The batch pull request merges with a **merge commit, never squash**: only
 then are the members' head commits reachable from master, so GitHub marks
 each member merged. A squash would leave every member open with its work
-already on master. Check afterwards that each member shows as merged and
-its branch is gone; delete a leftover branch by hand.
+already on master.
 
-The maintainer clicks merge, or the session the maintainer delegated
-merging to.
+Merge it with the script, on the checkout where `build` and `open` ran:
+
+```bash
+python ops/integrate.py merge
+```
+
+Every merge here uses the admin bypass, so GitHub would merge an ordinary
+pull request as readily as a batch; `merge` is the check it does not
+make. It reads the plan `open` left in the worktree's git directory and
+merges only the pull request that plan names, and only when all of these
+hold:
+
+- its head branch is `integrate/*` and is the plan's branch;
+- its head is the head `build` made and the suite passed on;
+- every check on that head has completed and none failed or was cancelled
+  (a skipped or neutral check is fine). A pending check, or none reported
+  yet, refuses with "wait"; a failed one refuses naming it;
+- master has not moved since `build`, or the head contains current master.
+
+It then runs `gh pr merge <N> --merge --admin --match-head-commit <head>`,
+so GitHub merges nothing but that head, confirms that the batch and every
+member read `MERGED`, and prints the merge commit and the next steps: watch
+CI on master at that commit, then free the checkout with `git switch
+--detach origin/master` and `git branch -D <batch branch>`. Each refusal
+names what to do next and changes nothing; a member left open is printed
+with how to check and close it, and a rerun of `merge` resumes at that
+confirmation. Check that each member's branch is gone; delete a leftover
+by hand.
+
+A batch whose head moved after `open` (a merge-forward under the
+`merge-forward` skill included) is refused, because its head is not the
+one the suite passed on. Merging it under that skill's exceptions is an
+admin bypass the maintainer makes, outside the script.
+
+On the maintainer's Windows host a local Claude Code hookify rule blocks a
+raw `gh pr merge`, so this script is the only path there. That rule lives
+in the maintainer's own configuration, not in this repository: a Codex
+session, or any other harness, has no such block and relies on the written
+rule (CLAUDE.md, "Shipping checklist" item 4) to merge only through
+`python ops/integrate.py merge`.
+
+The maintainer runs it, or the session the maintainer delegated merging
+to.
