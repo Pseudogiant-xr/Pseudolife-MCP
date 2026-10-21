@@ -44,6 +44,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -172,6 +173,20 @@ class Plan:
         raw["dropped"] = [Dropped(Member(**d.pop("member")), **d) for d in raw["dropped"]]
         return Plan(**raw)
 
+
+# The ruleset's required checks (docs/specs/2026-10-19-merge-queue.md, read
+# from ruleset 19138403): `merge` waits until each has reported, so a head
+# where only the fast `scope` or `guards` finished never passes.
+REQUIRED_CHECKS = ("test", "Parity / ubuntu-latest", "Parity / windows-latest")
+# The only conclusions `merge` counts as passing; anything else is red or
+# still running.
+PASSING = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+# Members confirm on GitHub's own schedule after the merge: ask for up to
+# MEMBER_WAIT_SECONDS before accepting a head that is on master unmarked.
+MEMBER_WAIT_SECONDS = 120
+MEMBER_POLL_SECONDS = 10
+_sleep = time.sleep
+_clock = time.monotonic
 
 FAILED = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED",
           "STARTUP_FAILURE", "ERROR"}
@@ -827,9 +842,11 @@ def _merge_plan() -> Plan:
     if plan is None:
         raise Refusal(f"this checkout holds no batch plan ({branch or 'detached HEAD'}); "
                       "run `merge` on the checkout where `build` and `open` ran, which "
-                      "stays on the batch branch. A pull request from any other branch "
-                      f"is never merged directly: label it `{LABEL}` and let a batch "
-                      "carry it")
+                      "stays on the batch branch. A batch opened before `open` kept its "
+                      "plan has none: the maintainer merges it by hand after the checks "
+                      "in docs/dev/merge-batches.md (\"Merging it\"), or close it and "
+                      "build again. A pull request from any other branch is never "
+                      f"merged directly: label it `{LABEL}` and let a batch carry it")
     if not branch.startswith(PREFIX) or not plan.branch.startswith(PREFIX):
         raise Refusal(f"{branch} is not an `{PREFIX}` batch branch; only a batch pull "
                       "request merges. A pull request from any other branch is never "
@@ -842,6 +859,50 @@ def _merge_plan() -> Plan:
         raise Refusal(f"{plan.branch} was built but not published; run `python "
                       "ops/integrate.py open` first, then wait for its CI")
     return plan
+
+
+def _latest_checks(rollup: list[dict] | None) -> list[dict]:
+    """The latest result of each check, so a rerun that superseded a failure
+    counts: a CheckRun is keyed by workflow and name, a StatusContext by its
+    context, and the later start (then completion) wins, list order on a tie."""
+    latest: dict[tuple, dict] = {}
+    for check in rollup or []:
+        if check.get("__typename") == "StatusContext" or "context" in check:
+            key = ("status", check.get("context", ""))
+        else:
+            key = ("check", check.get("workflowName", ""), check.get("name", ""))
+        when = (check.get("startedAt") or "", check.get("completedAt") or "")
+        held = latest.get(key)
+        if held is None or when >= (held.get("startedAt") or "",
+                                    held.get("completedAt") or ""):
+            latest[key] = check
+    return list(latest.values())
+
+
+def _merge_checks(rollup: list[dict] | None) -> tuple[list[str], list[str]]:
+    """(red, waiting) for a batch head: every latest check must have finished
+    as SUCCESS, SKIPPED or NEUTRAL, and each required lane must be among
+    them. Any other conclusion (STALE and TIMED_OUT included) is red."""
+    red, waiting, names = [], [], set()
+    for check in _latest_checks(rollup):
+        name = _check_name(check)
+        names.add(name)
+        if check.get("__typename") == "StatusContext" or "context" in check or (
+                "status" not in check):
+            state = (check.get("state") or "").upper()
+            if state in ("", "PENDING", "EXPECTED"):
+                waiting.append(name)
+            elif state != "SUCCESS":
+                red.append(f"{name} ({state})")
+            continue
+        conclusion = (check.get("conclusion") or "").upper()
+        if (check.get("status") or "").upper() != "COMPLETED" or not conclusion:
+            waiting.append(name)
+        elif conclusion not in PASSING:
+            red.append(f"{name} ({conclusion})")
+    waiting += [f"{name} (not reported yet)" for name in REQUIRED_CHECKS
+                if name not in names]
+    return red, waiting
 
 
 def _refuse_unmergeable(plan: Plan, view: dict) -> None:
@@ -870,19 +931,17 @@ def _refuse_unmergeable(plan: Plan, view: dict) -> None:
                       f"--detach {REMOTE}/{BASE}`, remove the local branch and build "
                       "again (a batch forwarded under the `merge-forward` skill is the "
                       "maintainer's to merge)")
-    rollup = view.get("statusCheckRollup") or []
-    red = [_check_name(c) for c in rollup if _check_state(c) in FAILED]
+    red, waiting = _merge_checks(view.get("statusCheckRollup"))
     if red:
         raise Refusal(f"CI failed on #{n} at {plan.head[:12]}: {', '.join(red)}. Nothing "
                       "is fixed inside a batch: rerun once only for the flake classes "
                       "CLAUDE.md names (issues #830 and #855); otherwise drop the member "
                       "the failing job covers, or bisect, then close the batch and build "
                       "again (docs/dev/merge-batches.md, \"Validating it\")")
-    if _checks(rollup) != "green":
-        waiting = [_check_name(c) for c in rollup if _unfinished(c)]
-        raise Refusal(f"CI on #{n} has not finished ("
-                      f"{', '.join(waiting) or 'no checks reported yet'}); wait for "
-                      "every check to complete, then rerun `python ops/integrate.py merge`")
+    if waiting:
+        raise Refusal(f"CI on #{n} has not finished ({', '.join(waiting)}); wait for "
+                      "every check, the required lanes included, to complete, then rerun "
+                      "`python ops/integrate.py merge`")
     git("fetch", "-q", REMOTE, BASE)
     master = _out("rev-parse", f"{REMOTE}/{BASE}")
     if (master != plan.base_sha and git("merge-base", "--is-ancestor", master,
@@ -894,6 +953,55 @@ def _refuse_unmergeable(plan: Plan, view: dict) -> None:
                       "remove the local branch and build the next batch; only the "
                       "`merge-forward` skill's exceptions let it merge instead, and that "
                       "merge is the maintainer's")
+
+
+def _on_master(sha: str, number: int, commit: str) -> bool:
+    """Is `sha` reachable from the merge commit or master? Fetches the
+    member's head first when this checkout lacks it (a push after `build`)."""
+    if git("cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode != 0:
+        git("fetch", "-q", REMOTE, f"pull/{number}/head", check=False)
+    tips = [t for t in (commit, f"{REMOTE}/{BASE}") if t
+            and git("cat-file", "-e", f"{t}^{{commit}}", check=False).returncode == 0]
+    return any(git("merge-base", "--is-ancestor", sha, tip, check=False).returncode == 0
+               for tip in tips)
+
+
+def _confirm_members(plan: Plan, commit: str) -> list[tuple[Member, str, str]]:
+    """Report each member against its current head, asking GitHub again for
+    up to MEMBER_WAIT_SECONDS while one sits on master unmarked. Returns the
+    members not confirmed: (member, state, head) whose head is the one the
+    batch carried and yet is not on master."""
+    deadline = _clock() + MEMBER_WAIT_SECONDS
+    pending = list(plan.merged)
+    unconfirmed = []
+    while pending:
+        git("fetch", "-q", REMOTE, BASE, check=False)
+        last = _clock() >= deadline
+        waiting = []
+        for m in pending:
+            view = json.loads(gh("pr", "view", str(m.number), "--json",
+                                 "state,headRefOid"))
+            state, head = view.get("state", ""), view.get("headRefOid", "")
+            if state == "MERGED":
+                print(f"  #{m.number} MERGED {m.title}")
+            elif _on_master(head, m.number, commit):
+                if state == "OPEN" and not last:
+                    waiting.append(m)   # GitHub marks it merged shortly
+                else:
+                    print(f"  #{m.number} {state.lower()}: its head {head[:12]} is in "
+                          f"{BASE}; GitHub has not marked it merged - {m.title}")
+            elif head != m.sha:
+                print(f"  #{m.number} {state.lower()}: has commits after the batch "
+                      f"({head[:12]}, the batch carried {m.sha[:12]}); it keeps its "
+                      "label and joins a later batch")
+            elif last:
+                unconfirmed.append((m, state, head))
+            else:
+                waiting.append(m)
+        pending = waiting
+        if pending:
+            _sleep(MEMBER_POLL_SECONDS)
+    return unconfirmed
 
 
 def merge(args: argparse.Namespace) -> int:
@@ -922,19 +1030,13 @@ def merge(args: argparse.Namespace) -> int:
         return 1
     commit = (after.get("mergeCommit") or {}).get("oid", "")
     print(f"merged #{n} into {BASE} as {commit or '<merge commit unknown>'}")
-    unmerged = []
-    for m in plan.merged:
-        state = json.loads(gh("pr", "view", str(m.number), "--json", "state"))["state"]
-        print(f"  #{m.number} {state} {m.title}")
-        if state != "MERGED":
-            unmerged.append(m)
-    for m in unmerged:
-        print(f"integrate: #{m.number} does not read MERGED. GitHub marks a member "
-              f"merged once its head ({m.sha[:12]}) is reachable from {BASE}: check "
-              f"with `git merge-base --is-ancestor {m.sha[:12]} {commit[:12] or BASE}` "
-              f"after a fetch, and if it is, close #{m.number} with a comment naming "
-              f"#{n}; then rerun `merge`", file=sys.stderr)
-    if unmerged:
+    unconfirmed = _confirm_members(plan, commit)
+    for m, state, head in unconfirmed:
+        print(f"integrate: #{m.number} reads {state.lower()} and its head {head[:12]}, "
+              f"the one this batch carried, is not on {REMOTE}/{BASE} yet; check #{n}'s "
+              f"merge commit on GitHub, then rerun `merge` to confirm again",
+              file=sys.stderr)
+    if unconfirmed:
         return 1
     Plan.path(plan.branch).unlink(missing_ok=True)
     print("Next:\n"
