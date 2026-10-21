@@ -164,6 +164,31 @@ jobs:
           tests/test_changelog_fragments.py tests/test_wall_clock_budgets.py
           "tests/test_disposable_database_guard.py::test_every_reap_and_full_bank_truncate_is_guarded_first"
 
+  lock-resolve:
+    # Replays the daemon image's constrained install (ops/Dockerfile.daemon
+    # step 2) as a pip dry run, so a lock whose pins contradict each other
+    # goes red on its pull request instead of in the image build. No other
+    # job resolves ops/requirements.lock.txt (the tests that read it match
+    # single pins): Dependabot's #875 (aiohttp 3.14.4, which needs
+    # yarl>=1.25.1, against a lock pinning yarl 1.24.2) was green everywhere
+    # else. Runs on every event, unscoped, since it is cheap (the resolve
+    # step took 74 s on a hosted runner, run 39450066156 on 2026-10-21) and
+    # a path filter would be one more way to skip it. It gates a merge only
+    # once the ruleset requires it (docs/specs/2026-10-19-merge-queue.md).
+    # The Python must be the image's (tests/test_check_lock_resolves.py pins
+    # it to the FROM line).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: The lock resolves the way the daemon image installs it
+        run: python ops/check_lock_resolves.py
+
   test:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
