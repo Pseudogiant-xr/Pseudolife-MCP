@@ -37,11 +37,14 @@ the memory bank; procedures belong in a skill or doc this file points to.
    touched and dependent tests with the bench Postgres up, since a missing
    PostgreSQL or an unexpected skip is not a pass, and record the tested
    head, selected files, dependency reasoning and result in the PR.
-4. **CI before merge:** every PR needs passing CI (full PostgreSQL job,
-   lite Linux, Windows, macOS, required analysis) for its current head
-   integrated with current master; if master moved, update the branch and
-   wait for fresh CI, because rerunning an old job tests its old merge
-   commit. The only exceptions are in the `merge-forward` skill.
+4. **CI before merge:** a PR lands through an integration batch, whose own
+   PR's passing CI (full PostgreSQL job, lite Linux, Windows, macOS, Parity,
+   required analysis) on its head integrated with current master is every
+   member's CI; if master moved, rebuild the batch, because rerunning an
+   old job tests its old merge commit. A push to any other PR runs only the
+   fast lanes (`scope`, `guards`, the Rust job and the unscoped checks),
+   because full lanes there made each change wait for CI twice. The only
+   exceptions are in the `merge-forward` skill.
    Independent review is still required, and the maintainer owns the merge.
    **Merge queue: CI ready, queue off** (2026-10-19): both workflows run on
    `merge_group`, but enabling GitHub's merge queue is a ruleset change only
@@ -207,10 +210,12 @@ current merge ref, except as the `merge-forward` skill allows):
   (plus doc guards if docs overlap). A hand-resolved code conflict always
   requires one.
 - **An integration batch** (`integrate/<date>-batch-N` from `python
-  ops/integrate.py build`, over reviewed `ready-to-batch` PRs green on their
-  own heads, when three or more are ready or about every 4 hours) passes
-  the local WSL full suite on its head before `ops/integrate.py open`
-  pushes it, because since #846 that costs less than one CI run; nothing
+  ops/integrate.py build`, over `ready-to-batch` PRs with their review,
+  their own local targeted validation and own-head CI that is not red, when
+  three or more are ready or about every 4 hours) passes the local WSL full
+  suite and the `rust/` harness run `build` prints on its head before
+  `ops/integrate.py open` pushes it, because since #846 that costs less
+  than one CI run and the suite never collects `rust/`; nothing
   is fixed inside a batch (a conflicting member, or the culprit a red
   batch's local bisection finds, is dropped with a comment), and the
   maintainer or the delegated session merges it with a merge commit, never
