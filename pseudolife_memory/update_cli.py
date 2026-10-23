@@ -879,17 +879,15 @@ class Update:
                 sleep(self.o.health_delay_ms / 1000.0)
         if not health:
             lines = ["daemon did not report healthy. Logs: docker logs " + DAEMON_CONTAINER, "to roll back:"] + self.rollback_lines
+            if self.rollback_lines:
+                lines += self._schema_rollback_note(None)
             raise UpdateError("\n".join(lines))
         self.step(f"healthy. version={health.get('version')} schema={health.get('schema')} "
                   f"persist_errors={health.get('persist_errors')}")
         before, after = self.schema_before, health.get("schema")
         if self.rollback_lines and type(before) is int and type(after) is int and after > before:
-            # An older daemon refuses a bank stamped by a newer build, so an
-            # image-only rollback across a schema change no longer starts.
-            self.rollback_lines = self.rollback_lines + [
-                f"      This deploy moved the bank's schema from v{before} to v{after}, which the older daemon",
-                "      refuses: after rolling back the image, restore the backup taken above with",
-                "      ops/restore.ps1 -Apply -BackupFile <dump> (ops/restore.sh --apply --backup-file <dump>)."]
+            self.rollback_lines = self.rollback_lines + self._schema_rollback_note(after)
+            self.report.rollback["restore_required"] = True
         if expect_version and health.get("version") != expect_version:
             lines = [f"the daemon reports version {health.get('version')}, not the {expect_version} that was pulled: "
                      f"the compose project's image setting won (check `docker compose config` for the daemon "
@@ -901,6 +899,23 @@ class Update:
                 print(line)
             sys.stdout.flush()   # ahead of a warning on stderr, or a streamed child
         return health
+
+    def _schema_rollback_note(self, after: int | None) -> list[str]:
+        """The rollback lines' schema caveat. An older daemon refuses a bank
+        a newer build has upgraded, so an image-only rollback across a
+        schema change no longer starts: the bank must be restored too.
+        ``after`` is the new daemon's schema, or None when it never
+        reported healthy (then whether the schema moved is unknown)."""
+        if after is not None:
+            head = (f"      The new daemon's schema is v{after}, the previous one's v{self.schema_before}: "
+                    "the older daemon refuses the upgraded bank,")
+        else:
+            head = "      If the new daemon upgraded the bank's schema before failing, the older daemon refuses it,"
+        source = ("a backup taken before this deploy (this run took none: --no-backup)" if self.o.no_backup
+                  else "the backup taken above")
+        return [head,
+                f"      so after rolling back the image, restore {source} with",
+                "      ops/restore.ps1 -Apply -BackupFile <dump> (ops/restore.sh --apply --backup-file <dump>)."]
 
     def prune_cache(self, checkout: Path | None) -> None:
         if self.o.no_cache_prune:

@@ -1166,6 +1166,8 @@ def _schema_version_refusal(stamp: str) -> str | None:
         version = json.loads(stamp)
     except ValueError:
         version = None
+    if type(version) is int and not -(2**63) <= version < 2**63:
+        version = None  # beyond i64, as the Rust daemon reads it: malformed
     if type(version) is int and version > SCHEMA_META_VERSION:
         return (
             f"Refusing to start: bank schema version {version} is newer than "
@@ -1228,12 +1230,14 @@ def ensure_schema(conn) -> dict:
     # connection in either mode.
     with conn.transaction(), conn.cursor() as cur:
         # Checked FIRST, before any DDL (including the lock/statement
-        # timeouts below) — a dim mismatch must abort before touching
-        # anything, not merely before the CREATE TABLE calls.
-        _refuse_on_embedding_dim_mismatch(cur)
-        # Likewise before any DDL: the trailing schema_version upsert must
-        # never stamp a newer build's bank down to this build's version.
+        # timeouts below): the trailing schema_version upsert must never
+        # stamp a newer build's bank down to this build's version. Before
+        # the dimension guard, since a newer build may also have moved the
+        # embedding dimension, and then the newer build is the true cause.
         _refuse_on_future_or_malformed_version(cur)
+        # Likewise before any DDL — a dim mismatch must abort before
+        # touching anything, not merely before the CREATE TABLE calls.
+        _refuse_on_embedding_dim_mismatch(cur)
         # Bound every DDL statement so a stray lock holder surfaces as an
         # error instead of an indefinite hang (the v0.1 lesson, applied to
         # the new storage layer). SET LOCAL: these guards are for THIS

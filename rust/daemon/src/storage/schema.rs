@@ -222,7 +222,15 @@ mod tests {
 
     #[test]
     fn bank_version_is_never_downgraded_or_coerced() {
-        for value in ["null", "true", "1.5", "\"55\"", "0", "-1"] {
+        for value in [
+            "null",
+            "true",
+            "1.5",
+            "\"55\"",
+            "0",
+            "-1",
+            "9223372036854775808",
+        ] {
             assert!(version_refusal(value).is_some(), "{value}");
         }
         assert_eq!(version_refusal("1"), None);

@@ -14,7 +14,15 @@
   not a positive integer is refused the same way. The Rust daemon already
   refused both. It now gives the same text, and its startup plan runs the
   check as its own `version_guard` step.
+- The newer-build check runs before the embedding-dimension check, so a
+  bank a newer release upgraded is named as that, not as a dimension
+  migration.
 - `pseudolife-mcp update` adds a line to its printed rollback when the
-  deploy moved the bank's schema: an image-only rollback across that
+  deploy moved the daemon's schema: an image-only rollback across that
   change is now refused, so the backup must be restored after the image
-  rolls back.
+  rolls back (`--json`: `rollback.restore_required`). A deploy that never
+  turns healthy says the same, conditionally, beside its rollback, and a
+  `--no-backup` run says it took no backup.
+- The Rust parity scenario `stamped` now requires both daemons to refuse
+  the stamp with the same message and to leave the bank unchanged; the
+  divergence it recorded is retired.

@@ -12,10 +12,11 @@ older stamp and the current one still open.
 
 Refusal cases on the bench database run inside the fixture connection's
 own uncommitted transaction (``ensure_schema``'s ``conn.transaction()``
-becomes a savepoint there), so an interrupted run never leaves the shared
-test database stamped by a "newer build". The one test that goes through
-``PostgresStorage``, the daemon's entry point, commits the stamp and puts
-it back in ``finally``.
+becomes a savepoint there), so they never leave the shared test database
+stamped by a "newer build". The one test that goes through
+``PostgresStorage``, the daemon's entry point, must commit the stamp and
+puts it back in ``finally``: only a killed process can leave it, and the
+next ``pg_conn`` setup then refuses with this message, naming the cause.
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ from pseudolife_memory.storage.schema import (
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 NEWER = SCHEMA_META_VERSION + 1
-MALFORMED = ['"55"', "null", "true", "1.5", "0", "-1", '{"v": 56}']
+MALFORMED = ['"55"', "null", "true", "1.5", "0", "-1", '{"v": 56}', str(2**63)]
 # A table ensure_schema creates on every start: absent after a refused call
 # proves the refusal came before any DDL.
 _PROBE_TABLE = "store_decisions"
@@ -67,6 +68,22 @@ def test_a_refused_stamp_is_left_as_it_is_and_no_ddl_runs(pg_conn, stamp):
         pg_conn.rollback()
     assert _stamp(pg_conn) == str(SCHEMA_META_VERSION)
     assert _table_exists(pg_conn, _PROBE_TABLE)
+
+
+def test_a_newer_build_is_named_before_a_dimension_it_moved(pg_conn):
+    """A newer build may also have moved the embedding dimension: the
+    refusal names the newer build, the true cause, not the dimension
+    migration script, which does not apply to a newer bank."""
+    try:
+        _set_stamp(pg_conn, str(NEWER))
+        pg_conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL")
+        pg_conn.execute("ALTER TABLE entries ALTER COLUMN embedding TYPE vector(384) USING NULL")
+        with pytest.raises(RuntimeError) as raised:
+            ensure_schema(pg_conn)
+        assert "is newer than this build" in str(raised.value)
+        assert "migrate_embeddings" not in str(raised.value)
+    finally:
+        pg_conn.rollback()
 
 
 def test_the_daemon_entry_point_refuses_a_newer_bank_and_names_the_fix(pg_conn, pg_url):
