@@ -67,6 +67,11 @@ class _UpStorage:
     def get_meta(self, _key: str):
         return None
 
+    def cms_counters_get(self):
+        # A bank with no counters row yet (schema v57); a failed read here
+        # fails hydration closed, like the stores _stub_hydration stubs.
+        return None
+
 
 def _stub_hydration(monkeypatch, **overrides) -> None:
     """Hydrate nothing from the stand-in storage (it has no tables)."""

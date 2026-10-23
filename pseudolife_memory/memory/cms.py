@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import copy
 import heapq
+import json
 import logging
 import math
 import random
@@ -2287,60 +2288,90 @@ class ContinuumMemorySystem:
         self._loaded_schema_version = SCHEMA_VERSION
 
     # ------------------------------------------------------------------
-    # Weights-only persistence (v0.2 — entries live in Postgres)
+    # Counter persistence (storage mode — entries live in Postgres)
     # ------------------------------------------------------------------
 
-    def save_weights(self, directory: str | Path) -> None:
-        """Atomically persist band weights + counters to ``weights.pt``.
-
-        No entries: in storage mode they are transactional in Postgres,
-        so this file is a disposable, retrainable cache. tmp+rename plus
-        a single ``.bak`` rotation — see :mod:`utils.atomic_io`.
-        """
-        from pseudolife_memory.utils.atomic_io import atomic_torch_save
-        directory = Path(directory)
-        state = {
-            "schema_version": SCHEMA_VERSION,
-            "kind": "weights",
-            "preset_name": self.config.miras.preset,
-            "interaction_count": self._interaction_count,
-            "logical_turn_count": self._logical_turn_count,
-            "surprise_history": self._surprise_history,
-            "consolidation_events": self._consolidation_events,
-            "tier_hits": self._tier_hits,
-            "tier_queries": self._tier_queries,
+    def counters_state(self) -> dict:
+        """The counters storage mode persists, keyed as ``cms_counters``'s
+        columns (schema v57): what ``weights.pt`` held before, despite its
+        name never weights since v0.5. Copies, so a later store or retrieve
+        cannot change a state already handed to the writer."""
+        # Plain JSON types throughout: an imported legacy payload may hold
+        # tensor or numpy scalars, which the jsonb write would refuse.
+        return {
+            "preset_name": str(self.config.miras.preset),
+            "interaction_count": int(self._interaction_count),
+            "logical_turn_count": int(self._logical_turn_count),
+            "tier_queries": int(self._tier_queries),
+            "tier_hits": {str(name): int(hits)
+                          for name, hits in self._tier_hits.items()},
+            "surprise_history": {
+                str(name): [float(v) for v in history]
+                for name, history in self._surprise_history.items()},
+            "consolidation_events": json.loads(json.dumps(
+                list(self._consolidation_events), default=float)),
         }
-        atomic_torch_save(state, directory / "weights.pt")
 
-    def load_weights(self, directory: str | Path) -> bool:
-        """Restore band weights + counters from ``weights.pt`` (or .bak).
+    def reset_counters(self) -> None:
+        """The counters a fresh CMS starts with: zeros, one empty history
+        and hit count per current band, no consolidation events."""
+        self._interaction_count = 0
+        self._logical_turn_count = 0
+        self._surprise_history = {b.name: [] for b in self.bands}
+        self._consolidation_events = []
+        self._tier_hits = {b.name: 0 for b in self.bands}
+        self._tier_queries = 0
 
-        Returns True on success, False when absent (fresh install) or
-        corrupt — the corrupt case additionally sets ``weights_reset``
-        so ``stats()`` surfaces that the MLPs restarted from scratch.
-        Never touches band entries.
-        """
-        from pseudolife_memory.utils.atomic_io import (
-            WeightsCorrupt, load_with_backup,
-        )
-        path = Path(directory) / "weights.pt"
-        if not path.exists() and not path.with_suffix(".pt.bak").exists():
-            return False
-        try:
-            state, used_backup = load_with_backup(path)
-        except WeightsCorrupt as exc:
-            logger.warning("weights.pt unrecoverable (%s) — fresh MLPs; "
-                           "entries are unaffected.", exc)
-            self.weights_reset = True
-            return False
-        if used_backup:
-            logger.warning("weights.pt corrupt — restored from .bak.")
+    def apply_counters(self, state: dict) -> None:
+        """Restore counters from a ``counters_state()``-shaped dict (the
+        ``cms_counters`` row, or a ``weights.pt`` payload). Per-band maps
+        merge into the current bands' entries, so a band the state does not
+        name keeps its value and one it names that the preset no longer has
+        is kept, as ``load_weights`` always did. Never touches band
+        entries."""
         self._interaction_count = state.get("interaction_count", 0)
         self._logical_turn_count = state.get("logical_turn_count", 0)
         self._surprise_history.update(state.get("surprise_history") or {})
         self._consolidation_events = state.get("consolidation_events") or []
         self._tier_hits.update(state.get("tier_hits") or {})
         self._tier_queries = state.get("tier_queries", 0)
+
+    def read_weights(self, directory: str | Path) -> tuple[dict, str] | None:
+        """The payload of a pre-v57 ``weights.pt`` and the name of the file
+        it came from (``weights.pt``, or ``weights.pt.bak`` when the first is
+        unreadable), without applying it; None when neither file exists.
+        Raises :class:`~pseudolife_memory.utils.atomic_io.WeightsCorrupt`
+        when neither loads."""
+        from pseudolife_memory.utils.atomic_io import load_with_backup
+        path = Path(directory) / "weights.pt"
+        if not path.exists() and not path.with_suffix(".pt.bak").exists():
+            return None
+        state, used_backup = load_with_backup(path)
+        if used_backup:
+            logger.warning("weights.pt corrupt — read from .bak.")
+        return state, ("weights.pt.bak" if used_backup else "weights.pt")
+
+    def load_weights(self, directory: str | Path) -> bool:
+        """Restore counters from a pre-v57 ``weights.pt`` (or its .bak).
+
+        Since schema v57 the counters live in the bank (``cms_counters``)
+        and nothing writes this file; the service imports it through
+        :meth:`read_weights`. Returns True on success, False when absent or
+        corrupt; the corrupt case additionally sets ``weights_reset`` so
+        ``stats()`` surfaces that the counters restarted from scratch.
+        Never touches band entries.
+        """
+        from pseudolife_memory.utils.atomic_io import WeightsCorrupt
+        try:
+            got = self.read_weights(directory)
+        except WeightsCorrupt as exc:
+            logger.warning("weights.pt unrecoverable (%s) — fresh counters; "
+                           "entries are unaffected.", exc)
+            self.weights_reset = True
+            return False
+        if got is None:
+            return False
+        self.apply_counters(got[0])
         return True
 
     def load(self, directory: str | Path) -> None:

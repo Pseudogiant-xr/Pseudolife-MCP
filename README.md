@@ -484,7 +484,8 @@ at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
 runs the same Postgres embedded, no container) is the durable source of
 truth —
 the in-memory store is a write-through cache hydrated at startup
-(a small `weights.pt` persists only counters — there are no MLP weights).
+(the CMS counters live in the bank too, in `cms_counters` since schema
+v57; there are no MLP weights).
 
 The daemon runs **either** containerized (recommended — portable, no host
 Python) **or** as a host process. Claude Code attaches through a thin

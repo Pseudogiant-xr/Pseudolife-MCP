@@ -907,6 +907,9 @@ class MemoryService(DreamOps, MaintainerOps):
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
         self._last_saved_fingerprint = None
+        # A counters-row write that failed: the next autosave saves even
+        # when the fingerprint has not moved, so the row is not left stale.
+        self._counters_save_pending = False
         # Poison-pill guard for the dream: consecutive extraction-failure
         # counts per entry (db_id). In-memory only — a daemon restart resets
         # the strikes, which just means a poison entry needs its three
@@ -1481,17 +1484,96 @@ class MemoryService(DreamOps, MaintainerOps):
             "bank (%s). Nothing is served or written until a retry "
             "succeeds; next attempt in %.0fs.", reason, self._init_backoff_s)
 
+    def _load_counters(self) -> None:
+        """Restore the CMS counters from the bank's ``cms_counters`` row.
+
+        A ``memory_state/weights.pt`` (or its ``.bak``) is imported instead,
+        and written as the row at once, when the bank has no row, or when
+        the file actually read is newer than the row and counts at least as
+        many interactions: counters only grow, so a smaller newer file (an
+        older release that restarted from zero after a rollback) is set
+        aside and the row kept. Files are renamed ``*.imported`` (never
+        deleted, never over an earlier copy), so no later bank, such as a
+        fresh database or a transfer target, imports counters frozen at the
+        upgrade. A failed read or write of the row raises, like any other
+        failed hydration: serving on and autosaving fresh counters would
+        overwrite the real ones. A file that cannot be read as counters is
+        logged and skipped, setting ``weights_reset`` when no row exists to
+        fall back on."""
+        assert self._cms is not None and self._storage is not None
+        cms = self._cms
+        row = self._storage.cms_counters_get()
+        save_dir = Path(self.config.memory.save_dir)
+        files = [p for p in (save_dir / "weights.pt", save_dir / "weights.pt.bak")
+                 if p.exists()]
+        candidate = None  # (counters_state, mtime of the file read)
+        if files:
+            try:
+                got = cms.read_weights(save_dir)
+                if got is not None:
+                    payload, name = got
+                    if not isinstance(payload, dict):
+                        raise TypeError(f"payload is {type(payload).__name__}")
+                    cms.reset_counters()
+                    cms.apply_counters(payload)
+                    candidate = (cms.counters_state(),
+                                 (save_dir / name).stat().st_mtime)
+            except Exception as exc:  # noqa: BLE001 — a bad file, never the bank
+                logger.warning("the counters in %s cannot be read (%s); "
+                               "skipping them", save_dir / "weights.pt", exc)
+                if row is None:
+                    cms.weights_reset = True
+            cms.reset_counters()
+        if candidate is not None and (
+                row is None or (candidate[1] > row["updated_at"]
+                                and candidate[0]["interaction_count"]
+                                >= row["interaction_count"])):
+            cms.apply_counters(candidate[0])
+            self._storage.cms_counters_put(candidate[0])
+            logger.warning("imported the CMS counters from %s into the bank "
+                           "(cms_counters)", save_dir / "weights.pt")
+            self._set_weights_files_aside(files)
+            return
+        if row is not None:
+            cms.apply_counters(row)
+            cms.weights_reset = False
+            if candidate is not None and candidate[1] > row["updated_at"]:
+                logger.warning(
+                    "%s is newer than the bank's counters but counts fewer "
+                    "interactions (%d < %d), as after a rollback that started "
+                    "from zero; keeping the bank's", save_dir / "weights.pt",
+                    candidate[0]["interaction_count"], row["interaction_count"])
+            if files:
+                self._set_weights_files_aside(files)
+
+    @staticmethod
+    def _set_weights_files_aside(files: list[Path]) -> None:
+        for path in files:
+            target = path.with_name(path.name + ".imported")
+            n = 1
+            while target.exists():
+                n += 1
+                target = path.with_name(f"{path.name}.imported-{n}")
+            try:
+                os.replace(path, target)
+            except OSError as exc:
+                logger.warning("could not rename %s to %s (%s); the bank's "
+                               "counters row stays the newer source", path,
+                               target.name, exc)
+
     def _hydrate_resident_stores(self) -> None:
         """Build the resident stores and fill them from storage (or the
         v0.1 files). A failed Postgres hydration of entries, cortex, world
         facts or lessons raises, as does any other unhandled failure, and
         ``_ensure_init`` then drops whatever was built
         (:meth:`_abandon_partial_init`): a store that failed to load is
-        never served or saved from. Five steps keep their own deliberate
-        tolerance: the legacy ``.pt`` import (resumable, surfaced as
-        ``migration_partial``), the weights file, the optional reference
-        bank, dream tracking (a failure disables the dream alone, surfaced
-        as ``dream_tracking_error``), and the v0.1 file-mode loads."""
+        never served or saved from, and so does a failed read of the
+        counters row (``_load_counters``). Five steps keep their own
+        deliberate tolerance: the legacy ``.pt`` import (resumable, surfaced
+        as ``migration_partial``), a corrupt pre-v57 ``weights.pt``
+        (``weights_reset``), the pre-v57 chromadb document import, dream
+        tracking (a failure disables the dream alone, surfaced as
+        ``dream_tracking_error``), and the v0.1 file-mode loads."""
         # Documents live in the Postgres bank (schema v57); file mode has no
         # document store, like it has no cortex. A pre-v57 chromadb store in
         # the data dir is copied in once first. A failed import never fails
@@ -1569,10 +1651,7 @@ class MemoryService(DreamOps, MaintainerOps):
             except Exception as exc:
                 raise RuntimeError(f"entry hydration failed: {exc}") from exc
             logger.info("hydrated %d entries from storage", n)
-            try:
-                self._cms.load_weights(self.config.memory.save_dir)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("weights load skipped: %s", exc)
+            self._load_counters()
         else:
             # File mode (v0.1) — restore persisted state if any.
             try:
@@ -3606,7 +3685,8 @@ class MemoryService(DreamOps, MaintainerOps):
             if self._cms is None:
                 return None
             fp = self._entry_fingerprint()
-            if fp == self._last_saved_fingerprint:
+            if (fp == self._last_saved_fingerprint
+                    and not self._counters_save_pending):
                 return None
             out = self._persist_all(kind="auto")
             self._last_saved_fingerprint = fp
@@ -3808,9 +3888,10 @@ class MemoryService(DreamOps, MaintainerOps):
     def _persist_all(self, *, kind: str) -> dict[str, Any]:
         """Shared body of save/autosave/flush. Caller holds the lock.
 
-        Storage mode: weights are the only file artifact (atomic);
-        entries are already transactional in PG, so we only sync the
-        lazily-updated access counts and snapshot the cortex.
+        Storage mode: entries are already transactional in PG, so we write
+        the counters row (``cms_counters``, schema v57; until then the file
+        ``weights.pt``), sync the lazily-updated access counts and snapshot
+        the cortex.
         File mode: legacy full-bank torch.save (v0.1 behavior).
         """
         # A correction spans the resident bank itself, so unresolved state
@@ -3878,8 +3959,18 @@ class MemoryService(DreamOps, MaintainerOps):
             return result
 
         if self._storage is not None:
-            _timed("weights",
-                   lambda: self._cms.save_weights(self.config.memory.save_dir))
+            # "weights" names the counters weights.pt held; since schema v57
+            # they are the bank's cms_counters row. Like the access counts
+            # below, a failed write is logged and the facts still save: the
+            # counters are a cache the next save rewrites, and the next
+            # autosave retries it even when nothing else changed.
+            try:
+                _timed("weights", lambda: self._storage.cms_counters_put(
+                    self._cms.counters_state()))
+                self._counters_save_pending = False
+            except Exception as exc:  # noqa: BLE001
+                self._counters_save_pending = True
+                logger.warning("counters save failed: %s", exc)
             pairs = [
                 (e.db_id, e.access_count)
                 for band in self._cms.bands
