@@ -161,7 +161,11 @@ async def fetch_context(client, url: str, snapshot, *, identity=None,
         expected = hmac.new(hashlib.sha256(identity["credential"].encode()).digest(),
                             message, hashlib.sha256).hexdigest()
         proof = value.get("proof")
-        if not isinstance(proof, str) or not hmac.compare_digest(proof, expected):
+        # Bytes, as the Rust shim compares: on str, compare_digest raises
+        # TypeError for non-ASCII instead of answering "no", and a lone
+        # surrogate from the JSON needs surrogatepass to encode at all.
+        if not isinstance(proof, str) or not hmac.compare_digest(
+                proof.encode("utf-8", "surrogatepass"), expected.encode("ascii")):
             raise AdapterError("coordination bank identity could not be verified",
                                code="bank_identity_mismatch")
     return context

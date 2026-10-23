@@ -169,7 +169,10 @@ def test_unreadable_context_answer_is_not_an_identity_verdict(answer, proved):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("proof", [None, 7, "f" * 64])
+# A non-ASCII proof made hmac.compare_digest raise TypeError on str
+# arguments, and a lone surrogate cannot be encoded; each must still be a
+# refusal, not an exception that ends the proxy (Codex review of d7c8ecad).
+@pytest.mark.parametrize("proof", [None, 7, "f" * 64, "é" * 64, "\ud800"])
 def test_failed_mailbox_proof_on_a_readable_answer_stays_an_identity_verdict(proof):
     """The near miss: a well-formed answer whose proof is missing or wrong
     was read fine and did not prove this mailbox, so it is still
@@ -181,7 +184,11 @@ def test_failed_mailbox_proof_on_a_readable_answer_stays_an_identity_verdict(pro
         value = {"bank_id": bank.bank_id, "principal": bank.principal}
         if proof is not None:
             value["proof"] = proof
-        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=value))
+        # ASCII JSON, escapes included, as a daemon puts it on the wire: a
+        # lone surrogate arrives as "\ud800" and decodes to an unencodable str.
+        body = json.dumps(value).encode("ascii")
+        transport = httpx.MockTransport(lambda request: httpx.Response(
+            200, content=body, headers={"content-type": "application/json"}))
         async with httpx.AsyncClient(transport=transport) as client:
             with pytest.raises(AdapterError) as caught:
                 await fetch_context(client, URL, provider.snapshot(),
