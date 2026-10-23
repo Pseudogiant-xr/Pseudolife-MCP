@@ -4,16 +4,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -24,12 +24,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -83,6 +83,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -640,7 +654,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -676,6 +690,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -890,16 +917,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -910,12 +937,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -969,6 +996,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -1526,7 +1567,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -1562,6 +1603,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -5150,16 +5204,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -5170,12 +5224,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -5229,6 +5283,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -5786,7 +5854,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -5822,6 +5890,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -6036,16 +6117,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -6056,12 +6137,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -6115,6 +6196,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -6672,7 +6767,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -6708,6 +6803,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -7256,16 +7364,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "141214c0dbf28ed18f5e0f68"
+      "rows": 514,
+      "sha256": "adc43633bbf8393c40385e1b"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "2f9b2d33dfa43d0c9e7871e8"
+      "rows": 514,
+      "sha256": "eb553cbf902d9ef7fd164a46"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -7276,12 +7384,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -7335,6 +7443,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -7892,7 +8014,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -7928,6 +8050,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -8142,16 +8277,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "141214c0dbf28ed18f5e0f68"
+      "rows": 514,
+      "sha256": "adc43633bbf8393c40385e1b"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "2f9b2d33dfa43d0c9e7871e8"
+      "rows": 514,
+      "sha256": "eb553cbf902d9ef7fd164a46"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -8162,12 +8297,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -8221,6 +8356,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -8778,7 +8927,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -8814,6 +8963,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -9696,16 +9858,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -9716,12 +9878,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -9775,6 +9937,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -10332,7 +10508,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -10368,6 +10544,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -10582,16 +10771,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -10602,12 +10791,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -10661,6 +10850,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -11218,7 +11421,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -11254,6 +11457,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -11470,16 +11686,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -11490,12 +11706,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -11549,6 +11765,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -12106,7 +12336,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -12142,6 +12372,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -12356,16 +12599,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -12376,12 +12619,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -12435,6 +12678,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -12992,7 +13249,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -13028,6 +13285,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -13718,16 +13988,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "141214c0dbf28ed18f5e0f68"
+      "rows": 514,
+      "sha256": "adc43633bbf8393c40385e1b"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "2f9b2d33dfa43d0c9e7871e8"
+      "rows": 514,
+      "sha256": "eb553cbf902d9ef7fd164a46"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -13738,12 +14008,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -13797,6 +14067,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -14354,7 +14638,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -14390,6 +14674,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -14604,16 +14901,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "141214c0dbf28ed18f5e0f68"
+      "rows": 514,
+      "sha256": "adc43633bbf8393c40385e1b"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "2f9b2d33dfa43d0c9e7871e8"
+      "rows": 514,
+      "sha256": "eb553cbf902d9ef7fd164a46"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -14624,12 +14921,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -14683,6 +14980,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -15240,7 +15551,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -15276,6 +15587,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -15492,16 +15816,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "c908dad751ec3d4deb8a3b62"
+      "rows": 514,
+      "sha256": "74d0304c701dbb884fa15f8f"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "0c8f1450b0423de7df2db4df"
+      "rows": 514,
+      "sha256": "aa199f6b37a9035e8afe6382"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -15512,12 +15836,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -15571,6 +15895,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -16128,7 +16466,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -16164,6 +16502,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -16378,16 +16729,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "c908dad751ec3d4deb8a3b62"
+      "rows": 514,
+      "sha256": "74d0304c701dbb884fa15f8f"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "0c8f1450b0423de7df2db4df"
+      "rows": 514,
+      "sha256": "aa199f6b37a9035e8afe6382"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -16398,12 +16749,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -16457,6 +16808,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -17014,7 +17379,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -17050,6 +17415,1847 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.relations": {
+      "columns": [
+       "name",
+       "description",
+       "src_type",
+       "dst_type",
+       "transitive",
+       "inverse_of",
+       "builtin",
+       "created_at"
+      ],
+      "rows": [
+       [
+        "avoids",
+        "src (a task-type) should avoid dead-end dst (negative lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "configures",
+        "src sets configuration for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "depends-on",
+        "src requires dst to function",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "hosts",
+        "src is the host/platform for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "implements",
+        "src (a source file) realizes concept/role dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "part-of",
+        "src is a component of dst",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "prefers",
+        "src (a task-type) prefers approach/tool dst (positive lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "related-to",
+        "untyped catch-all association",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "runs-on",
+        "src executes on host/platform dst",
+        null,
+        null,
+        false,
+        "hosts",
+        true,
+        "<created_at>"
+       ],
+       [
+        "stores-data-in",
+        "src persists its data in dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "uses",
+        "src makes use of dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ]
+      ]
+     },
+     "public.retrieval_events": {
+      "columns": [
+       "id",
+       "query_text",
+       "origin",
+       "session_id",
+       "episode_id",
+       "served",
+       "created_at",
+       "params",
+       "served_facts"
+      ],
+      "rows": []
+     },
+     "public.retrieval_uses": {
+      "columns": [
+       "event_id",
+       "entry_id",
+       "used_via",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.slot_reads": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "read_count",
+       "last_read_at"
+      ],
+      "rows": []
+     },
+     "public.store_decisions": {
+      "columns": [
+       "id",
+       "store",
+       "entity_norm",
+       "attribute_norm",
+       "action",
+       "decided_by",
+       "reason",
+       "record",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.world_facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "source_url",
+       "source_quote",
+       "retrieved_at",
+       "freshness_class",
+       "content_hash",
+       "source_doc_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     }
+    }
+   }
+  ],
+  "5767ab84d8e7b0078e964d55a153cb4d9a001757": [
+   {
+    "catalog": {
+     "column_types": {
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
+     },
+     "columns": {
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
+     },
+     "constraints": {
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
+     },
+     "extensions": {
+      "rows": 2,
+      "sha256": "571b948c38bd5754f1861b6c"
+     },
+     "functions": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     },
+     "indexes": {
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
+     },
+     "owners_and_comments": {
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
+     },
+     "schemas": {
+      "rows": 1,
+      "sha256": "7bc06edb30fe47a6a1afd841"
+     },
+     "sequence_bounds": {
+      "rows": 19,
+      "sha256": "39772a7c4953e87dab66f88a"
+     },
+     "sequences": {
+      "rows": 19,
+      "sha256": "62e2c919c4ada0e8138a969a"
+     },
+     "triggers": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     },
+     "views": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     }
+    },
+    "rows": {
+     "public.chronicle_events": {
+      "columns": [
+       "id",
+       "occurred_at",
+       "occurred_phrase",
+       "recorded_at",
+       "actor",
+       "actor_norm",
+       "description",
+       "description_norm",
+       "episode",
+       "src_entry_id",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "invalidated_at"
+      ],
+      "rows": []
+     },
+     "public.client_sessions": {
+      "columns": [
+       "session_key",
+       "registered_via",
+       "principal",
+       "started_at",
+       "ended_at",
+       "end_reason",
+       "policy_variant",
+       "episode_ids",
+       "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
+      ],
+      "rows": []
+     },
+     "public.communities": {
+      "columns": [
+       "id",
+       "label",
+       "size",
+       "cohesion",
+       "computed_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_agents": {
+      "columns": [
+       "agent_id",
+       "principal",
+       "credential_hash",
+       "label",
+       "project",
+       "task",
+       "status",
+       "episode",
+       "capabilities",
+       "wake_enabled",
+       "created_at",
+       "last_activity",
+       "lifecycle",
+       "next_sequence",
+       "attachment_id",
+       "generation",
+       "lease_until",
+       "status_expires_at",
+       "children",
+       "park_reason",
+       "park_needs",
+       "park_clear_by",
+       "park_resume",
+       "park_expires",
+       "park_set_at",
+       "parent_agent_id",
+       "parent_thread",
+       "name",
+       "name_source",
+       "name_set_at",
+       "harness_name"
+      ],
+      "rows": []
+     },
+     "public.coordination_events": {
+      "columns": [
+       "seq",
+       "event",
+       "actor",
+       "principal",
+       "agent_id",
+       "recipient_agent_id",
+       "project",
+       "task",
+       "message_id",
+       "payload",
+       "created_at",
+       "hlc",
+       "prev_hash",
+       "hash",
+       "body",
+       "body_salt"
+      ],
+      "rows": []
+     },
+     "public.coordination_lease_waiters": {
+      "columns": [
+       "name",
+       "agent_id",
+       "ticket",
+       "principal",
+       "purpose",
+       "ttl",
+       "expect",
+       "enqueued_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_leases": {
+      "columns": [
+       "name",
+       "holder_agent_id",
+       "holder_principal",
+       "purpose",
+       "fence",
+       "acquired_at",
+       "expires_at",
+       "expect",
+       "expected_end",
+       "freed_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_messages": {
+      "columns": [
+       "message_id",
+       "sender_agent_id",
+       "recipient_agent_id",
+       "sender_principal",
+       "project",
+       "task",
+       "text",
+       "reply_to",
+       "request_id",
+       "fingerprint",
+       "recipient_sequence",
+       "hlc",
+       "created_at",
+       "expires_at",
+       "attempt_at",
+       "attempt_generation",
+       "attempts",
+       "acknowledged_at",
+       "first_read_at",
+       "wake",
+       "origin",
+       "maintainer_proof",
+       "repudiated_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_wakes": {
+      "columns": [
+       "wake_id",
+       "recipient_agent_id",
+       "sender_agent_id",
+       "message_id",
+       "decision",
+       "reason",
+       "urgent",
+       "ring_at",
+       "created_at",
+       "served_at"
+      ],
+      "rows": []
+     },
+     "public.curation_judgments": {
+      "columns": [
+       "store",
+       "a_key",
+       "b_key",
+       "verdict",
+       "keep",
+       "fold",
+       "confidence",
+       "note",
+       "model",
+       "judged_at"
+      ],
+      "rows": []
+     },
+     "public.dismissed_pairs": {
+      "columns": [
+       "a_norm",
+       "b_norm",
+       "dismissed_at"
+      ],
+      "rows": []
+     },
+     "public.dream_run_slots": {
+      "columns": [
+       "id",
+       "run_id",
+       "seq",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "kind",
+       "op",
+       "prev_kind",
+       "prev_value",
+       "prev_status",
+       "prev_confidence",
+       "prev_support",
+       "new_value",
+       "action",
+       "src_entry_id",
+       "at",
+       "chronicle_event_id"
+      ],
+      "rows": []
+     },
+     "public.dream_runs": {
+      "columns": [
+       "id",
+       "started_at",
+       "finished_at",
+       "cursor_before",
+       "cursor_after",
+       "pulled",
+       "claims",
+       "tallies",
+       "status",
+       "extractor",
+       "writer_id",
+       "rolled_back_at"
+      ],
+      "rows": []
+     },
+     "public.edge_evidence": {
+      "columns": [
+       "edge_id",
+       "entry_id"
+      ],
+      "rows": []
+     },
+     "public.edge_proposals": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "similarity",
+       "rationale",
+       "source",
+       "created_at",
+       "status",
+       "judge_verdict",
+       "judge_confidence",
+       "judge_note",
+       "judge_model",
+       "judged_at",
+       "judge_relation",
+       "decided_by",
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
+      ],
+      "rows": []
+     },
+     "public.edges": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "origin",
+       "asserted_at",
+       "superseded_at",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.entities": {
+      "columns": [
+       "id",
+       "canonical",
+       "display",
+       "etype",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.entity_aliases": {
+      "columns": [
+       "alias",
+       "entity_id"
+      ],
+      "rows": []
+     },
+     "public.entity_communities": {
+      "columns": [
+       "entity_id",
+       "community_id",
+       "computed_at"
+      ],
+      "rows": []
+     },
+     "public.entity_kinds": {
+      "columns": [
+       "entity_norm",
+       "kind",
+       "origin",
+       "confidence",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.entity_proposals": {
+      "columns": [
+       "id",
+       "kind",
+       "entity_id",
+       "into_id",
+       "score",
+       "reason",
+       "status",
+       "created_at",
+       "decided_by",
+       "decided_at",
+       "judge_verdict",
+       "judge_confidence",
+       "judge_note",
+       "judge_model",
+       "judged_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
+      ],
+      "rows": []
+     },
+     "public.entity_sources": {
+      "columns": [
+       "entity_id",
+       "source",
+       "count",
+       "origin",
+       "updated_at"
+      ],
+      "rows": []
+     },
+     "public.entries": {
+      "columns": [
+       "id",
+       "band",
+       "text",
+       "embedding",
+       "surprise",
+       "ts",
+       "access_count",
+       "source",
+       "superseded_at",
+       "superseded_by_text",
+       "last_logical_turn",
+       "episode_id",
+       "episode_title",
+       "tags",
+       "slots",
+       "authority",
+       "distortion_tolerance",
+       "dream_state",
+       "reinforcements",
+       "explicit_reinforcements"
+      ],
+      "rows": []
+     },
+     "public.entry_reinstatement_decisions": {
+      "columns": [
+       "operation_id",
+       "entry_id",
+       "request_sha256",
+       "entry_text_sha256",
+       "entry_source_sha256",
+       "prior_superseded_at",
+       "prior_superseded_by_text",
+       "prior_superseded_by_text_sha256",
+       "evidence_packet_sha256",
+       "reviewer_ids",
+       "reason",
+       "decided_by",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.episodes": {
+      "columns": [
+       "id",
+       "title",
+       "hint",
+       "started_at",
+       "ended_at",
+       "closed_by_new_start",
+       "session_key",
+       "parent_id"
+      ],
+      "rows": []
+     },
+     "public.facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "freshness_class",
+       "kind",
+       "value_norm",
+       "stance",
+       "authority",
+       "distortion_tolerance",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.lesson_search_events": {
+      "columns": [
+       "id",
+       "query_text",
+       "session_id",
+       "episode_id",
+       "served",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.lessons": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "about",
+       "polarity",
+       "outcome",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.maintainer_bootstrap": {
+      "columns": [
+       "code_hash",
+       "expires_at",
+       "used_at",
+       "credential_id",
+       "failed_attempts"
+      ],
+      "rows": []
+     },
+     "public.maintainer_nonces": {
+      "columns": [
+       "nonce",
+       "expires_at"
+      ],
+      "rows": []
+     },
+     "public.maintainer_passkeys": {
+      "columns": [
+       "credential_id",
+       "public_key",
+       "alg",
+       "sign_count",
+       "label",
+       "enrolled_by",
+       "state",
+       "active_from",
+       "created_at",
+       "last_used_at",
+       "revoked_at",
+       "revoked_by",
+       "flagged_at"
+      ],
+      "rows": []
+     },
+     "public.memory_trace_invalidations": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "source_entry_id",
+       "invalidated_at",
+       "cause"
+      ],
+      "rows": []
+     },
+     "public.memory_traces": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "entry_id",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.merge_decisions": {
+      "columns": [
+       "id",
+       "proposal_id",
+       "entity_display",
+       "into_display",
+       "status",
+       "score",
+       "reason",
+       "decided_by",
+       "decided_at",
+       "votes"
+      ],
+      "rows": []
+     },
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "schema_version",
+        57
+       ],
+       [
+        "writer_lease_epoch",
+        1
+       ]
+      ]
+     },
+     "public.outcome_signals": {
+      "columns": [
+       "id",
+       "task",
+       "outcome",
+       "about",
+       "detail",
+       "polarity",
+       "origin",
+       "episode_id",
+       "created_at",
+       "consumed_at",
+       "used_ids"
+      ],
+      "rows": []
+     },
+     "public.principals": {
+      "columns": [
+       "principal",
+       "token_hash",
+       "tier",
+       "board",
+       "code_hash",
+       "code_expires_at",
+       "paired_code_hash",
+       "created_at",
+       "paired_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.relations": {
+      "columns": [
+       "name",
+       "description",
+       "src_type",
+       "dst_type",
+       "transitive",
+       "inverse_of",
+       "builtin",
+       "created_at"
+      ],
+      "rows": [
+       [
+        "avoids",
+        "src (a task-type) should avoid dead-end dst (negative lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "configures",
+        "src sets configuration for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "depends-on",
+        "src requires dst to function",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "hosts",
+        "src is the host/platform for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "implements",
+        "src (a source file) realizes concept/role dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "part-of",
+        "src is a component of dst",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "prefers",
+        "src (a task-type) prefers approach/tool dst (positive lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "related-to",
+        "untyped catch-all association",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "runs-on",
+        "src executes on host/platform dst",
+        null,
+        null,
+        false,
+        "hosts",
+        true,
+        "<created_at>"
+       ],
+       [
+        "stores-data-in",
+        "src persists its data in dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ],
+       [
+        "uses",
+        "src makes use of dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<created_at>"
+       ]
+      ]
+     },
+     "public.retrieval_events": {
+      "columns": [
+       "id",
+       "query_text",
+       "origin",
+       "session_id",
+       "episode_id",
+       "served",
+       "created_at",
+       "params",
+       "served_facts"
+      ],
+      "rows": []
+     },
+     "public.retrieval_uses": {
+      "columns": [
+       "event_id",
+       "entry_id",
+       "used_via",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.slot_reads": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "read_count",
+       "last_read_at"
+      ],
+      "rows": []
+     },
+     "public.store_decisions": {
+      "columns": [
+       "id",
+       "store",
+       "entity_norm",
+       "attribute_norm",
+       "action",
+       "decided_by",
+       "reason",
+       "record",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.world_facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "source_url",
+       "source_quote",
+       "retrieved_at",
+       "freshness_class",
+       "content_hash",
+       "source_doc_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     }
+    }
+   },
+   {
+    "catalog": {
+     "column_types": {
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
+     },
+     "columns": {
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
+     },
+     "constraints": {
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
+     },
+     "extensions": {
+      "rows": 2,
+      "sha256": "571b948c38bd5754f1861b6c"
+     },
+     "functions": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     },
+     "indexes": {
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
+     },
+     "owners_and_comments": {
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
+     },
+     "schemas": {
+      "rows": 1,
+      "sha256": "7bc06edb30fe47a6a1afd841"
+     },
+     "sequence_bounds": {
+      "rows": 19,
+      "sha256": "39772a7c4953e87dab66f88a"
+     },
+     "sequences": {
+      "rows": 19,
+      "sha256": "62e2c919c4ada0e8138a969a"
+     },
+     "triggers": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     },
+     "views": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f"
+     }
+    },
+    "rows": {
+     "public.chronicle_events": {
+      "columns": [
+       "id",
+       "occurred_at",
+       "occurred_phrase",
+       "recorded_at",
+       "actor",
+       "actor_norm",
+       "description",
+       "description_norm",
+       "episode",
+       "src_entry_id",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "invalidated_at"
+      ],
+      "rows": []
+     },
+     "public.client_sessions": {
+      "columns": [
+       "session_key",
+       "registered_via",
+       "principal",
+       "started_at",
+       "ended_at",
+       "end_reason",
+       "policy_variant",
+       "episode_ids",
+       "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
+      ],
+      "rows": []
+     },
+     "public.communities": {
+      "columns": [
+       "id",
+       "label",
+       "size",
+       "cohesion",
+       "computed_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_agents": {
+      "columns": [
+       "agent_id",
+       "principal",
+       "credential_hash",
+       "label",
+       "project",
+       "task",
+       "status",
+       "episode",
+       "capabilities",
+       "wake_enabled",
+       "created_at",
+       "last_activity",
+       "lifecycle",
+       "next_sequence",
+       "attachment_id",
+       "generation",
+       "lease_until",
+       "status_expires_at",
+       "children",
+       "park_reason",
+       "park_needs",
+       "park_clear_by",
+       "park_resume",
+       "park_expires",
+       "park_set_at",
+       "parent_agent_id",
+       "parent_thread",
+       "name",
+       "name_source",
+       "name_set_at",
+       "harness_name"
+      ],
+      "rows": []
+     },
+     "public.coordination_events": {
+      "columns": [
+       "seq",
+       "event",
+       "actor",
+       "principal",
+       "agent_id",
+       "recipient_agent_id",
+       "project",
+       "task",
+       "message_id",
+       "payload",
+       "created_at",
+       "hlc",
+       "prev_hash",
+       "hash",
+       "body",
+       "body_salt"
+      ],
+      "rows": []
+     },
+     "public.coordination_lease_waiters": {
+      "columns": [
+       "name",
+       "agent_id",
+       "ticket",
+       "principal",
+       "purpose",
+       "ttl",
+       "expect",
+       "enqueued_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_leases": {
+      "columns": [
+       "name",
+       "holder_agent_id",
+       "holder_principal",
+       "purpose",
+       "fence",
+       "acquired_at",
+       "expires_at",
+       "expect",
+       "expected_end",
+       "freed_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_messages": {
+      "columns": [
+       "message_id",
+       "sender_agent_id",
+       "recipient_agent_id",
+       "sender_principal",
+       "project",
+       "task",
+       "text",
+       "reply_to",
+       "request_id",
+       "fingerprint",
+       "recipient_sequence",
+       "hlc",
+       "created_at",
+       "expires_at",
+       "attempt_at",
+       "attempt_generation",
+       "attempts",
+       "acknowledged_at",
+       "first_read_at",
+       "wake",
+       "origin",
+       "maintainer_proof",
+       "repudiated_at"
+      ],
+      "rows": []
+     },
+     "public.coordination_wakes": {
+      "columns": [
+       "wake_id",
+       "recipient_agent_id",
+       "sender_agent_id",
+       "message_id",
+       "decision",
+       "reason",
+       "urgent",
+       "ring_at",
+       "created_at",
+       "served_at"
+      ],
+      "rows": []
+     },
+     "public.curation_judgments": {
+      "columns": [
+       "store",
+       "a_key",
+       "b_key",
+       "verdict",
+       "keep",
+       "fold",
+       "confidence",
+       "note",
+       "model",
+       "judged_at"
+      ],
+      "rows": []
+     },
+     "public.dismissed_pairs": {
+      "columns": [
+       "a_norm",
+       "b_norm",
+       "dismissed_at"
+      ],
+      "rows": []
+     },
+     "public.dream_run_slots": {
+      "columns": [
+       "id",
+       "run_id",
+       "seq",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "kind",
+       "op",
+       "prev_kind",
+       "prev_value",
+       "prev_status",
+       "prev_confidence",
+       "prev_support",
+       "new_value",
+       "action",
+       "src_entry_id",
+       "at",
+       "chronicle_event_id"
+      ],
+      "rows": []
+     },
+     "public.dream_runs": {
+      "columns": [
+       "id",
+       "started_at",
+       "finished_at",
+       "cursor_before",
+       "cursor_after",
+       "pulled",
+       "claims",
+       "tallies",
+       "status",
+       "extractor",
+       "writer_id",
+       "rolled_back_at"
+      ],
+      "rows": []
+     },
+     "public.edge_evidence": {
+      "columns": [
+       "edge_id",
+       "entry_id"
+      ],
+      "rows": []
+     },
+     "public.edge_proposals": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "similarity",
+       "rationale",
+       "source",
+       "created_at",
+       "status",
+       "judge_verdict",
+       "judge_confidence",
+       "judge_note",
+       "judge_model",
+       "judged_at",
+       "judge_relation",
+       "decided_by",
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
+      ],
+      "rows": []
+     },
+     "public.edges": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "origin",
+       "asserted_at",
+       "superseded_at",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.entities": {
+      "columns": [
+       "id",
+       "canonical",
+       "display",
+       "etype",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.entity_aliases": {
+      "columns": [
+       "alias",
+       "entity_id"
+      ],
+      "rows": []
+     },
+     "public.entity_communities": {
+      "columns": [
+       "entity_id",
+       "community_id",
+       "computed_at"
+      ],
+      "rows": []
+     },
+     "public.entity_kinds": {
+      "columns": [
+       "entity_norm",
+       "kind",
+       "origin",
+       "confidence",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.entity_proposals": {
+      "columns": [
+       "id",
+       "kind",
+       "entity_id",
+       "into_id",
+       "score",
+       "reason",
+       "status",
+       "created_at",
+       "decided_by",
+       "decided_at",
+       "judge_verdict",
+       "judge_confidence",
+       "judge_note",
+       "judge_model",
+       "judged_at",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
+      ],
+      "rows": []
+     },
+     "public.entity_sources": {
+      "columns": [
+       "entity_id",
+       "source",
+       "count",
+       "origin",
+       "updated_at"
+      ],
+      "rows": []
+     },
+     "public.entries": {
+      "columns": [
+       "id",
+       "band",
+       "text",
+       "embedding",
+       "surprise",
+       "ts",
+       "access_count",
+       "source",
+       "superseded_at",
+       "superseded_by_text",
+       "last_logical_turn",
+       "episode_id",
+       "episode_title",
+       "tags",
+       "slots",
+       "authority",
+       "distortion_tolerance",
+       "dream_state",
+       "reinforcements",
+       "explicit_reinforcements"
+      ],
+      "rows": []
+     },
+     "public.entry_reinstatement_decisions": {
+      "columns": [
+       "operation_id",
+       "entry_id",
+       "request_sha256",
+       "entry_text_sha256",
+       "entry_source_sha256",
+       "prior_superseded_at",
+       "prior_superseded_by_text",
+       "prior_superseded_by_text_sha256",
+       "evidence_packet_sha256",
+       "reviewer_ids",
+       "reason",
+       "decided_by",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.episodes": {
+      "columns": [
+       "id",
+       "title",
+       "hint",
+       "started_at",
+       "ended_at",
+       "closed_by_new_start",
+       "session_key",
+       "parent_id"
+      ],
+      "rows": []
+     },
+     "public.facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "freshness_class",
+       "kind",
+       "value_norm",
+       "stance",
+       "authority",
+       "distortion_tolerance",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.lesson_search_events": {
+      "columns": [
+       "id",
+       "query_text",
+       "session_id",
+       "episode_id",
+       "served",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.lessons": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "about",
+       "polarity",
+       "outcome",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.maintainer_bootstrap": {
+      "columns": [
+       "code_hash",
+       "expires_at",
+       "used_at",
+       "credential_id",
+       "failed_attempts"
+      ],
+      "rows": []
+     },
+     "public.maintainer_nonces": {
+      "columns": [
+       "nonce",
+       "expires_at"
+      ],
+      "rows": []
+     },
+     "public.maintainer_passkeys": {
+      "columns": [
+       "credential_id",
+       "public_key",
+       "alg",
+       "sign_count",
+       "label",
+       "enrolled_by",
+       "state",
+       "active_from",
+       "created_at",
+       "last_used_at",
+       "revoked_at",
+       "revoked_by",
+       "flagged_at"
+      ],
+      "rows": []
+     },
+     "public.memory_trace_invalidations": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "source_entry_id",
+       "invalidated_at",
+       "cause"
+      ],
+      "rows": []
+     },
+     "public.memory_traces": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "entry_id",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.merge_decisions": {
+      "columns": [
+       "id",
+       "proposal_id",
+       "entity_display",
+       "into_display",
+       "status",
+       "score",
+       "reason",
+       "decided_by",
+       "decided_at",
+       "votes"
+      ],
+      "rows": []
+     },
+     "public.meta": {
+      "columns": [
+       "key",
+       "value"
+      ],
+      "rows": [
+       [
+        "schema_version",
+        57
+       ],
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     },
+     "public.outcome_signals": {
+      "columns": [
+       "id",
+       "task",
+       "outcome",
+       "about",
+       "detail",
+       "polarity",
+       "origin",
+       "episode_id",
+       "created_at",
+       "consumed_at",
+       "used_ids"
+      ],
+      "rows": []
+     },
+     "public.principals": {
+      "columns": [
+       "principal",
+       "token_hash",
+       "tier",
+       "board",
+       "code_hash",
+       "code_expires_at",
+       "paired_code_hash",
+       "created_at",
+       "paired_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -17266,16 +19472,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -17286,12 +19492,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -17345,6 +19551,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -17902,7 +20122,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -17938,6 +20158,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -18152,16 +20385,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -18172,12 +20405,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -18231,6 +20464,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -18788,7 +21035,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -18824,6 +21071,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -20364,16 +22624,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -20384,12 +22644,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -20443,6 +22703,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -21000,7 +23274,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -21036,6 +23310,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -21250,16 +23537,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -21270,12 +23557,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -21329,6 +23616,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -21886,7 +24187,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -21922,6 +24223,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -22138,16 +24452,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -22158,12 +24472,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -22217,6 +24531,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -22774,7 +25102,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -22810,6 +25138,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -23024,16 +25365,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -23044,12 +25385,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -23103,6 +25444,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -23660,7 +26015,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -23696,6 +26051,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -24578,16 +26946,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -24598,12 +26966,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -24657,6 +27025,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -25214,7 +27596,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -25250,6 +27632,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -25464,16 +27859,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -25484,12 +27879,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -25543,6 +27938,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -26100,7 +28509,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -26136,6 +28545,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -26352,16 +28774,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "e89a89250d3461e274cd8a7a"
+      "rows": 514,
+      "sha256": "d32942fda46796fa35a18c37"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "31de42aaa571fc2fd510e6bd"
+      "rows": 514,
+      "sha256": "f2b57c15ddd06bb0e0545392"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -26372,12 +28794,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -26431,6 +28853,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -26988,7 +29424,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -27024,6 +29460,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -27238,16 +29687,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "e89a89250d3461e274cd8a7a"
+      "rows": 514,
+      "sha256": "d32942fda46796fa35a18c37"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "31de42aaa571fc2fd510e6bd"
+      "rows": 514,
+      "sha256": "f2b57c15ddd06bb0e0545392"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -27258,12 +29707,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -27317,6 +29766,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -27874,7 +30337,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -27910,6 +30373,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -28808,16 +31284,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "a84bac0fb5b051c63eb4c7c8"
+      "rows": 514,
+      "sha256": "ed18d529e51226a83c401afb"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "7619c373857d42265919218e"
+      "rows": 514,
+      "sha256": "03fa55d97696cf5ab4f72c57"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -28828,12 +31304,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -28887,6 +31363,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -29444,7 +31934,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -29480,6 +31970,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -29694,16 +32197,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "a84bac0fb5b051c63eb4c7c8"
+      "rows": 514,
+      "sha256": "ed18d529e51226a83c401afb"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "7619c373857d42265919218e"
+      "rows": 514,
+      "sha256": "03fa55d97696cf5ab4f72c57"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -29714,12 +32217,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -29773,6 +32276,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -30330,7 +32847,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -30366,6 +32883,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -30582,16 +33112,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "3b40081f45b3e570e134379b"
+      "rows": 514,
+      "sha256": "cca09433558faab46b411ce1"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "b8073f279e4fd23ce919e47d"
+      "rows": 514,
+      "sha256": "9f9fbd52711dc066a2824391"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -30602,12 +33132,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -30661,6 +33191,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -31218,7 +33762,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -31254,6 +33798,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -31468,16 +34025,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "3b40081f45b3e570e134379b"
+      "rows": 514,
+      "sha256": "cca09433558faab46b411ce1"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "b8073f279e4fd23ce919e47d"
+      "rows": 514,
+      "sha256": "9f9fbd52711dc066a2824391"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -31488,12 +34045,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -31547,6 +34104,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -32104,7 +34675,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -32140,6 +34711,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -32356,16 +34940,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -32376,12 +34960,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -32435,6 +35019,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -32992,7 +35590,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -33028,6 +35626,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -33242,16 +35853,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -33262,12 +35873,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -33321,6 +35932,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -33878,7 +36503,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -33914,6 +36539,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -34130,16 +36768,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -34150,12 +36788,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -34209,6 +36847,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -34766,7 +37418,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -34802,6 +37454,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -35016,16 +37681,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -35036,12 +37701,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -35095,6 +37760,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -35652,7 +38331,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -35688,6 +38367,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -35904,16 +38596,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "141214c0dbf28ed18f5e0f68"
+      "rows": 514,
+      "sha256": "adc43633bbf8393c40385e1b"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "2f9b2d33dfa43d0c9e7871e8"
+      "rows": 514,
+      "sha256": "eb553cbf902d9ef7fd164a46"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -35924,12 +38616,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -35983,6 +38675,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -36540,7 +39246,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -36576,6 +39282,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -36790,16 +39509,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "141214c0dbf28ed18f5e0f68"
+      "rows": 514,
+      "sha256": "adc43633bbf8393c40385e1b"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "2f9b2d33dfa43d0c9e7871e8"
+      "rows": 514,
+      "sha256": "eb553cbf902d9ef7fd164a46"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -36810,12 +39529,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -36869,6 +39588,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -37426,7 +40159,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -37462,6 +40195,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -38656,16 +41402,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "a84bac0fb5b051c63eb4c7c8"
+      "rows": 514,
+      "sha256": "ed18d529e51226a83c401afb"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "7619c373857d42265919218e"
+      "rows": 514,
+      "sha256": "03fa55d97696cf5ab4f72c57"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -38676,12 +41422,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -38735,6 +41481,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -39292,7 +42052,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -39328,6 +42088,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -39542,16 +42315,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "a84bac0fb5b051c63eb4c7c8"
+      "rows": 514,
+      "sha256": "ed18d529e51226a83c401afb"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "7619c373857d42265919218e"
+      "rows": 514,
+      "sha256": "03fa55d97696cf5ab4f72c57"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -39562,12 +42335,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -39621,6 +42394,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -40178,7 +42965,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -40214,6 +43001,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -40430,16 +43230,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -40450,12 +43250,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -40509,6 +43309,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -41066,7 +43880,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -41102,6 +43916,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -41316,16 +44143,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -41336,12 +44163,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -41395,6 +44222,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -41952,7 +44793,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -41988,6 +44829,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -42794,16 +45648,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -42814,12 +45668,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -42873,6 +45727,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -43430,7 +46298,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -43466,6 +46334,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -43680,16 +46561,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -43700,12 +46581,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -43759,6 +46640,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -44316,7 +47211,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -44352,6 +47247,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -44568,16 +47476,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "a84bac0fb5b051c63eb4c7c8"
+      "rows": 514,
+      "sha256": "ed18d529e51226a83c401afb"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "7619c373857d42265919218e"
+      "rows": 514,
+      "sha256": "03fa55d97696cf5ab4f72c57"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -44588,12 +47496,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -44647,6 +47555,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -45204,7 +48126,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -45240,6 +48162,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -45454,16 +48389,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "a84bac0fb5b051c63eb4c7c8"
+      "rows": 514,
+      "sha256": "ed18d529e51226a83c401afb"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "7619c373857d42265919218e"
+      "rows": 514,
+      "sha256": "03fa55d97696cf5ab4f72c57"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -45474,12 +48409,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -45533,6 +48468,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -46090,7 +49039,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -46126,6 +49075,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -46342,16 +49304,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -46362,12 +49324,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -46421,6 +49383,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -46978,7 +49954,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -47014,6 +49990,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -47228,16 +50217,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -47248,12 +50237,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -47307,6 +50296,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -47864,7 +50867,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -47900,6 +50903,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -48116,16 +51132,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -48136,12 +51152,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -48195,6 +51211,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -48752,7 +51782,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -48788,6 +51818,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -49002,16 +52045,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -49022,12 +52065,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -49081,6 +52124,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -49638,7 +52695,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -49674,6 +52731,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -49890,16 +52960,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "141214c0dbf28ed18f5e0f68"
+      "rows": 514,
+      "sha256": "adc43633bbf8393c40385e1b"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "2f9b2d33dfa43d0c9e7871e8"
+      "rows": 514,
+      "sha256": "eb553cbf902d9ef7fd164a46"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -49910,12 +52980,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -49969,6 +53039,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -50526,7 +53610,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -50562,6 +53646,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -50776,16 +53873,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "141214c0dbf28ed18f5e0f68"
+      "rows": 514,
+      "sha256": "adc43633bbf8393c40385e1b"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "2f9b2d33dfa43d0c9e7871e8"
+      "rows": 514,
+      "sha256": "eb553cbf902d9ef7fd164a46"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -50796,12 +53893,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -50855,6 +53952,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -51412,7 +54523,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -51448,6 +54559,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -51664,16 +54788,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -51684,12 +54808,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -51743,6 +54867,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -52300,7 +55438,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -52336,6 +55474,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -52550,16 +55701,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -52570,12 +55721,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -52629,6 +55780,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -53186,7 +56351,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -53222,6 +56387,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -53968,16 +57146,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -53988,12 +57166,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -54047,6 +57225,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -54604,7 +57796,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -54640,6 +57832,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -54854,16 +58059,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -54874,12 +58079,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -54933,6 +58138,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -55490,7 +58709,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -55526,6 +58745,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -55742,16 +58974,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "c908dad751ec3d4deb8a3b62"
+      "rows": 514,
+      "sha256": "74d0304c701dbb884fa15f8f"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "0c8f1450b0423de7df2db4df"
+      "rows": 514,
+      "sha256": "aa199f6b37a9035e8afe6382"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -55762,12 +58994,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -55821,6 +59053,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -56378,7 +59624,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -56414,6 +59660,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -56628,16 +59887,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "c908dad751ec3d4deb8a3b62"
+      "rows": 514,
+      "sha256": "74d0304c701dbb884fa15f8f"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "0c8f1450b0423de7df2db4df"
+      "rows": 514,
+      "sha256": "aa199f6b37a9035e8afe6382"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -56648,12 +59907,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -56707,6 +59966,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -57264,7 +60537,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -57300,6 +60573,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -57516,16 +60802,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "e89a89250d3461e274cd8a7a"
+      "rows": 514,
+      "sha256": "d32942fda46796fa35a18c37"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "31de42aaa571fc2fd510e6bd"
+      "rows": 514,
+      "sha256": "f2b57c15ddd06bb0e0545392"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -57536,12 +60822,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -57595,6 +60881,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -58152,7 +61452,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -58188,6 +61488,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -58402,16 +61715,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "e89a89250d3461e274cd8a7a"
+      "rows": 514,
+      "sha256": "d32942fda46796fa35a18c37"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "31de42aaa571fc2fd510e6bd"
+      "rows": 514,
+      "sha256": "f2b57c15ddd06bb0e0545392"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -58422,12 +61735,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -58481,6 +61794,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -59038,7 +62365,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -59074,6 +62401,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -59876,16 +63216,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -59896,12 +63236,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -59955,6 +63295,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -60512,7 +63866,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -60548,6 +63902,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -60762,16 +64129,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -60782,12 +64149,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -60841,6 +64208,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -61398,7 +64779,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -61434,6 +64815,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -61650,16 +65044,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "e89a89250d3461e274cd8a7a"
+      "rows": 514,
+      "sha256": "d32942fda46796fa35a18c37"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "31de42aaa571fc2fd510e6bd"
+      "rows": 514,
+      "sha256": "f2b57c15ddd06bb0e0545392"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -61670,12 +65064,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -61729,6 +65123,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -62286,7 +65694,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -62322,6 +65730,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -62536,16 +65957,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "e89a89250d3461e274cd8a7a"
+      "rows": 514,
+      "sha256": "d32942fda46796fa35a18c37"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "31de42aaa571fc2fd510e6bd"
+      "rows": 514,
+      "sha256": "f2b57c15ddd06bb0e0545392"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -62556,12 +65977,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -62615,6 +66036,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -63172,7 +66607,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -63208,6 +66643,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -63424,16 +66872,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -63444,12 +66892,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -63503,6 +66951,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -64060,7 +67522,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -64096,6 +67558,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -64310,16 +67785,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -64330,12 +67805,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -64389,6 +67864,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -64946,7 +68435,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -64982,6 +68471,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -65198,16 +68700,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -65218,12 +68720,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -65277,6 +68779,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -65834,7 +69350,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -65870,6 +69386,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -66084,16 +69613,16 @@
    {
     "catalog": {
      "column_types": {
-      "rows": 497,
-      "sha256": "310b7b413407fef35167fabb"
+      "rows": 514,
+      "sha256": "26e7e1ea257084297dbd5718"
      },
      "columns": {
-      "rows": 497,
-      "sha256": "8212873d2f27aac76cdc2780"
+      "rows": 514,
+      "sha256": "2f4a5623e940a7876ffa265e"
      },
      "constraints": {
-      "rows": 356,
-      "sha256": "9bce460b3ecd0f8909edebb6"
+      "rows": 376,
+      "sha256": "4c599ce3d37b9ef2cdd39a41"
      },
      "extensions": {
       "rows": 2,
@@ -66104,12 +69633,12 @@
       "sha256": "4f53cda18c2baa0c0354bb5f"
      },
      "indexes": {
-      "rows": 99,
-      "sha256": "3b955cd29ea7c77a4ed4a2ff"
+      "rows": 102,
+      "sha256": "ba7822c8deee98a6ecac55f4"
      },
      "owners_and_comments": {
-      "rows": 161,
-      "sha256": "221ce8131afb68c41151a482"
+      "rows": 166,
+      "sha256": "440ab05459cb010b349de276"
      },
      "schemas": {
       "rows": 1,
@@ -66163,6 +69692,20 @@
        "policy_variant",
        "episode_ids",
        "start_times"
+      ],
+      "rows": []
+     },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
       ],
       "rows": []
      },
@@ -66720,7 +70263,7 @@
       "rows": [
        [
         "schema_version",
-        56
+        57
        ],
        [
         "writer_lease_epoch",
@@ -66756,6 +70299,19 @@
        "created_at",
        "paired_at",
        "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -66974,5 +70530,5 @@
   "catalog.extensions.extversion": "server-provided version; exact in live Python/Rust diff",
   "relations.created_at": "newly seeded rows only, against the common template"
  },
- "oracle_head": "370efe4542820a7fd3ad6b72a53146cf102193f3"
+ "oracle_head": "bd8217a1c2ed17876cf5dc27419c5f49710869df"
 }

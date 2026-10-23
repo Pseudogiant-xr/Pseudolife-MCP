@@ -1,4 +1,4 @@
--- schema_version 56
+-- schema_version 57
 
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
@@ -816,3 +816,28 @@ BEGIN
             ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0;
     END IF;
 END $$;
+
+CREATE TABLE IF NOT EXISTS reference_chunks (
+    id          TEXT PRIMARY KEY,
+    source      TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    embedding   vector(1024) NOT NULL,
+    metadata    JSONB NOT NULL DEFAULT '{}',
+    ingested_at DOUBLE PRECISION NOT NULL,
+    created_at  DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reference_chunks_source_idx
+    ON reference_chunks (source);
+
+CREATE TABLE IF NOT EXISTS cms_counters (
+    id                   INTEGER PRIMARY KEY CHECK (id = 1),
+    preset_name          TEXT NOT NULL,
+    interaction_count    BIGINT NOT NULL,
+    logical_turn_count   BIGINT NOT NULL,
+    tier_queries         BIGINT NOT NULL,
+    tier_hits            JSONB NOT NULL,
+    surprise_history     JSONB NOT NULL,
+    consolidation_events JSONB NOT NULL,
+    updated_at           DOUBLE PRECISION NOT NULL
+);

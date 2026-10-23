@@ -258,7 +258,7 @@ convention only.
 Never run `docker system prune --volumes` on this host: the bank lives in
 external volumes that a volume prune would take with it. On a default install
 those are `pseudolife-mcp-bank` (the Postgres data — the bank itself) and
-`pseudolife-mcp-state` (daemon state: ChromaDB, cortex/graph snapshots), per
+`pseudolife-mcp-state` (daemon state: cortex/graph snapshots and any pre-v57 ChromaDB store), per
 `ops/docker-compose.yml`. Installs predating the rename override both names
 via `PSEUDOLIFE_BANK_VOLUME` / `PSEUDOLIFE_STATE_VOLUME` in the gitignored
 `ops/.env`, so check there before assuming the shipped names are what your
