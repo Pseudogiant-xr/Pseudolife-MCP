@@ -26,6 +26,10 @@ const COORDINATION_BODY_LIMIT: usize = 32 * 1024;
 const SESSION_END_BODY_LIMIT: usize = 16 * 1024;
 const PAIR_BODY_LIMIT: usize = 1024;
 const REFUSAL_DRAIN_DEADLINE: Duration = Duration::from_millis(250);
+/// Bytes a refusal discards after its answer before giving up on keeping the
+/// connection: twice the MCP body budget, the largest any route admits, so a
+/// body just over any limit is always discarded and its connection kept.
+const REFUSAL_DISCARD_BUDGET: usize = 8 * 1024 * 1024;
 const TEXT_BODY_PATHS: [&str; 3] = ["/api/facts/set", "/api/consolidate", "/api/supersede"];
 const OPERATOR_POST_PATHS: [&str; 2] = ["/api/config", "/api/daemon-notice"];
 /// `principal_store.FAILED_REDEMPTIONS_PER_MINUTE`, `REDEMPTION_SLOTS`.
@@ -398,8 +402,12 @@ pub(crate) async fn read_body(body: &mut RequestBody, limit: usize) -> Option<Ve
             let bytes = collected.to_bytes();
             (bytes.len() <= limit).then(|| bytes.to_vec())
         }
-        Err(_) => {
-            *read_failed = true;
+        Err(error) => {
+            // Crossing the limit leaves the stream readable, so the refusal
+            // can discard the rest; only a failed read stops the cleanup.
+            if !error.is::<http_body_util::LengthLimitError>() {
+                *read_failed = true;
+            }
             None
         }
     }
@@ -769,13 +777,10 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
         .get_all("expect")
         .iter()
         .any(|value| value.as_bytes().eq_ignore_ascii_case(b"100-continue"));
-    let mcp_path = path == "/mcp" || path.starts_with("/mcp/");
-    let cap = match path.as_str() {
-        "/api/pair" => PAIR_BODY_LIMIT,
-        "/api/hook/session-end" => SESSION_END_BODY_LIMIT,
-        _ if mcp_path => crate::mcp::BODY_LIMIT,
-        _ => body_limit(&path),
-    };
+    let declared = h
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok());
     let mut body = RequestBody::new(body);
     let mut response = dispatch(&app, &path, &method, &h, raw_query.as_deref(), &mut body).await;
     // These hooks intentionally answer 200 without reading a rejected body.
@@ -789,34 +794,39 @@ pub async fn handle(State(app): State<Arc<App>>, req: Request<Body>) -> Response
                 | "/api/hook/coordination-start"
         );
     if (response.status().as_u16() >= 400 || bodyless_hook) && !body.inner.is_end_stream() {
-        let mut complete = false;
-        // Polling an Expect body would send 100 Continue after admission refused it.
-        if !expect_continue {
+        // uvicorn answers at once and discards the rest of the body on the
+        // kept connection. Discard at most REFUSAL_DISCARD_BUDGET more bytes
+        // within REFUSAL_DRAIN_DEADLINE after the answer is selected; a body
+        // read to its end keeps the connection. Otherwise dropping it closes
+        // the connection after the answer, and the listener's lingering close
+        // (`linger.rs`) reads what the client still sends, so the close is
+        // never a reset that takes the answer with it.
+        let cap = body.received.saturating_add(REFUSAL_DISCARD_BUDGET);
+        // Polling an Expect body would send 100 Continue after admission
+        // refused it, so that body is dropped unread (Hyper then skips the
+        // 100), as is one declared longer than the budget. Either connection
+        // will close, and the answer says so, so no client pools it.
+        let beyond = declared.is_some_and(|length| length > cap as u64);
+        if expect_continue || beyond {
+            response
+                .headers_mut()
+                .insert(header::CONNECTION, HeaderValue::from_static("close"));
+            return response;
+        }
+        tokio::spawn(async move {
             let outcome = finish_unread_body(
                 &mut body,
                 cap,
                 tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE,
             )
             .await;
-            complete = outcome == DrainOutcome::Complete && body.received <= cap;
-            if outcome != DrainOutcome::Complete || body.received > cap {
+            if outcome != DrainOutcome::Complete {
                 eprintln!(
-                    "http refusal cleanup: outcome={outcome:?} received={} cap={cap} overshoot={} frames={} max_frame={}",
-                    body.received,
-                    body.received.saturating_sub(cap),
-                    body.frames,
-                    body.max_frame
+                    "http refusal cleanup: outcome={outcome:?} received={} cap={cap} frames={} max_frame={}",
+                    body.received, body.frames, body.max_frame
                 );
             }
-        }
-        // A fully drained MCP refusal can reuse the connection, matching
-        // the SDK mount. An unfinished/oversized body must still close;
-        // REST and hook cleanup retain their existing connection policy.
-        if !mcp_path || !complete {
-            response
-                .headers_mut()
-                .insert(header::CONNECTION, HeaderValue::from_static("close"));
-        }
+        });
     }
     response
 }
@@ -830,7 +840,7 @@ async fn dispatch(
     body: &mut RequestBody,
 ) -> Response {
     if path == "/health" {
-        let payload = health::payload(&app.service).await;
+        let payload = health::payload(&app.service, &app.store).await;
         let status = if payload["status"] == "ok" { 200 } else { 503 };
         return json_response(status, &payload);
     }
@@ -970,43 +980,67 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_refusal_complete_drain_preserves_connection() {
-        for path in ["/mcp", "/mcp/"] {
-            let chunks = [
-                Ok::<_, std::io::Error>(vec![b' '; CONTROL_BODY_LIMIT]),
-                Ok(vec![b' '; 1]),
-            ];
-            let request = Request::builder()
+    async fn refusal_that_will_close_says_so() {
+        let pending =
+            || Body::from_stream(futures::stream::pending::<Result<Vec<u8>, std::io::Error>>());
+        // (declared length, Expect, closes): only a body the cleanup will not
+        // read to its end announces the close.
+        let just_over = (crate::mcp::BODY_LIMIT + 1).to_string();
+        let beyond = (REFUSAL_DISCARD_BUDGET + 1).to_string();
+        for (length, expect, closes) in [
+            (just_over.as_str(), false, false),
+            (beyond.as_str(), false, true),
+            (just_over.as_str(), true, true),
+        ] {
+            let mut request = Request::builder()
                 .method("POST")
-                .uri(path)
-                .body(Body::from_stream(futures::stream::iter(chunks)))
-                .unwrap();
-            let response = handle(State(mcp_refusal_app()), request).await;
+                .uri("/mcp")
+                .header("content-length", length);
+            if expect {
+                request = request.header("expect", "100-continue");
+            }
+            let response = tokio::time::timeout(
+                REFUSAL_DRAIN_DEADLINE / 5,
+                handle(State(mcp_refusal_app()), request.body(pending()).unwrap()),
+            )
+            .await
+            .unwrap();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-            assert!(
-                response.headers().get(header::CONNECTION).is_none(),
-                "{path}"
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::CONNECTION)
+                    .is_some_and(|v| v == "close"),
+                closes,
+                "{length} expect={expect}"
             );
         }
     }
 
     #[tokio::test]
-    async fn mcp_refusal_incomplete_drain_closes_connection() {
-        let request = Request::builder()
-            .method("POST")
-            .uri("/mcp")
-            .body(Body::from_stream(futures::stream::pending::<
-                Result<Vec<u8>, std::io::Error>,
-            >()))
+    async fn refusal_answers_before_cleanup_with_no_connection_header() {
+        for path in ["/mcp", "/api/store", "/api/pair"] {
+            let request = Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("origin", "http://evil.example")
+                .body(Body::from_stream(futures::stream::pending::<
+                    Result<Vec<u8>, std::io::Error>,
+                >()))
+                .unwrap();
+            // A body that never ends no longer holds the answer back.
+            let response = tokio::time::timeout(
+                REFUSAL_DRAIN_DEADLINE / 5,
+                handle(State(mcp_refusal_app()), request),
+            )
+            .await
             .unwrap();
-        let response = tokio::time::timeout(
-            Duration::from_secs(2),
-            handle(State(mcp_refusal_app()), request),
-        )
-        .await
-        .unwrap();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(response.headers()[header::CONNECTION], "close");
+            assert!(response.status().is_client_error(), "{path}");
+            assert!(
+                response.headers().get(header::CONNECTION).is_none(),
+                "{path}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1016,7 +1050,7 @@ mod tests {
         for expect in [false, true] {
             let polls = Arc::new(AtomicUsize::new(0));
             let count = polls.clone();
-            let chunks = futures::stream::iter([vec![b' '; crate::mcp::BODY_LIMIT], vec![b' '; 1]])
+            let chunks = futures::stream::iter([vec![b' '; REFUSAL_DISCARD_BUDGET], vec![b' '; 1]])
                 .map(move |chunk| {
                     count.fetch_add(1, Ordering::SeqCst);
                     Ok::<_, std::io::Error>(chunk)
@@ -1031,9 +1065,189 @@ mod tests {
             )
             .await;
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-            assert_eq!(response.headers()[header::CONNECTION], "close");
+            // An unread Expect body closes the connection, and says so.
+            assert_eq!(response.headers().get(header::CONNECTION).is_some(), expect);
+            // Cleanup runs after the answer: it takes the budget's one frame
+            // and never polls past it; an Expect body is never polled.
+            tokio::time::sleep(Duration::from_millis(50)).await;
             assert_eq!(polls.load(Ordering::SeqCst), usize::from(!expect));
         }
+    }
+
+    /// One request on a fresh connection: send all of it, then read the
+    /// status line. A reset before the read returns the error, as Windows
+    /// discards a received response when the peer's RST lands first.
+    /// Connecting is retried: hundreds of loopback connections in a row can
+    /// meet port exhaustion (WinError 10048, or a 21 s SYN timeout), which
+    /// involves no refusal (measured 2026-10-20 with 17,500 sockets in
+    /// TIME_WAIT after repeated loops).
+    fn read_after_send(
+        address: std::net::SocketAddr,
+        head: &[u8],
+        body: &[u8],
+    ) -> std::io::Result<String> {
+        use std::io::{Read, Write};
+        let mut attempts = 0;
+        let mut stream = loop {
+            match std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2)) {
+                Ok(stream) => break stream,
+                Err(error) if attempts < 10 => {
+                    attempts += 1;
+                    eprintln!("connect retry {attempts}: {error}");
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                Err(error) => panic!("loopback connect failed {attempts} times: {error}"),
+            }
+        };
+        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+        // A daemon may answer before the upload ends; only the answer counts.
+        let _ = stream.write_all(head).and_then(|()| stream.write_all(body));
+        let mut seen = Vec::new();
+        let mut chunk = [0u8; 4096];
+        while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+            let n = stream.read(&mut chunk)?;
+            if n == 0 {
+                break;
+            }
+            seen.extend_from_slice(&chunk[..n]);
+        }
+        Ok(String::from_utf8_lossy(&seen).into_owned())
+    }
+
+    /// Early refusals through the production listener reach a client that
+    /// reads only after sending: header-decided (Expect, declared length,
+    /// Origin) and body-decided (chunked over the MCP budget).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn early_refusals_reach_a_read_after_send_client() {
+        let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = tcp.local_addr().unwrap();
+        let router = axum::Router::new()
+            .fallback(handle)
+            .with_state(mcp_refusal_app());
+        let server =
+            tokio::spawn(async move { axum::serve(crate::serving_listener(tcp), router).await });
+        // The loss is Windows-only; elsewhere a few calls check the answers.
+        let calls = if cfg!(windows) { 200 } else { 20 };
+        let auth = "Authorization: Bearer fixture-token\r\nContent-Type: application/json\r\n";
+        let declared = 5 * 1024 * 1024;
+        let piece = 64 * 1024;
+        let mut chunked = Vec::new();
+        for _ in 0..(crate::mcp::BODY_LIMIT / piece + 1) {
+            chunked.extend_from_slice(format!("{piece:x}\r\n").as_bytes());
+            chunked.extend(std::iter::repeat_n(b' ', piece));
+            chunked.extend_from_slice(b"\r\n");
+        }
+        chunked.extend_from_slice(b"0\r\n\r\n");
+        let shapes: Vec<(&str, String, Vec<u8>, &str)> = vec![
+            (
+                "expect over the declared budget",
+                format!(
+                    "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n{auth}Expect: 100-continue\r\nContent-Length: {declared}\r\n\r\n"
+                ),
+                vec![b' '; declared],
+                "HTTP/1.1 413",
+            ),
+            (
+                "chunked over the MCP budget",
+                format!(
+                    "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n{auth}Transfer-Encoding: chunked\r\n\r\n"
+                ),
+                chunked,
+                "HTTP/1.1 413",
+            ),
+            (
+                "pair Origin before the body",
+                "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: \r\nContent-Type: application/json\r\nContent-Length: 262145\r\n\r\n".to_string(),
+                vec![b' '; 262145],
+                "HTTP/1.1 403",
+            ),
+        ];
+        let report = tokio::task::spawn_blocking(move || {
+            let mut report = Vec::new();
+            for (name, head, body, want) in shapes {
+                let (mut lost, mut failed) = (0, Vec::new());
+                for _ in 0..calls {
+                    let started = Instant::now();
+                    match read_after_send(address, head.as_bytes(), &body) {
+                        Ok(answer) => assert!(answer.starts_with(want), "{name}: {answer:?}"),
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::ConnectionReset
+                                    | std::io::ErrorKind::ConnectionAborted
+                            ) =>
+                        {
+                            lost += 1
+                        }
+                        // A refusal that never arrives (a hang) fails as well.
+                        Err(error) => failed.push(format!("{error} after {:?}", started.elapsed())),
+                    }
+                }
+                report.push(format!(
+                    "{name}: {lost} of {calls} lost to a reset; other failures {failed:?}"
+                ));
+            }
+            report
+        })
+        .await
+        .unwrap();
+        server.abort();
+        assert!(
+            report
+                .iter()
+                .all(|line| line.contains(": 0 of ") && line.ends_with("failures []")),
+            "{report:#?}"
+        );
+    }
+
+    /// After a refusal the rest of the body is discarded and the connection
+    /// serves the next request, as uvicorn's does.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn refused_body_is_discarded_and_the_connection_kept() {
+        let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = tcp.local_addr().unwrap();
+        let router = axum::Router::new()
+            .fallback(handle)
+            .with_state(mcp_refusal_app());
+        let server =
+            tokio::spawn(async move { axum::serve(crate::serving_listener(tcp), router).await });
+        let answers = tokio::task::spawn_blocking(move || {
+            use std::io::{Read, Write};
+            let mut stream = std::net::TcpStream::connect(address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let body = vec![b' '; 300 * 1024];
+            let refused = format!(
+                "POST /api/pair HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: \r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(refused.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+            stream
+                .write_all(b"GET /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+                .unwrap();
+            let mut seen = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while seen.windows(9).filter(|w| w == b"HTTP/1.1 ").count() < 2 {
+                match stream.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => seen.extend_from_slice(&chunk[..n]),
+                }
+            }
+            String::from_utf8_lossy(&seen).into_owned()
+        })
+        .await
+        .unwrap();
+        server.abort();
+        assert!(answers.starts_with("HTTP/1.1 403"), "{answers:?}");
+        assert!(answers.contains("\r\n\r\n{\"error\""), "{answers:?}");
+        assert!(answers.contains("HTTP/1.1 401"), "{answers:?}");
+        assert!(
+            !answers.to_ascii_lowercase().contains("connection: close"),
+            "{answers:?}"
+        );
     }
 
     #[tokio::test]
@@ -1123,6 +1337,8 @@ mod tests {
         let mut body = RequestBody::new(Body::from_stream(stream));
         assert!(read_body(&mut body, CONTROL_BODY_LIMIT).await.is_none());
         assert_eq!(seen.load(Ordering::SeqCst), 2);
+        // Crossing the limit is not a read failure: the stream stays usable.
+        assert!(!body.read_failed);
         assert_eq!(
             finish_unread_body(
                 &mut body,
@@ -1130,9 +1346,21 @@ mod tests {
                 tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE
             )
             .await,
-            DrainOutcome::ReadFailed
+            DrainOutcome::Cap
         );
         assert_eq!(seen.load(Ordering::SeqCst), 2);
+        // A refusal's discard budget starts at what was already received.
+        let cap = body.received + REFUSAL_DISCARD_BUDGET;
+        assert_eq!(
+            finish_unread_body(
+                &mut body,
+                cap,
+                tokio::time::Instant::now() + REFUSAL_DRAIN_DEADLINE
+            )
+            .await,
+            DrainOutcome::Complete
+        );
+        assert_eq!(seen.load(Ordering::SeqCst), 3);
         let mut exact = RequestBody::new(Body::from("0123456789"));
         assert_eq!(read_body(&mut exact, 10).await.unwrap(), b"0123456789");
     }

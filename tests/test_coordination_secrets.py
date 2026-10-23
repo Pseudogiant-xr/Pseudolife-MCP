@@ -184,20 +184,26 @@ def test_a_long_body_of_identifier_characters_is_scanned_quickly():
     """The scan runs on every send, up to 8192 bytes: no pattern may rescan
     quadratically over a long run of key characters. Measured 2026-09-26 on
     the maintainer's Windows host, best of three: the slowest of these took
-    1.0 ms; rescanning from each key instead of resuming after the value it
-    consumed made one take 77 ms (``auth:x,`` repeated). The bound sits well
-    between the two, with room for a machine several times slower."""
+    1.0 ms at 8 KB; rescanning from each key instead of resuming after the
+    value it consumed made one take 77 ms (``auth:x,`` repeated).
+
+    The bodies here are 16 times that size, so linear work stays near 16 ms
+    while a quadratic rescan grows 256-fold, to about 20 s. A 2 s bound then
+    sits two orders of magnitude from both, which a stalled runner cannot
+    cross; the old 25 ms bound at 8 KB could be."""
     import time
-    for text in ("token" * 1638, "a" * 8192, "sk-" + "a" * 8189, "tokenX" * 1365 + "=",
+    scale = 16
+    for unit in ("token" * 1638, "a" * 8192, "sk-" + "a" * 8189, "tokenX" * 1365 + "=",
                  "token=" * 1365, "token:a1" * 1024, ("secret_" * 1170)[:8192],
                  "auth:x," * 1170, ("key=" + "Ab1," * 5) * 400,
                  "-----BEGIN A " * 630, "eyJ" * 2730, "sk-" * 2730):
+        text = unit * scale
         timings = []
         for _ in range(3):
             started = time.perf_counter()
             looks_like_secret(text)
             timings.append(time.perf_counter() - started)
-        assert min(timings) < 0.025, (text[:12], min(timings))
+        assert min(timings) < 2.0, (text[:12], min(timings))
 
 
 def _refused(call, secret):

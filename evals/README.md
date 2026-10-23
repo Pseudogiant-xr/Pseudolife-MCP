@@ -1,3 +1,77 @@
+# Eval discipline (every bench, every published number)
+
+Rules for running a bench and for publishing what it measured. `CLAUDE.md`
+points here; each rule exists because it was broken at least once.
+
+## Running a bench
+
+- **Eval- or retrieval-affecting changes run `evals/regression_gate.ps1`
+  before commit** (a pinned replicated slice against the committed
+  baseline; exit 1 = regression). Extraction and dream-path changes re-run
+  the ladder instead; the gate deliberately does not cover them.
+- **Never hand-roll the GPU bench server launch.** Dot-source
+  `evals/qwen_server.ps1` and call `Start-Qwen`, or `Start-Qwen -Fast` for
+  throughput work whose output is never judged. The helper owns the eval
+  env protocol and the config choice; the default config is the
+  bit-reproducible one, and judged runs use it. Both configs bind `:1234`,
+  so "something answered the probe" is not proof the right one is running;
+  the helper checks and replaces. A judged run whose replicates disagree has
+  drifted onto the wrong server, and `replicate.py` warns on exactly that.
+  The configs and their measurements are under "Prerequisites" below.
+- **A comparator defined as "current/production X" is resolved from the
+  deployed config.** Grep `ops/` (launchers, compose, scheduled tasks) and
+  say where you read it. Never take it from a memory record (dated at write
+  time) or from whichever variant has the most baseline artifacts: the
+  2026-07-26 extractor smoke nearly ran against the v1 prompt because a v1
+  baseline existed and a memory said "v1 deployed", while
+  `ops/install-shim-autostart.ps1` had defaulted to v2 since 07-21.
+- **Every model-vs-model comparison carries a control arm whose input is
+  identical across the runs.** The LongMemEval `rag` arm is built from raw
+  turns and never touches the extractor, so any disagreement there is pure
+  measurement noise and bounds what the other arms can claim. Report it
+  next to the effect: a delta smaller than the control's spread is not a
+  finding. `evals/judge_determinism_check.py` measures the floor directly;
+  `evals/analyze_extractor_comparison.py` reports it beside each paired
+  test.
+
+## Publishing a benchmark number
+
+Whether a number is *right* needs a GPU and stays a human gate. Whether it
+is *backed* is pure parsing, and `tests/test_eval_evidence.py` enforces it:
+add a row there in the same change that adds the claim to the docs.
+
+- **Commit the artifact with the claim.** A number whose evidence lives only
+  in a terminal or an untracked working-copy file was never really measured:
+  nothing contradicts it, so no guard test and no currency pass will ever
+  surface it. Both audits (2026-07-17, 2026-07-21) found this failure; the
+  band-ablation significance table shipped with all five replicates
+  untracked and no comparison artifact at all.
+- **Every bench writes a file.** `replicate.py compare` and
+  `lesson_synthesis_bench.py` both took `--out` retroactively because they
+  printed and forgot. New harnesses persist by default.
+- **A p-value needs its own artifact**: an aggregate of means cannot justify
+  a significance claim.
+- **Retire numbers at the old site, not just the new one.** The retired
+  0.705 came back in a CHANGELOG entry written after its retirement,
+  because the retirement note lived in a different file. Mark the
+  superseded number where a reader will meet it.
+- **Never overwrite a canonical result file on a rerun**: tag the run and
+  promote deliberately. A v2 prompt run silently rewrote `sonnet-5.json`
+  while also writing its own tagged file (2026-07-21).
+- **A bench-instrument migration blocks the release gate until the
+  docs-currency pass lands.** The judge and the answerer are terms in every
+  published accuracy, so swapping either invalidates the docs the way a
+  schema bump invalidates the version tables. The 2026-08-17 Qwen3.6→3.8
+  migration deferred the docs promotion, and v0.14.0 then went out with a
+  README headline (cascade 0.936, since retired) that the new instrument
+  scores 0.846, below its own control (#188).
+- **Before promoting a claim to the README, run the headline slice under two
+  independent judge families.** Determinism is not validity: the retired
+  0.936 replicated at std 0.0000 three times and still did not survive a
+  judge swap, because reproducibility measures the instrument's steadiness,
+  not its agreement with any other instrument. A conclusion that moves when
+  the judge moves is a finding about the bench, not about the memory.
+
 # Extractor-ladder benchmark (`ladder_sweep.py`)
 
 Dev-only sweep that answers one question: **what is the minimum viable

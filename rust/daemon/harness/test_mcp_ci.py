@@ -10,14 +10,19 @@ def line(name, py, rs):
     return f"{name}: python={json.dumps(py)}\n          rust  ={json.dumps(rs)}"
 
 
-def baseline():
-    """The shapes the strict corpus records on mcp 2.2.0: only MCP-REFUSAL-CLEANUP."""
+def refusal_close(index):
+    """A Rust 413 that says it will close where Python's does not."""
     py = {"status": 413, "headers": {"mcp-session-id": None}, "body": {"raw": "Request body too large"}}
     rs = copy.deepcopy(py)
     rs["headers"]["connection"] = "close"
-    diffs = [line(f"body_limit[{i}]", py, rs) for i in (0, 2, 3, 4, 5)]
-    return {"summary": {"responses": 318, "cases": 18, "diffs": 5, "unserved_checked": list(UNSERVED)},
-            "diffs": diffs}
+    return line(f"body_limit[{index}]", py, rs)
+
+
+def baseline():
+    """The shapes the strict corpus records on mcp 2.2.0: only the two 413s
+    declaring a body past the daemon's discard budget (MCP-REFUSAL-CLEANUP)."""
+    return {"summary": {"responses": 318, "cases": 18, "diffs": 2, "unserved_checked": list(UNSERVED)},
+            "diffs": [refusal_close(i) for i in (4, 5)]}
 
 
 def test_exact_declared_baseline_is_retained():
@@ -31,14 +36,15 @@ def test_exact_declared_baseline_is_retained():
 
 # Each edit replaces text in the named diff: (diff name, old text, new text).
 EDITS = {
-    "status": ("body_limit[0]", '"status": 413', '"status": 500'),
-    "body": ("body_limit[0]", "Request body too large", "wrong refusal"),
-    "undeclared_index": ("body_limit[0]", "body_limit[0]", "body_limit[1]"),
-    "rust_keeps_connection": ("body_limit[2]", '"connection": "close"', '"connection": "keep-alive"'),
+    "status": ("body_limit[4]", '"status": 413', '"status": 500'),
+    "body": ("body_limit[4]", "Request body too large", "wrong refusal"),
+    "undeclared_index": ("body_limit[4]", "body_limit[4]", "body_limit[1]"),
+    "rust_keeps_connection": ("body_limit[5]", '"connection": "close"', '"connection": "keep-alive"'),
 }
 
 
-@pytest.mark.parametrize("change", ["missing", "extra", "duplicate", "incomplete", *EDITS])
+@pytest.mark.parametrize("change", ["missing", "extra", "duplicate", "incomplete",
+                                    "old_close_differences", *EDITS])
 def test_any_other_difference_or_incomplete_corpus_fails(change):
     report = baseline()
     if change == "missing":
@@ -49,6 +55,10 @@ def test_any_other_difference_or_incomplete_corpus_fails(change):
         report["diffs"][0] = report["diffs"][1]
     elif change == "incomplete":
         report["summary"]["responses"] -= 1
+    elif change == "old_close_differences":
+        # The five closes this daemon sent before 2026-10-20 must not return.
+        report["diffs"] = [refusal_close(i) for i in (0, 2, 3, 4, 5)]
+        report["summary"]["diffs"] = 5
     else:
         name, old, new = EDITS[change]
         index = next(i for i, d in enumerate(report["diffs"]) if d.startswith(name + ":"))
@@ -58,11 +68,10 @@ def test_any_other_difference_or_incomplete_corpus_fails(change):
         check_baseline(report)
 
 
-@pytest.mark.parametrize("family", ["body_limit["])
-def test_every_declared_family_is_required(family):
+def test_every_declared_difference_is_required():
     report = baseline()
-    report["diffs"] = [d for d in report["diffs"] if not d.startswith(family)]
-    report["summary"]["diffs"] = len(report["diffs"])
+    report["diffs"] = []
+    report["summary"]["diffs"] = 0
     with pytest.raises(AssertionError):
         check_baseline(report)
 

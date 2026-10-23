@@ -524,6 +524,11 @@ def _never_reached_daemon(error) -> bool:
             and data.get("operation_outcome") == "not_dispatched")
 
 
+# Each call opens a fresh connection; on 2026-10-19 one board update was
+# refused as unreachable while /health answered in 10 ms, so a call whose
+# connection failed before reaching the daemon is sent once more after this
+# pause (only while the daemon was answering until then).
+_UNREACHED_RETRY_SECONDS = 0.5
 _DAEMON_UNREACHABLE_MESSAGE = (
     "The memory daemon is unreachable, so this call did not run. The shim keeps "
     "retrying it in the background and has the client re-list tools when it "
@@ -533,7 +538,42 @@ _STARTED_WITHOUT_DAEMON_NOTE = (
     "{served} Each tool call retries it, and the tool list refreshes when it answers.")
 
 
-def probe_health(url: str, timeout: float = 0.25) -> dict | None:
+_HOOK_PROBE_DEFAULT_MS = 250
+_HOOK_PROBE_MAX_MS = 60_000
+_HOOK_PROBE_WHITESPACE = " \t\r\n"
+
+
+def hook_probe_timeout() -> float:
+    """Seconds ``probe_health`` waits when its caller names no timeout: the
+    hooks' daemon check and the shim's loopback startup probes.
+
+    250 ms unless ``PSEUDOLIFE_HOOK_PROBE_MS`` holds a positive whole number
+    of milliseconds, clamped to 60000. It is a test-facing knob: the CLI
+    parity harness sets it to the same value in both arms, because a cold
+    hosted runner can stall one arm's first connection past 250 ms. Only
+    ASCII digits count, after stripping spaces, tabs, CR and LF; anything
+    else (empty, zero, a sign, a decimal point, an underscore) keeps 250 ms.
+    ``rust/shim/src/lifecycle.rs`` (``parse_probe_ms``) parses it the same way.
+    """
+    raw = os.environ.get("PSEUDOLIFE_HOOK_PROBE_MS")
+    if raw is None:
+        return _HOOK_PROBE_DEFAULT_MS / 1000
+    digits = raw.strip(_HOOK_PROBE_WHITESPACE)
+    if not digits or not all("0" <= c <= "9" for c in digits):
+        return _HOOK_PROBE_DEFAULT_MS / 1000
+    # Leading zeros dropped and the length checked before int(): a long digit
+    # string clamps rather than tripping int()'s digit limit.
+    significant = digits.lstrip("0")
+    if not significant:
+        return _HOOK_PROBE_DEFAULT_MS / 1000
+    if len(significant) > len(str(_HOOK_PROBE_MAX_MS)):
+        return _HOOK_PROBE_MAX_MS / 1000
+    return min(int(significant), _HOOK_PROBE_MAX_MS) / 1000
+
+
+def probe_health(url: str, timeout: float | None = None) -> dict | None:
+    if timeout is None:
+        timeout = hook_probe_timeout()
     try:
         with urllib.request.urlopen(url + "/health", timeout=timeout) as r:
             return json.loads(r.read().decode())
@@ -1289,6 +1329,53 @@ def _transient_board_failure(exc: BaseException) -> bool:
     return exc.status is not None and (exc.status >= 500 or exc.status == 429)
 
 
+# Every board call first re-checks this session's identity with the daemon
+# (a read-only context request on the adapter's own connection). On
+# 2026-10-19 a delegate's board update after a host reboot, and its receive
+# after an app sign-out, were refused as "identity unavailable" when that one
+# request had failed; the same call seconds later worked. A dropped connection
+# and a cold daemon's 500 reproduce it. A board call checks again on this
+# schedule before it is refused; ordinary memory calls never wait for it.
+# One retry, as Codex threads already get (CodexCoordinationRegistry.
+# _verified_existing). A credential rotated meanwhile is not retried:
+# validate_snapshot refuses a stale snapshot before its request.
+_BOARD_CHECK_RETRY_DELAYS = (0.5,)
+_BOARD_CHECK_FAILED_MESSAGE = (
+    "This session's board identity could not be checked with the memory daemon "
+    "({cause}), so this board call did not run. A failed check does not by itself "
+    "mean the identity is lost: retry this call in a few seconds. If it keeps "
+    "failing, check the daemon with `pseudolife-mcp doctor`.")
+
+
+def _board_check_cause(exc: BaseException) -> str:
+    # A proxy in front of the daemon can be the one answering, so the
+    # status is the check's, not necessarily the daemon's.
+    status = getattr(exc, "status", None)
+    if status is not None:
+        return f"the check was answered with HTTP {status}"
+    return "the check got no answer"
+
+
+async def _validate_board_identity(adapter, snapshot) -> None:
+    """``adapter.validate_snapshot`` for a call that needs the identity:
+    a transient failure (:func:`_transient_board_failure`) is checked again
+    on ``_BOARD_CHECK_RETRY_DELAYS``, and one that outlasts them is refused
+    with its cause. Any other failure is raised as it came."""
+    import asyncio
+
+    for delay in (*_BOARD_CHECK_RETRY_DELAYS, None):
+        try:
+            await adapter.validate_snapshot(snapshot)
+            return
+        except Exception as exc:
+            if not _transient_board_failure(exc):
+                raise
+            if delay is None:
+                raise _CoordinationUnavailableError(message=_BOARD_CHECK_FAILED_MESSAGE.format(
+                    cause=_board_check_cause(exc))) from None
+        await asyncio.sleep(delay)
+
+
 # The refusal a board write gets while a late registration is still pending,
 # and the notes one tool result carries once it lands or once it stops.
 _BOARD_PENDING_REFUSAL = (
@@ -1756,24 +1843,40 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
 
     async def _call_tool(ctx, params):
         _remember_session(ctx)
+        # One total deadline (PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS) covers
+        # the call and any resend below.
+        deadline = anyio.current_time() + _operation_timeout_seconds()
         try:
-            return await _forward_call(ctx, params)
+            return await _forward_call(ctx, params, deadline)
         except MCPError as error:
             # Every call retries the daemon; one that could not reach it says
             # so instead of the generic connection advice, and starts the
             # background watch that re-lists tools when it answers.
             if not _never_reached_daemon(error):
                 raise
+            if (link["up"] and anyio.current_time() + _UNREACHED_RETRY_SECONDS
+                    < deadline):
+                # Nothing ran, and the daemon answered the call before: one
+                # failed connection is sent once more before the call is
+                # refused, inside the same deadline. A daemon already known
+                # to be down is not.
+                await asyncio.sleep(_UNREACHED_RETRY_SECONDS)
+                try:
+                    return await _forward_call(ctx, params, deadline)
+                except MCPError as retry_error:
+                    if not _never_reached_daemon(retry_error):
+                        raise
+                    error = retry_error
             _daemon_lost()
             raise MCPError(error.code, _DAEMON_UNREACHABLE_MESSAGE, error.data) from None
 
-    async def _forward_call(ctx, params):
+    async def _forward_call(ctx, params, deadline):
         call_headers = {}
         call_hint = coordination_hint
         noted_thread = None
         attempt = _UpstreamAttempt(phase="initialize")
         try:
-            with anyio.fail_after(_operation_timeout_seconds()):
+            with anyio.fail_after(max(0.0, deadline - anyio.current_time())):
                 from pseudolife_memory.repository_claims import FileClaimError, prepare_claim_arguments
                 # Refuse first: a shared process serves remote conversations,
                 # and preparing a claim runs git and reads host paths.
@@ -1793,11 +1896,15 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                     return CallToolResult(content=[TextContent(type="text", text=str(exc))], is_error=True)
                 snapshot = provider.snapshot()
                 if coordination_adapter is not None:
+                    needs_identity = _requires_coordination_identity(
+                        params.name, params.arguments)
                     try:
-                        await coordination_adapter.validate_snapshot(snapshot)
+                        if needs_identity:
+                            await _validate_board_identity(coordination_adapter, snapshot)
+                        else:
+                            await coordination_adapter.validate_snapshot(snapshot)
                     except Exception as exc:
-                        if _requires_coordination_identity(
-                                params.name, params.arguments):
+                        if needs_identity:
                             if isinstance(exc, _CoordinationUnavailableError):
                                 raise  # carries its own message
                             hint = (coordination_hint()

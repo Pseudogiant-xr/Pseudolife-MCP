@@ -403,5 +403,8 @@ def test_ci_reports_source_drift_but_gates_census_changes(tmp_path):
     generated.write_text('{"regenerated": true}', encoding="utf-8")
     commit()
     assert census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
+    # A queued merge group gates on its own range, like a pull request.
+    event.write_text(json.dumps({"merge_group": {"base_sha": base}}), encoding="utf-8")
+    assert census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})
     event.write_text(json.dumps({"before": "f" * 40}), encoding="utf-8")
     assert not census.ci_currency_required(tmp_path, {"GITHUB_EVENT_PATH": str(event)})

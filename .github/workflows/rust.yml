@@ -2,6 +2,9 @@ name: Rust shim
 
 on:
   pull_request:
+  # The merge queue (docs/specs/2026-10-19-merge-queue.md): a queued group runs
+  # the same jobs, so the required Parity checks report under the same names.
+  merge_group:
   push:
     branches: [master]
   schedule:
@@ -9,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Ordinary CI or the bounded wait-mail capture'
+        description: 'Ordinary CI, the bounded wait-mail capture, or a stress loop of one selection'
         type: choice
-        options: [ci, wait-mail]
+        options: [ci, wait-mail, stress]
         default: ci
         required: true
       case_list:
@@ -23,6 +26,25 @@ on:
         description: 'Required for ci and wait-mail: full reviewed commit ID, equal to the dispatched master head'
         type: string
         required: false
+      # Stress (rust/ci/stress.py): before a new live parity row or a
+      # timing-sensitive test joins a required lane, it must pass 20 clean
+      # hosted windows-latest runs (CLAUDE.md). Each iteration is its own
+      # job on a fresh runner, reusing this run's candidate build.
+      selection:
+        description: 'Stress only: row:<row>[/<case>], scenario:<run.py scenario>, or pytest node ids'
+        type: string
+        required: false
+      iterations:
+        description: 'Stress only: how many fresh runners run the selection (1-50)'
+        type: number
+        default: 20
+        required: false
+      os:
+        description: 'Stress only: the hosted runner'
+        type: choice
+        options: [windows-latest, ubuntu-latest]
+        default: windows-latest
+        required: false
 
 permissions:
   contents: read
@@ -31,10 +53,14 @@ permissions:
 # a merge relies on: push run 38870639548 ended 2 s after nightly 38872655184
 # started (2026-10-16), and push 38704856443 / nightly 38705376001 match the
 # same pattern (2026-10-15); a later push then cancelled each nightly. Manual
-# CI on master would do the same, so it gets its own group too. A push run is
-# now cancelled only by a newer push.
+# CI on master would do the same, so it gets its own group too; a wait-mail
+# capture or a stress loop gets a group per run. A push run is now cancelled
+# only by a newer push. A merge group falls through to the
+# ref-keyed group: its ref is its own queue branch
+# (refs/heads/gh-readonly-queue/master/...), one per queue entry, so no pull
+# request or push shares it and nothing else cancels it.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail' && format('rust-capture-{0}', github.run_id) || (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('rust-{0}-{1}-{2}', github.event_name, github.workflow, github.ref) || format('rust-{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'wait-mail' || inputs.mode == 'stress') && format('rust-{0}-{1}', inputs.mode, github.run_id) || (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('rust-{0}-{1}-{2}', github.event_name, github.workflow, github.ref) || format('rust-{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 env:
@@ -47,12 +73,16 @@ env:
 jobs:
   scope:
     # Decides whether this run needs the Rust, candidate, parity and image
-    # jobs. Only a pull request whose every changed file (merge commit vs its
-    # base parent) is documentation skips them: Markdown, llms.txt /
+    # jobs. Only a pull request or merge group whose every changed file is
+    # documentation skips them (a pull request's merge commit vs its base
+    # parent; a merge group's master tip, fetched here, to its head): Markdown, llms.txt /
     # llms-full.txt, and non-script files under docs/ (CLAUDE.md "Docs-only
     # changes"), none of them under rust/, evals/, pseudolife_memory/,
-    # plugin/, ops/, tests/ or .github/. An empty or unreadable diff, and a
-    # failed scope job, run everything. On 2026-10-16 a CLAUDE.md-only PR
+    # plugin/, ops/, tests/ or .github/. An empty or unreadable diff runs
+    # everything. A failed scope job runs the Rust and candidate jobs, but
+    # the parity matrix comes from scope's parity output, so parity-checks
+    # and the Parity gate then fail (closed) and the run needs a rerun. On
+    # 2026-10-16 a CLAUDE.md-only PR
     # (#782) queued the whole ~33-job matrix behind the account's 20-job cap.
     # No hosted step here reads docs outside rust/: the producer census only
     # reports docs drift, and the W2-D docs seed runs locally, not in CI.
@@ -62,33 +92,80 @@ jobs:
     timeout-minutes: 5
     outputs:
       rust: ${{ steps.scope.outputs.rust }}
+      full: ${{ steps.scope.outputs.full }}
+      parity: ${{ steps.parity.outputs.parity }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
+      # `full` (2026-10-21): a pull request from any branch but integrate/*
+      # skips the candidate build and so the parity matrix; its full CI is
+      # its integration batch's (docs/dev/merge-batches.md), and the Rust
+      # job (format, clippy, builds, nextest) still runs. One whose diff
+      # changes CI or dependency inputs ($ciInputs, the same pattern as
+      # ci.yml's scope) stays full, so a workflow edit cannot switch off its
+      # own check. Every other event, a pull request whose head ref Actions
+      # did not supply, and an empty or unreadable diff run everything.
       - name: Classify the change
         id: scope
         shell: pwsh
         env:
           EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
+          $ciInputs = '^(\.github/workflows/|pyproject\.toml$|ops/requirements\.lock\.txt$|rust/rust-toolchain\.toml$)|(^|/)(Cargo\.lock|package-lock\.json)$'
+          $ordinary = $env:EVENT_NAME -ceq 'pull_request' -and $env:HEAD_REF -and -not $env:HEAD_REF.StartsWith('integrate/', [System.StringComparison]::Ordinal)
+          $full = 'true'
           $docs = '^(?!(?i:rust|evals|pseudolife_memory|plugin|ops|tests|\.github)/)([^/"].*\.md|llms(-full)?\.txt|docs/.*(?<!\.(py|ps1|psm1|sh|bash|bat|cmd|js|mjs|cjs|ts|rs|toml|yml|yaml)))$'
           $rust = 'true'
+          $base = $null
           if ($env:EVENT_NAME -ceq 'pull_request') {
-            $files = @(git diff --no-renames --name-only HEAD^1 HEAD)
+            $base = 'HEAD^1'
+          } elseif ($env:EVENT_NAME -ceq 'merge_group' -and $env:MERGE_GROUP_BASE_REF -ceq 'refs/heads/master') {
+            # Master's current tip, not merge_group.base_sha: that may be the
+            # queue entry ahead, which need not pass on its own, so every
+            # unmerged entry must count. Anything else runs everything.
+            git fetch --no-tags --depth=1 origin refs/heads/master
+            if ($LASTEXITCODE -eq 0) { $base = 'FETCH_HEAD' }
+          }
+          if ($base) {
+            $files = @(git diff --no-renames --name-only $base HEAD)
             if ($LASTEXITCODE -eq 0 -and $files.Count -gt 0) {
               $files | Write-Output
               if (@($files | Where-Object { $_ -cnotmatch $docs }).Count -eq 0) { $rust = 'false' }
+              if ($ordinary -and @($files | Where-Object { $_ -cmatch $ciInputs }).Count -eq 0) { $full = 'false' }
             }
           }
+          Write-Output "full=$full"
+          "full=$full" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Output "rust=$rust"
           "rust=$rust" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           exit 0
+      # The parity matrix (rust/ci/parity_scope.py). Master pushes, the
+      # nightly, manual CI and merge groups run every suite. A pull request
+      # that scope marks full (one from integrate/*, or one changing CI or
+      # dependency inputs; the others skip the matrix, see `full` above)
+      # runs the floor (eval, cli, cli-daemon, cli-live, h5-w1a) plus the
+      # suites its diff reaches: a row, its golden or its command's shim code
+      # reaches the shard that runs the row, the daemon crate its daemon
+      # suites, and anything the module cannot place (the Python oracle,
+      # this workflow, Cargo files) every suite. A divergence in a suite a
+      # pull request skipped surfaces on the master push that merges it.
+      # Before this, each pull request push queued 24 parity jobs behind the
+      # account's 20-job cap.
+      - name: Choose the parity suites
+        id: parity
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: python3 rust/ci/parity_scope.py --event "$EVENT_NAME" --github-output "$GITHUB_OUTPUT"
 
   rust:
-    # Fail-safe: run unless scope affirmatively says skip.
+    # Fail-safe: run unless scope affirmatively says skip. Ordinary CI only:
+    # a wait-mail capture or a stress loop needs no Rust or parity job, and
+    # a stress loop takes only scope and candidate.
     needs: scope
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' }}
     name: Rust / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -100,10 +177,11 @@ jobs:
     # 116323387861, 116326383784), 20 min in before the override builds,
     # after the daemon's warm release compile went from about 1 to 2 min.
     # No cold run has finished since: an estimated 26-34 min. Warm runs
-    # peak at 17.5 min. A cold run must finish, or the cache is never saved
-    # and every later run is cold too: the cache key hashes the runner
-    # image's own Rust, so each image rollout starts cold (windows-latest
-    # 1.98.1 -> 1.99.0, 2026-10-15).
+    # peak at 17.5 min. A cold run used to have to finish, or the cache was
+    # never saved and every later run was cold too, and the cache key hashed
+    # the runner image's own Rust, so each image rollout started cold
+    # (windows-latest 1.98.1 -> 1.99.0, 2026-10-15). The cache now saves on
+    # failure and hashes only the pinned toolchain (see its steps).
     timeout-minutes: 45
     defaults:
       run:
@@ -168,9 +246,39 @@ jobs:
         with:
           toolchain: 1.94.0
           components: rustfmt, clippy
+      # rust-cache hashes every installed toolchain (`rustup toolchain list`)
+      # into its key, so each rollout of the runner image's own stable Rust
+      # started every cache cold (windows-latest 1.98.1 -> 1.99.0,
+      # 2026-10-15). With only the pin left, the key changes when the pin or
+      # Cargo.lock does. add-rust-environment-hash-key: false would drop the
+      # Cargo.lock hash too, and a key that never changes is never saved
+      # again (rust-cache skips the save on an exact hit). Hosted only: a
+      # self-hosted runner's toolchains belong to its owner.
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted'
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+          # A cold run whose later steps fail still saves what it compiled,
+          # so the next run is not cold too. Three cold runs were cancelled
+          # by their timeout on 2026-10-15; whether rust-cache's save also
+          # runs after a timeout cancellation is not yet observed here.
+          cache-on-failure: true
       - name: Install pinned nextest in the runner temporary directory
         shell: pwsh
         run: |
@@ -244,7 +352,9 @@ jobs:
 
   candidate:
     needs: scope
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' }}
+    # The parity jobs need its release builds, so skipping it on an ordinary
+    # pull request (scope's `full`) skips the parity matrix as well.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
     name: Candidate / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -260,10 +370,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted'
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
           shared-key: shim-release
+          cache-on-failure: true
       - name: Build candidate
         run: cargo build --locked --release --bin pseudolife-stdio --bin pseudolife-daemon -j 3
       - name: Retain default static candidate
@@ -292,92 +420,153 @@ jobs:
           if-no-files-found: error
 
   parity-checks:
-    # Explicit: the implicit success() also checks scope, an ancestor, so a
-    # failed scope would skip these jobs even after rust and candidate ran.
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
+    # Explicit: the implicit success() would also check scope. Scope is a
+    # direct need for the matrix; if it failed, the matrix cannot expand, so
+    # this job and the Parity gate fail rather than skip.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
     name: Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}
-    needs: [candidate, rust]
+    needs: [scope, candidate, rust]
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        # Windows step medians on 2026-10-10, 14 successful runs: 317s/476s/552.5s.
-        suite: [eval, cli, judges, w1c-doctor, w1c-pairing, w1c-connection, h5-audit, h5-backup, h5-w1a, h5-background, h5-daemon-mutants, h5-graph-mutants]
-        # W1-C row sums: master run 38076979343, 2026-10-10, Windows.
-        # Live + golden: doctor 15.3m; pairing 17.6m; connection 20.1m.
-        # Add ~2.5m checkout/dependency/PostgreSQL setup, then allow twice
-        # the total. Connection also keeps the existing 20m record budget.
-        include:
-          - suite: w1c-doctor
-            w1c_rows: "'doctor'"
-            w1c_timeout: 32
-            job_timeout: 36
-          - suite: w1c-pairing
-            w1c_rows: "'transfer', 'invite', 'pair'"
-            w1c_timeout: 36
-            job_timeout: 40
-          - suite: w1c-connection
-            w1c_rows: "'test_login', 'connect', 'maintainer', 'move', 'tunnel'"
-            w1c_timeout: 42
-            job_timeout: 66
-          # Linux 2026-10-11, live + oracle capture + replay:
-          # audit 112s, backup 34s, W1-A 435s, daemon controls 189s,
-          # graph controls 394s. Linux step budgets are about twice these.
-          # Windows budgets are provisional until the first hosted run;
-          # each new job stays inside the existing ~56-minute slowest job.
-          # Hosted ubuntu 2026-10-12: the audit step's live phase alone took
-          # 201s and the step hit its 4-minute budget on three runs (PRs
-          # #661 and #737) with every compared case matching; 10 minutes
-          # is about twice the observed ~5-minute step.
-          - suite: h5-audit
-            h5_timeout: 10
-            h5_windows_timeout: 20
-            job_timeout: 30
-          - suite: h5-backup
-            h5_timeout: 2
-            h5_windows_timeout: 10
-            job_timeout: 20
-          - suite: h5-w1a
-            h5_timeout: 15
-            h5_windows_timeout: 40
-            job_timeout: 56
-          # Linux 2026-10-11: six background scenarios, 9 live cases,
-          # 110s combined; 4m allows about twice measured CPU work.
-          - suite: h5-background
-            h5_timeout: 4
-            h5_windows_timeout: 20
-            job_timeout: 30
-          - suite: h5-daemon-mutants
-            h5_timeout: 6
-            h5_windows_timeout: 20
-            job_timeout: 35
-          - suite: h5-graph-mutants
-            h5_timeout: 14
-            h5_windows_timeout: 30
-            job_timeout: 45
+        # Every suite and its include values live in rust/ci/parity_scope.py,
+        # which the scope job turns into this run's selection: all of them on
+        # master pushes, the nightly, manual CI and merge groups; on a pull
+        # request the floor plus what its diff reaches. Only the selected
+        # suites' include entries come back: an entry matching no
+        # combination would add a job of its own. parity-selfhosted takes
+        # the same matrix, and parity-live reuses the steps below through
+        # the YAML anchor.
+        suite: ${{ fromJSON(needs.scope.outputs.parity).suite }}
+        # The required gate holds only work hosted Windows runs
+        # deterministically: builds, nextest, self-tests, goldens and
+        # replays. cli-live holds the live Python-versus-Rust comparisons
+        # whose verdict depends on sub-second timing and Windows socket
+        # resets on a cold shared runner (the 250 ms hook probe, early
+        # refusals' RST; docs/specs/2026-10-19-merge-queue.md, "The required
+        # Parity gate"). Linux keeps them required; hosted Windows runs
+        # them in parity-live, which reports and never gates.
+        exclude:
+          - os: windows-latest
+            suite: cli-live
+        include: ${{ fromJSON(needs.scope.outputs.parity).include }}
     runs-on: ${{ matrix.os }}
-    # Hosted Windows cli jobs for PRs #709/#710 (2026-10-10 UTC) took
-    # 105m55s/104m04s, with about 50m outside W1-C. Master run
-    # 38076979343 (2026-10-10, Windows) confirms ~46m remaining.
-    # W1-C now runs in parallel; allow twice the conservative 50m remainder.
-    timeout-minutes: ${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}
-    steps:
+    # Every cli and W1-C shard names its own budget beside its measurement
+    # in the include list; eval and judges keep the 210-minute fallback.
+    timeout-minutes: ${{ matrix.job_timeout || 210 }}
+    env:
+      # Artifact names must be unique within a run; parity-selfhosted sets
+      # its own prefix so both lanes can upload the same outcomes.
+      PARITY_ARTIFACT_PREFIX: ''
+    steps: &parity_steps
+      # Self-hosted only (docs/specs/2026-10-19-self-hosted-parity-lane.md):
+      # the runner's own configuration names this machine's full-suite lease
+      # and lock directory; the tree never names a machine. Runs before
+      # checkout so a yielding shard loads nothing.
+      - name: Yield to this machine's full suite
+        if: runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $lease = $env:PSEUDOLIFE_PARITY_LEASE
+          $lockDir = $env:PSEUDOLIFE_PARITY_LOCK_DIR
+          if ($lease -cnotmatch '^full-suite@[A-Za-z0-9._-]{1,40}$' -or -not $lockDir) {
+            throw "The runner's .env must set PSEUDOLIFE_PARITY_LEASE (full-suite@<machine>) and PSEUDOLIFE_PARITY_LOCK_DIR (the suite user's lock directory); see docs/specs/2026-10-19-self-hosted-parity-lane.md"
+          }
+          if (-not (Get-Command pseudolife-mcp -ErrorAction SilentlyContinue)) {
+            throw 'pseudolife-mcp is not on the runner PATH; install it for the runner user with: uv tool install pseudolife-mcp'
+          }
+          # CLAUDE.md "Disk space": no heavy work below 8 GB free.
+          $freeGb = [math]::Floor([IO.DriveInfo]::new($env:GITHUB_WORKSPACE).AvailableFreeSpace / 1GB)
+          if ($freeGb -lt [int]$env:PARITY_MIN_FREE_GB) {
+            throw "Only $freeGb GB free on the runner's work drive; the floor is $env:PARITY_MIN_FREE_GB GB"
+          }
+          # The lease check reads these two for this process only, never the shard's tests.
+          $env:PSEUDOLIFE_SUITE_LEASE = $lease
+          $env:PSEUDOLIFE_SUITE_LOCK_DIR = $lockDir
+          $deadline = (Get-Date).AddMinutes([int]$env:PARITY_YIELD_MINUTES)
+          while ($true) {
+            $report = pseudolife-mcp lease check --json $lease
+            $code = $LASTEXITCODE
+            if ($code -ne 0 -and $code -ne 1) { throw "lease check $lease failed (exit $code); neither held nor free is known" }
+            $state = ($report | Out-String | ConvertFrom-Json).local.state
+            # A missing or unreadable lock file means the directory or its grant is wrong,
+            # and every probe would read free.
+            if ($null -eq $state) { throw "No readable full-suite lock file in PSEUDOLIFE_PARITY_LOCK_DIR (wrong directory, or the runner account lacks read access); the check cannot see this machine's suites" }
+            if ($code -eq 0) { Write-Output "$lease is free; running the shard."; break }
+            if ((Get-Date) -ge $deadline) {
+              "Yielded: $lease stayed held for $env:PARITY_YIELD_MINUTES minutes, so this shard did not run." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+              throw "Yielded to the full suite holding $lease"
+            }
+            Write-Output "$lease is held by a full suite; checking again in 60 seconds."
+            Start-Sleep -Seconds 60
+          }
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Hosted Windows' vCPU count and image version were never recorded,
+      # so a slow or flaky shard could not be tied to its machine.
+      - name: Record the runner image and CPU count
+        shell: pwsh
+        run: |
+          $memory = [math]::Round([GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes / 1GB, 1)
+          $image = if ($env:ImageOS) { "$env:ImageOS $env:ImageVersion" } else { 'not a hosted image' }
+          $facts = "Runner: $env:RUNNER_OS $env:RUNNER_ARCH ($env:RUNNER_ENVIRONMENT), image $image, $([Environment]::ProcessorCount) logical CPUs, $memory GB memory"
+          Write-Output $facts
+          if ($env:GITHUB_STEP_SUMMARY) { $facts | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
+          # A self-hosted runner keeps its own pip cache; saving one to the
+          # repository cache could evict the hosted Rust caches.
+          cache: ${{ runner.environment != 'self-hosted' && 'pip' || '' }}
           cache-dependency-path: pyproject.toml
+      # A persistent runner shares one tool-cache Python between jobs; a venv
+      # in the job's temporary directory starts each shard as clean as hosted.
+      - name: Give the shard its own Python environment
+        if: runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $venv = Join-Path $env:RUNNER_TEMP 'parity-venv'
+          python -m venv $venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bin = if ($IsWindows) { Join-Path $venv 'Scripts' } else { Join-Path $venv 'bin' }
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "VIRTUAL_ENV=$venv" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - uses: dtolnay/rust-toolchain@stable
         if: "!startsWith(matrix.suite, 'w1c-')"
         with:
           toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted' && (matrix.suite == 'eval' || matrix.suite == 'cli' || matrix.suite == 'cli-daemon')
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      # One key per suite. All suites shared one key: the first to save fixed
+      # it, and on an exact hit no later suite's compile was ever saved.
+      # Only the suites that compile cache (sent-YAML mutants in cli, the
+      # storage test binary in cli-daemon, which_comparison in eval); the
+      # rest restored a 71 MB registry they never read (master run
+      # 39236836263, 2026-10-19).
       - uses: Swatinem/rust-cache@v2
-        if: "!startsWith(matrix.suite, 'w1c-')"
+        if: matrix.suite == 'eval' || matrix.suite == 'cli' || matrix.suite == 'cli-daemon'
         with:
           workspaces: rust
+          key: ${{ matrix.suite }}
+          cache-on-failure: true
+          save-if: ${{ runner.environment != 'self-hosted' }}
       - name: Install checkout and test dependencies
         timeout-minutes: 10
         run: |
@@ -390,7 +579,7 @@ jobs:
           name: rust-shim-${{ runner.os }}
           path: rust/target/release
       - name: Download debug bind fixture
-        if: matrix.suite == 'cli' || matrix.suite == 'h5-w1a'
+        if: matrix.suite == 'cli-live' || matrix.suite == 'h5-w1a'
         uses: actions/download-artifact@v4
         with:
           name: daemon-bind-fixture-${{ runner.os }}
@@ -404,7 +593,7 @@ jobs:
         run: |
           $suffix = if ($IsWindows) { '.exe' } else { '' }
           $env:PSEUDOLIFE_SENT_YAML_BIN = Join-Path (Get-Location) "rust/target/release/pseudolife-stdio$suffix"
-          python -m pytest rust/daemon/harness/test_sent_yaml.py rust/daemon/harness/test_sent_yaml_mutants.py -q
+          python -m pytest rust/daemon/harness/test_sent_yaml.py rust/daemon/harness/test_sent_yaml_mutants.py -q -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/compare-sent-yaml-startup-with-pyyaml.xml')
           exit $LASTEXITCODE
       - name: Bind the event-selected Python oracle
         shell: pwsh
@@ -415,7 +604,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Check CI coverage contract
         if: matrix.suite == 'eval'
-        run: python -m pytest -q rust/ci
+        run: python -m pytest -q rust/ci -ra --durations=30 --junitxml ${{ runner.temp }}/junit/check-ci-coverage-contract.xml
       - name: Run every eval harness test
         if: matrix.suite == 'eval'
         shell: pwsh
@@ -424,7 +613,7 @@ jobs:
           $episodeCandidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PSEUDOLIFE_PORT_EPISODE_JSON = ConvertTo-Json -InputObject @($episodeCandidate) -Compress
           $evalReport = Join-Path $env:RUNNER_TEMP 'rust-eval-harness.junit.xml'
-          python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard --junitxml $evalReport
+          python -m pytest evals/rust_port evals/rust_baseline -p evals.rust_port.collection_guard --eval-collection-guard -ra --durations=30 --junitxml $evalReport
           exit $LASTEXITCODE
       # Linux 2026-10-13: offline W2-D checks measured below one second;
       # one minute is the smallest whole-minute timeout above twice that.
@@ -433,7 +622,7 @@ jobs:
         timeout-minutes: 1
         shell: pwsh
         run: |
-          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py
+          python -m pytest -q rust/daemon/harness/test_w2d_controls.py rust/daemon/harness/test_w2d_namespace.py rust/daemon/harness/test_w2d_recent.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-w2-d-search-harness-regressions.xml')
           exit $LASTEXITCODE
       # This fixture creates a small graph locally; no model is downloaded.
       - name: Offline embedding golden and mutant row
@@ -444,7 +633,7 @@ jobs:
           python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
-          python -m pytest -q rust/daemon/harness/test_embedding.py
+          python -m pytest -q rust/daemon/harness/test_embedding.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/offline-embedding-golden-and-mutant-row.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py embedding --fixture --golden rust/daemon/harness/goldens/embedding-fixture.json --rust-bin (Join-Path 'rust/target/release' $binaryName) --out (Join-Path $env:RUNNER_TEMP 'embedding-fixture.json')
           exit $LASTEXITCODE
@@ -457,14 +646,25 @@ jobs:
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PSEUDOLIFE_RUST_BINARY = $candidate
           $env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'
-          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py rust/cli_harness/test_backup.py
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_cli_harness.py rust/cli_harness/test_lease.py rust/cli_harness/test_bank.py rust/cli_harness/test_backup.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-differential-harness.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python rust/cli_harness --row mail --row hook --row episode --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-golden.json')
+          exit $LASTEXITCODE
+      # The same rows against this checkout's Python live: the hook row's
+      # 250 ms health probe is part of what is compared, so a cold Windows
+      # runner's first TLS handshake can decide it (2026-10-16 root cause).
+      - name: CLI differential harness live arms
+        if: matrix.suite == 'cli-live'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           python rust/cli_harness --row mail --row hook --row episode --skip-bank --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness.json')
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python rust/cli_harness --row mail --row hook --row episode --golden --candidate $candidate -v
           exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL for CLI lease row
-        if: matrix.suite == 'cli'
+        # Every cli shard's daemon harnesses take their banks from it.
+        if: startsWith(matrix.suite, 'cli')
         timeout-minutes: 10
         shell: pwsh
         # pg0's initdb inherits the locale on Linux; template1 then retains
@@ -496,7 +696,7 @@ jobs:
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_lease_operator.py rust/cli_harness/test_lease_transport.py
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_lease_operator.py rust/cli_harness/test_lease_transport.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-lease-operator-differential-harness.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease_operator --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-lease-operator.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -515,7 +715,7 @@ jobs:
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           if (-not $IsWindows) { chmod +x $candidate }
           $env:PL_DREAM_CONTRACT_BINARY = $candidate
-          python -m pytest -q rust/daemon/harness/test_dream_cursors.py rust/daemon/harness/test_dream_cursor_cancel.py
+          python -m pytest -q rust/daemon/harness/test_dream_cursors.py rust/daemon/harness/test_dream_cursor_cancel.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/dream-cursor-differential-harness.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/dream_cursors.py golden --ci-fixture --rust-bin $candidate
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -542,7 +742,7 @@ jobs:
           $binaryName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PL_STATIC_DEFAULT_BIN = $candidate
-          python -m pytest -q rust/daemon/harness/test_static.py
+          python -m pytest -q rust/daemon/harness/test_static.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-static-http-parity.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $candidate --only static-build static-paths static-missing static-root-link --out (Join-Path $env:RUNNER_TEMP 'daemon-static-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -552,7 +752,7 @@ jobs:
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-static-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-static-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-static-*.json
           if-no-files-found: warn
       - name: Restore graph store executable permission
@@ -590,13 +790,13 @@ jobs:
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
           $env:PL_HARNESS_SLICE = 'w3i'
           $env:PL_HARNESS_SCRATCH = Join-Path $env:RUNNER_TEMP 'daemon-background-harness'
-          python -m pytest -q -p no:cacheprovider rust/daemon/harness/test_background_harness.py
+          python -m pytest -q -p no:cacheprovider rust/daemon/harness/test_background_harness.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-background-pruning-golden.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py golden --rust-bin $candidate --only sweep-pruning --no-refusals
           exit $LASTEXITCODE
 
       - name: Daemon body admission parity
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-live'
         timeout-minutes: 10
         shell: pwsh
         env:
@@ -604,21 +804,21 @@ jobs:
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          python -m pytest -q rust/daemon/harness/test_body_cases.py
+          python -m pytest -q rust/daemon/harness/test_body_cases.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-body-admission-parity.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $candidate --only body-limits body-view-open body-pair-budget body-text-window --out (Join-Path $env:RUNNER_TEMP 'daemon-body-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py golden --rust-bin $candidate --only body-limits body-view-open body-pair-budget body-text-window --out (Join-Path $env:RUNNER_TEMP 'daemon-body-golden.json')
           exit $LASTEXITCODE
       - name: Retain daemon body parity outcomes
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-live'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-body-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-body-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-body-*.json
           if-no-files-found: warn
       - name: Daemon security admission parity
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-live'
         timeout-minutes: 10
         shell: pwsh
         env:
@@ -632,7 +832,7 @@ jobs:
           if (-not $IsWindows) { chmod +x $bindFixture }
           $env:PL_SECURITY_DEFAULT_BIN = $candidate
           $env:PL_SECURITY_RELEASE_MUTANTS_BIN = $mutants
-          python -m pytest -q rust/daemon/harness/test_security_cases.py rust/daemon/harness/test_principals_settle.py
+          python -m pytest -q rust/daemon/harness/test_security_cases.py rust/daemon/harness/test_principals_settle.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-security-admission-parity.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte security-refusals --out (Join-Path $env:RUNNER_TEMP 'daemon-security-live.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -647,7 +847,7 @@ jobs:
       # The tool argument binding sweep and its 14 mutants add 9.4s (Windows
       # release build, 2026-10-16).
       - name: Daemon MCP live parity and controls
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-live'
         # Windows master 2026-10-15: 6m28s and 6m49s (runs 38689105018,
         # 38794022446), so seven minutes had no headroom; fourteen is about
         # twice that gate.
@@ -664,7 +864,7 @@ jobs:
           # Scalar coercions are not fully described by the SDK JSON schemas.
           python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py rust/daemon/harness/test_mcp_binding.py rust/daemon/harness/test_mcp_wire.py
+          python -m pytest -q tests/test_rust_mcp_catalogue.py rust/daemon/harness/test_mcp_mount.py rust/daemon/harness/test_mcp_mutant_verdict.py rust/daemon/harness/test_mcp_ci.py rust/daemon/harness/test_mcp_runner.py rust/daemon/harness/test_mcp_validation.py rust/daemon/harness/test_mcp_binding.py rust/daemon/harness/test_mcp_wire.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/daemon-mcp-live-parity-and-controls.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Tool argument binding: the table is current, then every generated
           # case matches Python in process and every binder mutant is caught.
@@ -676,26 +876,26 @@ jobs:
           python rust/daemon/harness/mcp_ci.py --default-bin $candidate --mutant-bin $mutants --out (Join-Path $env:RUNNER_TEMP 'daemon-mcp')
           exit $LASTEXITCODE
       - name: Retain daemon MCP parity outcomes
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-live'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-mcp-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-mcp-${{ runner.os }}
           path: |
             ${{ runner.temp }}/daemon-mcp/**/*.json
             ${{ runner.temp }}/daemon-mcp/*.log
           if-no-files-found: error
       - name: Retain daemon security parity outcomes
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-live'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-security-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-security-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-security-*.json
           if-no-files-found: warn
       - name: Retain additive executable node outcomes
         if: always() && matrix.suite == 'eval'
         uses: actions/upload-artifact@v4
         with:
-          name: rust-eval-harness-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-eval-harness-${{ runner.os }}
           path: ${{ runner.temp }}/rust-eval-harness.junit.xml
           if-no-files-found: error
       - name: Principal store differential and golden harness
@@ -713,28 +913,34 @@ jobs:
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: rust-principals-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-principals-${{ runner.os }}
           path: ${{ runner.temp }}/principal-*.json
           if-no-files-found: error
+      # In the single cli job these steps ran after the MCP step had pinned
+      # pydantic for the Python oracle; keep the same pin now that they run
+      # in their own shard.
+      - name: Keep the oracle's pydantic pin for the startup steps
+        if: matrix.suite == 'cli-daemon'
+        run: python -m pip install "pydantic==2.14.0" "pydantic-core==2.50.0"
       - name: Daemon schema startup parity
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-daemon'
         timeout-minutes: 10
         shell: pwsh
         run: |
           python rust/daemon/harness/schema_ci.py --test-bin-out (Join-Path $env:RUNNER_TEMP 'daemon-storage-test-path.txt') --out (Join-Path $env:RUNNER_TEMP 'daemon-schema-parity.json')
           exit $LASTEXITCODE
       - name: Retain daemon schema parity
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-daemon'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-schema-parity-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-schema-parity-${{ runner.os }}
           path: ${{ runner.temp }}/daemon-schema-parity.json
           if-no-files-found: error
       - name: Retain graph store outcomes
         if: always() && matrix.suite == 'cli'
         uses: actions/upload-artifact@v4
         with:
-          name: rust-graph-store-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-graph-store-${{ runner.os }}
           path: |
             ${{ runner.temp }}/graph-store-live.json
             ${{ runner.temp }}/graph-store-golden.json
@@ -742,7 +948,7 @@ jobs:
             ${{ runner.temp }}/graph-read-golden.json
           if-no-files-found: error
       - name: Daemon resident startup parity
-        if: matrix.suite == 'cli'
+        if: matrix.suite == 'cli-daemon'
         # Windows CI 2026-10-10: about 28s/cell x 25 cells plus clock/guard,
         # about 13 minutes in total; allow twice that validation duration.
         timeout-minutes: 26
@@ -754,10 +960,10 @@ jobs:
           python rust/daemon/harness/startup_ci.py --no-build --rust-test-bin $candidate --out (Join-Path $env:RUNNER_TEMP 'daemon-startup-parity.json')
           exit $LASTEXITCODE
       - name: Retain daemon resident startup parity
-        if: always() && matrix.suite == 'cli'
+        if: always() && matrix.suite == 'cli-daemon'
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-startup-parity-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}daemon-startup-parity-${{ runner.os }}
           path: |
             ${{ runner.temp }}/daemon-startup-parity.json
             ${{ runner.temp }}/daemon-startup-parity-clock-retry.json
@@ -837,16 +1043,16 @@ jobs:
         if: "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
         uses: actions/upload-artifact@v4
         with:
-          name: test_login-linux-golden
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}test_login-linux-golden
           path: |
             rust/cli_harness/goldens/test_login.linux.json
             ${{ runner.temp }}/test-login-linux-record.json
           if-no-files-found: error
       - name: Retain CLI harness summaries
-        if: always() && (matrix.suite == 'cli' || startsWith(matrix.suite, 'w1c-'))
+        if: always() && (startsWith(matrix.suite, 'cli') || startsWith(matrix.suite, 'w1c-'))
         uses: actions/upload-artifact@v4
         with:
-          name: cli-harness-${{ runner.os }}-${{ matrix.suite }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}cli-harness-${{ runner.os }}-${{ matrix.suite }}
           path: ${{ runner.temp }}/cli-harness*.json
           if-no-files-found: warn
       - name: Prepare disposable PostgreSQL for H5
@@ -877,8 +1083,9 @@ jobs:
           }
       - name: Ported rows and daemon controls
         if: startsWith(matrix.suite, 'h5-')
-        # Twice the Linux measurements named beside the matrix entries;
-        # retain the first hosted Windows measurement in the same artifacts.
+        # Budgets come from the hosted step timings named beside the matrix
+        # entries (rust/ci/parity_scope.py): Linux five times the ubuntu
+        # p99; Windows as that comment says.
         timeout-minutes: ${{ runner.os == 'Linux' && matrix.h5_timeout || matrix.h5_windows_timeout }}
         shell: pwsh
         run: |
@@ -888,7 +1095,7 @@ jobs:
         if: always() && startsWith(matrix.suite, 'h5-')
         uses: actions/upload-artifact@v4
         with:
-          name: h5-${{ runner.os }}-${{ matrix.suite }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}h5-${{ runner.os }}-${{ matrix.suite }}
           # Static-path witnesses leave deliberate symlink loops in scratch.
           # Upload only receipts and oracle captures, without walking scratch.
           path: |
@@ -923,7 +1130,7 @@ jobs:
           $env:PSEUDOLIFE_RUST_BINARY = $candidatePath
           $env:PSEUDOLIFE_WAIT_MAIL_ORACLE_ROOT = $oracleSource
           $env:PSEUDOLIFE_WAIT_MAIL_NATIVE_REQUIRED = '1'
-          & $oraclePython -m pytest -q evals/rust_port/test_cli_wait_mail.py evals/rust_port/test_wait_mail_phase2d_native.py evals/rust_port/test_wait_mail_reduction_native.py evals/rust_port/test_wait_mail_producer_native.py evals/rust_port/test_wait_mail_candidate_contract.py evals/rust_port/test_wait_mail_measurement.py evals/rust_port/test_wait_mail_listener_events.py
+          & $oraclePython -m pytest -q evals/rust_port/test_cli_wait_mail.py evals/rust_port/test_wait_mail_phase2d_native.py evals/rust_port/test_wait_mail_reduction_native.py evals/rust_port/test_wait_mail_producer_native.py evals/rust_port/test_wait_mail_candidate_contract.py evals/rust_port/test_wait_mail_measurement.py evals/rust_port/test_wait_mail_listener_events.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/run-unchanged-candidates-and-differential-judges.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $leaseHeaderReceipt = Join-Path $env:RUNNER_TEMP 'lease-header-policy.json'
           & $oraclePython -m evals.rust_port.lease_headers --root $checkoutRoot --candidate $candidatePath --out $leaseHeaderReceipt
@@ -976,11 +1183,19 @@ jobs:
           $processPublicReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process-public.json'
           & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --public-out $processPublicReceipt --modes help version lease --offline-resource-checked-at $resourceCheckedAt
           exit $LASTEXITCODE
+      - name: Retain parity pytest reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}parity-junit-${{ runner.os }}-${{ matrix.suite }}
+          path: ${{ runner.temp }}/junit/*.xml
+          # W1-C and H5 shards drive their harnesses without pytest.
+          if-no-files-found: ignore
       - name: Retain comparison summary
         if: always() && matrix.suite == 'judges'
         uses: actions/upload-artifact@v4
         with:
-          name: rust-parity-${{ runner.os }}
+          name: ${{ env.PARITY_ARTIFACT_PREFIX }}rust-parity-${{ runner.os }}
           path: |
             evals/results/rust-phase1-ci-*.json
             evals/results/rust-phase2-ci-*.json
@@ -989,6 +1204,64 @@ jobs:
             ${{ runner.temp }}/lease-header-policy.json
             ${{ runner.temp }}/oracle-selection.json
           if-no-files-found: warn
+
+  parity-live:
+    # Hosted Windows' live comparisons (the cli-live suite), outside the
+    # required gate: continue-on-error and no place in any job's needs keep
+    # its result out of every required check, so it reports and never
+    # gates. Master pushes, the nightly and manual CI run it; a pull
+    # request or merge group never does, so it holds no PR check open. A
+    # failure here is a Windows-only live divergence to triage against the
+    # Linux cli-live shard, which stays required.
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
+    name: Parity live (non-gating) / ${{ matrix.os }} / ${{ matrix.suite }}
+    needs: [candidate, rust]
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        suite: [cli-live]
+    runs-on: ${{ matrix.os }}
+    # The cli-live budget in parity-checks' include list.
+    timeout-minutes: 55
+    env:
+      PARITY_ARTIFACT_PREFIX: ''
+    steps: *parity_steps
+
+  parity-selfhosted:
+    # A comparison lane, not a gate (docs/specs/2026-10-19-self-hosted-parity-lane.md):
+    # the same matrix and steps as parity-checks, on the maintainer's dev
+    # machines. continue-on-error and no place in the Parity gate's needs
+    # keep its outcome out of every required check. It runs only on the
+    # nightly and manual CI, which have their own concurrency groups: on a
+    # pull request its pending jobs would hold the PR's checks open, and on
+    # a master push a newer push would cancel the whole run while its
+    # self-hosted jobs queue, turning finished hosted results into a
+    # cancelled run. It stays off until the repository variable
+    # PARITY_SELFHOSTED_RUNNERS lists the registered runners (JSON, such as
+    # ["linux", "windows"]); a job for an unregistered label would queue for
+    # a day.
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && vars.PARITY_SELFHOSTED_RUNNERS != '' && needs.candidate.result == 'success' && needs.rust.result == 'success' }}
+    name: Parity self-hosted / ${{ matrix.runner }} / ${{ matrix.suite }}
+    needs: [scope, candidate, rust]
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '["off"]') }}
+        # Every suite: the nightly and manual CI select them all.
+        suite: ${{ fromJSON(needs.scope.outputs.parity).suite }}
+        include: ${{ fromJSON(needs.scope.outputs.parity).include }}
+    runs-on: [self-hosted, "pseudolife-parity-${{ matrix.runner }}"]
+    # The slowest hosted shard budget (210m) plus the hour a shard may wait
+    # for this machine's full suite before it yields.
+    timeout-minutes: 270
+    env:
+      PARITY_ARTIFACT_PREFIX: self-hosted-
+      PARITY_YIELD_MINUTES: '60'
+      PARITY_MIN_FREE_GB: '8'
+    steps: *parity_steps
 
   source-mutants:
     # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs
@@ -1026,10 +1299,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted'
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
           key: cli-source-mutants
+          cache-on-failure: true
       - name: Install source harness dependencies
         # Network-bound setup keeps the existing ten-minute dependency floor.
         timeout-minutes: 10
@@ -1089,7 +1380,7 @@ jobs:
   daemon-image:
     name: Rust daemon / disposable image
     needs: scope
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') && needs.scope.outputs.rust != 'false' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -1102,7 +1393,7 @@ jobs:
       - name: Select changed image inputs
         id: image-inputs
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: python rust/daemon/container_inputs.py --base "$BASE_SHA" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
       - name: Check the opt-in container contract
         run: python rust/daemon/test_container.py
@@ -1127,11 +1418,13 @@ jobs:
           docker compose -p "$project" -f ops/docker-compose.rust.yml logs --no-color rust-daemon > "$RUNNER_TEMP/rust-daemon-startup.log"
           python rust/daemon/container_probe.py --startup-log "$RUNNER_TEMP/rust-daemon-startup.log"
   parity:
-    # Only a PR or a master push may skip the CLI source matrix. The nightly
-    # (and ordinary manual CI) require its success, never a skip or failure.
-    # A PR that scope classified as documentation-only skips the Rust,
-    # candidate and parity jobs; any other skip still fails.
-    if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail')
+    # Only a PR, a merge group or a master push may skip the CLI source
+    # matrix. The nightly (and ordinary manual CI) require its success, never
+    # a skip or failure. A PR or merge group that scope classified as
+    # documentation-only skips the Rust, candidate and parity jobs, and a PR
+    # scope marked not full (an ordinary branch changing no CI input) skips the candidate
+    # and parity jobs; any other skip still fails.
+    if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')
     name: Parity / ${{ matrix.os }}
     needs: [scope, rust, candidate, parity-checks, source-mutants]
     strategy:
@@ -1148,18 +1441,164 @@ jobs:
           GATE_EVENT: ${{ github.event_name }}
         run: |
           $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
-          $docsOnly = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
+          $docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
+          $fastPr = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.full -ceq 'false'
           foreach ($job in @('rust', 'candidate', 'parity-checks')) {
-            if ($results[$job].result -cne 'success' -and -not ($docsOnly -and $results[$job].result -ceq 'skipped')) {
+            $skipChosen = $docsOnly -or ($fastPr -and $job -cne 'rust')
+            if ($results[$job].result -cne 'success' -and -not ($skipChosen -and $results[$job].result -ceq 'skipped')) {
               Write-Error "$job did not succeed"
               exit 1
             }
           }
           $sourceResult = $results['source-mutants'].result
-          if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
-            Write-Error "source-mutants did not succeed outside the PR and push skip exception"
+          if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
+            Write-Error "source-mutants did not succeed outside the PR, merge-group and push skip exception"
             exit 1
           }
+
+  # A stress loop (mode=stress): run one selection on N fresh hosted runners
+  # and report every iteration (rust/ci/stress.py). It compares against this
+  # checkout's Python on any branch; the event oracle binds best-effort (only
+  # a master dispatch with frozen_head has one). Inputs reach the scripts only through env,
+  # never inlined into a script.
+  stress-plan:
+    name: Stress / plan
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'stress'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      iterations: ${{ steps.plan.outputs.iterations }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the selection and list the iterations
+        id: plan
+        env:
+          STRESS_SELECTION: ${{ inputs.selection }}
+          STRESS_ITERATIONS: ${{ inputs.iterations }}
+        run: python3 rust/ci/stress.py plan --selection "$STRESS_SELECTION" --iterations "$STRESS_ITERATIONS" --github-output "$GITHUB_OUTPUT"
+
+  stress:
+    name: Stress / ${{ inputs.os }} / ${{ matrix.iteration }}
+    needs: [stress-plan, candidate]
+    if: ${{ !cancelled() && needs.stress-plan.result == 'success' && needs.candidate.result == 'success' }}
+    strategy:
+      fail-fast: false
+      # Half the account's 20-job cap, so a loop never starves other runs.
+      max-parallel: 10
+      matrix:
+        iteration: ${{ fromJSON(needs.stress-plan.outputs.iterations) }}
+    runs-on: ${{ inputs.os }}
+    # The slowest parity shard's budget; one iteration is one selection.
+    timeout-minutes: 45
+    env:
+      STRESS_SELECTION: ${{ inputs.selection }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Record the runner image and CPU count
+        shell: pwsh
+        run: |
+          $memory = [math]::Round([GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes / 1GB, 1)
+          $image = if ($env:ImageOS) { "$env:ImageOS $env:ImageVersion" } else { 'not a hosted image' }
+          $facts = "Runner: $env:RUNNER_OS $env:RUNNER_ARCH ($env:RUNNER_ENVIRONMENT), image $image, $([Environment]::ProcessorCount) logical CPUs, $memory GB memory"
+          Write-Output $facts
+          if ($env:GITHUB_STEP_SUMMARY) { $facts | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install checkout and test dependencies
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install "setuptools>=68" wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install -e ".[dev,lite]" "mcp==2.2.0" "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0" "pydantic==2.14.0" "pydantic-core==2.50.0"
+          exit $LASTEXITCODE
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-shim-${{ runner.os }}
+          path: rust/target/release
+      - name: Restore executable permission
+        if: runner.os == 'Linux'
+        run: chmod +x rust/target/release/*
+      # Best effort: the event oracle binds only for a master dispatch with
+      # frozen_head. The CLI and daemon harnesses never read it; pytest
+      # selections under evals/rust_port that call selected_oracle() need it,
+      # and on a branch they fail with its "select the event oracle" error.
+      - name: Bind the event-selected Python oracle when the dispatch has one
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
+          exit $LASTEXITCODE
+      - name: Prepare disposable PostgreSQL
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
+        run: |
+          python rust/cli_harness/lease_ci.py
+          exit $LASTEXITCODE
+      # test_login's container cases need the image the W1-C connection
+      # shard builds; hosted Windows runs Windows containers only, so the row
+      # skips those cases there.
+      - name: Build the test_login container image
+        if: runner.os == 'Linux' && contains(env.STRESS_SELECTION, 'test_login')
+        # Master run 38076979343, 2026-10-10: Linux image build 13s.
+        # Five-minute floor because this step is network-bound.
+        timeout-minutes: 5
+        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
+      - name: Run the selection once
+        shell: pwsh
+        run: |
+          python rust/ci/stress.py run --selection $env:STRESS_SELECTION --iteration ${{ matrix.iteration }} --candidates rust/target/release --out (Join-Path $env:RUNNER_TEMP 'stress/stress-row-${{ matrix.iteration }}.json')
+          exit $LASTEXITCODE
+      - name: Retain this iteration
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-row-${{ matrix.iteration }}
+          path: ${{ runner.temp }}/stress/
+          if-no-files-found: warn
+
+  stress-report:
+    name: Stress report
+    needs: [stress-plan, stress]
+    if: ${{ always() && needs.stress-plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        # A loop where no iteration ran uploads nothing; the report then
+        # names every iteration "no result".
+        continue-on-error: true
+        with:
+          pattern: stress-row-*
+          path: stress-rows
+      - name: Join the iterations
+        env:
+          STRESS_SELECTION: ${{ inputs.selection }}
+          STRESS_ITERATIONS: ${{ inputs.iterations }}
+          STRESS_OS: ${{ inputs.os }}
+        run: python3 rust/ci/stress.py report --selection "$STRESS_SELECTION" --iterations "$STRESS_ITERATIONS" --os "$STRESS_OS" --rows stress-rows --out stress-report.json --summary "$GITHUB_STEP_SUMMARY"
+      - name: Retain the stress report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-report
+          path: stress-report.json
+          if-no-files-found: warn
 
   capture-windows:
     name: Capture / Windows / wait-mail

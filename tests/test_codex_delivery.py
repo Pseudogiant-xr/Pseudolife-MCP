@@ -187,8 +187,11 @@ def test_blocked_socket_send_respects_request_budget(monkeypatch):
         monkeypatch.setattr(codex_delivery, "_load_connect", lambda: connector_for(socket, []))
         bridge = codex_delivery.CodexDelivery(
             "ws://127.0.0.1:1234", "secret", THREAD_ID, rpc_timeout=0.01)
+        # The verdict is the request budget's own error; the outer bound only
+        # stops a hang. At 0.2 s a stalled runner let it fire first, so the
+        # test saw TimeoutError though the budget worked.
         with pytest.raises(codex_delivery.DeliveryError):
-            await asyncio.wait_for(bridge.__aenter__(), timeout=0.2)
+            await asyncio.wait_for(bridge.__aenter__(), timeout=30)
         assert socket.closed
     run(drive())
 

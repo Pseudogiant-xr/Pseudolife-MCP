@@ -24,7 +24,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -51,37 +50,18 @@ STORED = {"dave": ("tok-dave-0001", "minimal"), "erin": ("tok-erin-0001", None),
           "frank": ("tok-frank-0001", "full")}
 
 
-# Bound on waiting for each daemon to create public.principals. A fixed 3 s
-# pause after /health was too short twice on the Windows dev VM (2026-10-18,
-# freshly built binaries); 60 s matches the Rust daemon's start bound.
-PRINCIPALS_WAIT_S = 60.0
-
-
-def wait_for_principals(banks, timeout_s=PRINCIPALS_WAIT_S, poll_s=0.25):
-    """Poll until every bank (side name -> DSN) has public.principals.
-
-    Raises RuntimeError naming each side still without the table at the
-    deadline, which main() reports as an infrastructure failure."""
-    import psycopg
-    deadline = time.monotonic() + timeout_s
-    pending = dict(banks)
-    while True:
-        for side, dsn in list(pending.items()):
-            with psycopg.connect(dsn, autocommit=True, connect_timeout=10) as conn:
-                if conn.execute("SELECT to_regclass('public.principals')").fetchone()[0] is not None:
-                    del pending[side]
-        if not pending:
-            return
-        if time.monotonic() >= deadline:
-            raise RuntimeError(f"public.principals never appeared in the {' and '.join(pending)} "
-                               f"bank {timeout_s:g} s after both daemons answered /health")
-        time.sleep(poll_s)
-
-
 def seed_stored(dsn):
+    """Apply the schema (the daemons find it current) and write STORED, on a
+    bank no daemon has started on yet, so each daemon's first stored-principal
+    read already holds them."""
     import psycopg
     from pseudolife_memory.principal_store import create_invite, redeem
     from pseudolife_memory.principals import secret_sha256
+    from pseudolife_memory.storage.schema import ensure_schema
+    with psycopg.connect(dsn) as conn:
+        conn.execute("SET search_path TO public")
+        ensure_schema(conn)
+        conn.commit()
     with psycopg.connect(dsn, autocommit=True) as conn:
         for name, (token, tier) in STORED.items():
             invite = create_invite(conn, name, tier=tier, ttl_seconds=600, replace=False)
@@ -170,19 +150,18 @@ def main():
         if mutant:
             rs_extra["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
         rs_env = daemons.base_env(rs_home, rs_extra)
-        py = daemons.python_daemon(py_home, py_port, py_env)
-        started.append(py)
-        py.start(wait_s=300)
-        rs = daemons.rust_daemon(binary, rs_home, rs_port, rs_env)
-        started.append(rs)
-        rs.start(wait_s=60)
         if "--tokenless" not in args and "--config2" not in args:
-            # Seed once both daemons have created the principals table, then
-            # outwait both 10 s snapshot refreshes.
-            wait_for_principals({"python": py_dsn, "rust": rs_dsn})
             seed_stored(py_dsn)
             seed_stored(rs_dsn)
-            time.sleep(13)
+        # This surface needs no embedding model (CI has none, so init never
+        # finishes): start once each daemon's stored-principal view has
+        # loaded, which with the seeding above includes STORED.
+        py = daemons.python_daemon(py_home, py_port, py_env)
+        started.append(py)
+        py.start(wait_s=300, stages=("principals",))
+        rs = daemons.rust_daemon(binary, rs_home, rs_port, rs_env)
+        started.append(rs)
+        rs.start(wait_s=240, stages=("principals",))
         if "--mount-probe" in args:
             from run import Tokens, bearer, call, compare_case
             case = next(c for c in Tokens().cases() if c["name"] == "mcp path, auth")

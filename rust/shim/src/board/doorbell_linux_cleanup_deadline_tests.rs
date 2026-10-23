@@ -86,6 +86,9 @@ async fn stalled_metadata_cutoff_retains_owned_leader_and_allows_ordinary_retry(
 
     let opened = Arc::new(AtomicBool::new(false));
     let writer_opened = opened.clone();
+    let wrote = Arc::new(AtomicBool::new(false));
+    let writer_wrote = wrote.clone();
+    let (reading, read_started) = tokio::sync::oneshot::channel::<()>();
     let (release, receive) = mpsc::channel();
     let writer = std::thread::spawn(move || {
         let end = Instant::now() + Duration::from_secs(2);
@@ -103,24 +106,36 @@ async fn stalled_metadata_cutoff_retains_owned_leader_and_allows_ordinary_retry(
             }
         };
         writer_opened.store(true, Ordering::Release);
-        // The fallback also makes the synchronous counterfactual terminate.
-        let _ = receive.recv_timeout(Duration::from_millis(350));
+        let _ = reading.send(());
+        // The metadata is written only after the cutoff returned (the test
+        // sends the release then), so a cutoff that waited for this read could
+        // only return after the fallback, with `wrote` set: an ordering check
+        // in place of an elapsed-time bound. The fallback ends that
+        // counterfactual instead of hanging it.
+        let _ = receive.recv_timeout(Duration::from_secs(10));
         let fields = std::iter::repeat_n("0", 15).collect::<Vec<_>>().join(" ");
+        // Marked before the write, so a reader released by it can never be
+        // seen returning before the mark (a preempted writer would hide it).
+        writer_wrote.store(true, Ordering::Release);
         output
             .write_all(format!("99999999 (slow metadata) Z 0 0 0 {fields} 1\n").as_bytes())
             .unwrap();
     });
     let timer = Arc::new(AtomicBool::new(false));
     let progress = timer.clone();
+    // Runs only if the runtime is free while the metadata read is blocked.
     let ticker = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        progress.store(true, Ordering::Release);
+        if read_started.await.is_ok() {
+            progress.store(true, Ordering::Release);
+        }
     });
     let started = Instant::now();
+    // The deadline only has to outlast the scan's setup on a loaded runner:
+    // the blocked read holds the cutoff until it, whatever its length.
     let result =
-        kill_cancelled_group_until(child.as_mut(), root, started + Duration::from_millis(100))
-            .await;
+        kill_cancelled_group_until(child.as_mut(), root, started + Duration::from_secs(2)).await;
     let elapsed = started.elapsed();
+    let cutoff_before_read = !wrote.load(Ordering::Acquire);
     let runtime_progress = timer.load(Ordering::Acquire);
     let reader_opened = opened.load(Ordering::Acquire);
     let identity_retained = child.id() == Some(leader);
@@ -140,8 +155,8 @@ async fn stalled_metadata_cutoff_retains_owned_leader_and_allows_ordinary_retry(
     );
     assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
     assert!(
-        elapsed < Duration::from_millis(250),
-        "cleanup overran its bounded deadline: {elapsed:?}"
+        cutoff_before_read,
+        "cleanup waited for the slow metadata read instead of its deadline: {elapsed:?}"
     );
     assert!(
         runtime_progress,

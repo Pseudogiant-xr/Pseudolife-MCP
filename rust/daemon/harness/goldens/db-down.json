@@ -63,7 +63,12 @@
     "memory": {
      "source": "unavailable"
     },
+    "pending": [
+     "init",
+     "principals"
+    ],
     "persist_errors": 0,
+    "ready": false,
     "schema": 55,
     "status": "ok",
     "storage": "postgres",
@@ -103,7 +108,12 @@
     "memory": {
      "source": "unavailable"
     },
+    "pending": [
+     "init",
+     "principals"
+    ],
     "persist_errors": 0,
+    "ready": false,
     "schema": 55,
     "status": "ok",
     "storage": "postgres",
