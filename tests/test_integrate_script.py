@@ -1281,6 +1281,31 @@ def test_a_member_colliding_with_a_waiter_waits_too(world, capsys):
     assert "## Dropped" not in body
 
 
+def test_a_census_changer_a_waiters_conflict_hid_never_waits(world, capsys):
+    # #13 conflicts with #11, so the full head never shows that it changes
+    # the census inputs; once it merges in a trial it is a census changer,
+    # whose census currency is mandatory, never a no-action waiter.
+    _with_census(world)
+    sha10 = world.pr(10, {"ops/ten.sh": "10\n",
+                          "rust/producer-census.json": _census(tool="t\n", ten="10\n")})
+    sha11 = world.pr(11, {"docs/foo.md": "w\n"})
+    sha13 = world.pr(13, {"docs/foo.md": "c\n",
+                          "rust/contract-inventory.json": '{"tools": []}\n'})
+    for n, sha in ((10, sha10), (11, sha11), (13, sha13)):
+        world.gh.add(n, sha)
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    (_, body), = world.gh.bodies("create")
+    assert WAITING not in body
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha11]
+    comments = {args[2]: text for args, text in world.gh.bodies("comment")}
+    assert set(comments) == {"10", "13"}
+    assert all("regenerate the census" in text for text in comments.values())
+    assert "rust/contract-inventory.json" in comments["13"] and "#10" in comments["13"]
+    assert {args[2] for args, _ in world.gh.bodies("edit")} == {"10", "13"}
+
+
 def test_a_census_too_deep_to_parse_lists_no_paths(world):
     world.advance_master({"rust/producer-census.json": "[" * 200000})
     assert integrate._census_keys(_git(world.work, "rev-parse", "origin/master")) == set()

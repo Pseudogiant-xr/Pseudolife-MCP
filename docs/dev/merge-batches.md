@@ -156,7 +156,8 @@ hashes (so a deleted one counts) and what each changer's census hashes
 (since a changer may widen the scopes). A member that conflicted with one
 of those merges once it is left out, so each trial head is searched again
 and its own such members are left out too, until the check passes or a
-trial finds none. If the check passes, that head is the batch: the members
+trial finds none; one that changes the census inputs itself counts as a
+census changer, never a waiter, and leaves with them if the check fails. If the check passes, that head is the batch: the members
 left out are listed in the batch pull request under `## Waiting (no action
 needed)`, get no comment, keep their label and join the next batch, where
 CI only reports the census because their diffs leave its inputs alone. A

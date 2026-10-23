@@ -570,7 +570,8 @@ def _remerge(plan: Plan, members: list[Member], dropped: list[Dropped],
 
 
 def _census_waiters(plan: Plan, members: list[Member], dropped: list[Dropped],
-                    culprits: list[tuple[Member, list[str]]]) -> list[Dropped]:
+                    culprits: list[tuple[Member, list[str]]]
+                    ) -> tuple[list[Dropped], list[tuple[Member, list[str]]]]:
     """With the census check failing on the full batch head, keep the
     census changers and leave out instead the other members whose own diff
     touches a path the census hashes: their CI never gates on the census,
@@ -580,12 +581,31 @@ def _census_waiters(plan: Plan, members: list[Member], dropped: list[Dropped],
     then HEAD is that batch and the waiters are returned (keeping their
     label). A member a waiter had kept out (a conflict with it) merges in
     that trial, so each trial head is searched again and its own waiters
-    join, until the check passes or a trial finds none. Otherwise returns
-    none, the trial heads left for the caller to reset."""
+    join, until the check passes or a trial finds none. Such a member whose
+    own diff changes the census inputs is a census changer, never a waiter:
+    it joins the changers, whose census currency CI enforces. Returns the
+    waiters and the census changers found; with no waiters the trial heads
+    are left for the caller to reset and the changers are the ones to drop."""
+    culprits = list(culprits)
     changers = [m for m, _ in culprits]
     numbers = {m.number for m in changers}
+    inputs = _census_inputs(plan.base_sha) or set()
     root = Path(_out("rev-parse", "--show-toplevel"))
     before = {d.member.number for d in dropped}
+    order = {m.number: i for i, m in enumerate(members)}
+
+    def revealed() -> None:
+        """Add the merged members on HEAD that change the census inputs and
+        were not known as census changers (a conflict had kept them out)."""
+        found = [(m, sorted(_changed(m.sha, plan.base_sha) & inputs))
+                 for m in plan.merged if m.number not in numbers]
+        found = [(m, f) for m, f in found if f]
+        for m, _ in found:
+            print(f"  #{m.number} changes the census inputs too; it is a census changer")
+        culprits.extend(found)
+        culprits.sort(key=lambda c: order[c[0].number])
+        changers[:] = [m for m, _ in culprits]
+        numbers.update(m.number for m, _ in found)
 
     def touching() -> dict[int, list[str]]:
         """The merged non-changers on HEAD whose own diff touches a hashed path."""
@@ -596,13 +616,13 @@ def _census_waiters(plan: Plan, members: list[Member], dropped: list[Dropped],
 
     files = touching()
     if not files:
-        return []
+        return [], culprits
     print("  checking the census changers' census without the other members")
     _remerge(plan, members, dropped, {m.number for m in members} - numbers)
     if ({m.number for m in plan.merged} != numbers
             or _census_ci_fails(root, plan.base_sha)):
         print("  it fails without them too, so the census changers leave")
-        return []
+        return [], culprits
     while True:
         # Label order, so the reasons and the output are deterministic.
         waiters = [Dropped(m, _waiting_reason(files[m.number], changers, plan.label),
@@ -616,13 +636,14 @@ def _census_waiters(plan: Plan, members: list[Member], dropped: list[Dropped],
         if not _census_ci_fails(root, plan.base_sha):
             for d in waiters:
                 print(f"  waiting #{d.member.number}: {d.reason}")
-            return waiters
+            return waiters, culprits
+        revealed()
         more = touching()
         if not more:
             break
         files.update(more)
     print("  the census still fails without them, so the census changers leave")
-    return []
+    return [], culprits
 
 
 def _merge_batch(plan: Plan, members: list[Member]) -> None:
@@ -635,7 +656,8 @@ def _merge_batch(plan: Plan, members: list[Member]) -> None:
     census_drops: list[Dropped] = []
     _merge_members(plan, members)
     while culprits := _census_culprits(plan):
-        waiters = _census_waiters(plan, members, cut_drops + census_drops, culprits)
+        waiters, culprits = _census_waiters(plan, members, cut_drops + census_drops,
+                                            culprits)
         if waiters:
             # HEAD is the batch without them; the loop's check confirms it.
             census_drops += waiters
