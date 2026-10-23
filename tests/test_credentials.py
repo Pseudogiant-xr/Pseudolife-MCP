@@ -448,11 +448,22 @@ def _modify_only_folder(tmp_path: Path, sid: str) -> Path:
     folders carry explicit SYSTEM and Administrators full-control entries, so
     an elevated runner token kept full control there (measured 2026-10-23,
     batch #898 and a diagnostic stress run)."""
+    folder = tmp_path / "modify-only"
+    folder.mkdir()
+    # Modify (icacls M) = 0x1301bf; object and container inherit; protected.
+    _set_dacl(folder, f"D:P(A;OICI;0x1301bf;;;{sid})")
+    listing = subprocess.run(["icacls", str(folder)], capture_output=True, text=True,
+                             timeout=60).stdout
+    entries = [line for line in listing.splitlines() if ":(" in line]
+    assert len(entries) == 1 and "(OI)(CI)(M)" in entries[0], listing
+    return folder
+
+
+def _set_dacl(path: Path, sddl: str) -> None:
+    """Replace `path`'s whole access list with `sddl`'s (protected)."""
     import ctypes
     from ctypes import wintypes
 
-    folder = tmp_path / "modify-only"
-    folder.mkdir()
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
@@ -461,19 +472,13 @@ def _modify_only_folder(tmp_path: Path, sid: str) -> Path:
     advapi.SetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
     kernel.LocalFree.argtypes = [ctypes.c_void_p]
     descriptor = ctypes.c_void_p()
-    # Modify (icacls M) = 0x1301bf; object and container inherit; protected.
     assert advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        f"D:P(A;OICI;0x1301bf;;;{sid})", 1, ctypes.byref(descriptor), None)
+        sddl, 1, ctypes.byref(descriptor), None)
     try:
         # DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
-        assert advapi.SetFileSecurityW(str(folder), 0x80000004, descriptor), ctypes.get_last_error()
+        assert advapi.SetFileSecurityW(str(path), 0x80000004, descriptor), ctypes.get_last_error()
     finally:
         kernel.LocalFree(descriptor)
-    listing = subprocess.run(["icacls", str(folder)], capture_output=True, text=True,
-                             timeout=60).stdout
-    entries = [line for line in listing.splitlines() if ":(" in line]
-    assert len(entries) == 1 and "(OI)(CI)(M)" in entries[0], listing
-    return folder
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
@@ -533,16 +538,23 @@ def test_the_access_list_alone_protects_the_users_own_file_in_a_modify_only_fold
     from pseudolife_memory import credentials
 
     sid = _current_user_sid()
-    folder = _modify_only_folder(tmp_path, sid)
+    # Hand the file to the user while its folder still grants full control (an
+    # elevated token's new files are Administrators', and the runner's token
+    # holds SeTakeOwnership disabled, so icacls is denied that once the folder
+    # is Modify-only); then give the file and the folder Modify-only lists. A
+    # folder's new list does not reach a file already in it.
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    path = staging / "credential"
+    path.write_text("fixture-secret", encoding="utf-8")
+    if _file_owner_sid(path) != sid:
+        subprocess.run(["icacls", str(path), "/setowner", f"*{sid}"], check=True,
+                       capture_output=True, timeout=60)
+    assert _file_owner_sid(path) == sid
+    _set_dacl(path, f"D:P(A;;0x1301bf;;;{sid})")
+    folder = staging
+    _set_dacl(folder, f"D:P(A;OICI;0x1301bf;;;{sid})")
     try:
-        path = folder / "credential"
-        path.write_text("fixture-secret", encoding="utf-8")
-        if _file_owner_sid(path) != sid:
-            # An elevated token's new files are Administrators'; icacls enables
-            # its own take-ownership privilege to hand this one to the user.
-            subprocess.run(["icacls", str(path), "/setowner", f"*{sid}"], check=True,
-                           capture_output=True, timeout=60)
-        assert _file_owner_sid(path) == sid
         looked_up = []
         real = credentials._windows_owner_sid
         monkeypatch.setattr(credentials, "_windows_owner_sid",
