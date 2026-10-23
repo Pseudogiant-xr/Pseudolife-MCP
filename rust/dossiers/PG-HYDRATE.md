@@ -128,7 +128,7 @@ Extend `rust/daemon/harness/run.py:1` and its catalog/row observer `rust/daemon/
 3. Inject one loader failure at a time after entries/cortex/world/lessons starts; call a read, write, save and health. Verify refusal, unchanged durable histories, all resident stores abandoned, retained model, then successful retry with the same connection when valid.
 4. With two owned sessions, close A's storage session, acquire/write with B and keep B open; operating A must refuse while B holds the writer lease. Then close B: A's raw flush must refuse until an ordinary read/write detects handover and rehydrates; after that, compare A's served/saved state to B's committed state (`tests/test_writer_lease.py:315`, `:335`). Repeat without B and with an unreachable server; compare their different resident-read behavior.
 5. A wrong constrained vector column must refuse before any schema/seed/epoch mutation. An unconstrained vector and a missing table are separate controls. Force constructor failure and verify lease is released before retry.
-6. On identical current-schema fixture banks, stamp `meta.schema_version` to `SCHEMA_META_VERSION+1`. Record Python's downgrade separately; native must answer the named future-version refusal and leave every table, catalog object, sequence, relation seed and writer epoch unchanged. This exercises the declared divergence, not a normalized parity pass.
+6. On identical current-schema fixture banks, stamp `meta.schema_version` to `SCHEMA_META_VERSION+1`. Both must answer the named future-version refusal with the same message and leave every table, catalog object, sequence, relation seed and writer epoch unchanged. (Until 2026-10-23 Python downgraded the stamp and this was a declared divergence.)
 7. Seed tied retention scores around the spill cap with an injected fixed clock and explicit durable ids; compare moved ids and destination append order. Seed two open episodes with equal started_at; record Python's current-id choice and gate any native id tie-break as the separately declared pending disposition.
 
 Eight source mutants, each expected to make a named case fail:
@@ -151,9 +151,9 @@ No cases or mutants have been implemented or run by this documentation task.
 CONFIG-LOAD chooses the preset/paths/backend; STORAGE-COMPAT owns legacy migration and tolerant file branches; EMBEDDING/ONNX-PREREQUISITE owns model artifacts/dimension readiness; write, dream, graph and coordination rows supply recovery/HLC integrations. Existing W1-A foundation already contains schema-opening harness work; coordinate a remaining row boundary rather than duplicate it (`rust/daemon/harness/run.py:50`).
 
 The PG schema/startup slice owns this seam and its all-loads-then-Ready
-`StartupState` interface; W2-D/E consume it. Future-schema refusal is the
-accepted declared divergence above, while equal-start episode id tie-breaking
-remains pending. These post-source dispositions do not modify Python's oracle.
+`StartupState` interface; W2-D/E consume it. Future-schema refusal is no
+longer a divergence (Python refuses too since 2026-10-23), while equal-start
+episode id tie-breaking remains pending. These post-source dispositions do not modify Python's oracle.
 
 Single synchronous writer session plus service lock is the Python concurrency model (`pseudolife_memory/storage/postgres.py:1`); the native async equivalent must preserve pinned transaction ownership and session lock lifetime. Reconnect is not a schema rerun, timeouts are scoped, row ordering is observable, and per-entry hydration repairs are not a single global snapshot. Catalog extension versions/collation/owner differences need explicitly recorded fixture policy. Full enumeration of recovery helpers and all startup meta mutations is incomplete here; review those paths before treating this as a closed row.
 

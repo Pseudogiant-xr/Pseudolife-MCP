@@ -275,6 +275,7 @@ def _apply(update, latest: str, idle: int) -> int:
             post_notice(update, text)
             raise UpdateError(text, 4)
 
+    update.schema_before = health.get("schema")
     try:
         update.deploy_release(current=current, before_recreate=board_still_idle,
                               previous_digest=health.get("hooks_digest"))
