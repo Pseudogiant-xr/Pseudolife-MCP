@@ -734,3 +734,30 @@ def test_unclean_legacy_metadata_does_not_stop_the_import(tmp_path, storage):
     row = storage.conn.execute(
         "SELECT source, chunk_index, ingested_at FROM reference_chunks").fetchone()
     assert row == ("odd.md", 0, 0.0)
+
+
+def test_a_listed_chunk_a_page_does_not_return_blocks_the_marker(
+        tmp_path, storage, monkeypatch):
+    """chromadb's get(ids=...) silently leaves out an id it cannot return.
+    A store that lists a chunk and then fails to return it is not marked
+    done: the chunks it did return are in the bank, and the next start
+    tries the missing one again."""
+    from chromadb.api.models.Collection import Collection
+
+    store = tmp_path / "chromadb"
+    docs = dict(list(CORPUS.items())[:3])
+    _legacy_ingest(store, docs, compact=False)
+    real_get = Collection.get
+
+    def drops_one(self, ids=None, **kwargs):
+        if ids:
+            ids = ids[1:]
+        return real_get(self, ids=ids, **kwargs)
+
+    monkeypatch.setattr(Collection, "get", drops_one)
+
+    with pytest.raises(RuntimeError, match="1 of 3 chunks"):
+        _migrate(store, storage)
+
+    assert _bank(storage).size == 2
+    assert storage.meta_get("reference_chroma_import") is None

@@ -28,7 +28,7 @@ any such store in:
   (embedding none of them again) and carries on with the rest.
 * **Once.** With the marker set, the store is never opened again (an open
   costs chromadb's per-process System cache: about 19 threads and ~3 MB,
-  released here once the read ends). The marker is bank-local: a logical
+  released here by closing the client once the read ends). The marker is bank-local: a logical
   transfer does not carry it (``transfer_cli._META_SKIP_KEYS``), so a target
   host's own legacy store is still imported.
 * **Vectors of another dimension** (documents ingested before the v25
@@ -54,7 +54,8 @@ MIGRATION_META_KEY = "reference_chroma_import"
 _PAGE = 256
 # The scratch directory's name, beside the store.
 SCRATCH_NAME = ".chromadb-import-copy"
-# Free space the copy needs beyond the store's own size.
+# Free space the copy needs: twice the store (the copy, and room for chromadb
+# to rewrite an older store's files as it opens it) plus this much.
 _COPY_HEADROOM_BYTES = 256 * 1024 * 1024
 
 
@@ -105,7 +106,7 @@ def _open_copy(store: Path, collection_name: str):
 
     scratch = store.parent / SCRATCH_NAME
     _remove_scratch(scratch)
-    need = _tree_bytes(store) + _COPY_HEADROOM_BYTES
+    need = 2 * _tree_bytes(store) + _COPY_HEADROOM_BYTES
     free = shutil.disk_usage(store.parent).free
     if free < need:
         raise RuntimeError(
@@ -126,14 +127,15 @@ def _open_copy(store: Path, collection_name: str):
             yield (client.get_collection(collection_name)
                    if collection_name in names else None)
         finally:
+            # close() stops this path's cached System (threads, open
+            # files), so the scratch copy can go. Not clear_system_cache():
+            # it drops every chromadb System in the process without stopping
+            # them. Releases without close() keep the System, and the copy,
+            # until the process exits; the next attempt copies into a fresh
+            # subdirectory and a later one removes the old.
             close = getattr(client, "close", None)
             if close is not None:
                 close()
-            # chromadb caches each path's System (threads, open files) for
-            # the life of the process; dropping it lets the scratch copy go.
-            clear = getattr(client, "clear_system_cache", None)
-            if clear is not None:
-                clear()
     finally:
         _remove_scratch(scratch)
 
@@ -164,14 +166,14 @@ def import_legacy_store(store, collection_name: str, storage,
     with _open_copy(store, collection_name) as collection:
         ids = [] if collection is None else list(
             collection.get(include=[])["ids"])
-        written: list[str] = []
-        inserted = reembedded = resumed = skipped = 0
+        listed = set(ids)
+        textless: set[str] = set()
+        inserted = reembedded = resumed = 0
         for start in range(0, len(ids), _PAGE):
             page_ids = ids[start:start + _PAGE]
             present = storage.reference_chunk_ids_present(page_ids)
             resumed += len(present)
             todo_ids = [i for i in page_ids if i not in present]
-            written.extend(present)
             if not todo_ids:
                 continue
             page = collection.get(
@@ -182,7 +184,7 @@ def import_legacy_store(store, collection_name: str, storage,
             rows: list[dict] = []
             for i, chunk in enumerate(page["ids"]):
                 if documents[i] is None:
-                    skipped += 1
+                    textless.add(chunk)
                     continue
                 metadata = dict(metadatas[i] or {})
                 rows.append({
@@ -205,20 +207,21 @@ def import_legacy_store(store, collection_name: str, storage,
                     row["embedding"] = vector
             reembedded += len(stale)
             inserted += storage.upsert_reference_chunks(rows, replace=False)
-            written.extend(r["id"] for r in rows)
             logger.warning(
                 "chromadb document import: %d of %d chunks done (%d embedded "
                 "again so far)", min(start + _PAGE, len(ids)), len(ids),
                 reembedded)
 
-    # Verified before it is marked: every chunk with text is in the bank.
-    missing = len(written) - len(storage.reference_chunk_ids_present(written))
+    # Verified before it is marked: every listed chunk with text is in the
+    # bank, including any id the store listed but a page did not return.
+    expected = sorted(listed - textless)
+    missing = len(expected) - len(storage.reference_chunk_ids_present(expected))
     if missing:
         raise RuntimeError(
-            f"{missing} of {len(written)} chunks read from the chromadb store "
-            f"at {store} are not in the bank after the import; not marking it "
-            "done, so the next start tries again")
-    chunks = len(written)
+            f"{missing} of {len(expected)} chunks the chromadb store at "
+            f"{store} lists are not in the bank after the import; not marking "
+            "it done, so the next start tries again")
+    chunks, skipped = len(expected), len(textless)
     storage.meta_set(MIGRATION_META_KEY, {
         "status": "done", "chunks": chunks, "inserted": inserted,
         "reembedded": reembedded, "resumed": resumed, "skipped": skipped,
