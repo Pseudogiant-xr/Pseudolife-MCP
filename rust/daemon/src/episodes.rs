@@ -288,9 +288,9 @@ pub struct WriteState {
     pub active_session: Option<(String, f64)>,
     /// `ContinuumMemorySystem._last_entity_seen` (never persisted).
     pub last_entity_seen: Option<String>,
-    /// `_interaction_count` (persisted only in `weights.pt`).
+    /// `_interaction_count` (Python persists it in the `cms_counters` row).
     pub interaction_count: u64,
-    /// `_surprise_history` per band, last 100 (persisted only in `weights.pt`).
+    /// `_surprise_history` per band, last 100 (Python persists it in `cms_counters`).
     pub surprise_history: HashMap<String, Vec<f64>>,
     /// `_entity_kind_cache`: `entity_kinds` (entity_norm -> kind), read on the
     /// first `freshness_class="auto"` fact write and kept for the process.

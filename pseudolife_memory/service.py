@@ -1484,25 +1484,47 @@ class MemoryService(DreamOps, MaintainerOps):
     def _load_counters(self) -> None:
         """Restore the CMS counters from the bank's ``cms_counters`` row.
 
-        A bank without one (fresh, or first started on v57) imports a
-        pre-v57 ``memory_state/weights.pt`` once, if there is one, and
-        writes it as the row; the file is left in place and never read
-        again, because the row exists from then on. A failed read or write
-        of the row raises, like any other failed hydration: serving on and
-        autosaving fresh counters would overwrite the real ones. A corrupt
-        file only sets ``weights_reset``, as it always has."""
+        A ``memory_state/weights.pt`` (or its ``.bak``) is imported instead,
+        and written as the row at once, when the bank has no row or the file
+        is newer than the row: a pre-v57 file on the first start, or one an
+        older release wrote after a rollback. An imported file is renamed
+        ``*.imported``, never deleted, so no later bank (a fresh database, a
+        transfer target) imports counters frozen at the upgrade; an older
+        file beside a newer row is set aside the same way. A failed read or
+        write of the row raises, like any other failed hydration: serving on
+        and autosaving fresh counters would overwrite the real ones. An
+        unreadable file sets ``weights_reset`` only when there is no row to
+        fall back on."""
         assert self._cms is not None and self._storage is not None
         row = self._storage.cms_counters_get()
+        save_dir = Path(self.config.memory.save_dir)
+        files = [p for p in (save_dir / "weights.pt", save_dir / "weights.pt.bak")
+                 if p.exists()]
+        newest = max((p.stat().st_mtime for p in files), default=None)
+        if newest is not None and (row is None or newest > row["updated_at"]):
+            if self._cms.load_weights(save_dir):
+                self._storage.cms_counters_put(self._cms.counters_state())
+                logger.warning(
+                    "imported the CMS counters from %s into the bank "
+                    "(cms_counters)", save_dir / "weights.pt")
+                self._set_weights_files_aside(files)
+                return
         if row is not None:
             self._cms.apply_counters(row)
-            return
-        save_dir = self.config.memory.save_dir
-        if self._cms.load_weights(save_dir):
-            self._storage.cms_counters_put(self._cms.counters_state())
-            logger.warning(
-                "imported the CMS counters from %s into the bank "
-                "(cms_counters); the file is left in place and no longer "
-                "read", Path(save_dir) / "weights.pt")
+            self._cms.weights_reset = False
+            if files:
+                self._set_weights_files_aside(files)
+
+    @staticmethod
+    def _set_weights_files_aside(files: list[Path]) -> None:
+        for path in files:
+            target = path.with_name(path.name + ".imported")
+            try:
+                os.replace(path, target)
+            except OSError as exc:
+                logger.warning("could not rename %s to %s (%s); the bank's "
+                               "counters row stays the newer source", path,
+                               target.name, exc)
 
     def _hydrate_resident_stores(self) -> None:
         """Build the resident stores and fill them from storage (or the
@@ -3902,9 +3924,14 @@ class MemoryService(DreamOps, MaintainerOps):
 
         if self._storage is not None:
             # "weights" names the counters weights.pt held; since schema v57
-            # they are the bank's cms_counters row.
-            _timed("weights", lambda: self._storage.cms_counters_put(
-                self._cms.counters_state()))
+            # they are the bank's cms_counters row. Like the access counts
+            # below, a failed write is logged and the facts still save: the
+            # counters are a cache the next save rewrites.
+            try:
+                _timed("weights", lambda: self._storage.cms_counters_put(
+                    self._cms.counters_state()))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("counters save failed: %s", exc)
             pairs = [
                 (e.db_id, e.access_count)
                 for band in self._cms.bands

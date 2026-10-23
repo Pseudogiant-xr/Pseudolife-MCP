@@ -2116,12 +2116,14 @@ class PostgresStorage:
         "consolidation_events")
 
     def cms_counters_get(self) -> dict | None:
-        """The counters row as a ``counters_state()`` dict, or None when the
-        bank has none yet (a fresh bank, or one not started since v57)."""
+        """The counters row as a ``counters_state()`` dict plus its
+        ``updated_at``, or None when the bank has none yet (a fresh bank, or
+        one not started since v57)."""
+        columns = self._CMS_COUNTER_COLUMNS + ("updated_at",)
         row = self.conn.execute(
-            "SELECT " + ", ".join(self._CMS_COUNTER_COLUMNS)
+            "SELECT " + ", ".join(columns)
             + " FROM cms_counters WHERE id = 1").fetchone()
-        return None if row is None else dict(zip(self._CMS_COUNTER_COLUMNS, row))
+        return None if row is None else dict(zip(columns, row))
 
     def cms_counters_put(self, state: dict) -> None:
         """Write the counters row (``id = 1``), replacing the one there."""

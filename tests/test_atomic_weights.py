@@ -117,3 +117,22 @@ def test_counters_state_round_trips_and_merges_per_band(tmp_path):
     cms2.apply_counters(partial)
     assert cms2._interaction_count == state["interaction_count"]
     assert cms2._tier_hits[band] == 0 and cms2._surprise_history[band] == []
+
+
+def test_counters_state_is_plain_json_even_from_a_legacy_payload():
+    """An old weights.pt may hold tensor scalars; the state written to the
+    jsonb columns is plain numbers, so the write cannot refuse it."""
+    import json
+
+    cms = ContinuumMemorySystem(MemoryConfig())
+    band = cms.bands[0].name
+    cms.apply_counters({
+        "interaction_count": torch.tensor(3), "logical_turn_count": 1,
+        "tier_queries": 2, "tier_hits": {band: torch.tensor(2)},
+        "surprise_history": {band: [torch.tensor(0.5)]},
+        "consolidation_events": [{"timestamp": torch.tensor(1.5)}],
+    })
+    state = cms.counters_state()
+    assert json.loads(json.dumps(state)) == state
+    assert state["surprise_history"][band] == [0.5]
+    assert state["consolidation_events"] == [{"timestamp": 1.5}]

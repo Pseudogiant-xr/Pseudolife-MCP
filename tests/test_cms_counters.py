@@ -86,9 +86,9 @@ def test_counters_survive_a_restart_in_the_bank(
 
 def test_a_pre_v57_weights_file_is_imported_once(
         tmp_path, pg_url, pg_conn, monkeypatch):  # noqa: F811
-    """The first start on a bank without the row imports weights.pt and
-    writes the row at once; the file stays, and a later start reads the row,
-    never the file again."""
+    """The first start on a bank without the row imports weights.pt, writes
+    the row at once and renames the file *.imported (never deleted), so a
+    later bank cannot import counters frozen at the upgrade."""
     state_dir = tmp_path / "memory_state"
     _legacy_weights(state_dir, interactions=500)
 
@@ -100,14 +100,90 @@ def test_a_pre_v57_weights_file_is_imported_once(
         assert row["tier_hits"]["flat"] == 3 and row["tier_queries"] == 4
     finally:
         _close(svc)
-    assert (state_dir / "weights.pt").exists()
+    assert not (state_dir / "weights.pt").exists()
+    assert (state_dir / "weights.pt.imported").exists()
 
-    _legacy_weights(state_dir, interactions=1)  # a stale file left behind
     again = _service(tmp_path, monkeypatch, pg_url)
     try:
         assert again._cms._interaction_count == 500  # noqa: SLF001
     finally:
         _close(again)
+
+
+def test_a_bank_without_the_row_does_not_import_a_set_aside_file(
+        tmp_path, pg_url, pg_conn, monkeypatch):  # noqa: F811
+    """A fresh database (a transfer target, a recreated bank) on a data dir
+    whose weights.pt was imported long ago starts fresh counters rather than
+    the ones frozen at the upgrade."""
+    state_dir = tmp_path / "memory_state"
+    _legacy_weights(state_dir, interactions=500)
+    _close(_service(tmp_path, monkeypatch, pg_url))
+    pg_conn.execute("DELETE FROM cms_counters")
+    pg_conn.commit()
+
+    svc = _service(tmp_path, monkeypatch, pg_url)
+    try:
+        assert svc._cms._interaction_count == 0  # noqa: SLF001
+        assert svc._storage.cms_counters_get() is None  # noqa: SLF001
+    finally:
+        _close(svc)
+
+
+def test_a_file_newer_than_the_row_is_imported_and_an_older_one_set_aside(
+        tmp_path, pg_url, pg_conn, monkeypatch):  # noqa: F811
+    """After a rollback an older release writes weights.pt again; upgrading
+    once more imports that newer file instead of dropping its counters. A
+    file older than the row is set aside and the row wins."""
+    import os
+    import time
+
+    state_dir = tmp_path / "memory_state"
+    svc = _service(tmp_path, monkeypatch, pg_url)
+    try:
+        _count(svc, interactions=10, turns=1, queries=2)
+        svc.save()
+        saved_at = svc._storage.cms_counters_get()["updated_at"]  # noqa: SLF001
+    finally:
+        _close(svc)
+
+    _legacy_weights(state_dir, interactions=99)  # the rollback's file
+    later = saved_at + 60
+    os.utime(state_dir / "weights.pt", (later, later))
+    again = _service(tmp_path, monkeypatch, pg_url)
+    try:
+        assert again._cms._interaction_count == 99  # noqa: SLF001
+        assert again._storage.cms_counters_get()["interaction_count"] == 99  # noqa: SLF001
+    finally:
+        _close(again)
+    assert not (state_dir / "weights.pt").exists()
+
+    _legacy_weights(state_dir, interactions=5)  # older than the row now
+    earlier = time.time() - 3600
+    os.utime(state_dir / "weights.pt", (earlier, earlier))
+    third = _service(tmp_path, monkeypatch, pg_url)
+    try:
+        assert third._cms._interaction_count == 99  # noqa: SLF001
+    finally:
+        _close(third)
+    assert not (state_dir / "weights.pt").exists()
+
+
+def test_a_failed_counters_write_does_not_stop_the_save(
+        tmp_path, pg_url, pg_conn, monkeypatch):  # noqa: F811
+    """The counters are a cache the next save rewrites; a failed write of
+    the row is logged and the cortex, world and lesson saves still run."""
+    svc = _service(tmp_path, monkeypatch, pg_url)
+    try:
+        def broken(state):
+            raise RuntimeError("lock timeout")
+
+        saved = []
+        monkeypatch.setattr(svc._storage, "cms_counters_put", broken)  # noqa: SLF001
+        monkeypatch.setattr(svc, "_save_cortex", lambda: saved.append("cortex"))
+        svc._persist_all(kind="auto")  # noqa: SLF001
+        assert saved == ["cortex"]
+    finally:
+        _close(svc)
 
 
 def test_the_import_falls_back_to_the_backup_file(

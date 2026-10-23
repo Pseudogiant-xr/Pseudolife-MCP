@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import copy
 import heapq
+import json
 import logging
 import math
 import random
@@ -2295,17 +2296,20 @@ class ContinuumMemorySystem:
         columns (schema v57): what ``weights.pt`` held before, despite its
         name never weights since v0.5. Copies, so a later store or retrieve
         cannot change a state already handed to the writer."""
+        # Plain JSON types throughout: an imported legacy payload may hold
+        # tensor or numpy scalars, which the jsonb write would refuse.
         return {
-            "preset_name": self.config.miras.preset,
+            "preset_name": str(self.config.miras.preset),
             "interaction_count": int(self._interaction_count),
             "logical_turn_count": int(self._logical_turn_count),
             "tier_queries": int(self._tier_queries),
-            "tier_hits": dict(self._tier_hits),
+            "tier_hits": {str(name): int(hits)
+                          for name, hits in self._tier_hits.items()},
             "surprise_history": {
-                name: list(history)
+                str(name): [float(v) for v in history]
                 for name, history in self._surprise_history.items()},
-            "consolidation_events": [
-                dict(event) for event in self._consolidation_events],
+            "consolidation_events": json.loads(json.dumps(
+                list(self._consolidation_events), default=float)),
         }
 
     def apply_counters(self, state: dict) -> None:

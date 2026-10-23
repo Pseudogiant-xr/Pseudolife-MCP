@@ -91,7 +91,10 @@ def create(name: str, template: str | None = None) -> str:
             conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
                 sql.Identifier(_check(name)), sql.Identifier(_check(template))))
     if template is not None:
-        from rust.daemon.harness.dbstate import UNPORTED_ROWS
+        try:  # the harness's own dbstate when it is on the path, so one
+            from dbstate import UNPORTED_ROWS  # module instance holds it
+        except ImportError:
+            from rust.daemon.harness.dbstate import UNPORTED_ROWS
         with psycopg.connect(dsn(name), autocommit=True) as conn:
             for table in UNPORTED_ROWS:
                 if conn.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone()[0]:
