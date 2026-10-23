@@ -213,9 +213,8 @@ current merge ref, except as the `merge-forward` skill allows):
 - **An integration batch** (`integrate/<date>-batch-N` from `python
   ops/integrate.py build`, over `ready-to-batch` PRs with their review,
   their own local targeted validation and own-head CI that has not
-  failed (label once review and targeted runs are done, with own-head CI
-  still pending, since the batch's CI is its members' CI), built whenever
-  none is open and one is ready, a lone PR or release cut
+  failed (pending is fine, since the batch's CI is its members' CI),
+  built whenever none is open and one is ready, a lone PR or release cut
   as a batch of one) passes the local WSL full
   suite and the `rust/` harness run `build` prints on its head before
   `ops/integrate.py open` pushes it, because since #846 that costs less
