@@ -39,6 +39,14 @@ pub struct Ready {
     pub lessons: crate::stores::lessons::SharedLessons,
     /// The service hybrid logical clock (`MemoryService._hlc`).
     pub hlc: std::sync::Mutex<crate::hlc::Clock>,
+    /// The dream's acknowledgement state (`dream::service`). Lock order:
+    /// `write`, then this.
+    pub dream: tokio::sync::Mutex<crate::dream::service::Tracking>,
+    /// The dream pass's process-local state (`dream::run::RunState`): the
+    /// single-flight guard, the per-batch failure counter, the alias-name
+    /// memo, the stall tracker and the last extractor record. Never held
+    /// across an await that takes `write`.
+    pub dream_run: crate::dream::run::RunState,
 }
 
 impl Ready {
@@ -309,6 +317,8 @@ impl Service {
                     world: crate::stores::world::SharedWorld::new(world),
                     lessons: crate::stores::lessons::SharedLessons::new(lessons),
                     hlc: std::sync::Mutex::new(crate::hlc::Clock::default()),
+                    dream: tokio::sync::Mutex::new(Default::default()),
+                    dream_run: Default::default(),
                 });
                 inner.ready = Some(ready.clone());
                 // Python publishes every loaded store before the late reseed.

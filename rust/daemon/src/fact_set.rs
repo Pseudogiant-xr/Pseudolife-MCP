@@ -31,38 +31,99 @@ pub(crate) fn internal(e: impl std::fmt::Display) -> ToolError {
     ToolError::Internal(anyhow::anyhow!(e.to_string()))
 }
 
-/// The bound arguments `service.cortex_write` receives from
-/// `mcp_server.memory_fact_set`.
-struct Args {
-    entity: String,
-    attribute: String,
-    value: String,
-    /// `origin or "agent"`.
-    support: String,
-    confidence: f64,
-    episode: Option<String>,
-    freshness_class: String,
-    authority: String,
-    distortion_tolerance: String,
+/// A label argument of `service.cortex_write` (`authority`,
+/// `distortion_tolerance`): Python's `INHERIT` sentinel, or a requested
+/// value for `resolve_authority` / `resolve_distortion` (`"auto"` infers
+/// from the value, a string is validated, None clears).
+pub(crate) enum LabelArg {
+    /// Passed by the dream's claim writes for an unlabelled source.
+    #[allow(dead_code)]
+    Inherit,
+    Requested(Option<String>),
 }
 
-impl Args {
-    fn bind(a: &Map<String, Value>) -> Args {
-        let text = |k: &str, d: &str| a.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
-        Args {
-            entity: text("entity", ""),
-            attribute: text("attribute", ""),
-            value: text("value", ""),
-            support: text("origin", "agent"),
-            confidence: a
-                .get("confidence")
-                .and_then(crate::mcp::binding::float_arg)
-                .unwrap_or(0.8),
-            episode: a.get("episode").and_then(Value::as_str).map(str::to_string),
-            freshness_class: text("freshness_class", "auto"),
-            authority: text("authority", "auto"),
-            distortion_tolerance: text("distortion_tolerance", "auto"),
+impl LabelArg {
+    fn auto() -> LabelArg {
+        LabelArg::Requested(Some("auto".into()))
+    }
+
+    /// `resolve_authority(requested, value)` / `resolve_distortion(..)`.
+    fn resolve(
+        &self,
+        value: &str,
+        f: fn(Option<&str>, &str) -> Result<crate::labels::Resolved, String>,
+    ) -> Result<crate::labels::Resolved, String> {
+        match self {
+            LabelArg::Inherit => Ok(crate::labels::Resolved::Inherit),
+            LabelArg::Requested(r) => f(r.as_deref(), value),
         }
+    }
+}
+
+/// The arguments of `service.cortex_write` (`service.py:3916-3933`) but
+/// `now`, which no caller passes: `memory_fact_set` binds its MCP
+/// arguments (`Self::bind`); the dream's claim writes pass `support`,
+/// `stance`, both labels, `dream=True` and, to park, `provenance` and
+/// `force_contend` (`service_dream.py:2106-2208`).
+pub(crate) struct CortexWriteArgs {
+    pub entity: String,
+    pub attribute: String,
+    pub value: String,
+    pub confidence: f64,
+    pub provenance: Vec<String>,
+    /// As passed; `_norm_support` runs in the store.
+    pub support: Option<String>,
+    pub episode: Option<String>,
+    pub freshness_class: String,
+    pub force_contend: bool,
+    pub stance: Option<String>,
+    pub authority: LabelArg,
+    pub distortion_tolerance: LabelArg,
+    pub dream: bool,
+}
+
+impl CortexWriteArgs {
+    /// The Python defaults: confidence 0.7, no provenance or support,
+    /// `freshness_class="auto"`, both labels `"auto"`, no stance, neither
+    /// `force_contend` nor `dream`.
+    pub(crate) fn new(entity: &str, attribute: &str, value: &str) -> CortexWriteArgs {
+        CortexWriteArgs {
+            entity: entity.into(),
+            attribute: attribute.into(),
+            value: value.into(),
+            confidence: 0.7,
+            provenance: Vec::new(),
+            support: None,
+            episode: None,
+            freshness_class: "auto".into(),
+            force_contend: false,
+            stance: None,
+            authority: LabelArg::auto(),
+            distortion_tolerance: LabelArg::auto(),
+            dream: false,
+        }
+    }
+
+    /// The arguments `mcp_server.memory_fact_set` passes: `origin or
+    /// "agent"`, confidence 0.8 by default, the episode, the class and both
+    /// labels as strings; the rest stay neutral.
+    fn bind(a: &Map<String, Value>) -> CortexWriteArgs {
+        let text = |k: &str, d: &str| a.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
+        let mut w = CortexWriteArgs::new(
+            &text("entity", ""),
+            &text("attribute", ""),
+            &text("value", ""),
+        );
+        w.support = Some(text("origin", "agent"));
+        w.confidence = a
+            .get("confidence")
+            .and_then(crate::mcp::binding::float_arg)
+            .unwrap_or(0.8);
+        w.episode = a.get("episode").and_then(Value::as_str).map(str::to_string);
+        w.freshness_class = text("freshness_class", "auto");
+        w.authority = LabelArg::Requested(Some(text("authority", "auto")));
+        w.distortion_tolerance = LabelArg::Requested(Some(text("distortion_tolerance", "auto")));
+        w
     }
 }
 
@@ -75,7 +136,7 @@ fn mcp_memory_fact_set<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> Too
             transport_session: call.ident.transport_session.clone(),
         };
         let writer = call.ident.writer.clone();
-        let args = Args::bind(call.args);
+        let args = CortexWriteArgs::bind(call.args);
         // Python's body runs on a worker thread a disconnecting client cannot
         // stop; an admitted write runs to completion in its own task.
         let r2 = ready.clone();
@@ -118,18 +179,28 @@ pub(crate) async fn embed(ready: &Ready, text: String) -> Result<Arc<[f32]>, Too
     Ok(Arc::from(row))
 }
 
-/// `service.cortex_write` with the MCP arguments, under the write lock (the
-/// Python service lock) from the freshness lookup to the answer.
-async fn cortex_write(
+/// `service.cortex_write` (`service.py:3916-4040`), under the write lock
+/// (the Python service lock) from the freshness lookup to the answer: the
+/// label resolution before it, then the class, both embeddings, the writer
+/// and episode stamps, an HLC tick, the store write, the entity mint, the
+/// per-slot save and, for a direct user supersede (never a dream write),
+/// the correction signal. A set-valued slot answers `ToolError::Invalid`
+/// with `SET_SLOT_REFUSAL`. `memory_fact_set` calls it with the neutral
+/// inputs; the dream's claim writes call it with theirs.
+pub(crate) async fn cortex_write(
     svc: &Service,
     ready: &Arc<Ready>,
     caller: &Caller,
     writer: String,
-    a: Args,
+    a: CortexWriteArgs,
 ) -> Result<Value, ToolError> {
-    let authority = crate::labels::resolve_authority(Some(&a.authority), &a.value)
+    let authority = a
+        .authority
+        .resolve(&a.value, crate::labels::resolve_authority)
         .map_err(ToolError::Invalid)?;
-    let distortion = crate::labels::resolve_distortion(Some(&a.distortion_tolerance), &a.value)
+    let distortion = a
+        .distortion_tolerance
+        .resolve(&a.value, crate::labels::resolve_distortion)
         .map_err(ToolError::Invalid)?;
     let db = ready.storage.client();
     let mut ws = ready.write.lock().await;
@@ -160,7 +231,7 @@ async fn cortex_write(
         embedding,
         slot_embedding: Some(slot_embedding),
         confidence: a.confidence,
-        support: norm_support(Some(&a.support)),
+        support: norm_support(a.support.as_deref()),
         now: episodes::now(),
         hlc,
         writer_id: Some(writer),
@@ -168,6 +239,10 @@ async fn cortex_write(
         freshness_class,
         authority,
         distortion_tolerance: distortion,
+        provenance: a.provenance.clone(),
+        stance: a.stance.clone(),
+        force_contend: a.force_contend,
+        dream: a.dream,
     };
     let outcome = ready
         .cortex
@@ -182,7 +257,8 @@ async fn cortex_write(
     let snap = ready.cortex.snapshot();
     let record = &snap.records[outcome.record];
     if outcome.action == "superseded"
-        && py_strip(&a.support).to_lowercase() == "user"
+        && !a.dream
+        && py_strip(a.support.as_deref().unwrap_or("")).to_lowercase() == "user"
         && !crate::mutants::active("mcp-fact-set-no-correction-signal")
     {
         let episode_id = match &resolved {
@@ -290,5 +366,45 @@ async fn emit_correction_signal(
     .await;
     if let Err(e) = res {
         eprintln!("correction signal emit failed: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_mcp_binding_passes_the_neutral_dream_inputs() {
+        let a = CortexWriteArgs::bind(
+            json!({"entity": "db", "attribute": "host", "value": "a", "confidence": 0.6})
+                .as_object()
+                .unwrap(),
+        );
+        assert_eq!(a.support.as_deref(), Some("agent"));
+        assert_eq!(a.confidence, 0.6);
+        assert!(a.provenance.is_empty() && a.stance.is_none());
+        assert!(!a.force_contend && !a.dream);
+        assert_eq!(a.freshness_class, "auto");
+        for label in [&a.authority, &a.distortion_tolerance] {
+            assert!(matches!(label, LabelArg::Requested(Some(v)) if v == "auto"));
+        }
+        let d = CortexWriteArgs::new("db", "host", "a");
+        assert_eq!((d.confidence, d.support), (0.7, None));
+    }
+
+    #[test]
+    fn label_args_resolve_like_python() {
+        use crate::labels::{Resolved, resolve_authority};
+        let r = |l: LabelArg, v: &str| l.resolve(v, resolve_authority);
+        assert_eq!(r(LabelArg::Inherit, "you must").unwrap(), Resolved::Inherit);
+        assert_eq!(
+            r(LabelArg::Requested(None), "x").unwrap(),
+            Resolved::Set(None)
+        );
+        assert_eq!(
+            r(LabelArg::Requested(Some(" Quoted ".into())), "x").unwrap(),
+            Resolved::Set(Some("quoted".into()))
+        );
+        assert!(r(LabelArg::Requested(Some("loud".into())), "x").is_err());
     }
 }

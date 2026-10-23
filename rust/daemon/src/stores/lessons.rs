@@ -3,9 +3,10 @@
 //! `memory/lessons.py` (`LessonRecord`, `LessonStore.current_records`,
 //! `search`, `retire`); `storage/sync.py` `_lesson_record_to_row`,
 //! `sync_lesson_slots` (409-450), `hydrate_lessons` (474-505);
-//! `storage/postgres.py` `load_lessons` (1998-2008). The dream's synthesis
-//! is not ported; `memory_forget` retires lessons (scope `lesson`, and the
-//! source cascade of scope `memory`).
+//! `storage/postgres.py` `load_lessons` (1998-2008), and `write_fact`
+//! (`memory/lessons.py:91-208`), the write the dream's lesson synthesis and
+//! `lesson_write` make (`crate::lesson_write`); `memory_forget` retires
+//! lessons (scope `lesson`, and the source cascade of scope `memory`).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, RwLock};
@@ -91,7 +92,217 @@ pub struct LessonStore {
     pub dirty_slots: BTreeSet<SlotKey>,
 }
 
+/// `OUTCOMES` (`memory/lessons.py:32`).
+const OUTCOMES: [&str; 3] = ["success", "failure", "correction"];
+
+/// The keyword arguments of `LessonStore.write_fact` (`tx_time` is always
+/// left to default to `now`).
+#[derive(Debug, Clone)]
+pub struct LessonWrite<'a> {
+    pub about: Option<&'a str>,
+    pub outcome: &'a str,
+    pub polarity: &'a str,
+    pub confidence: f64,
+    pub origin: Option<&'a str>,
+    pub provenance: &'a [String],
+    pub support: &'a [String],
+    pub now: f64,
+    pub hlc: Option<(i64, i64)>,
+    pub valid_time: Option<f64>,
+    pub writer_id: Option<&'a str>,
+    pub session_id: Option<&'a str>,
+}
+
+/// What one `write_fact` may change at its slot, to undo it
+/// (`service_dream._staged_slot`): the record count, the record at the
+/// slot's current index and whether the slot was dirty.
+#[derive(Debug, Clone)]
+pub struct SlotUndo {
+    key: SlotKey,
+    appended_from: usize,
+    before: Option<(usize, LessonRecord)>,
+    was_dirty: bool,
+}
+
+/// A set's union, kept as a sorted list (the store keeps sets).
+fn union(into: &mut Vec<String>, more: &[String]) {
+    into.extend(more.iter().cloned());
+    into.sort();
+    into.dedup();
+}
+
 impl LessonStore {
+    /// `_current.get(key)`: the slot's current record (the last one, as the
+    /// index Python rebuilds keeps).
+    pub fn current_index(&self, key: &SlotKey) -> Option<usize> {
+        self.records
+            .iter()
+            .rposition(|r| r.status == "current" && r.key == *key)
+    }
+
+    /// The undo record for a write at `(task, aspect)`, taken before it.
+    pub fn slot_undo(&self, task: &str, aspect: &str) -> SlotUndo {
+        let key = slot_key(task, aspect);
+        SlotUndo {
+            appended_from: self.records.len(),
+            before: self
+                .current_index(&key)
+                .map(|i| (i, self.records[i].clone())),
+            was_dirty: self.dirty_slots.contains(&key),
+            key,
+        }
+    }
+
+    /// Undo the write `undo` was taken before.
+    pub fn undo(&mut self, undo: SlotUndo) {
+        self.records.truncate(undo.appended_from);
+        if let Some((i, rec)) = undo.before {
+            self.records[i] = rec;
+        }
+        if !undo.was_dirty {
+            self.dirty_slots.remove(&undo.key);
+        }
+    }
+
+    /// `LessonStore.write_fact` (`memory/lessons.py:91-185`): insert at an
+    /// empty slot; the same normalized lesson confirms (refresh, lift the
+    /// confidence, merge the sets, adopt the framing); a different one
+    /// supersedes unless its HLC is older (`stale`). Returns the action and
+    /// the index of the record it names.
+    pub fn write_fact(
+        &mut self,
+        entity: &str,
+        attribute: &str,
+        value: &str,
+        embedding: Option<Arc<[f32]>>,
+        w: &LessonWrite<'_>,
+    ) -> (&'static str, usize) {
+        let t = w.now;
+        let txt = t;
+        let vt = w.valid_time.unwrap_or(txt);
+        let outcome = if OUTCOMES.contains(&w.outcome) {
+            w.outcome
+        } else {
+            "success"
+        };
+        let key = slot_key(entity, attribute);
+        self.dirty_slots.insert(key.clone());
+        let Some(idx) = self.current_index(&key) else {
+            let rec = self.new_record(entity, attribute, value, embedding, outcome, w, vt, None);
+            self.records.push(rec);
+            return ("inserted", self.records.len() - 1);
+        };
+        let norm = crate::stores::cortex_write::norm_value;
+        let cur = &mut self.records[idx];
+        if norm(&cur.value) == norm(value) {
+            cur.last_confirmed = t;
+            // `min(1.0, max(cur.confidence, float(confidence)))`.
+            let m = if w.confidence > cur.confidence {
+                w.confidence
+            } else {
+                cur.confidence
+            };
+            cur.confidence = if m < 1.0 { m } else { 1.0 };
+            union(&mut cur.provenance, w.provenance);
+            union(&mut cur.support, w.support);
+            cur.outcome = outcome.to_string();
+            cur.polarity = w.polarity.to_string();
+            if let Some(about) = w.about.filter(|a| !a.is_empty()) {
+                cur.about = Some(about.to_string());
+            }
+            if let Some(origin) = w.origin.filter(|o| !o.is_empty()) {
+                cur.origin = Some(origin.to_string());
+            }
+            if let Some(e) = embedding {
+                cur.unit = Some(Arc::from(unit_f32(&e)));
+                cur.embedding = Some(e);
+            }
+            cur.tx_time = Some(txt);
+            if let Some((phys, logical)) = w.hlc {
+                cur.hlc_phys = Some(phys);
+                cur.hlc_logical = Some(i32::try_from(logical).unwrap_or(i32::MAX));
+            }
+            if let Some(writer) = w.writer_id.filter(|s| !s.is_empty()) {
+                cur.writer_id = Some(writer.to_string());
+            }
+            if let Some(session) = w.session_id.filter(|s| !s.is_empty()) {
+                cur.session_id = Some(session.to_string());
+            }
+            return ("confirmed", idx);
+        }
+        let cur_hlc = (
+            cur.hlc_phys.unwrap_or(0),
+            i64::from(cur.hlc_logical.unwrap_or(0)),
+        );
+        let cand_hlc = w.hlc.unwrap_or((0, 0));
+        if cand_hlc < cur_hlc || (cand_hlc == cur_hlc && t < cur.asserted_at) {
+            return ("stale", idx);
+        }
+        cur.status = "superseded".into();
+        cur.superseded_at = Some(t);
+        cur.superseded_by_value = Some(value.to_string());
+        let supersedes = cur.value.clone();
+        let rec = self.new_record(
+            entity,
+            attribute,
+            value,
+            embedding,
+            outcome,
+            w,
+            vt,
+            Some(supersedes),
+        );
+        self.records.push(rec);
+        ("superseded", self.records.len() - 1)
+    }
+
+    /// `LessonStore._insert`'s record.
+    #[allow(clippy::too_many_arguments)]
+    fn new_record(
+        &self,
+        entity: &str,
+        attribute: &str,
+        value: &str,
+        embedding: Option<Arc<[f32]>>,
+        outcome: &str,
+        w: &LessonWrite<'_>,
+        valid_time: f64,
+        supersedes: Option<String>,
+    ) -> LessonRecord {
+        let mut provenance = Vec::new();
+        union(&mut provenance, w.provenance);
+        let mut support = Vec::new();
+        union(&mut support, w.support);
+        LessonRecord {
+            key: slot_key(entity, attribute),
+            entity: entity.to_string(),
+            attribute: attribute.to_string(),
+            value: value.to_string(),
+            about: w.about.map(str::to_string),
+            polarity: w.polarity.to_string(),
+            outcome: outcome.to_string(),
+            confidence: w.confidence,
+            status: "current".into(),
+            origin: w.origin.map(str::to_string),
+            support,
+            provenance,
+            asserted_at: w.now,
+            last_confirmed: w.now,
+            supersedes_value: supersedes,
+            superseded_by_value: None,
+            superseded_at: None,
+            unit: embedding.as_deref().map(|e| Arc::from(unit_f32(e))),
+            embedding,
+            tx_time: Some(w.now),
+            valid_time: Some(valid_time),
+            hlc_phys: w.hlc.map(|h| h.0),
+            hlc_logical: w.hlc.map(|h| i32::try_from(h.1).unwrap_or(i32::MAX)),
+            writer_id: w.writer_id.map(str::to_string),
+            session_id: w.session_id.map(str::to_string),
+            version: 1,
+        }
+    }
+
     /// `current_records`: every current lesson, in record order.
     pub fn current_records(&self) -> impl Iterator<Item = &LessonRecord> {
         self.records.iter().filter(|r| r.status == "current")
@@ -466,16 +677,32 @@ async fn write_slot_rows(
     Ok(())
 }
 
+/// `norm_name(name)` as `find_entity` sends it. psycopg refuses a
+/// parameter holding a reply's lone surrogate (a lesson whose `about` skipped
+/// the graph link as junk or a compound still reaches this lookup):
+/// `str(exc)` of its `UnicodeEncodeError`, the position counted within the
+/// normalized name, fails the sync.
+fn lookup_name(name: &str) -> Result<String> {
+    let n = crate::storage::graph::norm_name(name);
+    if crate::mutants::active("mcp-dream-stage-lessons-about-unchecked") {
+        return Ok(n);
+    }
+    match crate::dream::extractor::encode_error(&[&n]) {
+        Some(e) => Err(anyhow::anyhow!(e)),
+        None => Ok(n),
+    }
+}
+
 /// `storage.find_entity(norm_name(name))["id"]`, or none.
 async fn entity_id(db: &Client, name: &str) -> Result<Option<i64>> {
-    let n = crate::storage::graph::norm_name(name);
+    let n = lookup_name(name)?;
     let found = crate::storage::graph::find_entity(db, &n).await?;
     Ok(found.get("id").and_then(Value::as_i64))
 }
 
 /// `entity_id` on a client inside a transaction the caller holds.
 async fn entity_id_in(c: &Client, name: &str) -> Result<Option<i64>> {
-    let n = crate::storage::graph::norm_name(name);
+    let n = lookup_name(name)?;
     let found = crate::storage::graph::find_entity_body(c, &n).await?;
     Ok(found.get("id").and_then(Value::as_i64))
 }
@@ -513,6 +740,18 @@ mod tests {
             key: slot_key(task, aspect),
             unit: None,
         }
+    }
+
+    #[test]
+    fn lookups_refuse_a_lone_surrogate_at_its_normalized_position() {
+        let lone = char::from_u32(crate::mcp::py_loads::LONE_SURROGATE_BASE + 0x3d).unwrap();
+        let e = lookup_name(&format!("redis  +  kafka{lone}")).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "'utf-8' codec can't encode character '\\ud83d' in position 13: \
+             surrogates not allowed"
+        );
+        assert_eq!(lookup_name(" Redis Cache ").unwrap(), "redis-cache");
     }
 
     #[test]
@@ -573,5 +812,89 @@ mod tests {
         assert_eq!(s.dirty_slots.len(), 2);
         // Restored slots are live now: nothing more to restore.
         assert!(s.restore("deploy", None).is_empty());
+    }
+
+    /// Expected values: Python's `LessonStore.write_fact` on the same calls.
+    #[test]
+    fn write_fact_inserts_supersedes_and_refuses_an_older_stamp() {
+        let mut s = LessonStore::default();
+        let w = |now: f64, hlc: (i64, i64), prov: &'static [String]| LessonWrite {
+            about: None,
+            outcome: "success",
+            polarity: "+",
+            confidence: 0.6,
+            origin: Some("agent"),
+            provenance: prov,
+            support: &[],
+            now,
+            hlc: Some(hlc),
+            valid_time: None,
+            writer_id: None,
+            session_id: None,
+        };
+        let first = LessonWrite {
+            about: Some("pipe"),
+            ..w(10.0, (5, 0), &[])
+        };
+        assert_eq!(
+            s.write_fact("Deploy", "Approach", "Use the pipeline.", None, &first)
+                .0,
+            "inserted"
+        );
+        let undo = s.slot_undo("deploy", "approach");
+        let second = LessonWrite {
+            about: Some(""),
+            outcome: "weird",
+            polarity: "-",
+            confidence: 0.9,
+            ..w(20.0, (6, 0), &[])
+        };
+        let (action, i) = s.write_fact("deploy", "approach", "use the  pipeline", None, &second);
+        assert_eq!(action, "superseded");
+        let r = &s.records[i];
+        assert_eq!(
+            (r.confidence, r.outcome.as_str(), r.polarity.as_str()),
+            (0.9, "success", "-")
+        );
+        assert_eq!(
+            (r.tx_time, r.valid_time, r.about.as_deref()),
+            (Some(20.0), Some(20.0), Some(""))
+        );
+        assert_eq!(s.records[0].status, "superseded");
+        assert_eq!(
+            s.records[0].superseded_by_value.as_deref(),
+            Some("use the  pipeline")
+        );
+        assert_eq!(
+            s.write_fact(
+                "deploy",
+                "approach",
+                "new lesson",
+                None,
+                &w(30.0, (4, 0), &[])
+            )
+            .0,
+            "stale"
+        );
+        // The undo puts back the slot as it was before the supersede.
+        s.undo(undo);
+        assert_eq!(s.records.len(), 1);
+        assert_eq!(s.records[0].status, "current");
+        let confirm = LessonWrite {
+            about: Some("pipeline"),
+            confidence: 0.3,
+            ..w(40.0, (7, 1), &[])
+        };
+        let (action, i) = s.write_fact("DEPLOY", "approach", "Use the pipeline.", None, &confirm);
+        assert_eq!(action, "confirmed");
+        let r = &s.records[i];
+        assert_eq!(
+            (r.confidence, r.last_confirmed, r.asserted_at),
+            (0.6, 40.0, 10.0)
+        );
+        assert_eq!(
+            (r.about.as_deref(), r.hlc_logical),
+            (Some("pipeline"), Some(1))
+        );
     }
 }

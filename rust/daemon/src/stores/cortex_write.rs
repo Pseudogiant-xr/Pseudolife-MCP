@@ -1,13 +1,12 @@
 //! The cortex write primitives (`memory/cortex.py` `CortexStore.write_fact`
-//! and its helpers), for the branches `memory_fact_set` can reach: support in
-//! {user, action, agent}, no stance, no provenance, never `force_contend`,
-//! never `dream`. Every mutation marks its slot in `dirty_slots`; every audit
-//! row marks `meta_dirty` (`_log`). Persistence is `cortex_sync.rs`.
+//! and its helpers). Every mutation marks its slot in `dirty_slots`; every
+//! audit row marks `meta_dirty` (`_log`). Persistence is `cortex_sync.rs`.
 //!
-//! Not ported because no MCP call reaches them: the quarantine park
-//! (`force_contend`), the dream guards and tier marks (`dream=True`), and the
-//! assistant-origin park (`support="assistant"`). `fact_set.rs` never passes
-//! those inputs.
+//! `memory_fact_set` passes support in {user, action, agent}, no stance, no
+//! provenance, never `force_contend`, never `dream`. The other inputs (the
+//! quarantine park, the dream guards and tier marks, the assistant-origin
+//! park, stance and provenance) are ported for the dream's claim writes,
+//! which reach them through `fact_set::cortex_write`.
 
 use std::sync::Arc;
 
@@ -54,7 +53,7 @@ pub fn norm_support(s: Option<&str>) -> Option<&'static str> {
 }
 
 /// `_rank` (`cortex.py:265`): the provenance tier rank; unknown is 0.
-fn rank(origin: Option<&str>) -> i32 {
+pub(super) fn rank(origin: Option<&str>) -> i32 {
     match py_casefold(origin.unwrap_or("").trim_matches(py_isspace)).as_str() {
         "user" => 3,
         "action" => 2,
@@ -123,16 +122,65 @@ pub(super) fn add_unique(v: &mut Vec<String>, s: &str) {
     }
 }
 
-/// `_mark_tier(rec, sup, dream=False)`: a direct write at a user or action
-/// tier clears that tier's dream mark. Called before adding `sup`.
-pub(super) fn mark_tier_direct(rec: &mut CortexRecord, sup: &str) {
-    if DIRECT_TIERS.contains(&sup) {
-        let mark = format!("dream:{sup}");
+/// `_mark_tier(rec, sup, dream)` (`cortex.py:227`), called before adding
+/// `sup`: a direct write at a user or action tier clears that tier's dream
+/// mark; a dream write marks a user or action tier the record lacks.
+pub(super) fn mark_tier(rec: &mut CortexRecord, sup: &str, dream: bool) {
+    if !DIRECT_TIERS.contains(&sup) {
+        return;
+    }
+    let mark = format!("dream:{sup}");
+    if !dream {
         rec.provenance.retain(|p| *p != mark);
+    } else if !rec.support.iter().any(|s| s == sup) && !crate::mutants::active("dream-no-tier-mark")
+    {
+        add_unique(&mut rec.provenance, &mark);
     }
 }
 
-/// One `memory_fact_set` write, as `service.cortex_write` hands it to
+/// The `dream:<tier>` mark a new record gets when a dream write is the one
+/// giving it a user or action tier (`cortex.py:706`, `:1029`, `:1323`).
+pub(super) fn mark_new_record(rec: &mut CortexRecord, sup: Option<&str>, dream: bool) {
+    if let Some(sup) = sup
+        && dream
+        && DIRECT_TIERS.contains(&sup)
+        && !crate::mutants::active("dream-no-tier-mark")
+    {
+        add_unique(&mut rec.provenance, &format!("dream:{sup}"));
+    }
+}
+
+/// `direct_backed` (`cortex.py:213`): a user or action tier backs the
+/// record without its dream mark.
+pub fn direct_backed(rec: Option<&CortexRecord>) -> bool {
+    rec.is_some_and(|r| {
+        DIRECT_TIERS.iter().any(|t| {
+            r.support.iter().any(|s| s == t) && !r.provenance.contains(&format!("dream:{t}"))
+        })
+    })
+}
+
+/// `_clean_prov` (`cortex.py:220`): incoming provenance without empty
+/// entries or `dream:*` tokens (only the `dream` flag adds a mark), as a
+/// set (first occurrence kept).
+pub(super) fn clean_prov(provenance: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in provenance {
+        if !p.is_empty() && !p.starts_with("dream:") {
+            add_unique(&mut out, p);
+        }
+    }
+    out
+}
+
+/// `rec.provenance |= _clean_prov(provenance)`.
+pub(super) fn union_prov(rec: &mut CortexRecord, provenance: &[String]) {
+    for p in clean_prov(provenance) {
+        add_unique(&mut rec.provenance, &p);
+    }
+}
+
+/// One fact write, as `service.cortex_write` hands it to
 /// `CortexStore.write_fact`.
 pub struct FactWrite<'a> {
     pub entity: &'a str,
@@ -151,6 +199,14 @@ pub struct FactWrite<'a> {
     pub freshness_class: String,
     pub authority: Resolved,
     pub distortion_tolerance: Resolved,
+    /// The incoming provenance as passed (`_clean_prov` runs at each use).
+    pub provenance: Vec<String>,
+    /// The v29 stance; it follows the latest asserting write.
+    pub stance: Option<String>,
+    /// The consolidation quarantine: park a conflicting or new value.
+    pub force_contend: bool,
+    /// A dream claim write.
+    pub dream: bool,
 }
 
 /// The record a `_log` row is written against: its slot, its value
@@ -316,7 +372,7 @@ impl CortexStore {
             confidence: w.confidence,
             origin_column: None,
             support: w.support.map(|s| vec![s.to_string()]).unwrap_or_default(),
-            provenance: Vec::new(),
+            provenance: clean_prov(&w.provenance),
             asserted_at: w.now,
             last_confirmed: w.now,
             supersedes_value: supersedes,
@@ -329,7 +385,7 @@ impl CortexStore {
             freshness_class: norm_freshness(&w.freshness_class),
             kind: "scalar".into(),
             value_norm: None,
-            stance: None,
+            stance: w.stance.clone(),
             authority: pick(&w.authority, inherit.map(|r| &r.authority)),
             distortion_tolerance: pick(
                 &w.distortion_tolerance,
@@ -345,6 +401,7 @@ impl CortexStore {
             key: (String::new(), String::new()),
             unit: None,
         };
+        mark_new_record(&mut rec, w.support, w.dream);
         rec.refresh_derived();
         rec
     }
@@ -364,16 +421,19 @@ impl CortexStore {
         i
     }
 
-    /// `_confirm` (`cortex.py:621`): the standing record absorbs the write.
-    fn confirm(&mut self, idx: usize, w: &FactWrite<'_>) -> WriteOutcome {
+    /// `_confirm` (`cortex.py:621`): the standing record absorbs the write,
+    /// at tier `sup` (the write's own, or none for a dream echo that would
+    /// raise the retained value's tier).
+    fn confirm(&mut self, idx: usize, w: &FactWrite<'_>, sup: Option<&str>) -> WriteOutcome {
         let conf = self.confirmed_confidence(self.records[idx].confidence, w.confidence);
         let cur = &mut self.records[idx];
-        cur.stance = None;
+        cur.stance = w.stance.clone();
         cur.authority = pick(&w.authority, Some(&cur.authority));
         cur.distortion_tolerance = pick(&w.distortion_tolerance, Some(&cur.distortion_tolerance));
         cur.last_confirmed = w.now;
-        if let Some(sup) = w.support {
-            mark_tier_direct(cur, sup);
+        union_prov(cur, &w.provenance);
+        if let Some(sup) = sup {
+            mark_tier(cur, sup, w.dream);
             add_unique(&mut cur.support, sup);
         }
         cur.confidence = conf;
@@ -455,21 +515,33 @@ impl CortexStore {
         );
     }
 
-    /// `_contend` (`cortex.py:1238`) at a slot with a current record: park
-    /// the write as the slot's one contender (or confirm the matching one).
-    pub(super) fn contend(&mut self, cur: usize, w: &FactWrite<'_>, reason: &str) -> WriteOutcome {
-        let key = self.records[cur].key.clone();
+    /// `_contend` (`cortex.py:1238`): park the write as the slot's one
+    /// contender (or confirm the matching one). `cur` is the current record
+    /// it contends with, or None for a currentless park (quarantine at an
+    /// empty slot, an assistant join of a set), whose key comes from the
+    /// write and whose log rows anchor on the contender itself.
+    pub(super) fn contend(
+        &mut self,
+        cur: Option<usize>,
+        w: &FactWrite<'_>,
+        reason: &str,
+    ) -> WriteOutcome {
+        let key = match cur {
+            Some(c) => self.records[c].key.clone(),
+            None => slot_key(w.entity, w.attribute),
+        };
         if let Some(e) = self.active_contender(&key)
             && norm_value(&self.records[e].value) == norm_value(w.value)
         {
             let conf = self.confirmed_confidence(self.records[e].confidence, w.confidence);
             let ex = &mut self.records[e];
-            ex.stance = None;
+            ex.stance = w.stance.clone();
             ex.authority = pick(&w.authority, Some(&ex.authority));
             ex.distortion_tolerance = pick(&w.distortion_tolerance, Some(&ex.distortion_tolerance));
             ex.last_confirmed = w.now;
+            union_prov(ex, &w.provenance);
             if let Some(sup) = w.support {
-                mark_tier_direct(ex, sup);
+                mark_tier(ex, sup, w.dream);
                 add_unique(&mut ex.support, sup);
             }
             ex.confidence = conf;
@@ -483,7 +555,7 @@ impl CortexStore {
             ex.hlc_phys = Some(w.hlc.0);
             ex.hlc_logical = Some(w.hlc.1 as i32);
             self.log(
-                cur,
+                cur.unwrap_or(e),
                 w.value,
                 w.confidence,
                 w.now,
@@ -504,19 +576,27 @@ impl CortexStore {
             ex.superseded_by_value = Some(w.value.to_string());
             supersedes = Some(ex.value.clone());
         }
-        let rec = self.new_record(w, "contested", supersedes, Some(cur));
+        let rec = self.new_record(w, "contested", supersedes, cur);
         self.records.push(rec);
         let i = self.records.len() - 1;
         self.contested.entry(key).or_default().push(i);
-        self.log(cur, w.value, w.confidence, w.now, "contested", reason, w);
+        self.log(
+            cur.unwrap_or(i),
+            w.value,
+            w.confidence,
+            w.now,
+            "contested",
+            reason,
+            w,
+        );
         WriteOutcome {
             action: "contested",
             record: i,
         }
     }
 
-    /// `write_fact` (`cortex.py:438-619`) for the inputs `memory_fact_set`
-    /// passes. Refuses a slot that holds current set members.
+    /// `write_fact` (`cortex.py:438-619`). Refuses a slot that holds
+    /// current set members.
     pub fn write_fact(&mut self, w: &FactWrite<'_>) -> Result<WriteOutcome, &'static str> {
         let key = slot_key(w.entity, w.attribute);
         if self.members.get(&key).is_some_and(|m| !m.is_empty()) {
@@ -524,6 +604,10 @@ impl CortexStore {
         }
         self.dirty_slots.insert(key.clone());
         let Some(idx) = self.current.get(&key).copied() else {
+            if w.force_contend {
+                // Quarantine: even a new slot's first value parks, currentless.
+                return Ok(self.contend(None, w, "quarantine_low_trust"));
+            }
             let new = self.insert(w, None, None);
             self.settle_matching_contender(&key, new, w);
             return Ok(WriteOutcome {
@@ -532,7 +616,7 @@ impl CortexStore {
             });
         };
         if norm_value(&self.records[idx].value) == norm_value(w.value) {
-            return Ok(self.confirm(idx, w));
+            return Ok(self.confirm(idx, w, w.support));
         }
         if is_compression_echo(w.value, &self.records[idx].value) {
             self.log(
@@ -544,7 +628,32 @@ impl CortexStore {
                 "compression_echo",
                 w,
             );
-            return Ok(self.confirm(idx, w));
+            // A dream echo confirms the retained value but never raises its tier.
+            let echo_sup = if w.dream && rank(w.support) > rank(Some(self.records[idx].origin())) {
+                None
+            } else {
+                w.support
+            };
+            return Ok(self.confirm(idx, w, echo_sup));
+        }
+        if w.force_contend {
+            // Quarantine: park whatever the tier.
+            return Ok(self.contend(Some(idx), w, "quarantine_low_trust"));
+        }
+        if w.dream
+            && self.protect_provenance
+            && direct_backed(Some(&self.records[idx]))
+            && !crate::mutants::active("dream-fact-no-direct-guard")
+        {
+            // A dream claim never replaces a direct user or action value.
+            return Ok(self.contend(Some(idx), w, "direct_write"));
+        }
+        if w.support == Some("assistant")
+            && self.records[idx].origin() != "assistant"
+            && !crate::mutants::active("cortex-fact-no-assistant-park")
+        {
+            // Not gated on protect_provenance (`cortex.py:578-591`).
+            return Ok(self.contend(Some(idx), w, "assistant_origin"));
         }
         let cur_origin = self.records[idx].origin();
         let tier_ok = !self.protect_provenance || rank(w.support) >= rank(Some(cur_origin));
@@ -586,7 +695,7 @@ impl CortexStore {
                 record: idx,
             });
         }
-        Ok(self.contend(idx, w, reason))
+        Ok(self.contend(Some(idx), w, reason))
     }
 }
 
@@ -715,6 +824,10 @@ mod tests {
             freshness_class: "evergreen".into(),
             authority: Resolved::Inherit,
             distortion_tolerance: Resolved::Inherit,
+            provenance: Vec::new(),
+            stance: None,
+            force_contend: false,
+            dream: false,
         }
     }
 
@@ -988,7 +1101,9 @@ mod tests {
     /// final record field, slot index and audit row must match. Ops `add`
     /// and `remove` replay `add_member` / `remove_member`
     /// (`cortex_members.rs`); op `resolve` replays `resolve`
-    /// (`cortex_resolve.rs`), whose None answer is a null action.
+    /// (`cortex_resolve.rs`), whose None answer is a null action. The
+    /// dream and quarantine inputs are optional keys, absent meaning the
+    /// neutral value the MCP tools pass.
     const GOLDEN: &str = include_str!("../../harness/goldens/w2e-cortex-write.json");
 
     fn label(v: &Value) -> Resolved {
@@ -1031,6 +1146,12 @@ mod tests {
             .into()
     }
 
+    fn strings(v: &Value) -> Vec<String> {
+        v.as_array()
+            .map(|a| a.iter().map(|s| s.as_str().unwrap().to_string()).collect())
+            .unwrap_or_default()
+    }
+
     /// One golden write: `(action, record, members_count)`.
     fn replay(
         s: &mut CortexStore,
@@ -1042,11 +1163,21 @@ mod tests {
         let now = x["now"].as_f64().unwrap();
         let count = |s: &CortexStore| Some(s.members(&e, &a).len());
         let op = x["op"].as_str().unwrap_or("fact");
+        let dream = x["dream"].as_bool().unwrap_or(false);
         if op == "resolve" {
             let hlc = x["hlc"]
                 .as_array()
                 .map(|h| (h[0].as_i64().unwrap(), h[1].as_i64().unwrap()));
-            let got = s.resolve(&e, &a, x["accept"].as_bool().unwrap(), now, "user", hlc);
+            let got = s.resolve(
+                &e,
+                &a,
+                x["accept"].as_bool().unwrap(),
+                now,
+                x["support"].as_str().unwrap_or("user"),
+                hlc,
+                dream,
+                x["expect_value"].as_str(),
+            );
             return (got.map(|g| g.action), got.map(|g| g.record), None);
         }
         let v = text("value");
@@ -1062,12 +1193,15 @@ mod tests {
                     hlc: (x["hlc"][0].as_i64().unwrap(), x["hlc"][1].as_i64().unwrap()),
                     writer_id: x["writer_id"].as_str().map(str::to_string),
                     session_id: x["session_id"].as_str().map(str::to_string),
+                    support: x["support"].as_str().map(str::to_string),
+                    provenance: strings(&x["provenance"]),
+                    dream,
                 };
                 let got = s.add_member(&mw);
                 (got.action, got.record, count(s))
             }
             "remove" => {
-                let got = s.remove_member(&e, &a, &v, now);
+                let got = s.remove_member(&e, &a, &v, now, x["support"].as_str(), dream);
                 (got.action, got.record, count(s))
             }
             _ => {
@@ -1091,12 +1225,63 @@ mod tests {
                     freshness_class: text("freshness_class"),
                     authority: label(&x["authority"]),
                     distortion_tolerance: label(&x["distortion_tolerance"]),
+                    provenance: strings(&x["provenance"]),
+                    stance: x["stance"].as_str().map(str::to_string),
+                    force_contend: x["force_contend"].as_bool().unwrap_or(false),
+                    dream,
                 };
                 let got = s.write_fact(&fw).unwrap();
                 (got.action, Some(got.record), None)
             }
         };
         (Some(action), record, count)
+    }
+
+    /// The golden reaches every dream, quarantine, assistant and
+    /// `expect_value` branch (each reason, refusal and mark at least once).
+    #[test]
+    fn the_golden_covers_the_dream_inputs() {
+        let golden: Value = serde_json::from_str(GOLDEN).unwrap();
+        let mut reasons = std::collections::BTreeSet::new();
+        let mut actions = std::collections::BTreeSet::new();
+        let mut marks = std::collections::BTreeSet::new();
+        let mut stances = 0;
+        for seq in golden.as_object().unwrap().values() {
+            for row in seq["log"].as_array().unwrap() {
+                reasons.insert(row["reason"].as_str().unwrap().to_string());
+            }
+            for r in seq["results"].as_array().unwrap() {
+                if let Some(a) = r["action"].as_str() {
+                    actions.insert(a.to_string());
+                }
+            }
+            for r in seq["records"].as_array().unwrap() {
+                for p in r["provenance"].as_array().unwrap() {
+                    if let Some(m) = p.as_str().filter(|p| p.starts_with("dream:")) {
+                        marks.insert(m.to_string());
+                    }
+                }
+                stances += usize::from(r["stance"].is_string());
+            }
+        }
+        for reason in [
+            "quarantine_low_trust",
+            "direct_write",
+            "assistant_origin",
+            "member_add_blocked_assistant",
+            "member_add_blocked_tier",
+            "member_add_blocked_direct",
+        ] {
+            assert!(reasons.contains(reason), "{reason}");
+        }
+        for action in ["member_remove_refused", "refused_changed", "refused_direct"] {
+            assert!(actions.contains(action), "{action}");
+        }
+        assert_eq!(
+            marks.into_iter().collect::<Vec<_>>(),
+            ["dream:action", "dream:user"]
+        );
+        assert!(stances >= 3);
     }
 
     #[test]
