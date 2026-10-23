@@ -987,7 +987,7 @@ in `config.rs`; registered in `mcp::dispatch::registry`. Python:
 | FG13 | The lesson store holds every `lessons` column it rewrites (the vector, the HLC stamps, writer, session, version) and is shared like the cortex: readers take snapshots, writers mutate under the service lock. | `sync.py:474-505` |
 | FG14 | `sync_lesson_slots`: the dirty slots' records in record order, rewritten in one transaction (DELETE the slots, one INSERT each: support and provenance sorted, an empty origin as NULL, `version` at least 1), each row's subject and `about` linked to their entities (`find_entity(norm_name(...))`, looked up before the transaction); the slots are cleared after. A failure counts a persistence error and is an internal error. | `sync.py:211-222, 409-450`; `postgres.py:1846-1875` |
 | FG15 | The cortex, world and lesson saves are the existing per-slot paths, so a forget's dirty state persists exactly as Python's does: at its own save (fact, world, lesson scopes), or the next one (the cascade's cortex retirements). | `service.py:3746-3785` |
-| FG16 | Not reachable: the restore path (`memory_graph_review(action="restore_slot")`, W3-H) and file mode. | `divergences.md` |
+| FG16 | Not reachable: file mode. The restore path (`memory_graph_review(action="restore_slot")`) is served since task O1c (RV15-RV19). | `divergences.md` |
 
 `harness/w2e.py live --only forget-memory forget-slots forget-unbounded` compares every
 answer and the full bank after each call, on templates whose entries,
@@ -1169,6 +1169,134 @@ multiset in their slots (the hash-order row in "Graph and review"). The
 `mcp-graph-no-relation-filter`, `mcp-graph-tag-no-ambiguous`,
 `mcp-graph-facts-no-alias` and `mcp-graph-no-labels` mutants must be
 caught.
+
+### memory_recall over MCP (2026-10-19)
+
+`recall.rs` (the walk, the service steps, the caps and projection) and
+`recall_mentions.rs` (the mention matcher, over the Unicode 14 tables in
+`recall_unicode14.rs`), on `search_route::run` for each search and
+`graph_read_tools::graph_neighborhood` for each graph read; the
+`memory.recall` settings in `config.rs`; registered in
+`mcp::dispatch::registry`. Python: `mcp_server.py` caps and projection
+(2729-2869) and `memory_recall` (2873-2951); `service.py`
+`_recall_vocab` (9085-9096), `_graph_degrees` (9098-9107), `recall`
+(9109-9163), `_pin_recalled_constraints` (9166-9187),
+`_annotate_recalled_facts` (9189-9294), `_annotate_trace_invalidations`
+(4300-4328); `memory/recall.py` (20-418); `utils/config.py` `RecallConfig`
+(969-1029). This is the graph expansion PARITY.md deferred on 2026-10-12;
+the maintainer's 2026-10-19 decision returned it to scope.
+
+| # | Exact item | Source |
+|---|---|---|
+| RC1 | Bound arguments: `memory_recall(query, hops=3, top_k=5, verbose=False)` (`top_k` at least 1). `hops` clamps to 1..5 and `top_k` to at least 1, any integer the binder admits. | `mcp_server.py:2873-2899`; `service.py:9121-9125` |
+| RC2 | The `memory.recall` settings: `driver` ("mechanical"), `default_hops` (3), `default_top_k` (5), `max_entities` (50), `hub_gate` (true), `hub_percentile` (95.0), `hub_floor` (8), `expand_budget` (0), `max_searches_per_hop` (6), `max_total_searches` (31), `time_budget_seconds` (20.0), `skip_part_of_expansion` (false); `PSEUDOLIFE_RECALL_DRIVER` overrides the driver. | `utils/config.py:969-1029`; `service.py:9126` |
+| RC3 | A query blank after `strip()` answers `{query: "", seeds: [], entities: [], edges: [], paths: [], texts: [], iterations: 0, hops, low_confidence: true}` (plus the bookkeeping RC15 drops) with no search. | `service.py:9127-9132` |
+| RC4 | The vocabulary: entity display names by id, then each entity's aliases (grouped by first alias, `ORDER BY alias`), empty names dropped, first occurrence kept. With the hub gate, the asserted undirected degree by display name, and the threshold `max(floor, sorted(degrees)[min(len - 1, int(len × percentile / 100))])` (the floor alone for no edges). | `service.py:9085-9107,9139-9141`; `recall.py:200-206` |
+| RC5 | The seed search: `search(query, top_k)` as `memory_search`'s service body runs it (access accrual and the retrieval event included); its non-empty hit texts open `texts`, first occurrence kept, and their count is `seed_text_count`. | `recall.py:271-278` |
+| RC6 | Seeds (the mechanical driver): the vocabulary names the query mentions, else those the joined seed hits mention; none sets `low_confidence` and ends the walk with the seed texts. Seeds are deduplicated in order and cut to `max_entities`, each at hop 0. | `recall.py:144-161,279-290` |
+| RC7 | Mentions (`_mentions`): word-bounded and case-insensitive under Python 3.11's `re` (Unicode 14 `\w`, `\s` and `IGNORECASE` folding), the name's separator runs (`[\s_\-/]+`) matching any such run, a dot after the name bounding only when no word character follows, a dot before never, an apostrophe inside a word bounding only a possessive `s`, and a combining mark just outside a match counting as a word character. | `recall.py:20-103` |
+| RC8 | Each hop while the frontier is non-empty, fewer than `hops` hops have run and fewer than `max_entities` names are seen: the frontier selection (seeds always; other names below the hub threshold, by ascending degree then name, cut to a non-zero `expand_budget` as Python slices; unchanged with the gate off). | `recall.py:174-197,291-306` |
+| RC9 | Each selected name: its depth-1 neighborhood (`memory_graph`'s body with facts); a miss is skipped. Each node's display joins `entities` at this hop the first time it is seen, its facts kept from the first sight; each edge joins once per `(src, relation, dst)` as `{src, relation, dst, derived}` with its hop; paths join once. The hop stops once `max_entities` names are seen. | `recall.py:307-349`; `recall.py:164-171` |
+| RC10 | Re-queries: the hop's new names (less those reached only by `part-of` under `skip_part_of_expansion`), cut to `max_searches_per_hop` when larger by mentions in the seed hits (descending), degree (ascending) and name; each `search(f"{query} {name}", top_k)` adds its new texts. The total-search ceiling (seed search included) and the time budget, checked before each search and each expansion, stop the walk with `truncated`. | `recall.py:350-381,209-223` |
+| RC11 | On each seed, `constraint` facts move first, marked `pinned` (under `memory.cortex.pin_constraints`, default on). | `service.py:9156-9161,9166-9187` |
+| RC12 | With traces enabled, each served fact matched to its slot on (the record entity resolved through the alias table, attribute, value), the latest confirmation winning a tie, carries `re_verify` and `re_verify_reason` ("derived from N source memory/memories corrected since this fact was last confirmed") when a `source_superseded` invalidation of that slot is newer than its last confirmation (`last_confirmed or asserted_at`). | `service.py:9189-9294,4300-4328` |
+| RC13 | The service answer: `{query, seeds, entities: [{entity, facts}], edges, paths, texts, iterations, hops, low_confidence, entity_hop, edge_hop, seed_text_count}` plus `truncated` and `searches_issued` only when a ceiling cut the walk. | `recall.py:385-418` |
+| RC14 | The caps: entities to 10 and edges to 15, each by the per-hop quota (`cap // H` per hop, the remainder to the latest hops, unused slots granted latest-first, earliest items within a hop), edges between surviving entities first; each entity's facts to 5; texts to 6 with up to `min(3, top_k)` from the seed search and a short hop pool backfilled from the seed texts. | `mcp_server.py:2754-2833,2911-2928` |
+| RC15 | `entity_hop`, `edge_hop` and `seed_text_count` are dropped; `truncated` and `searches_issued` stay. | `mcp_server.py:2929-2938` |
+| RC16 | Without `verbose`: facts as `{attribute, value}` plus `re_verify`/`re_verify_reason` when set and `authority`, `distortion_tolerance`, `pinned` when truthy; edges as `{src, relation, dst}`; texts cut to 200 characters plus `…`. | `mcp_server.py:2836-2869,2939-2950` |
+
+`recall_mentions.rs` is checked against Python's `_mentions` over a
+generated corpus (`harness/goldens/recall-mentions.json`, written by
+`harness/gen_recall_mentions_goldens.py`), and its tables against their
+generator (`harness/gen_recall_unicode.py`). `harness/w2e.py live --only
+recall recall-wide recall-caps recall-ceiling recall-ungated` compares every answer and the full bank
+(retrieval events and access counts included) after each call, on templates
+the Python daemon's own tools wrote (memories, facts with a constraint, a
+graph with a part-of chain, an alias, a fact whose source memory a
+correction retired after it was traced): blank queries; the walk compact and
+verbose; hop and width clamps; a pinned seed constraint and an alias seed;
+`re_verify` verbose and compact; seeds from the hits and none; a walk after
+a write; under tight settings the hub gate, the expansion budget, the per-hop
+ceiling, part-of arrivals and the entity ceiling; the total-search ceiling alone (`truncated`, `searches_issued`);
+with the gate, the ceilings, pinning and trace annotation off; and a hub of
+twelve leaves with one deeper node, where the entity cap keeps the deepest
+hop. The
+`mcp-recall-seed-any`, `mcp-recall-no-hub-gate`, `mcp-recall-no-requery`,
+`mcp-recall-no-pin`, `mcp-recall-no-annotate` and `mcp-recall-flat-caps`
+mutants must be caught.
+
+### memory_graph_review over MCP: list and the decision actions (2026-10-19)
+
+`graph_review.rs` (the analyzers of `memory/graph_review.py`),
+`graph_review_tools.rs` (the tool, its dispatch, the list service and its
+storage readers) and `graph_review_actions.rs` (the decision actions, their
+storage writes and the automatic-decision index), on the ported graph store
+(`storage/graph.rs`: `merge_entity`, `delete_entity`, `upsert_edge`) and
+`graph_write_tools.rs` (`relate`, entity resolution); the two
+`memory.deep_dream` switches in `config.rs`; registered in
+`mcp::dispatch::registry`. Python: `mcp_server.py` `memory_graph_review`
+(2290-2431, `_noted` and `_REVIEW_NOTES` 683-751); `service.py`
+`graph_review` (7812-7895), `graph_dismiss_duplicate` (7897-7942),
+`_fold_direction` (8787-8799), `graph_propose_links` (8809-8854),
+`graph_accept_proposal` (8867-8922), `graph_reject_proposal` (8930-8946),
+`graph_accept_entity_merge` (8965-8999), `graph_accept_entity_junk` (9006-9032),
+`graph_reject_entity_proposal` (9039-9083); `memory/graph_review.py`;
+`memory/review_decisions.py` (`recent_decisions` 53-68,
+`confirm_human_pair` 598-611, `confirm_human_proposal` 614-626);
+`relation_quality.py`; `storage/postgres.py` (the proposal, decision and
+dismissal statements). No action calls a model: the judges, the three-judge
+tiebreak and the filers run from the background sweep and are task O2.
+
+| # | Exact item | Source |
+|---|---|---|
+| RV1 | Bound arguments: `memory_graph_review(action="list", proposal_id=None, proposal_ids=None, proposals=None, scope=None, src=None, dst=None, relation=None, store=None)`. Every action runs under the service lock (the writer lock); the mutating ones run detached from the request. | `mcp_server.py:2309-2356` |
+| RV2 | `list`: under the lock, the graph, the source map, the pending link and entity proposals, the proposal states, the dismissed pairs, the lesson-linked entity ids and the current-fact counts. A pending merge row is presented in the direction an accept will apply: swapped when its stored from-side carries strictly more evidence (degree plus current facts, over the whole graph). | `service.py:7812-7845,8787-8799` |
+| RV3 | A truthy `scope` other than "all" keeps the entities with that source and the edges between them; queued proposals always list. | `service.py:7846-7849` |
+| RV4 | The findings, in order: `duplicate` (token-Jaccard ≥ 0.6 over tokens longer than two characters or holding a digit, lesson-only nodes left out, dismissed pairs and name-shape vetoes skipped, a file and its own stem offered as `relate`/`implements`, score to 3 places, sorted by score descending, stably), `test_artifact`, `dubious_edge` (agent-origin edges at confidence ≤ 0.6, a 0.0 counting as 1.0), `orphan` (degree ≤ 1), `unattributed`, `proposed_link` (tagged AMBIGUOUS), `merge_candidate` (grouped on shared nodes, with the judge, second and third votes parsed from their columns and note tails), `junk_candidate`. | `graph_review.py:160-554` |
+| RV5 | Each finding carries `automation {state, reason}`: queued kinds `pending`; a duplicate `pending`/`terminal` from its proposal's status, else `gated` when `memory.deep_dream.judges_enabled` or `analyzer_file_duplicates` is off, else `unfiled`; anything else `manual`. The answer adds the state counts, `recent_merges` (20), `merge_decision_stats` and the 20 most recent automatic decisions (their non-sensitive fields). | `service.py:7850-7895`; `review_decisions.py:53-68` |
+| RV6 | `propose`: an empty or missing list answers `proposals_required`. Each proposal: names as `str()` (so `None` is "None"), an unregistered relation (or `prefers`/`avoids`) as `related-to`; skipped on an empty side, equal normalized names or a hard type violation; both entities resolved or minted first; confidence 0.70 (0.45 for `related-to`, ×0.25 on a violation); inserted with source "deep-dream", a conflict skipped. `{proposed, skipped}`. | `service.py:8809-8854`; `relation_quality.py:86-108` |
+| RV7 | `relate`: `src`, `relation` and `dst` required (`src_relation_dst_required`); `memory_graph_relate`'s body with origin "agent" (its refusals pass through), then the pair dismissed as `dismiss_pair` does: the relate answer plus `pair_dismissed`. | `mcp_server.py:2363-2376` |
+| RV8 | `dismiss_pair`: `src` and `dst` required (`src_dst_required`); normalized names, empty or equal answering `bad_pair`; each mapped to a stored canonical by canonical or display (not aliases); in one transaction the automatic-decision index rewritten (always, created on first use) and the sorted pair stored once. `{dismissed, new, a, b}`. | `service.py:7897-7942`; `review_decisions.py:598-611` |
+| RV9 | The id actions take `proposal_ids` first (a list or a JSON list in a string; a non-empty one answers `{action, settled, results}`, `settled` counting truthy `accepted`/`rejected`), else `proposal_id` (`proposal_id_required`), each with `decided_by` "agent"; `note` is added for `bad_pair`, `bad_store`, `not_pending`, `stale_review`, `nothing_retired` and `slot_live`. | `mcp_server.py:2290-2306,2400-2431,683-751` |
+| RV10 | `accept_link`: a pending link proposal (else `not_pending`); the edge upserted at `max(confidence, 0.7)` with origin "action", then (a second commit) the proposal marked accepted under `FOR UPDATE` and the pending guard, an analyzer row also dismissing its pair. | `service.py:8867-8922`; `storage/postgres.py:3603-3630` |
+| RV11 | `reject_link`: the automatic decision on it retired, then the proposal marked rejected; `{rejected, id}` (a stale id: false, no reason). | `service.py:8930-8946`; `review_decisions.py:614-626` |
+| RV12 | `accept_merge`: a pending merge proposal (else `not_pending`), folded in the RV2 direction: the merge audit (with the votes), then `merge_entity`, then the status, three commits, the audit written even when the fold finds its ends gone. `{accepted, from, into}`. | `service.py:8965-8999` |
+| RV13 | `accept_junk`: a pending junk proposal; the audit (`junk: <reason>`), then `delete_entity`, then the status. `{accepted, entity}`. | `service.py:9006-9032` |
+| RV14 | `reject_entity`: the automatic decision retired first, then in one transaction the status, the audit and the dismissal (a merge's pair as stored; a junk node as `junk:<canonical>` twice). `{rejected, id}`; a stale id answers `not_pending`. | `service.py:9039-9083` |
+| RV15 | `dismiss_slot_pair`: `store`, `src` and `dst` required, each key `entity|attribute` with exactly one bare `|` (`%7C` a literal pipe), else `store_src_dst_required` with its detail; an unknown store `bad_store`; keys normalized with the cortex `_norm_key`, a blank or identical slot `bad_pair`; in one transaction `<store>:<key>` pairs dismissed and `curation_auto_dismissals_v1` rewritten (always, `{}` included). `{dismissed, new, store, a_key, b_key}`. | `mcp_server.py:2376-2385`; `service.py:477-483,7944-7967`; `curation_safety.py:531-545` |
+| RV16 | `restore_slot`: `store` `lesson` or `world` and `src` required (`store_src_required`); a `|` key restores that slot, a bare name every retired aspect of it; `decided_by` "agent". | `mcp_server.py:2386-2399` |
+| RV17 | A slot a curated duplicate retired (its retire row carrying `_curation_duplicate`) restores through `restore_curated_duplicate`: the target and evidence checks (`curation_restore_requires_attribute`, `curation_target_mismatch`, `curation_evidence_changed`), the loser staged on a copy (rebuilt from its evidence when compaction purged it), then one transaction re-validating under `FOR UPDATE`, rewriting the slots with entity links and adding the restore audit; the copy published after commit. A failed commit reloads the store and classifies it: committed answers `source: "reconciled"`, rolled back raises `curation restore rolled back: …` (`internal_error`). | `curation_safety.py:1140-1231`; `service.py:4898-4943` |
+| RV18 | Otherwise the resident store restores the newest retired record of each slot without a current one (`superseded_at` cleared), each with a `store_decisions` restore row and, for lessons, its graph link, then the store is saved; slots whose retired rows compaction purged come back from their `retired_slots` audit snapshots, world facts through `world_write` (an unsafe source URL skipped, `source_doc_id` kept) with a restore row `from audit snapshot`. | `service.py:5231-5266,5390-5440,5476-5604`; `memory/lessons.py:283-314` |
+| RV19 | The answer: `{restored, source: retired_record|audit_snapshot|mixed|reconciled, task+aspect or entity+attribute, entries}`, or `{restored: 0, label, reason: slot_live|nothing_retired}` with its note. | `service.py:5522-5537` |
+
+`harness/w2e.py live --only review-list review-list-gated
+review-list-no-analyzer review-actions` compares every answer and the full
+bank after each call, on a template the Python daemon's own tools wrote
+(the graph, a hand dismissal, an outcome's lesson nodes, proposed links
+through `propose`) plus what only the dream and its judges write, as SQL
+seeds: source attribution, merge and junk proposals with first, second and
+third votes, a decided merge, earlier audit rows, an automatic decision in
+the index. `review-list` reaches every finding type and automation state
+(pending, terminal, unfiled, manual, and a relate-form duplicate), scopes,
+and a list after writes and a proposal filed behind the daemons' backs; the
+two `-gated` scenarios turn each switch off. `review-actions` runs every
+action, the batch form (a JSON-string list, duplicates and stale ids) and
+each refusal, with active automatic decisions in the index and its row
+deleted, an analyzer proposal whose settlement dismisses its pair, and a
+filed relate proposal decided. The `mcp-review-dup-threshold`, `-no-merge-veto`, `-no-fold-swap`,
+`-terminal-as-pending`, `-accept-no-fold`, `-accept-no-floor`,
+`-dismiss-aliases`, `-reject-no-dismiss`, `-propose-keep-violations` and
+`-pair-index-noop`, `-analyzer-no-dismiss` and `-relate-state-miss`
+mutants must be caught. `review-slots` seeds lessons and world facts (the
+lessons as SQL, since only the dream writes them; world facts through
+`memory_world_set` and `memory_forget`; curated retire rows with
+fingerprints computed as Python does, some with vectors) and runs both slot
+actions through every branch: the refusals, both stores, curated restores
+(a rebuilt purged loser, evidence edited behind the daemons' backs), legacy
+restores, the world audit-snapshot fallback; its `mcp-review-slot-meta-noop`,
+`-restore-oldest`, `-restore-over-live` and `-no-decision` mutants must be
+caught. The lesson-fallback prediction and the reconciliation classifier
+are unit-tested against Python's own functions.
 
 ### Board tools over MCP (2026-10-16)
 

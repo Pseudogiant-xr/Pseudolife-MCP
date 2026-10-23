@@ -1,11 +1,14 @@
 {
   "format": 1,
-  "source_sha256": "fefdfa22c8e9b898e9b8de54b8277daa89819c20803d571a57eac5a87e4ada3a",
+  "source_sha256": "8904af3b9a2b65774535a6edfebbfa34c229c1ab9b5c5b9e4d2bce73b13bfbf9",
   "schema_version": 56,
   "embedding_dimension": 1024,
   "embedding_probe": "SELECT atttypmod FROM pg_attribute WHERE attrelid = to_regclass('public.entries') AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",
   "embedding_refusal": "Refusing to start: entries.embedding is vector({live_dim}) but this build's schema expects vector(1024). ensure_schema is additive-only and will NOT alter vector dimensions in place -- that would either half-migrate four tables at startup or write 1024-d vectors into a {live_dim}-d column, corrupting the bank. Run the human-gated migration first: `python ops/migrate_embeddings.py` (backs up, requires the daemon stopped, re-embeds every row through the real embedder, and moves all four embedding columns from vector({live_dim}) to vector(1024)). Never run the daemon against a bank you have not migrated.",
   "steps": [
+    {
+      "op": "version_guard"
+    },
     {
       "op": "embedding_guard"
     },

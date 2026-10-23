@@ -228,6 +228,54 @@ def test_native_version_bump_preserves_dependencies_with_same_old_version(releas
     assert select_release(root, base, head)["oracle_head"] == head
 
 
+def daemon_crate(root, version, lock_daemon=None, extra=""):
+    write(root, "rust/daemon/Cargo.toml",
+          '[package]\nname = "pseudolife-daemon"\nversion = "' + version + '"\n' + extra)
+    write(root, "rust/Cargo.lock",
+          '[[package]]\nname = "pseudolife-daemon"\nversion = "' + (lock_daemon or version) + '"\n\n'
+          '[[package]]\nname = "pseudolife-stdio"\nversion = "' + version + '"\n')
+
+
+def test_a_cut_that_moves_the_daemon_crate_is_still_a_release(release):
+    """The daemon crate carries the release version (its /health reports
+    it), so a cut moves it beside the shim crate."""
+    root, _, _ = release
+    bump(root, "0.18.0")
+    daemon_crate(root, "0.18.0")
+    base = commit(root)
+    bump(root, "0.18.1")
+    daemon_crate(root, "0.18.1")
+    head = commit(root)
+    assert select_release(root, base, head)["oracle_head"] == head
+
+
+def test_a_cut_from_before_the_daemon_crate_carried_the_version_is_a_release(release):
+    """Earlier cuts left the lock's daemon entry at 0.0.0, untouched: their
+    receipts must still recompute as releases."""
+    root, _, _ = release
+    daemon = '[[package]]\nname = "pseudolife-daemon"\nversion = "0.0.0"\n\n'
+    lock = root / "rust/Cargo.lock"
+    bump(root, "0.18.0")
+    write(root, "rust/Cargo.lock", daemon + lock.read_text(encoding="utf-8"))
+    base = commit(root)
+    bump(root, "0.18.1")
+    write(root, "rust/Cargo.lock", daemon + lock.read_text(encoding="utf-8"))
+    head = commit(root)
+    assert select_release(root, base, head)["oracle_head"] == head
+
+
+@pytest.mark.parametrize("lock_daemon,extra", [("0.18.0", ""), (None, '[dependencies]\nnew = "1"\n')])
+def test_a_half_moved_or_edited_daemon_crate_is_not_a_release(release, lock_daemon, extra):
+    root, _, _ = release
+    bump(root, "0.18.0")
+    daemon_crate(root, "0.18.0")
+    base = commit(root)
+    bump(root, "0.18.1")
+    daemon_crate(root, "0.18.1", lock_daemon=lock_daemon, extra=extra)
+    head = commit(root)
+    assert select_release(root, base, head)["oracle_head"] == base
+
+
 def test_native_implementation_edit_cannot_accompany_release_exception(release):
     root, base, _ = release
     path = root / "rust/shim/src/lifecycle.rs"
