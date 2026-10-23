@@ -394,7 +394,7 @@ of its own.
 | A merge-group tie between keys of different types (merge rows with a NULL target) | `TypeError: '<' not supported between instances of …` | `invalid_argument` with Rust's own wording | merge rows always carry a target |
 | A corrupt automatic-decision index (`next_seq` not an integer, `cursors`/`active` not mappings) | `int()` / `dict()` raise | read leniently in `list` | corrupt persisted data only; the judges write the index |
 | A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
-| The judges (merge two- and three-vote, link, junk, curation, candidates), their freshness and the sweep tick that runs them | served by the background sweep | not run | task O2, with the dream (task P), behind a stub extractor |
+| The link, junk, curation and candidate judges, their freshness, and the sweep steps around the merge judge (the analyzer and deep ticks, the stall tick, the automatic dream) | served by the background sweep | not run (the merge judge is served: see "The merge judge and its tiebreak" below) | tasks P3b (the judges) and P4 (the ticks) |
 | Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution |
 
 ### memory_dream: status, pull, commit, runs and the consolidation pass (2026-10-20)
@@ -449,6 +449,22 @@ of its own.
 | A missing embedding on an entry a context vector stacks, or `min_entity_mentions` at 0 with no mention | numpy's `ValueError` text | an internal error with Rust's wording | `entries.embedding` is `NOT NULL`; the default is 2 |
 | A non-finite float (REAL or double) in the pre-apply graph snapshot file | `NaN`, `Infinity`, `-Infinity` (`json.dumps` defaults) | `null` | the five tables' float columns hold confidences, scores and timestamps; matching Python needs a non-standard JSON writer |
 | Wrong-type `memory.deep_dream` deep knobs (`top_k_candidates: 2.5`, `auto_apply_safe: "yes"`) | taken as given (slicing or truthiness) | refused at config load | the existing config-type substitution |
+
+### The merge judge and its tiebreak (2026-10-20)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| The sweep steps around the merge judge: the analyzer filing tick (and its analyzer-pair reconciliation) and the deep tick before it; the link, junk, curation and candidate judges after it; `dream_status`, the stall tick and the automatic dream | run on every tick while dreaming is enabled | not run (the judge runs after the reapers) | tasks P3b (the review-queue judges) and P4 (the ticks and the automatic dream); the `judge-merge-*` scenarios switch each off on the Python side |
+| `/api/graph/rejudge` (`review_rejudge`, `review_judgments.requeue`) | served | not served: the daemon serves no `/api/graph/*` route | the web API slice; `requeue` also reads the curation and candidate queues (task P3b) |
+| `deep_dream_judge`'s `extractor`, `limit`, `second_extractor` and `third_extractor` arguments | test hooks | absent: the sweep passes none | no production caller passes them |
+| A judge memo, decision index or response identity meta value that is not an object, or a decision record missing a key | `.items()` / `.get()` / `int()` raise, and the tick answers `error` | read as empty, or the key as absent | corrupt persisted data only; the judge writes these values |
+| The deep_dream values the fingerprints sign | what PyYAML 1.1 made of the YAML (`yes`, `on` and `1e3` are a boolean and a string) | what yaml-rust2 (YAML 1.2) made of it | only such scalars differ: a fingerprint then differs and the verdicts are asked again once; the typed knobs refuse a wrong type at load as before |
+| A tick's `error` text for a database failure | psycopg's message | tokio-postgres' message | the answer is only logged |
+| A merge decision audit for an entity whose display is NULL | `entity_display` / `into_display` NULL (`disp.get(id, "?")` finds the NULL) | `?` | as the review actions write it; a display is NULL only for hand-written rows |
+| Transactions inside one verdict | nested `transaction()` savepoints around each storage call | one transaction per verdict, with one savepoint around the relate link | no data differs: a nested block only rolls back on an exception, which ends the tick in both |
+| The sweep tick's log line (`deep-dream judge: …`) | the answer as a Python dict repr | the answer as JSON | log-only; no caller parses it |
+| Shutdown while a judge tick is running | the sweep's daemon thread dies with the process, wherever it is (an open transaction rolls back with the connection) | the tick stops at the next lock-free phase: an endpoint construction, alias probe, model call or signing in flight is abandoned, no new phase starts, and a verdict transaction already begun runs to its end; the tick answers `skipped: "stopping"` | so `Background::shutdown` does not wait out a model's timeout (240 s by default); no committed state differs from a Python process killed between the same two transactions |
+| A reply's served model holding a lone surrogate | PostgreSQL refuses the response identity's JSON (`invalid input syntax for type json`, with its DETAIL and CONTEXT) | the same statement fails on the same server, its text laid out as psycopg's (message, DETAIL, CONTEXT) without psycopg's closing parameter line | log-only, as the tick's `error` text for a database failure (above) |
 
 ## Coordination board completion (W2-F)
 

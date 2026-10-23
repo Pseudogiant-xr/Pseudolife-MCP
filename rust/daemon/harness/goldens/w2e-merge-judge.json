@@ -1,0 +1,423 @@
+{
+ "formatted": [
+  [
+   {
+    "n": 1,
+    "from": {
+     "display": "Kafka Broker",
+     "etype": null,
+     "degree": 3,
+     "scopes": [
+      "proj-a",
+      "it's"
+     ],
+     "snippets": [
+      "one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one ",
+      "two",
+      "three"
+     ]
+    },
+    "into": {
+     "display": null,
+     "etype": "tool",
+     "degree": 0,
+     "scopes": [],
+     "snippets": []
+    },
+    "reason": "write-dedup: a",
+    "score": 0.7099999785423279,
+    "low_differential": true,
+    "snippet_chars": 240
+   },
+   "[1] FROM 'Kafka Broker' (degree 3, scopes ['proj-a', \"it's\"]) evidence: one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one ; two\n    INTO 'None' (degree 0, scopes []) evidence: none\n    detector: write-dedup: a (score 0.7099999785423279)\n    caution: LOW-DIFFERENTIAL evidence \u2014 the shown snippets cannot tell the sides apart (heavy overlap, one side empty, or one side's evidence contained in the other's). Judge from the name-shape rules (2-5), degrees and scopes; \"leave\" is legitimate when those are inconclusive (rule 6)."
+  ],
+  [
+   {
+    "n": 2,
+    "from": {
+     "display": "\u00dcn\u00efcode \u2713",
+     "degree": 1,
+     "scopes": [
+      "b\"q"
+     ],
+     "snippets": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
+     ]
+    },
+    "into": {
+     "display": "Kafka Broker",
+     "etype": null,
+     "degree": 3,
+     "scopes": [
+      "proj-a",
+      "it's"
+     ],
+     "snippets": [
+      "one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one ",
+      "two",
+      "three"
+     ]
+    },
+    "reason": null,
+    "score": null,
+    "low_differential": false,
+    "snippet_chars": 0
+   },
+   "[2] FROM '\u00dcn\u00efcode \u2713' (degree 1, scopes ['b\"q']) evidence: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; \u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\n    INTO 'Kafka Broker' (degree 3, scopes ['proj-a', \"it's\"]) evidence: one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one ; two\n    detector: ?"
+  ],
+  [
+   {
+    "n": 3,
+    "from": {},
+    "into": {
+     "display": "\u00dcn\u00efcode \u2713",
+     "degree": 1,
+     "scopes": [
+      "b\"q"
+     ],
+     "snippets": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
+     ]
+    },
+    "reason": "",
+    "score": 1.0,
+    "low_differential": null,
+    "snippet_chars": 5
+   },
+   "[3] FROM '?' (degree 0, scopes []) evidence: none\n    INTO '\u00dcn\u00efcode \u2713' (degree 1, scopes ['b\"q']) evidence: xxxxx; \u00e9\u00e9\u00e9\u00e9\u00e9\n    detector: ? (score 1.0)"
+  ],
+  [
+   {
+    "n": 4,
+    "from": {
+     "display": null,
+     "etype": "tool",
+     "degree": 0,
+     "scopes": [],
+     "snippets": []
+    },
+    "into": {
+     "display": null,
+     "etype": "tool",
+     "degree": 0,
+     "scopes": [],
+     "snippets": []
+    },
+    "reason": "r",
+    "score": 1e-05
+   },
+   "[4] FROM 'None' (degree 0, scopes []) evidence: none\n    INTO 'None' (degree 0, scopes []) evidence: none\n    detector: r (score 1e-05)"
+  ]
+ ],
+ "raw_verdicts": [
+  {
+   "id": 1,
+   "verdict": "Accept",
+   "confidence": 0.9,
+   "note": "same"
+  },
+  {
+   "id": "2",
+   "verdict": " reject ",
+   "confidence": "0.85",
+   "relation": "Uses"
+  },
+  {
+   "id": 3,
+   "verdict": "relate",
+   "confidence": 2,
+   "relation": "teleports"
+  },
+  {
+   "id": 4.7,
+   "verdict": "leave",
+   "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+  },
+  {
+   "id": 9,
+   "verdict": "accept"
+  },
+  {
+   "id": null,
+   "verdict": "accept"
+  },
+  {
+   "id": 1,
+   "verdict": "maybe"
+  },
+  {
+   "id": true,
+   "verdict": "reject",
+   "confidence": null,
+   "relation": 0
+  },
+  {
+   "id": 2,
+   "verdict": "relate",
+   "confidence": "nan",
+   "relation": "part of"
+  },
+  "not a dict",
+  {
+   "id": 3,
+   "verdict": "reject",
+   "confidence": -1,
+   "relation": "related-to"
+  }
+ ],
+ "verdicts": [
+  {
+   "n": 1,
+   "verdict": "accept",
+   "confidence": 0.9,
+   "note": "same",
+   "relation": null
+  },
+  {
+   "n": 2,
+   "verdict": "relate",
+   "confidence": 0.85,
+   "note": "",
+   "relation": "uses"
+  },
+  {
+   "n": 3,
+   "verdict": "reject",
+   "confidence": 1.0,
+   "note": "",
+   "relation": null
+  },
+  {
+   "n": 4,
+   "verdict": "leave",
+   "confidence": 0.5,
+   "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+   "relation": null
+  },
+  {
+   "n": 1,
+   "verdict": "reject",
+   "confidence": 0.5,
+   "note": "",
+   "relation": null
+  },
+  {
+   "n": 2,
+   "verdict": "relate",
+   "confidence": 1.0,
+   "note": "",
+   "relation": "part-of"
+  },
+  {
+   "n": 3,
+   "verdict": "relate",
+   "confidence": 0.0,
+   "note": "",
+   "relation": "related-to"
+  }
+ ],
+ "notes": [
+  [
+   null,
+   " | 3rd (m3): reject 0.90 [2-1 reject]",
+   " | 3rd (m3): reject 0.90 [2-1 reject]"
+  ],
+  [
+   "relate:uses xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx | 2nd (m2): reject 0.80 [split]",
+   " | 3rd (model-three): relate:part-of 0.70 [2-1 reject]",
+   "relate:uses xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx | 2nd (m2): reject 0.80 [split] | 3rd (model-three): relate:part-of 0.70 [2-1 reject]"
+  ],
+  [
+   "plain note | 2nd (mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm): accept 0.60 [split]",
+   " | 3rd (m): accept 0.50 [2-1 accept]",
+   " | 2nd (mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm): accept 0.60 [split] | 3rd (m): accept 0.50 [2-1 accept]"
+  ],
+  [
+   "short",
+   " | 3rd (m): leave 0.00 [no majority]",
+   "short | 3rd (m): leave 0.00 [no majority]"
+  ]
+ ],
+ "signed_deep_dream": {
+  "min_similarity": 0.55,
+  "top_k_candidates": 50,
+  "max_context_snippets": 3,
+  "auto_apply_safe": true,
+  "min_entity_mentions": 2,
+  "max_fallback_mentions": 30,
+  "merge_min_similarity": 0.9,
+  "junk_max_degree": 1,
+  "max_support_overlap": 0.8,
+  "snippet_max_chars": 240,
+  "snapshot_keep": 10,
+  "curation_min_similarity": 0.8,
+  "curation_top_k": 20,
+  "auto_tick": true,
+  "auto_min_new_entities": 150,
+  "auto_interval_days": 7.0,
+  "review_queue_alert_pending": 500,
+  "review_queue_alert_age_days": 14.0,
+  "review_queue_alert_min_pending": 100,
+  "judge_mode": "shadow",
+  "judge_batch": 8,
+  "judge_snippet_max_chars": 240,
+  "judge_reject_min_confidence": 0.8,
+  "judge_url": "",
+  "judge_model": "",
+  "judges_enabled": true,
+  "judge_second_opinion": true,
+  "judge_second_model": "",
+  "judge_reject_min_confidence_2": 0.7,
+  "judge_accept_min_confidence": 0.6,
+  "link_judge_mode": "shadow",
+  "link_accept_min_confidence": 0.8,
+  "link_reject_min_confidence": 0.8,
+  "junk_judge_mode": "shadow",
+  "junk_keep_min_confidence": 0.8,
+  "junk_delete_min_confidence": 0.85,
+  "junk_max_auto_degree": 2,
+  "curation_judge_mode": "shadow",
+  "curation_distinct_min_confidence": 0.8,
+  "curation_forget_min_confidence": 0.9,
+  "curation_rejudge_days": 30.0,
+  "candidate_judge_mode": "off",
+  "candidate_min_confidence": 0.6,
+  "candidate_rejudge_days": 30.0,
+  "analyzer_file_duplicates": true,
+  "orphan_sweep": false,
+  "orphan_min_age_days": 7.0,
+  "orphan_max_per_apply": 50
+ },
+ "policy": {
+  "version": 1,
+  "prompt": "You judge MERGE PROPOSALS for a knowledge-graph deduper. Each numbered proposal asks: are FROM and INTO two names for the SAME real-world referent (accept folds FROM into INTO), or different things (reject)? Historically only ~23% of proposals are true merges \u2014 be skeptical.\nRules:\n1. Evidence over name-shape: accept only when BOTH sides' evidence snippets describe the same referent. Similar names with mismatched or absent evidence are not enough.\n2. Differing variant tokens (sizes, quants, versions, dates: v0.8.5 vs v0.8.6, 26B vs 4B, two dated filenames) mean sibling artifacts \u2014 reject.\n3. A dated run/session slug paired with a broader name (a project, a process) is one event vs a category \u2014 reject.\n4. File-vs-concept, feature-vs-phase, tool-vs-its-output, table-vs-tool pairs are related but distinct \u2014 reject, and name the relation that holds from FROM to INTO in \"relation\" when one below fits.\n5. Legitimate merge shapes: branch-vs-slug, path-vs-basename of the same file, bare-vs-qualified name, abbreviation-vs-full name \u2014 when the evidence agrees.\n6. Use \"leave\" only when the evidence is genuinely insufficient to decide; do not use it to avoid judging.\n\"relation\" is optional and only annotates a reject (src is FROM, dst is INTO): depends-on (src needs dst), part-of (src is a component of dst), runs-on (src executes on host/platform dst), hosts (src serves dst), uses (src makes use of dst), configures (src sets up dst), stores-data-in, tests (src is a test of dst), implements (src code realizes concept dst), superseded-by (src replaced by dst), related-to (untyped; weakest). Null when none fits. It never changes the verdict or its confidence.\nReturn JSON only: {\"verdicts\":[{\"id\":<proposal number>,\"verdict\":\"accept\"|\"reject\"|\"leave\",\"confidence\":<0..1>,\"relation\":<vocab or null, with reject only>,\"note\":\"<reason, max 25 words>\"}]} \u2014 one entry per proposal, confidence is your honest probability that the verdict is correct (for a reject: that FROM and INTO are different things).",
+  "deep_dream": {
+   "min_similarity": 0.55,
+   "top_k_candidates": 50,
+   "max_context_snippets": 3,
+   "auto_apply_safe": true,
+   "min_entity_mentions": 2,
+   "max_fallback_mentions": 30,
+   "merge_min_similarity": 0.9,
+   "junk_max_degree": 1,
+   "max_support_overlap": 0.8,
+   "snippet_max_chars": 240,
+   "snapshot_keep": 10,
+   "curation_min_similarity": 0.8,
+   "curation_top_k": 20,
+   "auto_tick": true,
+   "auto_min_new_entities": 150,
+   "auto_interval_days": 7.0,
+   "review_queue_alert_pending": 500,
+   "review_queue_alert_age_days": 14.0,
+   "review_queue_alert_min_pending": 100,
+   "judge_mode": "shadow",
+   "judge_batch": 8,
+   "judge_snippet_max_chars": 240,
+   "judge_reject_min_confidence": 0.8,
+   "judge_url": "",
+   "judge_model": "",
+   "judges_enabled": true,
+   "judge_second_opinion": true,
+   "judge_second_model": "",
+   "judge_reject_min_confidence_2": 0.7,
+   "judge_accept_min_confidence": 0.6,
+   "link_judge_mode": "shadow",
+   "link_accept_min_confidence": 0.8,
+   "link_reject_min_confidence": 0.8,
+   "junk_judge_mode": "shadow",
+   "junk_keep_min_confidence": 0.8,
+   "junk_delete_min_confidence": 0.85,
+   "junk_max_auto_degree": 2,
+   "curation_judge_mode": "shadow",
+   "curation_distinct_min_confidence": 0.8,
+   "curation_forget_min_confidence": 0.9,
+   "curation_rejudge_days": 30.0,
+   "candidate_judge_mode": "off",
+   "candidate_min_confidence": 0.6,
+   "candidate_rejudge_days": 30.0,
+   "analyzer_file_duplicates": true,
+   "orphan_sweep": false,
+   "orphan_min_age_days": 7.0,
+   "orphan_max_per_apply": 50
+  },
+  "model": "judge-one",
+  "endpoint": "http://127.0.0.1:9/v1",
+  "max_tokens": 2048,
+  "extra_body": {
+   "cache_prompt": false
+  },
+  "thinking": false,
+  "override": null,
+  "effort": null
+ },
+ "policy_fingerprint": "a7ea93a44279950a510c0eb97284bec189c57f693aa71e5722e124c77b29886c",
+ "sample": {
+  "b": [
+   1,
+   2.0,
+   null,
+   1e+16,
+   -0.0
+  ],
+  "a": "\u00e9\u007f\u2014\ud83d\ude00",
+  "c": {
+   "z": true,
+   "y": 0.1
+  }
+ },
+ "sample_fingerprint": "1f6332f6c90d5ad552f5e74db57f720611822a370375d05e450b5f26fb202837",
+ "served": [
+  [
+   "gpt-4o",
+   "gpt-4o-2024-08-06",
+   null
+  ],
+  [
+   "gpt-4o",
+   "gpt-4o-20240806",
+   null
+  ],
+  [
+   "gpt-4o",
+   "gpt-4o-mini",
+   [
+    "gpt-4o",
+    "gpt-4o-mini"
+   ]
+  ],
+  [
+   "judge",
+   "anything",
+   null
+  ],
+  [
+   "model-b",
+   "model-a",
+   [
+    "model-b",
+    "model-a"
+   ]
+  ],
+  [
+   "model-b",
+   null,
+   null
+  ],
+  [
+   "model-b",
+   "model-b",
+   null
+  ],
+  [
+   "gpt-4o",
+   "gpt-4o-2024-08-0",
+   [
+    "gpt-4o",
+    "gpt-4o-2024-08-0"
+   ]
+  ]
+ ]
+}

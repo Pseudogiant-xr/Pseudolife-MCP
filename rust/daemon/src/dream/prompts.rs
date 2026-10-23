@@ -241,3 +241,92 @@ pub const DIGEST_SYSTEM_PROMPT_TAIL: &str = concat!(
     "- No headings, no bullet ",
     "lists \u{2014} one compact narrative paragraph (two at most).",
 );
+
+/// `_RELATION_VOCAB` (`memory/dream.py:374-380`): the typed-edge vocabulary
+/// the graph judges name relations from.
+pub const RELATION_VOCAB: &str = concat!(
+    "depends-on (src needs dst), part-of (src is a component of dst), ",
+    "runs-on (src executes on host/platform dst), hosts (src serves dst), ",
+    "uses (src makes use of dst), configures (src sets up dst), ",
+    "stores-data-in, tests (src is a test of dst), implements (src code ",
+    "realizes concept dst), superseded-by (src replaced by dst), related-to ",
+    "(untyped; weakest)",
+);
+
+/// `_RELATION_NAMES` (`memory/dream.py:382-383`): the bare relation names,
+/// the only relations a merge "relate" may carry.
+pub const RELATION_NAMES: [&str; 11] = [
+    "depends-on",
+    "part-of",
+    "runs-on",
+    "hosts",
+    "uses",
+    "configures",
+    "stores-data-in",
+    "tests",
+    "implements",
+    "superseded-by",
+    "related-to",
+];
+
+/// `_JUDGE_SYSTEM_PROMPT` (`memory/dream.py:392-424`): the merge judge.
+pub const JUDGE_SYSTEM_PROMPT: &str = concat!(
+    "You judge MERGE PROPOSALS for a knowledge-graph deduper. Each numbered ",
+    "proposal asks: are FROM and INTO two names for the SAME real-world ",
+    "referent (accept folds FROM into INTO), or different things (reject)? ",
+    "Historically only ~23% of proposals are true merges \u{2014} be skeptical.\n",
+    "Rules:\n",
+    "1. Evidence over name-shape: accept only when BOTH sides' evidence ",
+    "snippets describe the same referent. Similar names with mismatched or ",
+    "absent evidence are not enough.\n",
+    "2. Differing variant tokens (sizes, quants, versions, dates: v0.8.5 vs ",
+    "v0.8.6, 26B vs 4B, two dated filenames) mean sibling artifacts \u{2014} ",
+    "reject.\n",
+    "3. A dated run/session slug paired with a broader name (a project, a ",
+    "process) is one event vs a category \u{2014} reject.\n",
+    "4. File-vs-concept, feature-vs-phase, tool-vs-its-output, table-vs-tool ",
+    "pairs are related but distinct \u{2014} reject, and name the relation that ",
+    "holds from FROM to INTO in \"relation\" when one below fits.\n",
+    "5. Legitimate merge shapes: branch-vs-slug, path-vs-basename of the ",
+    "same file, bare-vs-qualified name, abbreviation-vs-full name \u{2014} when ",
+    "the evidence agrees.\n",
+    "6. Use \"leave\" only when the evidence is genuinely insufficient to ",
+    "decide; do not use it to avoid judging.\n",
+    "\"relation\" is optional and only annotates a reject (src is FROM, ",
+    "dst is INTO): ",
+    "depends-on (src needs dst), part-of (src is a component of dst), ",
+    "runs-on (src executes on host/platform dst), hosts (src serves dst), ",
+    "uses (src makes use of dst), configures (src sets up dst), ",
+    "stores-data-in, tests (src is a test of dst), implements (src code ",
+    "realizes concept dst), superseded-by (src replaced by dst), related-to ",
+    "(untyped; weakest)",
+    ". Null when none fits. It never ",
+    "changes the verdict or its confidence.\n",
+    "Return JSON only: {\"verdicts\":[{\"id\":<proposal number>,",
+    "\"verdict\":\"accept\"|\"reject\"|\"leave\",\"confidence\":<0..1>,",
+    "\"relation\":<vocab or null, with reject only>,",
+    "\"note\":\"<reason, max 25 words>\"}]} \u{2014} one entry per proposal, ",
+    "confidence is your honest probability that the verdict is correct ",
+    "(for a reject: that FROM and INTO are different things).",
+);
+
+#[cfg(test)]
+mod judge_prompt_tests {
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn judge_prompt_is_pythons_bytes() {
+        // sha256 and length of dream._JUDGE_SYSTEM_PROMPT (CPython 3.11).
+        let p = super::JUDGE_SYSTEM_PROMPT;
+        assert_eq!(p.chars().count(), 2012);
+        assert_eq!(
+            hex::encode(Sha256::digest(p.as_bytes())),
+            "74bc177861381c1a15c6390a1dd719264f3e37d0a0ecdc13915de76c36ac9cbb"
+        );
+        let names: Vec<&str> = super::RELATION_VOCAB
+            .split(", ")
+            .map(|part| part.split(" (").next().unwrap_or("").trim())
+            .collect();
+        assert_eq!(names, super::RELATION_NAMES);
+    }
+}
