@@ -10,7 +10,7 @@ import mcp_run
 
 @pytest.fixture
 def runner(tmp_path, monkeypatch):
-    homes, stopped, dropped, binaries = [], [], [], []
+    homes, stopped, dropped, binaries, starts = [], [], [], [], []
     fault = {"stop": False, "drop": False, "start": False}
 
     class Daemon:
@@ -19,6 +19,7 @@ def runner(tmp_path, monkeypatch):
             homes.append(home)
 
         def start(self, **kwargs):
+            starts.append((self.side, kwargs))
             if fault["start"] and self.side == "rs":
                 raise RuntimeError("startup failed after launching")
             return self
@@ -50,7 +51,8 @@ def runner(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_run.pg, "drop", drop)
     monkeypatch.setattr(mcp_run.subprocess, "run", compare)
     monkeypatch.setattr(sys, "argv", ["mcp_run.py", "relative-daemon", str(tmp_path / "out"), "--config2"])
-    return SimpleNamespace(homes=homes, stopped=stopped, dropped=dropped, binaries=binaries, fault=fault)
+    return SimpleNamespace(homes=homes, stopped=stopped, dropped=dropped, binaries=binaries, fault=fault,
+                           starts=starts)
 
 
 def test_invocations_keep_distinct_homes(runner):
@@ -118,111 +120,22 @@ def test_failed_or_incomplete_oracle_record_is_not_written(tmp_path, monkeypatch
     assert 'record' in output.err.lower()
 
 
-class Clock:
-    """Fake monotonic clock that sleep advances, so waits take no real time.
-    It patches the time module itself, which mcp_run shares (also through
-    the inline `import time` of the earlier fixed-sleep version)."""
-    def __init__(self, monkeypatch):
-        import time
-        self.now = 0.0
-        monkeypatch.setattr(time, "monotonic", lambda: self.now)
-        monkeypatch.setattr(time, "sleep", self.sleep)
-
-    def sleep(self, seconds):
-        self.now += seconds
-
-
-def fake_banks(monkeypatch, clock, ready_at):
-    """psycopg.connect stand-in: bank `dsn` has public.principals from
-    ready_at[dsn] seconds of fake time on (None = never). Returns probe
-    counts."""
-    import psycopg
-    probes = {dsn: 0 for dsn in ready_at}
-
-    class Conn:
-        def __init__(self, dsn):
-            self.dsn = dsn
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def execute(self, sql, *params):
-            assert "to_regclass('public.principals')" in sql, sql
-            probes[self.dsn] += 1
-            found = has_table(clock, ready_at, self.dsn)
-            return SimpleNamespace(fetchone=lambda: ("principals" if found else None,))
-
-    monkeypatch.setattr(psycopg, "connect", lambda dsn, **kwargs: Conn(dsn))
-    return probes
-
-
-def has_table(clock, ready_at, dsn):
-    return ready_at[dsn] is not None and clock.now >= ready_at[dsn]
-
-
-def test_principals_wait_polls_until_each_bank_has_the_table(monkeypatch):
-    clock = Clock(monkeypatch)
-    probes = fake_banks(monkeypatch, clock, {"py-dsn": 0, "rs-dsn": 5})
-    mcp_run.wait_for_principals({"python": "py-dsn", "rust": "rs-dsn"})
-    # A ready bank is not probed again; the slow one is polled until it is.
-    assert probes["py-dsn"] == 1 and probes["rs-dsn"] > 1
-    assert 5 <= clock.now < 6
-
-
-def test_principals_wait_names_the_bank_that_never_created_it(monkeypatch):
-    clock = Clock(monkeypatch)
-    fake_banks(monkeypatch, clock, {"py-dsn": 0, "rs-dsn": None})
-    with pytest.raises(RuntimeError) as failure:
-        mcp_run.wait_for_principals({"python": "py-dsn", "rust": "rs-dsn"})
-    message = str(failure.value)
-    assert "rust" in message and "python" not in message
-    assert "public.principals" in message
-    assert mcp_run.PRINCIPALS_WAIT_S <= clock.now < mcp_run.PRINCIPALS_WAIT_S + 1
-
-
-def stored_banks(runner, monkeypatch, ready_at):
-    """Run main() in the ordinary configuration, where it seeds stored
-    principals, on fake banks with per-side table readiness. seed_stored
-    fails as the real one does on a bank whose daemon has not created the
-    table yet. Returns the clock and the banks seeded."""
+def test_stored_principals_are_seeded_before_both_daemons_start(runner, monkeypatch, capsys):
+    # 2026-10-18, Windows dev VM: a freshly built daemon had not created the
+    # principals table 3 s after /health, and the seeding then waited on a
+    # table poll and a 13 s pause (#826). Seeding a schema'd bank before the
+    # daemons start, and starting on the readiness contract's principals
+    # stage, leaves nothing to poll.
     sys.argv.remove('--config2')
-    clock = Clock(monkeypatch)
-    dsns = {f"pl_cf_w2g_{side}": f"postgresql://unused/{side}" for side in ("py", "rs")}
-    ready = {dsns[f"pl_cf_w2g_{side}"]: at for side, at in ready_at.items()}
-    monkeypatch.setattr(mcp_run.pg, "create", dsns.__getitem__)
-    fake_banks(monkeypatch, clock, ready)
-    seeded = []
-
-    def seed(dsn):
-        if not has_table(clock, ready, dsn):
-            raise RuntimeError('relation "public.principals" does not exist')
-        seeded.append(dsn)
-    monkeypatch.setattr(mcp_run, 'seed_stored', seed)
+    events = []
+    monkeypatch.setattr(mcp_run, 'seed_stored', lambda dsn: events.append(("seed", len(runner.starts))))
     monkeypatch.setattr(mcp_run, 'expected_summary', lambda args: {
         "responses": 10, "cases": 2, "unserved_checked": []})
-    return clock, seeded
-
-
-def test_slow_daemon_schema_setup_no_longer_fails_setup(runner, monkeypatch, capsys):
-    # 2026-10-18, Windows dev VM: a freshly built daemon had not created the
-    # table 3 s after /health, past the old fixed pause before seeding.
-    clock, seeded = stored_banks(runner, monkeypatch, {"py": 0, "rs": 5})
     assert mcp_run.main() == 0, capsys.readouterr().err
-    assert seeded == ["postgresql://unused/py", "postgresql://unused/rs"]
-    assert set(runner.stopped) == {'py', 'rs'} and len(runner.dropped) == 2
-
-
-def test_principals_timeout_is_an_infrastructure_failure(runner, monkeypatch, capsys):
-    clock, seeded = stored_banks(runner, monkeypatch, {"py": 0, "rs": None})
-    assert mcp_run.main() == 2
-    err = capsys.readouterr().err
-    assert 'infrastructure failed' in err
-    assert 'public.principals never appeared in the rust bank' in err
-    assert not seeded
-    assert set(runner.stopped) == {'py', 'rs'} and len(runner.dropped) == 2
+    assert events == [("seed", 0), ("seed", 0)]
+    assert [(side, kwargs.get("stages")) for side, kwargs in runner.starts] == [
+        ("py", ("principals",)), ("rs", ("principals",))]
+    assert not hasattr(mcp_run, "wait_for_principals")
 
 
 def test_completed_sweep_difference_is_parity_failure(runner, monkeypatch, capsys):
@@ -232,7 +145,6 @@ def test_completed_sweep_difference_is_parity_failure(runner, monkeypatch, capsy
 
     sys.argv.remove('--config2')
     sys.argv.append('--validation-sweep')
-    monkeypatch.setattr(mcp_run, 'wait_for_principals', lambda banks: None)
     monkeypatch.setattr(mcp_run, 'seed_stored', lambda dsn: None)
     monkeypatch.setattr(time, 'sleep', lambda seconds: None)
     ports = iter([1, 2])
@@ -286,7 +198,7 @@ def test_compensated_case_truncation_is_rejected(tmp_path, monkeypatch, consumer
     assert not mcp_compare.recording_errors(record)
     record['protocol_versions'] = record['protocol_versions'][:6]
     record['handshake'] += [response] * 4
-    assert sum(len(value) for value in record.values()) == 320
+    assert sum(len(value) for value in record.values()) == 319
     target = tmp_path / 'output.json'
     target.write_text('previous golden', encoding='utf-8')
     if consumer == 'producer':

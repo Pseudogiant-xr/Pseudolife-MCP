@@ -4,9 +4,9 @@
 # ops/wsl-suite.ps1 calls this inside WSL, so a Windows host runs its full
 # suite where process creation never touches the Windows console subsystem
 # (tests/suite_lock.py carries the 2026-10-02 measurement). It works the same
-# from any Linux shell. With no arguments it runs the full suite, under
-# pytest-xdist when the machine has room (see suite_workers below); any
-# arguments replace that and go to pytest unchanged.
+# from any Linux shell. With no arguments, or only display and worker
+# options, it runs the full suite, under pytest-xdist when the machine has
+# room (see plan_run below); any other arguments go to pytest unchanged.
 #
 # With PSEUDOLIFE_SUITE_COMMIT set (the wrapper sets it), the run does not
 # read the checkout over /mnt/c: it fetches that commit from the repository
@@ -36,6 +36,12 @@
 #   PSEUDOLIFE_SUITE_WORKERS     xdist workers for the default full run
 #                                (default: chosen from CPUs and memory;
 #                                0 or 1 runs it in one process)
+#   PSEUDOLIFE_SUITE_PROFILE     1: load tests/suite_profile_plugin.py (worker
+#                                timeline, resource and test-server samples,
+#                                run manifest) and fold its summary afterwards;
+#                                the arguments and exit code are unchanged
+#   PSEUDOLIFE_SUITE_PROFILE_DIR where the profile goes (default: a new
+#                                directory under ~/.pseudolife-mcp/suite-profiles)
 #
 # The run is offline (HF_HUB_OFFLINE=1) and WSL has its own Hugging Face
 # cache, so a fresh distribution needs the embedders CI warms
@@ -67,6 +73,185 @@ if [[ -n "${PSEUDOLIFE_SUITE_DISPATCHED:-}" ]]; then
         exit 2
     fi
 fi
+
+# Workers for a full run: up to 4, one per two CPUs, one per 6 GB of
+# memory, the memory being the smaller of RAM and this run's cgroup limit
+# (a dispatched run's systemd scope sets one, 16 GB by default). Measured
+# 2026-10-19 in WSL (8 CPUs, 40 GB) at -n 4 --dist loadfile: 10:59 against
+# 28-31 min single-process, peak 20.2 GB used, 1-minute load under 6.
+# --dist loadfile keeps each file on one worker, as CI's -n 2 does, so
+# module-scoped fixtures keep their meaning.
+suite_workers() {
+    if [[ -n "${PSEUDOLIFE_SUITE_WORKERS:-}" ]]; then
+        echo "$PSEUDOLIFE_SUITE_WORKERS"
+        return
+    fi
+    local cpus mem_kb limit n
+    # GNU nproc answers OMP_NUM_THREADS / OMP_THREAD_LIMIT when set (CI's
+    # Linux lanes export OMP_NUM_THREADS=2), which is a thread budget, not
+    # the CPUs here (Codex review, 2026-10-19).
+    cpus="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc 2>/dev/null || echo 1)"
+    mem_kb="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || true)"
+    [[ "$mem_kb" =~ ^[0-9]+$ ]] || mem_kb=0
+    # cgroup v2's memory.max, else v1's memory controller (a hybrid host
+    # mounts v2 at /sys/fs/cgroup/unified and keeps memory on v1).
+    for limit in \
+        "/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)/memory.max" \
+        "/sys/fs/cgroup/memory$(sed -n 's/^[0-9]*:\([^:]*,\)\{0,1\}memory\(,[^:]*\)\{0,1\}://p' /proc/self/cgroup 2>/dev/null || true)/memory.limit_in_bytes"; do
+        [[ -r "$limit" ]] || continue
+        limit="$(cat "$limit")"
+        if [[ "$limit" =~ ^[0-9]+$ ]] && (( limit / 1024 < mem_kb )); then
+            mem_kb=$(( limit / 1024 ))
+        fi
+        break
+    done
+    n=$(( cpus / 2 ))
+    (( mem_kb / (6 * 1024 * 1024) < n )) && n=$(( mem_kb / (6 * 1024 * 1024) ))
+    (( n > 4 )) && n=4
+    echo "$n"
+}
+
+# What pytest runs, decided before anything is fetched or installed, so a
+# malformed request is refused at once:
+#   - no arguments: the full suite, `tests/ -q -rs`, on automatic workers;
+#   - only display options (-q..., -v..., --quiet, --verbose, -r<chars>,
+#     --durations[=]N, --durations-min[=]S, --tb[=]STYLE), worker choices
+#     (-n N, -nN, --numprocesses[=]N; N a whole number, auto or logical) and
+#     a distribution (--dist[=]MODE): still the full suite, the display
+#     options in place of -q -rs. A worker choice wins over the automatic
+#     count and is never doubled, and a chosen distribution over loadfile;
+#     --dist no alone runs it in one process (xdist would turn it into load
+#     once it had workers);
+#   - anything else (paths, node ids, -k, -m, --collect-only, --help, an
+#     unknown option), or a `--` anywhere: every argument goes to pytest
+#     unchanged and nothing is added; pytest then judges them all. An
+#     unknown option is never parsed, since the launcher cannot know
+#     whether it takes the next word.
+# In a full-suite run, a worker or display option missing its value, a
+# worker choice given twice, or an invalid count, mode or number exits 2.
+run_args=()
+run_note=""
+plan_run() {
+    local -a display=() chosen=() dist=()
+    local arg name value problem="" durations=0 i=1 n=$#
+    local -a argv=("$@")
+    note_problem() { [[ -n "$problem" ]] || problem="$1"; }
+    # The value of option $1: the attached one when $2 is 1 (`--x=v`; empty
+    # is missing), else the next word. Sets `value`; returns 1 when missing.
+    take_value() {
+        if (( $2 )); then
+            value="$3"
+        elif (( i <= n )); then
+            # i is the 1-based position of the next word, argv 0-based.
+            value="${argv[i-1]}"
+            i=$(( i + 1 ))
+        else
+            value=""
+        fi
+        [[ -n "$value" ]] && return 0
+        note_problem "$1 needs a value"
+        return 1
+    }
+    for arg in "$@"; do
+        [[ "$arg" == "--" ]] && { run_args=("$@"); run_note="pass"; return; }
+    done
+    while (( i <= n )); do
+        arg="${argv[i-1]}"
+        i=$(( i + 1 ))
+        case "$arg" in
+            -q|-qq|-qqq|-qqqq|-v|-vv|-vvv|-vvvv|--quiet|--verbose) display+=("$arg") ;;
+            -r?*)
+                [[ "$arg" =~ ^-r[fEsxXpPaAwN]+$ ]] || { run_args=("$@"); run_note="pass"; return; }
+                display+=("$arg") ;;
+            --durations|--durations=*|--durations-min|--durations-min=*)
+                name="${arg%%=*}"
+                take_value "$name" "$( [[ "$arg" == *=* ]] && echo 1 || echo 0 )" "${arg#*=}" || continue
+                if [[ "$name" == --durations ]]; then
+                    durations=1
+                    [[ "$value" =~ ^[0-9]+$ ]] \
+                        || note_problem "--durations takes a number, not '$value'"
+                else
+                    # pytest reads it with float(): 1, 1., .5, 1e-3.
+                    [[ "$value" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?$ ]] \
+                        || note_problem "--durations-min takes a number, not '$value'"
+                fi
+                display+=("$name=$value") ;;
+            --tb|--tb=*)
+                take_value --tb "$( [[ "$arg" == *=* ]] && echo 1 || echo 0 )" "${arg#*=}" || continue
+                [[ "$value" =~ ^(auto|long|short|line|native|no)$ ]] \
+                    || note_problem "--tb takes auto, long, short, line, native or no, not '$value'"
+                display+=("--tb=$value") ;;
+            -n|-n?*|--numprocesses|--numprocesses=*)
+                name="${arg%%=*}"
+                if [[ "$arg" == -n?* ]]; then
+                    name=-n
+                    take_value -n 1 "${arg#-n}" || continue
+                elif [[ "$arg" == --numprocesses=* ]]; then
+                    take_value "$name" 1 "${arg#*=}" || continue
+                else
+                    take_value "$name" 0 "" || continue
+                fi
+                if (( ${#chosen[@]} )); then
+                    note_problem "workers chosen twice (${chosen[0]} and $value)"
+                elif [[ "$value" =~ ^([0-9]+|auto|logical)$ ]]; then
+                    [[ "$value" =~ ^[0-9]+$ ]] && value=$(( 10#$value ))
+                    chosen=("$value")
+                else
+                    note_problem "$name takes a whole number, auto or logical, not '$value'"
+                fi ;;
+            --dist|--dist=*)
+                take_value --dist "$( [[ "$arg" == *=* ]] && echo 1 || echo 0 )" "${arg#*=}" || continue
+                if (( ${#dist[@]} )); then
+                    note_problem "--dist given twice"
+                elif [[ "$value" =~ ^(each|load|loadscope|loadfile|loadgroup|worksteal|no)$ ]]; then
+                    dist=("$value")
+                else
+                    note_problem "--dist takes an xdist mode, not '$value'"
+                fi ;;
+            *) run_args=("$@"); run_note="pass"; return ;;
+        esac
+    done
+    if [[ -n "$problem" ]]; then
+        echo "wsl-suite: $problem; refusing" >&2
+        exit 2
+    fi
+    (( ${#display[@]} )) || display=(-q -rs)
+    local workers source xdist=0
+    if (( ${#chosen[@]} )); then
+        workers="${chosen[0]}"
+        source="-n"
+        [[ "$workers" == 0 ]] || xdist=1
+    elif [[ "${dist[0]:-}" == no ]]; then
+        workers=0
+        source="--dist no"
+    else
+        workers="$(suite_workers)"
+        source="automatic"
+        [[ -n "${PSEUDOLIFE_SUITE_WORKERS:-}" ]] && source="PSEUDOLIFE_SUITE_WORKERS"
+        if ! [[ "$workers" =~ ^[0-9]+$ ]]; then
+            echo "wsl-suite: PSEUDOLIFE_SUITE_WORKERS must be a whole number, not '$workers'" >&2
+            exit 2
+        fi
+        workers=$(( 10#$workers ))  # "08" is 8, not an octal error
+        (( workers >= 2 )) && xdist=1
+    fi
+    run_args=(tests/ "${display[@]}")
+    if (( xdist )) || (( ${#chosen[@]} )); then
+        run_args+=(-n "$workers")
+    fi
+    if (( ${#dist[@]} )); then
+        run_args+=(--dist "${dist[0]}")
+    elif (( xdist )); then
+        run_args+=(--dist loadfile)
+    fi
+    (( xdist && ! durations )) && run_args+=(--durations=30)
+    if (( xdist )); then
+        run_note="full suite, $workers xdist worker$( [[ "$workers" == 1 ]] || echo s ) ($source)"
+    else
+        run_note="full suite, one process ($source)"
+    fi
+}
+plan_run "$@"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="${PSEUDOLIFE_SUITE_NAME:-$(basename "$root")}"
@@ -419,58 +604,36 @@ export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 # does not, and a test installs into a disposable user base through the base
 # interpreter. Scoped to this run.
 export PIP_BREAK_SYSTEM_PACKAGES=1
-# Workers for the default full run: up to 4, one per two CPUs, one per 6 GB
-# of memory, the memory being the smaller of RAM and this run's cgroup limit
-# (a dispatched run's systemd scope sets one, 16 GB by default). Measured
-# 2026-10-19 in WSL (8 CPUs, 40 GB) at -n 4 --dist loadfile: 10:59 against
-# 28-31 min single-process, peak 20.2 GB used, 1-minute load under 6.
-# --dist loadfile keeps each file on one worker, as CI's -n 2 does, so
-# module-scoped fixtures keep their meaning.
-suite_workers() {
-    if [[ -n "${PSEUDOLIFE_SUITE_WORKERS:-}" ]]; then
-        echo "$PSEUDOLIFE_SUITE_WORKERS"
-        return
-    fi
-    local cpus mem_kb limit n
-    # GNU nproc answers OMP_NUM_THREADS / OMP_THREAD_LIMIT when set (CI's
-    # Linux lanes export OMP_NUM_THREADS=2), which is a thread budget, not
-    # the CPUs here (Codex review, 2026-10-19).
-    cpus="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc 2>/dev/null || echo 1)"
-    mem_kb="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || true)"
-    [[ "$mem_kb" =~ ^[0-9]+$ ]] || mem_kb=0
-    # cgroup v2's memory.max, else v1's memory controller (a hybrid host
-    # mounts v2 at /sys/fs/cgroup/unified and keeps memory on v1).
-    for limit in \
-        "/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)/memory.max" \
-        "/sys/fs/cgroup/memory$(sed -n 's/^[0-9]*:\([^:]*,\)\{0,1\}memory\(,[^:]*\)\{0,1\}://p' /proc/self/cgroup 2>/dev/null || true)/memory.limit_in_bytes"; do
-        [[ -r "$limit" ]] || continue
-        limit="$(cat "$limit")"
-        if [[ "$limit" =~ ^[0-9]+$ ]] && (( limit / 1024 < mem_kb )); then
-            mem_kb=$(( limit / 1024 ))
-        fi
-        break
-    done
-    n=$(( cpus / 2 ))
-    (( mem_kb / (6 * 1024 * 1024) < n )) && n=$(( mem_kb / (6 * 1024 * 1024) ))
-    (( n > 4 )) && n=4
-    echo "$n"
-}
+set -- "${run_args[@]}"
+# stdout, beside "testing <sha>": through ops/wsl-suite.ps1 a redirected
+# stdout and stderr can land in one file at separate offsets, and this
+# line on stderr overwrote that one (2026-10-19).
+if [[ "$run_note" == pass ]]; then
+    echo "wsl-suite: chosen arguments, passed to pytest unchanged (no xdist workers added)"
+else
+    echo "wsl-suite: $run_note"
+fi
 
-if [[ $# -eq 0 ]]; then
-    set -- tests/ -q -rs
-    workers="$(suite_workers)"
-    if ! [[ "$workers" =~ ^[0-9]+$ ]]; then
-        echo "wsl-suite: PSEUDOLIFE_SUITE_WORKERS must be a whole number, not '$workers'" >&2
-        exit 2
-    fi
-    workers=$(( 10#$workers ))  # "08" is 8, not an octal error
-    if (( workers >= 2 )); then
-        set -- "$@" -n "$workers" --dist loadfile --durations=30
-    fi
-    # stdout, beside "testing <sha>": through ops/wsl-suite.ps1 a redirected
-    # stdout and stderr can land in one file at separate offsets, and this
-    # line on stderr overwrote that one (2026-10-19).
-    echo "wsl-suite: full suite, $( (( workers >= 2 )) && echo "$workers xdist workers" || echo "one process")"
+# Opt-in profiling (tests/suite_profile_plugin.py): the plugin is added to
+# whatever pytest runs, default or chosen, so a profiled run tests the same
+# selection with the same workers as an unprofiled one.
+profile_dir=""
+case "${PSEUDOLIFE_SUITE_PROFILE:-}" in
+    ""|0|off|false|no) ;;
+    *)
+        profile_dir="${PSEUDOLIFE_SUITE_PROFILE_DIR:-$HOME/.pseudolife-mcp/suite-profiles/$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$root" rev-parse --short=8 HEAD 2>/dev/null || echo worktree)}"
+        mkdir -p "$profile_dir"
+        export PSEUDOLIFE_SUITE_PROFILE_DIR="$profile_dir"
+        set -- -p tests.suite_profile_plugin "$@"
+        echo "wsl-suite: profiling to $profile_dir"
+        ;;
+esac
+# The command a full-suite run builds, every word from the launcher's own
+# allowlist; chosen arguments are not echoed (they may name local paths).
+if [[ "$run_note" != pass ]]; then
+    printf 'wsl-suite: pytest'
+    printf ' %q' "$@"
+    printf '\n'
 fi
 
 # Every process the run starts inherits this marker, so whatever outlives
@@ -563,4 +726,11 @@ trap 'pass_on INT 130' INT
 trap 'pass_on TERM 143' TERM
 code=0
 wait "$pytest_pid" || code=$?
+# The summary never changes the run's exit code; it runs only when the
+# plugin left its manifest (a run that never reached pytest leaves none).
+if [[ -n "$profile_dir" && -f "$profile_dir/manifest.json" ]]; then
+    "$venv/bin/python" evals/suite_profile_summary.py --profile-dir "$profile_dir" \
+        --tag "${profile_dir##*/}" --out "$profile_dir/summary.json" >&2 \
+        || echo "wsl-suite: the profile summary failed; the profile is in $profile_dir" >&2
+fi
 exit "$code"

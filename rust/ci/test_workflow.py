@@ -38,7 +38,8 @@ PARITY_CHECKS = {
     "Offline embedding golden and mutant row": "eval",
     "Offline W2-D search harness regressions": "eval",
     "CLI differential harness": "cli",
-    "Prepare disposable PostgreSQL for CLI lease row": "cli",
+    "CLI differential harness live arms": "cli-live",
+    "Prepare disposable PostgreSQL for CLI lease row": "cli*",
     "CLI lease differential harness": "cli",
     "CLI W1-C differential harness": "w1c",
     "Prepare disposable PostgreSQL for W1-C rows": "w1c",
@@ -49,12 +50,12 @@ PARITY_CHECKS = {
     "Principal store differential and golden harness": "cli",
     "Daemon static HTTP parity": "cli",
 
-    "Daemon schema startup parity": "cli",
+    "Daemon schema startup parity": "cli-daemon",
     "Graph store differential and recorded oracle": "cli",
-    "Daemon body admission parity": "cli",
-    "Daemon security admission parity": "cli",
-    "Daemon MCP live parity and controls": "cli",
-    "Daemon resident startup parity": "cli",
+    "Daemon body admission parity": "cli-live",
+    "Daemon security admission parity": "cli-live",
+    "Daemon MCP live parity and controls": "cli-live",
+    "Daemon resident startup parity": "cli-daemon",
     "Run unchanged candidates and differential judges": "judges",
 }
 # Parity uploads carry the lane prefix: empty on hosted, set by parity-selfhosted.
@@ -105,6 +106,15 @@ def row_commands(invocations, required_rows, golden):
 
 W1C_SUITES = ("w1c-doctor", "w1c-pairing", "w1c-connection")
 H5_SUITES = ("h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants")
+CLI_SUITES = ("cli", "cli-daemon", "cli-live")
+PARITY_SUITES = ["eval", *CLI_SUITES, "judges", *W1C_SUITES, *H5_SUITES]
+# The live Python-versus-Rust comparisons hosted Windows cannot run
+# deterministically (docs/specs/2026-10-19-merge-queue.md, "The required
+# Parity gate"): required on Linux, reported by parity-live on Windows.
+LIVE_SUITE = "cli-live"
+LIVE_CHECKS = ("CLI differential harness live arms", "Daemon body admission parity",
+               "Daemon security admission parity", "Daemon MCP live parity and controls")
+WINDOWS_LIVE_EXCLUDE = [{"os": "windows-latest", "suite": LIVE_SUITE}]
 
 
 # The W1-C step passes its rows through PowerShell arrays (@live, @golden), so
@@ -140,8 +150,8 @@ def check_w1c_shards(jobs):
     job = jobs["parity-checks"]
     matrix = job["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS
-    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES, *H5_SUITES]
-    assert "exclude" not in matrix
+    assert matrix["suite"] == PARITY_SUITES
+    assert matrix["exclude"] == WINDOWS_LIVE_EXCLUDE
     shards = [shard for shard in matrix["include"] if shard["suite"] in W1C_SUITES]
     assert len(shards) == len(W1C_SUITES)
     assert Counter(shard["suite"] for shard in shards) == Counter(W1C_SUITES)
@@ -183,7 +193,7 @@ def check_w1c_shards(jobs):
         "rust/cli_harness/goldens/test_login.linux.json",
         "${{ runner.temp }}/test-login-linux-record.json"]
     summaries = steps["Retain CLI harness summaries"]
-    assert summaries["if"] == ("always() && (matrix.suite == 'cli' || "
+    assert summaries["if"] == ("always() && (startsWith(matrix.suite, 'cli') || "
                                "startsWith(matrix.suite, 'w1c-'))")
     assert summaries["with"]["name"] == ARTIFACT_PREFIX + "cli-harness-${{ runner.os }}-${{ matrix.suite }}"
     assert summaries["with"]["path"] == "${{ runner.temp }}/cli-harness*.json"
@@ -195,8 +205,10 @@ def check_w1c_shards(jobs):
             if words[:2] == ["python", "rust/cli_harness"]:
                 assert not any(word in W1C_ROWS for word in words)
     for step in job["steps"]:
-        if step.get("uses") in ("dtolnay/rust-toolchain@stable", "Swatinem/rust-cache@v2"):
+        if step.get("uses") == "dtolnay/rust-toolchain@stable":
             assert step["if"] == "!startsWith(matrix.suite, 'w1c-')"
+        if step.get("uses") == "Swatinem/rust-cache@v2":
+            assert "w1c-" not in step["if"] and CACHED_SUITES == {"eval", "cli", "cli-daemon"}
 
 
 def check_executable_coverage(jobs):
@@ -246,11 +258,13 @@ def check_executable_coverage(jobs):
                      "rust/daemon/harness/test_w2d_namespace.py",
                      "rust/daemon/harness/test_w2d_recent.py"), PYTEST_FILTERS)
     assert search["timeout-minutes"] == 1
-    for name, rows in (("CLI differential harness", ("mail", "hook", "episode")),
-                       ("CLI lease differential harness", ("lease",))):
-        invocations = commands(parity[name]["run"])
-        for golden in (False, True):
-            row_commands(invocations, rows, golden)
+    # The mail, hook and episode rows replay their goldens in the required
+    # cli shard; their live arms run beside the other live comparisons.
+    row_commands(commands(parity["CLI differential harness"]["run"]), ("mail", "hook", "episode"), True)
+    row_commands(commands(parity["CLI differential harness live arms"]["run"]),
+                 ("mail", "hook", "episode"), False)
+    for golden in (False, True):
+        row_commands(commands(parity["CLI lease differential harness"]["run"]), ("lease",), golden)
     require_command(commands(parity["CLI differential harness"]["run"]),
                     ("python", "-m", "pytest"),
                     ("rust/cli_harness/test_cli_harness.py", "rust/cli_harness/test_lease.py",
@@ -402,7 +416,11 @@ def check_executable_coverage(jobs):
 
 
 def workflow():
-    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    """rust.yml as a master push runs it: the scope-chosen parity matrix
+    expanded to every suite (rust/ci/parity_scope.py; test_parity_scope.py
+    pins the expressions and the per-pull-request selection)."""
+    from parity_scope import resolve
+    return resolve(yaml.safe_load(WORKFLOW.read_text(encoding="utf-8")))
 
 
 
@@ -420,6 +438,22 @@ def test_h5_step_budgets_fit_their_jobs():
     assert shards["h5-audit"]["h5_timeout"] >= 10
 
 
+def test_h5_linux_step_budgets_cover_the_slow_hosted_runner():
+    # Master f82141c4's ubuntu runner ran 4.6-5.4x slower than usual and
+    # timed out h5-graph-mutants with every finished mutant caught, so each
+    # Linux step allows five times its hosted p99, and its job keeps the 15
+    # minutes test_h5_step_budgets_fit_their_jobs asks for around it.
+    hosted = json.loads((ROOT / "rust/ci/h5_linux_measurements.json").read_text(encoding="utf-8"))
+    suites = hosted["hosted_step_distribution"]["suites"]
+    assert set(suites) == set(H5_SUITES)
+    shards = {shard["suite"]: shard for shard in workflow()["jobs"]["parity-checks"]["strategy"]["matrix"]["include"]
+              if shard["suite"] in H5_SUITES}
+    slow = hosted["hosted_step_distribution"]["slow_runner"]
+    assert shards[slow["suite"]]["h5_timeout"] > slow["projected_step_minutes"]
+    for name, cells in suites.items():
+        assert shards[name]["h5_timeout"] * 60 >= 5 * cells["linux"]["p99_s"], name
+
+
 def test_shards_cover_both_systems_and_build_once():
     jobs = workflow()["jobs"]
     for name in ("rust", "candidate", "parity-checks", "parity"):
@@ -428,7 +462,7 @@ def test_shards_cover_both_systems_and_build_once():
         assert not jobs[name].get("continue-on-error", False)
     assert jobs["rust"]["name"] == "Rust / ${{ matrix.os }}"
     assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
-    assert jobs["parity-checks"]["needs"] == ["candidate", "rust"]
+    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "rust"]
     rust_steps = jobs["rust"]["steps"]
     override = commands(next(step["run"] for step in rust_steps
                              if step.get("name") == "Daemon override build configurations"))
@@ -440,9 +474,9 @@ def test_shards_cover_both_systems_and_build_once():
     assert produced["with"]["name"] == consumed["with"]["name"] == "daemon-bind-fixture-${{ runner.os }}"
     assert produced["with"]["if-no-files-found"] == "error"
     assert "rust/target/debug/pseudolife-daemon" in produced["with"]["path"].splitlines()
-    assert consumed["if"] == "matrix.suite == 'cli' || matrix.suite == 'h5-w1a'"
+    assert consumed["if"] == "matrix.suite == 'cli-live' || matrix.suite == 'h5-w1a'"
     assert consumed["with"]["path"] == "rust/target/debug"
-    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == ["eval", "cli", "judges", *W1C_SUITES, *H5_SUITES]
+    assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == PARITY_SUITES
     builds = [step for name in ("rust", "candidate", "parity-checks")
               for step in jobs[name]["steps"]
               if "cargo build --locked --release --bin pseudolife-stdio" in step.get("run", "")]
@@ -463,8 +497,9 @@ def test_original_checks_remain_gated_on_the_expected_shards():
             actual = matches[0]
             assert actual.get("run", "").strip(), name
             assert not actual.get("continue-on-error", False)
-            expected = "startsWith(matrix.suite, 'w1c-')" if suite == "w1c" else (
-                f"matrix.suite == '{suite}'" if suite else None)
+            expected = ("startsWith(matrix.suite, 'w1c-')" if suite == "w1c" else
+                        "startsWith(matrix.suite, 'cli')" if suite == "cli*" else
+                        f"matrix.suite == '{suite}'" if suite else None)
             assert actual.get("if") == expected
     check_executable_coverage(jobs)
 
@@ -601,11 +636,62 @@ def test_parity_gate_still_fails_a_broken_job_on_a_docs_pull_request(job, result
     assert run_gate(needs, "pull_request").returncode == 1
 
 
-def run_scope(tmp_path, event, files, git_exit=0, base_ref="refs/heads/master", fetch_exit=0):
+# An ordinary pull request (not from integrate/*): scope says full=false, the
+# Rust job runs and must pass, and the candidate build and parity matrix skip.
+ORDINARY_PR_SKIP = {"scope": {"result": "success", "outputs": {"rust": "true", "full": "false"}},
+                    "rust": {"result": "success"}, "candidate": {"result": "skipped"},
+                    "parity-checks": {"result": "skipped"}, "source-mutants": {"result": "skipped"}}
+
+
+def test_parity_gate_accepts_an_ordinary_pull_request_without_parity():
+    executed = run_gate(ORDINARY_PR_SKIP, "pull_request")
+    assert executed.returncode == 0, executed.stderr
+
+
+@pytest.mark.parametrize("event", ["merge_group", "push", "schedule", "workflow_dispatch"])
+def test_parity_gate_accepts_the_fast_lane_skip_only_on_pull_requests(event):
+    assert run_gate(ORDINARY_PR_SKIP, event).returncode == 1
+
+
+@pytest.mark.parametrize("scope", [
+    {"result": "success", "outputs": {"rust": "true", "full": "true"}},
+    {"result": "success", "outputs": {"rust": "true"}},
+    {"result": "failure", "outputs": {"rust": "true", "full": "false"}},
+    {"result": "skipped", "outputs": {}},
+    {"result": "cancelled", "outputs": {"full": "false"}},
+])
+def test_parity_gate_rejects_a_fast_lane_skip_scope_did_not_choose(scope):
+    needs = copy.deepcopy(ORDINARY_PR_SKIP)
+    needs["scope"] = scope
+    assert run_gate(needs, "pull_request").returncode == 1
+
+
+@pytest.mark.parametrize("job, result", [("rust", "skipped"), ("rust", "failure"),
+                                         ("rust", "cancelled"), ("candidate", "failure"),
+                                         ("candidate", "cancelled"), ("parity-checks", "failure"),
+                                         ("parity-checks", "")])
+def test_parity_gate_still_requires_the_rust_job_on_an_ordinary_pull_request(job, result):
+    # Only candidate and parity-checks may skip; the Rust job is the fast lane.
+    needs = copy.deepcopy(ORDINARY_PR_SKIP)
+    needs[job]["result"] = result
+    assert run_gate(needs, "pull_request").returncode == 1
+
+
+BATCH_REF = "integrate/2026-10-21-batch-1"
+
+
+def run_scope(tmp_path, event, files, git_exit=0, base_ref="refs/heads/master", fetch_exit=0,
+              head_ref=None):
+    """The scope step's outputs, in order. `head_ref` is github.head_ref, set
+    by Actions only for pull requests: by default a batch branch's, which
+    runs everything its diff needs."""
     import os
+    if head_ref is None:
+        head_ref = BATCH_REF if event == "pull_request" else ""
     step = next(s for s in workflow()["jobs"]["scope"]["steps"] if s.get("id") == "scope")
     assert step["env"] == {"EVENT_NAME": "${{ github.event_name }}",
-                           "MERGE_GROUP_BASE_REF": "${{ github.event.merge_group.base_ref }}"}
+                           "MERGE_GROUP_BASE_REF": "${{ github.event.merge_group.base_ref }}",
+                           "HEAD_REF": "${{ github.head_ref }}"}
     output = tmp_path / "github_output"
     output.write_text("", encoding="utf-8")
     # Stand in for `git fetch` and `git diff`, the step's only external inputs.
@@ -628,6 +714,7 @@ function git {
 '''
     result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", bootstrap + step["run"]],
                             env=dict(os.environ, EVENT_NAME=event, GITHUB_OUTPUT=str(output),
+                                     HEAD_REF=head_ref,
                                      MERGE_GROUP_BASE_REF=base_ref, PL_FIXTURE_FETCH_EXIT=str(fetch_exit),
                                      PL_FIXTURE_FILES="\n".join(files), PL_FIXTURE_GIT_EXIT=str(git_exit)),
                             capture_output=True, text=True)
@@ -672,19 +759,19 @@ CODE_CHANGES = [
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", DOCS_ONLY_CHANGES)
 def test_scope_skips_a_documentation_only_pull_request(tmp_path, files, event):
-    assert run_scope(tmp_path, event, files) == ["rust=false"]
+    assert run_scope(tmp_path, event, files) == ["full=true", "rust=false"]
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files", CODE_CHANGES)
 def test_scope_runs_everything_for_any_other_change(tmp_path, files, event):
-    assert run_scope(tmp_path, event, files) == ["rust=true"]
+    assert run_scope(tmp_path, event, files) == ["full=true", "rust=true"]
 
 
 def test_scope_runs_everything_for_a_mixed_merge_group(tmp_path):
     # A docs PR and a code PR queued together: the group is not docs-only.
     group = ["CLAUDE.md", "docs/guide/configuration.md", "rust/daemon/src/main.rs"]
-    assert run_scope(tmp_path, "merge_group", group) == ["rust=true"]
+    assert run_scope(tmp_path, "merge_group", group) == ["full=true", "rust=true"]
 
 
 @pytest.mark.parametrize("base_ref, fetch_exit", [
@@ -692,18 +779,64 @@ def test_scope_runs_everything_for_a_mixed_merge_group(tmp_path):
     ("REFS/HEADS/MASTER", 0), ("refs/heads/master", 128)])
 def test_scope_runs_everything_without_a_fetched_master_tip(tmp_path, base_ref, fetch_exit):
     assert run_scope(tmp_path, "merge_group", ["CLAUDE.md"], base_ref=base_ref,
-                     fetch_exit=fetch_exit) == ["rust=true"]
+                     fetch_exit=fetch_exit) == ["full=true", "rust=true"]
 
 
 @pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
 def test_scope_never_skips_outside_pull_requests(tmp_path, event):
-    assert run_scope(tmp_path, event, ["CLAUDE.md"]) == ["rust=true"]
+    assert run_scope(tmp_path, event, ["CLAUDE.md"]) == ["full=true", "rust=true"]
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files, git_exit", [([], 0), (["CLAUDE.md"], 128)])
 def test_scope_runs_everything_on_an_empty_or_unreadable_diff(tmp_path, files, git_exit, event):
-    assert run_scope(tmp_path, event, files, git_exit) == ["rust=true"]
+    assert run_scope(tmp_path, event, files, git_exit) == ["full=true", "rust=true"]
+
+
+# Ordinary pull requests skip the candidate build and the parity matrix (their
+# integration batch's integrate/* pull request runs them) but keep the Rust job.
+ORDINARY_REFS = ["claude/some-change", "fix/x", "integrate", "integrated/x",
+                 "Integrate/2026-10-21-batch-1", "x/integrate/y", "master"]
+
+
+@pytest.mark.parametrize("head_ref", ORDINARY_REFS)
+@pytest.mark.parametrize("files, rust", [(["rust/daemon/src/main.rs"], "true"),
+                                         (["pseudolife_memory/service.py"], "true"),
+                                         (["CLAUDE.md"], "false")])
+def test_scope_marks_an_ordinary_pull_request_not_full(tmp_path, head_ref, files, rust):
+    # `rust` is still classified by the diff, so the Rust job runs for code.
+    assert run_scope(tmp_path, "pull_request", files, head_ref=head_ref) == ["full=false", f"rust={rust}"]
+
+
+@pytest.mark.parametrize("ci_input", [".github/workflows/rust.yml", ".github/workflows/ci.yml",
+                                      "pyproject.toml", "ops/requirements.lock.txt",
+                                      "rust/Cargo.lock", "frontend/package-lock.json",
+                                      "rust/rust-toolchain.toml"])
+def test_scope_keeps_an_ordinary_pull_request_changing_ci_inputs_full(tmp_path, ci_input):
+    # A workflow or dependency edit is tested by the full lanes on its own
+    # pull request, so it cannot switch off its own check.
+    assert run_scope(tmp_path, "pull_request", ["rust/daemon/src/main.rs", ci_input],
+                     head_ref="claude/some-change") == ["full=true", "rust=true"]
+
+
+@pytest.mark.parametrize("files, git_exit", [([], 0), (["rust/daemon/src/main.rs"], 128)])
+def test_scope_keeps_an_ordinary_pull_request_with_an_unreadable_diff_full(tmp_path, files,
+                                                                          git_exit):
+    assert run_scope(tmp_path, "pull_request", files, git_exit,
+                     head_ref="claude/some-change") == ["full=true", "rust=true"]
+
+
+@pytest.mark.parametrize("head_ref", [BATCH_REF, "integrate/2026-10-07-rust-modes", ""])
+def test_scope_runs_everything_for_a_batch_or_unnamed_pull_request(tmp_path, head_ref):
+    # An empty head ref (Actions did not supply one) fails safe to full.
+    assert run_scope(tmp_path, "pull_request", ["rust/daemon/src/main.rs"],
+                     head_ref=head_ref) == ["full=true", "rust=true"]
+
+
+@pytest.mark.parametrize("event", ["merge_group", "push", "schedule", "workflow_dispatch"])
+def test_scope_reads_the_head_ref_only_for_pull_requests(tmp_path, event):
+    assert run_scope(tmp_path, event, ["rust/daemon/src/main.rs"],
+                     head_ref="claude/some-change") == ["full=true", "rust=true"]
 
 
 def concurrency_group(event, ref="refs/heads/master", mode=None, run_id="101"):
@@ -780,18 +913,27 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     jobs = workflow()["jobs"]
     scope = jobs["scope"]
     assert scope["runs-on"] == "ubuntu-latest" and "needs" not in scope
-    assert scope["outputs"] == {"rust": "${{ steps.scope.outputs.rust }}"}
+    assert scope["outputs"] == {"rust": "${{ steps.scope.outputs.rust }}",
+                                "full": "${{ steps.scope.outputs.full }}",
+                                "parity": "${{ steps.parity.outputs.parity }}"}
     checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["fetch-depth"] == 2
-    gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail') "
-             "&& needs.scope.outputs.rust != 'false' }}")
-    for name in ("rust", "candidate", "daemon-image"):
+    gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode %s) "
+             "&& needs.scope.outputs.rust != 'false'%s }}")
+    # The candidate build also serves a stress loop; the rest is ordinary CI.
+    # Only the candidate build (and through it the parity matrix) leaves an
+    # ordinary pull request; the Rust job and image check are its fast lanes.
+    for name, mode, full in (("rust", "== 'ci'", ""),
+                             ("candidate", "!= 'wait-mail'",
+                              " && needs.scope.outputs.full != 'false'"),
+                             ("daemon-image", "== 'ci'", "")):
         assert jobs[name]["needs"] == "scope", name
-        assert jobs[name]["if"] == gated, name
+        assert jobs[name]["if"] == gated % (mode, full), name
     # Parity checks and source mutants inherit the skip through their needs.
-    # Their success checks name the direct needs: the implicit success() also
-    # covers scope, so a failed scope would skip them after rust/candidate ran.
-    assert jobs["parity-checks"]["needs"] == ["candidate", "rust"]
+    # Their success checks name rust and candidate: the implicit success()
+    # would also cover scope. Parity checks need scope for their matrix, so a
+    # failed scope fails them (and the gate) instead of skipping them.
+    assert jobs["parity-checks"]["needs"] == ["scope", "candidate", "rust"]
     assert jobs["parity-checks"]["if"].startswith("${{ !cancelled() && ")
     assert jobs["parity-checks"]["if"].endswith(
         "&& needs.candidate.result == 'success' && needs.rust.result == 'success' }}")
@@ -1051,7 +1193,7 @@ def test_parity_rejects_a_rebuild_in_a_separate_step(monkeypatch, script):
 def test_w1c_rows_run_once_on_parallel_suites():
     jobs = workflow()["jobs"]
     matrix = jobs["parity-checks"]["strategy"]["matrix"]
-    assert matrix["suite"] == ["eval", "cli", "judges", *W1C_SUITES, *H5_SUITES]
+    assert matrix["suite"] == PARITY_SUITES
     assert matrix["os"] == SYSTEMS
     step = next(s for s in jobs["parity-checks"]["steps"]
                 if s.get("name") == "CLI W1-C differential harness")
@@ -1140,8 +1282,42 @@ function python {
 
 def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():
     job = workflow()["jobs"]["parity-checks"]
-    assert job["timeout-minutes"] == (
-        "${{ matrix.job_timeout || (matrix.suite == 'cli' && 100 || 210) }}")
+    assert job["timeout-minutes"] == "${{ matrix.job_timeout || 210 }}"
+    budgets = {shard["suite"]: shard.get("job_timeout")
+               for shard in job["strategy"]["matrix"]["include"]}
+    # Only eval and judges keep the old 210-minute fallback.
+    assert set(PARITY_SUITES) - set(budgets) == {"eval", "judges"}
+
+
+def test_no_cli_shard_is_an_hour_long_serial_job():
+    # Hosted Windows ran cli as one 61-70 minute job (master runs
+    # 39205533092, 39236836263, 2026-10-19). Each shard now measures about
+    # 26 minutes there, and its budget stays about twice that.
+    job = workflow()["jobs"]["parity-checks"]
+    budgets = {shard["suite"]: shard.get("job_timeout")
+               for shard in job["strategy"]["matrix"]["include"]}
+    for suite in CLI_SUITES:
+        assert 0 < budgets[suite] <= 60, suite
+    steps = job["steps"]
+    by_suite = {}
+    for step in steps:
+        for suite in CLI_SUITES:
+            if step.get("if") == f"matrix.suite == '{suite}'" and step.get("run"):
+                by_suite.setdefault(suite, []).append(step["name"])
+    # Resident startup reads the storage test binary the schema step builds.
+    # The startup steps keep the pydantic pin the MCP step gave them when
+    # they ran after it in the single cli job (reviewer, 2026-10-20).
+    assert by_suite["cli-daemon"] == ["Keep the oracle's pydantic pin for the startup steps",
+                                      "Daemon schema startup parity", "Daemon resident startup parity"]
+    pin = next(s for s in steps if s.get("name") == by_suite["cli-daemon"][0])
+    mcp = next(s for s in steps if s.get("name") == "Daemon MCP live parity and controls")
+    for package in ("pydantic==2.14.0", "pydantic-core==2.50.0"):
+        assert package in pin["run"] and package in mcp["run"]
+    names = [step.get("name") for step in steps]
+    assert names.index("Daemon schema startup parity") < names.index("Daemon resident startup parity")
+    for upload in ("Retain daemon schema parity", "Retain daemon resident startup parity"):
+        assert next(s for s in steps if s.get("name") == upload)["if"] == \
+            "always() && matrix.suite == 'cli-daemon'"
 
 
 @pytest.mark.parametrize("name", [
@@ -1186,8 +1362,10 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     text = WORKFLOW.read_text(encoding="utf-8")
     # Anchors, not a copy: a step or shard added to the hosted matrix reaches
     # the self-hosted lane in the same edit.
-    for alias in ("steps: *parity_steps", "suite: *parity_suites", "include: *parity_shards"):
-        assert text.count(alias) == 1, alias
+    # parity-selfhosted and parity-live both reuse the hosted steps; the
+    # self-hosted lane takes the same scope-chosen matrix (every suite on the
+    # nightly and manual CI, its only events).
+    assert text.count("steps: *parity_steps") == 2
     jobs = workflow()["jobs"]
     hosted, lane = jobs["parity-checks"], jobs["parity-selfhosted"]
     assert lane["steps"] == hosted["steps"]
@@ -1196,7 +1374,7 @@ def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     assert lane["strategy"]["matrix"]["runner"] == (
         "${{ fromJSON(vars.PARITY_SELFHOSTED_RUNNERS || '[\"off\"]') }}")
     assert lane["strategy"]["fail-fast"] is False
-    assert lane["needs"] == hosted["needs"] == ["candidate", "rust"]
+    assert lane["needs"] == hosted["needs"] == ["scope", "candidate", "rust"]
     # Only the maintainer's registered runners: one label per machine.
     assert lane["runs-on"] == ["self-hosted", "pseudolife-parity-${{ matrix.runner }}"]
     assert lane["timeout-minutes"] >= 210 + int(lane["env"]["PARITY_YIELD_MINUTES"])
@@ -1225,6 +1403,9 @@ def test_selfhosted_lane_never_touches_a_required_check():
 def test_both_lanes_upload_under_distinct_names():
     jobs = workflow()["jobs"]
     assert jobs["parity-checks"]["env"]["PARITY_ARTIFACT_PREFIX"] == ""
+    # Hosted Windows runs cli-live only in parity-live, so its uploads
+    # cannot collide with a parity-checks shard's.
+    assert jobs["parity-live"]["env"]["PARITY_ARTIFACT_PREFIX"] == ""
     assert jobs["parity-selfhosted"]["env"]["PARITY_ARTIFACT_PREFIX"] == "self-hosted-"
     uploads = [step for step in jobs["parity-checks"]["steps"]
                if step.get("uses") == "actions/upload-artifact@v4"]
@@ -1305,3 +1486,231 @@ def test_selfhosted_gate_runs_only_on_a_free_lease(tmp_path, case, sequence, ove
         assert line == f"call lease check --json full-suite@fixture | full-suite@fixture | {tmp_path / 'locks'}"
     yielded = summary.exists() and "Yielded" in summary.read_text(encoding="utf-8")
     assert yielded == (case == "yields")
+
+
+# --- the required gate holds only deterministic Windows work ---
+
+LIVE_EVENTS = ("${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || "
+               "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
+               "&& needs.candidate.result == 'success' && needs.rust.result == 'success' }}")
+
+
+def test_live_comparisons_run_in_their_own_suite():
+    steps = {step.get("name"): step for step in workflow()["jobs"]["parity-checks"]["steps"]}
+    for name in LIVE_CHECKS:
+        assert steps[name]["if"] == f"matrix.suite == '{LIVE_SUITE}'", name
+    # No other check routes to the live suite: everything else Windows runs
+    # under the required gate is a build, a self-test, a golden or a replay.
+    routed = {name for name, step in steps.items()
+              if LIVE_SUITE in step.get("if", "") and step.get("run")}
+    assert routed == set(LIVE_CHECKS)
+    # The golden arm of the same rows stays in the required cli shard.
+    golden = commands(steps["CLI differential harness"]["run"])
+    assert not [words for words in golden if words[:2] == ["python", "rust/cli_harness"]
+                and "--golden" not in words]
+
+
+def test_linux_requires_the_live_comparisons_and_windows_reports_them():
+    jobs = workflow()["jobs"]
+    matrix = jobs["parity-checks"]["strategy"]["matrix"]
+    assert LIVE_SUITE in matrix["suite"] and "ubuntu-latest" in matrix["os"]
+    assert matrix["exclude"] == WINDOWS_LIVE_EXCLUDE
+    live = jobs["parity-live"]
+    assert live["strategy"]["matrix"] == {"os": ["windows-latest"], "suite": [LIVE_SUITE]}
+    assert live["strategy"]["fail-fast"] is False
+    assert live["steps"] == jobs["parity-checks"]["steps"]
+    assert live["needs"] == ["candidate", "rust"]
+    assert live["runs-on"] == "${{ matrix.os }}"
+    assert 0 < live["timeout-minutes"] <= 60
+
+
+def test_windows_live_job_reports_but_never_gates():
+    jobs = workflow()["jobs"]
+    live = jobs["parity-live"]
+    assert live["continue-on-error"] is True
+    for name, job in jobs.items():
+        needs = job.get("needs", [])
+        assert "parity-live" not in ([needs] if isinstance(needs, str) else needs), name
+    assert "parity-live" not in jobs["parity"]["steps"][0]["run"]
+    # Master pushes, the nightly and manual CI: never a pull request or a
+    # merge group, whose required checks it would otherwise hold open.
+    assert live["if"] == LIVE_EVENTS
+    assert "pull_request" not in live["if"] and "merge_group" not in live["if"]
+    assert live["name"] == "Parity live (non-gating) / ${{ matrix.os }} / ${{ matrix.suite }}"
+    assert not live["name"].startswith("Parity /")
+
+
+# --- Rust caches: one key per compiling suite, saved on failure, no image toolchain ---
+
+TOOLCHAIN_STEP = "Keep only the pinned Rust toolchain"
+# The parity suites that compile (sent-YAML mutants in cli, the storage test
+# binary in cli-daemon, which_comparison in eval); the rest restored a 71 MB
+# registry they never read (master run 39236836263, 2026-10-19).
+CACHED_SUITES = {"eval", "cli", "cli-daemon"}
+CACHED_IF = "matrix.suite == 'eval' || matrix.suite == 'cli' || matrix.suite == 'cli-daemon'"
+
+
+def pinned_channel():
+    text = (ROOT / "rust/rust-toolchain.toml").read_text(encoding="utf-8")
+    return re.search(r'^channel = "([^"]+)"$', text, re.M).group(1)
+
+
+def cached_jobs():
+    jobs = workflow()["jobs"]
+    return {name: job for name, job in jobs.items()
+            if any(step.get("uses") == "Swatinem/rust-cache@v2" for step in job.get("steps", []))}
+
+
+def test_every_rust_cache_is_saved_on_failure_and_keeps_the_lockfile_hash():
+    jobs = cached_jobs()
+    assert set(jobs) >= {"rust", "candidate", "parity-checks", "source-mutants"}
+    for name, job in jobs.items():
+        cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
+        assert cache["with"]["cache-on-failure"] is True, name
+        # Turning the environment hash off also drops the Cargo.lock hash:
+        # the key would never change, and rust-cache skips the save on an
+        # exact hit, so the cache would freeze at its first save.
+        assert "add-rust-environment-hash-key" not in cache["with"], name
+
+
+def test_every_rust_cache_hashes_only_the_pinned_toolchain():
+    for name, job in cached_jobs().items():
+        steps = job["steps"]
+        toolchain = next(step for step in steps if step.get("uses") == "dtolnay/rust-toolchain@stable")
+        assert toolchain["with"]["toolchain"] == pinned_channel(), name
+        keep = next(step for step in steps if step.get("name") == TOOLCHAIN_STEP)
+        cache = next(step for step in steps if step.get("uses") == "Swatinem/rust-cache@v2")
+        assert steps.index(toolchain) < steps.index(keep) < steps.index(cache), name
+        # Never on a self-hosted runner: its toolchains belong to its owner.
+        expected = "runner.environment != 'self-hosted'"
+        if cache.get("if"):
+            expected += f" && ({cache['if']})"
+        assert keep["if"] == expected, name
+        assert keep["shell"] == "pwsh" and keep["run"] == steps_by_name("parity-checks")[TOOLCHAIN_STEP]["run"]
+
+
+def steps_by_name(job):
+    return {step.get("name"): step for step in workflow()["jobs"][job]["steps"]}
+
+
+def test_parity_suites_cache_under_their_own_keys():
+    cache = next(step for step in workflow()["jobs"]["parity-checks"]["steps"]
+                 if step.get("uses") == "Swatinem/rust-cache@v2")
+    # Nine suites shared one key: the first to save fixed it, and on an
+    # exact hit no later suite's compile was ever saved.
+    assert cache["with"]["key"] == "${{ matrix.suite }}"
+    assert "shared-key" not in cache["with"]
+    assert cache["if"] == CACHED_IF
+    assert CACHED_SUITES <= set(PARITY_SUITES)
+
+
+TOOLCHAIN_STUBS = r'''$ErrorActionPreference = 'stop'
+function rustup {
+    Add-Content -LiteralPath $env:PL_LOG -Value ($args -join ' ')
+    if ($args[0] -eq 'toolchain' -and $args[1] -eq 'list') {
+        $env:PL_TOOLCHAINS -split ';'
+        $global:LASTEXITCODE = 0
+    } elseif ($args[1] -eq 'uninstall') {
+        $global:LASTEXITCODE = [int]$env:PL_UNINSTALL_EXIT
+    } else { $global:LASTEXITCODE = 0 }
+}
+'''
+
+
+@pytest.mark.parametrize("toolchains, removed, exit_code, accepted", [
+    (["stable-x86_64-pc-windows-msvc", "1.94.0-x86_64-pc-windows-msvc (active, default)"],
+     ["stable-x86_64-pc-windows-msvc"], 0, True),
+    (["1.94.0-x86_64-unknown-linux-gnu (default)"], [], 0, True),
+    (["stable-x86_64-unknown-linux-gnu", "1.99.0-x86_64-unknown-linux-gnu",
+      "1.94.0-x86_64-unknown-linux-gnu (default)"],
+     ["stable-x86_64-unknown-linux-gnu", "1.99.0-x86_64-unknown-linux-gnu"], 0, True),
+    (["stable-x86_64-pc-windows-msvc", "1.94.0-x86_64-pc-windows-msvc (default)"],
+     ["stable-x86_64-pc-windows-msvc"], 1, False),
+    # A near miss: 1.94.0 as a prefix of another release is not the pin.
+    (["1.94.01-x86_64-pc-windows-msvc", "1.94.0-x86_64-pc-windows-msvc (default)"],
+     ["1.94.01-x86_64-pc-windows-msvc"], 0, True),
+])
+def test_toolchain_cleanup_removes_only_unpinned_toolchains(tmp_path, toolchains, removed, exit_code, accepted):
+    import os
+    step = steps_by_name("parity-checks")[TOOLCHAIN_STEP]
+    log = tmp_path / "rustup.log"
+    log.write_text("", encoding="utf-8")
+    env = dict(os.environ, PL_LOG=str(log), PL_TOOLCHAINS=";".join(toolchains),
+               PL_UNINSTALL_EXIT=str(exit_code), GITHUB_WORKSPACE=str(ROOT))
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", TOOLCHAIN_STUBS + step["run"]],
+                            env=env, capture_output=True, text=True)
+    assert (result.returncode == 0) == accepted, result.stdout + result.stderr
+    calls = log.read_text(encoding="utf-8").splitlines()
+    uninstalled = [call.split()[-1] for call in calls if call.startswith("toolchain uninstall")]
+    assert uninstalled == (removed if accepted else removed[:1])
+
+
+def test_toolchain_cleanup_refuses_without_a_pinned_channel(tmp_path):
+    import os
+    step = steps_by_name("parity-checks")[TOOLCHAIN_STEP]
+    (tmp_path / "rust").mkdir()
+    (tmp_path / "rust/rust-toolchain.toml").write_text("[toolchain]\n", encoding="utf-8")
+    log = tmp_path / "rustup.log"
+    log.write_text("", encoding="utf-8")
+    env = dict(os.environ, PL_LOG=str(log), PL_TOOLCHAINS="stable-x86_64-pc-windows-msvc",
+               PL_UNINSTALL_EXIT="0", GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", TOOLCHAIN_STUBS + step["run"]],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "uninstall" not in log.read_text(encoding="utf-8")
+
+
+# --- observability: runner facts, failure names, durations and junit ---
+
+FACTS_STEP = "Record the runner image and CPU count"
+CONTROL_RUN = "admitted_commit_survives_cancel_and_next_pull"
+
+
+def pytest_lines(script):
+    return [line.strip() for line in script.splitlines()
+            if re.match(r"(& \$oraclePython|python) -m pytest\b", line.strip())]
+
+
+def test_parity_shards_record_their_runner():
+    steps = workflow()["jobs"]["parity-checks"]["steps"]
+    facts = steps[2]
+    assert facts["name"] == FACTS_STEP and "if" not in facts and facts["shell"] == "pwsh"
+    assert steps[1]["uses"] == "actions/checkout@v4"
+
+
+def test_parity_pytest_runs_name_failures_and_keep_reports():
+    steps = workflow()["jobs"]["parity-checks"]["steps"]
+    reports = []
+    for step in steps:
+        for line in pytest_lines(step.get("run", "")):
+            if CONTROL_RUN in line:
+                # The mutant control must fail; its report would read as a failure.
+                assert "--junitxml" not in line
+                continue
+            assert " -ra " in f" {line} " and "--durations=30" in line, (step["name"], line)
+            # pwsh steps name the report with Join-Path; a default-shell step
+            # (bash on Linux) with the runner.temp expression.
+            joined = re.search(r"--junitxml \(Join-Path \$env:RUNNER_TEMP '(junit/[^']+)'\)", line)
+            reports.append("${{ runner.temp }}/" + joined.group(1) if joined else
+                           re.search(r"--junitxml (\$\{\{ runner\.temp \}\}\S+|\S+)", line).group(1))
+    assert len(reports) >= 12 and len(set(reports)) == len(reports), reports
+    upload = next(step for step in steps if step.get("name") == "Retain parity pytest reports")
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == "${{ runner.temp }}/junit/*.xml"
+    assert upload["with"]["name"] == ARTIFACT_PREFIX + "parity-junit-${{ runner.os }}-${{ matrix.suite }}"
+    own = [path for path in reports if path.startswith("${{ runner.temp }}/junit/")]
+    # The eval suite keeps its own report and upload.
+    assert set(reports) - set(own) == {"$evalReport"}
+
+
+def test_runner_facts_name_cpus_and_image(tmp_path):
+    import os
+    step = next(s for s in workflow()["jobs"]["parity-checks"]["steps"] if s.get("name") == FACTS_STEP)
+    summary = tmp_path / "summary.md"
+    env = dict(os.environ, ImageOS="win25", ImageVersion="20261012.1.0", RUNNER_OS="Windows",
+               RUNNER_ARCH="X64", RUNNER_ENVIRONMENT="github-hosted", GITHUB_STEP_SUMMARY=str(summary))
+    result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", step["run"]],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert f"image win25 20261012.1.0, {os.cpu_count()} logical CPUs" in result.stdout
+    assert result.stdout.strip() in summary.read_text(encoding="utf-8-sig")

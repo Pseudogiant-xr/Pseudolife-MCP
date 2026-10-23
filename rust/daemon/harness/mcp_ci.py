@@ -18,13 +18,15 @@ MUTANTS = ("mcp-tier-flip", "mcp-toolset-floor", "mcp-sse-no-session", "mcp-no-h
 
 
 # Declared differences (divergences.md), by name, as the strict corpus reports them.
-# MCP-REFUSAL-CLEANUP: Rust closes the connection after a 413.
-REFUSAL_CLEANUP = {f"body_limit[{index}]" for index in (0, 2, 3, 4, 5)}
+# MCP-REFUSAL-CLEANUP: a 413 whose declared body exceeds the daemon's discard
+# budget (the GETs declaring 9999999 bytes) says it will close; uvicorn keeps
+# that connection and discards without a limit.
+REFUSAL_CLOSE = {f"body_limit[{index}]" for index in (4, 5)}
 
 
 def _expected_pair(name):
     """The exact (python, rust) pair declared for one difference."""
-    if name in REFUSAL_CLEANUP:
+    if name in REFUSAL_CLOSE:
         py = {"status": 413, "headers": {"mcp-session-id": None}, "body": {"raw": "Request body too large"}}
         return py, {**py, "headers": {**py["headers"], "connection": "close"}}
     raise AssertionError(f"undeclared difference: {name}")
@@ -33,20 +35,19 @@ def _expected_pair(name):
 def check_baseline(report):
     """Accept exactly the declared differences; the strict report stays red."""
     summary = report["summary"]
-    assert (summary["responses"], summary["cases"], summary["diffs"]) == (320, 18, 5)
+    assert (summary["responses"], summary["cases"], summary["diffs"]) == (319, 18, len(REFUSAL_CLOSE))
     assert set(summary["unserved_checked"]) == set(UNSERVED)
-    expected = REFUSAL_CLEANUP
     seen = set()
     for diff in report["diffs"]:
         name, pair = diff.split(": python=", 1)
         py, rs = pair.split("\n          rust  =", 1)
         py, rs = json.loads(py), json.loads(rs)
-        assert name in expected and name not in seen, name
+        assert name in REFUSAL_CLOSE and name not in seen, name
         seen.add(name)
         want_py, want_rs = _expected_pair(name)
         assert py == want_py, name
         assert rs == want_rs, name
-    assert seen == expected
+    assert seen == REFUSAL_CLOSE
 
 
 def check_coercion_report(report):
@@ -93,8 +94,8 @@ def main(argv=None):
     print(f'SDK coercion gate: {2 * EXPECTED_COERCION_CASES} observations, zero differences', flush=True)
     mount = json.loads((baseline_dir / "foundation-mount.json").read_text(encoding="utf-8"))
     assert mount["case"] == "mcp path, auth" and not mount["diffs"]
-    print("strict baseline: 5 declared differences (the 413 close headers); foundation mount matches",
-          flush=True)
+    print("strict baseline: 2 declared differences (413 close headers past the discard budget); "
+          "foundation mount matches", flush=True)
     for mutant in MUTANTS:
         target = run(mutant, args.mutant_bin, ["--mutant", mutant, "--baseline", str(baseline_file)], 0)
         report = json.loads((target / f"mutant-{mutant}.json").read_text(encoding="utf-8"))

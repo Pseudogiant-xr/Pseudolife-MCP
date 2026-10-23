@@ -40,6 +40,15 @@ _INHERIT = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
 # reaches the caller's real one (127.0.0.1:8765 by default).
 DEAD_DAEMON_URL = "http://127.0.0.1:9"
 
+# PSEUDOLIFE_HOOK_PROBE_MS for both arms: the hooks' /health probe budget
+# (250 ms for users). Cold hosted Windows runners stall a first connection
+# or TLS handshake for 0.3-1 s, and a probe that misses in one arm only
+# leaves that hook silent, a difference no port caused. Both arms get the
+# same value, so the comparison is unchanged; a case that tests the
+# per-read deadline itself pins the default with {HOOK_PROBE_ENV: None}.
+HOOK_PROBE_ENV = "PSEUDOLIFE_HOOK_PROBE_MS"
+HOOK_PROBE_MS = "5000"
+
 
 @dataclasses.dataclass
 class Arm:
@@ -164,6 +173,7 @@ def _environment(case: Case, arm: Arm, target: Target) -> dict[str, str]:
         "LOCALAPPDATA": str(arm.home / "AppData" / "Local"),
         "PSEUDOLIFE_MCP_DAEMON_URL": arm.daemon.url if arm.daemon else DEAD_DAEMON_URL,
         "PSEUDOLIFE_RELEASE_CHECK": "0",
+        HOOK_PROBE_ENV: HOOK_PROBE_MS,
         "COLUMNS": "80",
     })
     if WINDOWS:

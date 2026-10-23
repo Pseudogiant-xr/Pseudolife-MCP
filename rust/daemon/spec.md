@@ -25,6 +25,7 @@ listed JSON bodies) is free. References are to `pseudolife_memory/` at master
 | H3 | `db`: `"ok"` after a `SELECT 1` on a fresh connection, else `"error: <text>"` and `status` becomes `"degraded"`. | `daemon.py:~380`, `storage/postgres.py:702` |
 | H4 | 200 when `status == "ok"`, else 503 with the same body; 500 `{"status":"error","error":str}` if building the payload fails. | `web/api.py:418-427` |
 | H5 | `embedder` `{backend, device, dtype}` is present once the embedder is built; `dtype` is null for the ONNX backend. | `daemon.py` health payload |
+| H6 | Always, last, in this order: `ready` bool (`status == "ok"` and `pending` empty), then `pending`, the unfinished startup stages in this order: `"init"` until the stores are published and the clock reseeded (`coordination_tier_ready`), `"principals"` until the stored-principal view has completed a read (loaded once stays loaded, never stale-checked; never listed without Postgres). Neither changes `status` or the HTTP code. | `readiness.py`, `daemon.py` health payload |
 
 Conditional keys owned by subsystems outside this slice (`coordination`,
 `updates`, `extractor`, `stall`, `hooks_digest`, `build`, `init_refusal`,
@@ -1165,6 +1166,49 @@ differential's to show (`harness/graph_store.py`). The
 `mcp-graph-inverse-unchecked` mutants must be caught. The store layer's
 own differential (`harness/graph_store.py`) keeps its eight mutants.
 
+### memory_graph over MCP (2026-10-19)
+
+`graph_read_tools.rs` (the tool, the neighborhood and whole-graph
+projections, `classify_edge`), on the ported GraphStore read model
+(`storage::graph::subgraph` over `graph_read::build_subgraph` and
+`derive_edges`, `spec-w3h-graph-read.md`) and `graph_read::alias_canonical_map`;
+registered in `mcp::dispatch::registry`. Python: `mcp_server.py`
+`memory_graph` (2647-2677); `service.py` `_whole_graph` (8224-8287),
+`graph_neighborhood` (8289-8405); `memory/graph_store.py` `subgraph`
+(56-70); `graph.py` `alias_canonical_map` (42-), `derive_edges` (91-140),
+`build_subgraph` (190-231); `memory/graph_review.py` `classify_edge`
+(100-113); `storage/postgres.py` `entity_sources_map` (4262-4268),
+`load_graph` (4425-4448), `load_communities` (4471-4481).
+
+| # | Exact item | Source |
+|---|---|---|
+| GR1 | Bound arguments: `memory_graph(entity, depth=1, include_facts=True, to=None, relation_filter=None)`. Read-only; under the service lock (the writer lock), so an answer never shows half of a write. | `mcp_server.py:2647-2671` |
+| GR2 | An empty `entity` is the whole graph (`_whole_graph(scope=None, max_nodes=None)`: no scope filter, no cap). | `service.py:8308-8310` |
+| GR3 | Else the community assignment (`SELECT entity_id, community_id FROM entity_communities`), then the root through `find_entity(norm_name(entity))`; a miss answers `{"found": false, "entity": <as given>}` (a blank name normalizes to `""` and misses). | `service.py:8318-8322` |
+| GR4 | A truthy `to` resolves the same way; a miss records `to_not_found: <as given>` and asks for no path. Then the subgraph of the root at `depth` (clamped to 1..3), with the path to the target: asserted edges in id order, then the derived ones (transitive closures per relation in registry order, then inverses), the nodes within `depth` undirected hops, NetworkX's bidirectional shortest path folded in, and the edges with both ends kept, in order. | `service.py:8324-8335`; `graph.py:91-231` |
+| GR5 | With `include_facts`, the resident cortex's current records in record order, each `{attribute, value, origin, confidence (4 places)}` plus `authority` and `distortion_tolerance` when set, filed under `norm_name(entity)` resolved through the alias table (an alias that is another node's canonical is dropped). | `service.py:8338-8361`; `graph.py:42-` |
+| GR6 | Nodes by id: `{entity: display, canonical, etype, aliases: <ORDER BY alias>, facts (with include_facts), community: <assignment or null>}`. | `service.py:8363-8377` |
+| GR7 | Edges in subgraph order: `{src, relation, dst, derived}` with display names; a derived edge adds `via` (its rule provenance); an asserted one adds `confidence` (4 places), `origin` when truthy, and `tag`: `EXTRACTED` for a user or action origin, else `AMBIGUOUS` below confidence 0.5, else `INFERRED`. | `service.py:8379-8393`; `graph_review.py:100-113` |
+| GR8 | The answer: `{found: true, entity: <root display>, depth: <clamped>, nodes, edges, paths: <display names>}` and `to_not_found` when recorded. | `service.py:8395-8405` |
+| GR9 | The whole graph: the graph load (entities by id, aliases, live edges by id), the communities, then the source map (`ORDER BY entity_id, source`). Nodes in id order `{entity, canonical, etype, aliases, community, sources, created_at}` plus `facts` (without the v35 labels) with `include_facts`; every live edge `{src, relation, dst, derived: false, confidence, origin (null allowed), asserted_at, tag}`; the answer `{found: true, entity: null, scope: "all", nodes, edges, paths: [], truncated: false, total_nodes, total_edges}`. | `service.py:8224-8287`; `storage/postgres.py:4262-4268,4425-4448` |
+| GR10 | `relation_filter`, when truthy and the answer has a non-empty edge list, keeps the edges whose relation, lowercased, contains the filter lowercased (Python's `str.lower`, under the pinned Unicode 14 tables); nodes and paths are untouched. | `mcp_server.py:2672-2677` |
+
+`harness/w2e.py live --only graph-read` compares every answer and the full
+bank after each call, on a template the Python daemon's own tools wrote
+(facts with labels and one under an alias, user, action, agent and
+low-confidence edges, a transitive chain, both inverse directions, a second
+component), plus what only the dream writes (community assignments, source
+attribution) as SQL seeds: the default neighborhood, depths 2, 3, 0 and 9,
+no facts, an alias root, a leaf; paths found, to the root, to an unknown
+target, to an empty one and into another component; relation filters
+case-folded, empty, emptying and on a miss; unknown and blank roots; the
+whole graph with and without facts and filtered; then answers after an
+unrelate, a new alias and a revival. Inverse-derived edges compare as a
+multiset in their slots (the hash-order row in "Graph and review"). The
+`mcp-graph-no-relation-filter`, `mcp-graph-tag-no-ambiguous`,
+`mcp-graph-facts-no-alias` and `mcp-graph-no-labels` mutants must be
+caught.
+
 ### Board tools over MCP (2026-10-16)
 
 `board/mcp.rs`, registered in `mcp::dispatch::registry`. Python:
@@ -1270,14 +1314,15 @@ incomplete tool coverage and incorrect per-case or corpus totals before writing 
 
 ### MCP refusal cleanup (2026-10-13)
 
-MCP admission and cleanup share the SDK's 4 MiB body limit. A complete,
-in-budget refusal drain keeps the connection reusable; incomplete cleanup,
-read failure, an exhausted budget or an unread Expect body closes it. The
-shared 250 ms deadline bounds cleanup, including headers-only peers. This
-resolves the accidental use of the REST 256 KiB budget without weakening
-body admission or changing REST cleanup. `MCP-REFUSAL-CLEANUP` in
-`divergences.md` records the remaining Python connection-lifetime difference.
-The strict live comparator and committed goldens are unchanged.
+MCP admission uses the SDK's 4 MiB body limit. Since 2026-10-20 every
+refusal is answered at once; the shared cleanup then discards at most 8 MiB
+more within 250 ms, keeping the connection when the body ends, and otherwise
+closes after the answer through the listener's lingering close
+(`src/linger.rs`). An unread Expect body is never polled, and it and a
+declared length past the budget are answered with `Connection: close`.
+`MCP-REFUSAL-CLEANUP` in `divergences.md` records the change and the
+Windows measurements; the strict live comparator keeps two declared
+differences, `body_limit[4]` and `[5]` (`mcp_ci.py`).
 
 Initialization validates known client-capability object fields and the SDK's
 boolean spellings for `roots.listChanged`; unknown capability fields remain

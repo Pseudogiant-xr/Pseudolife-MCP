@@ -53,6 +53,52 @@ pins the names.)
   concurrency group with a pull request or a master push. No PR push can
   cancel a queue run, and a queue run cancels nothing.
 
+### The required Parity gate
+
+`Parity / ubuntu-latest` and `Parity / windows-latest` both need every
+`parity-checks` shard on both systems, so they gate only on work whose
+verdict a hosted runner decides deterministically. That means builds,
+nextest, harness self-tests, goldens and replays, and on Linux the live
+comparisons too. The `cli-live` suite holds the live Python-versus-Rust
+comparisons whose verdict also depends on sub-second timing and Windows
+socket resets on a cold shared runner. These are the CLI differential
+harness's live arms (the hook row's 250 ms health probe), and daemon body
+admission, security admission and MCP live parity (early refusals that
+Windows can turn into a reset). Linux runs `cli-live` under the gate. Hosted
+Windows runs it in `Parity live (non-gating) / windows-latest / cli-live`, on
+master pushes, the nightly and manual CI only. That job has
+`continue-on-error` and no job needs it, so it reports a Windows-only live
+divergence without blocking a merge or holding a pull request's checks open.
+
+### Parity shards on a pull request
+
+Master pushes, the nightly, manual CI and merge groups run every parity
+suite. Since 2026-10-21 a pull request from any branch but `integrate/*`
+skips the candidate build and the matrix unless it changes CI or dependency
+inputs (`docs/dev/merge-batches.md`, "What CI runs where"). Any other pull
+request runs only the suites its diff reaches, and never fewer
+than the floor: `eval`, `cli`, `cli-daemon`, `cli-live` and `h5-w1a`. The
+`cli` suite was split into those three shards. The scope job's
+`rust/ci/parity_scope.py` maps each changed file to suites:
+
+- A CLI row (`rust/cli_harness/rows/<row>`, its goldens or its spec), or
+  one command's code under `rust/shim/src/cli/`, reaches the shard that runs
+  that row. Shim code also reaches `judges`.
+- Other `rust/cli_harness` or `rust/shim` code reaches every CLI row's
+  shard. The `pseudolife-daemon` crate reaches its daemon suites.
+- Python tests, the Console bundle, other workflows and documentation add
+  nothing beyond the floor.
+- Anything the module cannot place, such as the Python oracle, the plugin,
+  ops, packaging, `rust/ci`, Cargo files or this workflow, runs every suite.
+
+A divergence in a suite a pull request skipped surfaces on the master push
+that merges it. Per pull request push, `rust.yml` used to run 32 jobs, 24 of
+them parity shards, against the account's 20-job cap. It now runs 17 for a
+floor-only change, about 21 for one CLI command's change, and 35 when every
+suite runs. The Windows critical path drops from about 85 minutes (`Rust`,
+then the 61-70 minute cli shard) to about 45 (`Rust`, then a 26-minute
+shard).
+
 The scope jobs diff from master's tip rather than `merge_group.base_sha`
 because GitHub does not formally define `base_sha`. It is either master's tip
 or the head of the queue entry ahead of this one. If it were the entry ahead,
@@ -99,6 +145,7 @@ would still merge. Before enabling the queue, add these jobs to the
 | `test-lite-windows` | CI | the change is Rust-only |
 | `test-lite-macos` | CI | the change is Rust-only |
 | `frontend` | CI | never |
+| `lock-resolve` | CI | never |
 | `Rust daemon / disposable image` | Rust shim | the change is documentation-only |
 
 A job skipped by its `if:` reports success, so requiring these never blocks
@@ -111,8 +158,9 @@ approval and green PR checks before it can be queued.
 `tests/test_ci_merge_queue.py` checks that every name in both tables is a real
 check.
 
-**Cost to watch.** Each queue entry is a full CI run, and `rust.yml` is
-about 32 jobs against the account's 20-concurrent-job cap. Four entries
+**Cost to watch.** Each queue entry is a full CI run, and `rust.yml` runs
+every parity suite for a merge group, 35 jobs against the account's
+20-concurrent-job cap. Four entries
 building at once share that cap, so a group's wall time grows with its size.
 These values are a starting point. After the first week, compare median
 open-to-merge time and the number of cancelled master `rust.yml` runs with
@@ -186,7 +234,8 @@ queue as on, not before:
   checklist, "CI before merge"). The queue's group run is the integrated check, provided
   every lane is a required check (see "Required checks" above). Without
   that, this rule must stay for the lanes the ruleset does not require. A PR
-  needs green CI on its own head before it is queued. It no longer needs to
+  needs its fast lanes (and no red check) on its own head before it is
+  queued, as it does to join a batch today. It no longer needs to
   be updated and rerun each time master moves.
 - **Disjoint merge-forward** (the `merge-forward` skill, section A). It exists to skip a fresh CI
   run after a master forward-merge. With the queue, nothing waits on that

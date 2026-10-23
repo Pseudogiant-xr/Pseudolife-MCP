@@ -37,11 +37,15 @@ the memory bank; procedures belong in a skill or doc this file points to.
    touched and dependent tests with the bench Postgres up, since a missing
    PostgreSQL or an unexpected skip is not a pass, and record the tested
    head, selected files, dependency reasoning and result in the PR.
-4. **CI before merge:** every PR needs passing CI (full PostgreSQL job,
-   lite Linux, Windows, macOS, required analysis) for its current head
-   integrated with current master; if master moved, update the branch and
-   wait for fresh CI, because rerunning an old job tests its old merge
-   commit. The only exceptions are in the `merge-forward` skill.
+4. **CI before merge:** a PR from any branch but `integrate/*` is never
+   merged directly but lands in an integration batch whose own passing CI,
+   on its head integrated with current master, is every member's CI,
+   because pushes to other branches run only the fast lanes (what runs
+   where, and the `merge-forward` skill's exceptions:
+   `docs/dev/merge-batches.md`).
+   A batch merges through `python ops/integrate.py merge`, which refuses
+   anything but a green batch at its built head, except a merge under the
+   `merge-forward` skill's exceptions, which the maintainer makes by hand.
    Independent review is still required, and the maintainer owns the merge.
    **Merge queue: CI ready, queue off** (2026-10-19): both workflows run on
    `merge_group`, but enabling GitHub's merge queue is a ruleset change only
@@ -49,13 +53,13 @@ the memory bank; procedures belong in a skill or doc this file points to.
    integration batches stand unchanged; `docs/specs/2026-10-19-merge-queue.md`
    lists the settings, the lanes to make required first, and which rules
    retire once the queue is on.
-5. **Rust-only PRs skip the Python suite lanes:** a PR touching `rust/`
-   whose other files are only `.github/workflows/rust.yml`, `CHANGELOG.md`
-   or `changelog.d/` fragments is gated by the Rust workflow (Rust and
-   Parity, both OSes) plus `guards`; CI's `scope` job skips `test` and the
-   lite lanes (they run if `scope` fails), and the full suite still runs on
-   every master push and nightly. Anything else, `evals/rust_port/`
-   included, runs the full suite.
+5. **Rust-only batches skip the Python suite lanes:** a batch whose files
+   are under `rust/` plus only `.github/workflows/rust.yml`, `CHANGELOG.md`
+   or `changelog.d/` fragments is gated by the Rust workflow (Rust, the
+   parity shards its diff reaches and the Parity gate, both OSes) plus
+   `guards`, with `test` and the lite lanes skipped, because the full suite
+   still runs on every master push and nightly (anything else,
+   `evals/rust_port/` included, runs the full suite).
 6. **Deploy only via `pseudolife-mcp update`** (backup → rollback tag →
    daemon-only `--no-deps` recreate → health → clients):
    - Release mode installs the newest published release;
@@ -207,14 +211,18 @@ current merge ref, except as the `merge-forward` skill allows):
   (plus doc guards if docs overlap). A hand-resolved code conflict always
   requires one.
 - **An integration batch** (`integrate/<date>-batch-N` from `python
-  ops/integrate.py build`, over reviewed `ready-to-batch` PRs green on their
-  own heads, when three or more are ready or about every 4 hours) passes
-  the local WSL full suite on its head before `ops/integrate.py open`
-  pushes it, because since #846 that costs less than one CI run; nothing
+  ops/integrate.py build`, over `ready-to-batch` PRs with their review,
+  their own local targeted validation and own-head CI that is not red,
+  built whenever none is open and one is ready, a lone PR or release cut
+  as a batch of one) passes the local WSL full
+  suite and the `rust/` harness run `build` prints on its head before
+  `ops/integrate.py open` pushes it, because since #846 that costs less
+  than one CI run and the suite never collects `rust/`; nothing
   is fixed inside a batch (a conflicting member, or the culprit a red
   batch's local bisection finds, is dropped with a comment), and the
   maintainer or the delegated session merges it with a merge commit, never
-  squash, so GitHub marks its members merged. Procedure:
+  squash, so GitHub marks its members merged (the command: item 4).
+  Procedure:
   `docs/dev/merge-batches.md`.
 - These suite-gate rules (the 2026-09-28 trial with its 2026-10-05
   amendments) are permanent by maintainer decision of 2026-10-19.
@@ -327,10 +335,9 @@ bank ("dev machines homelab"), never in the tree.
 - **A PR adding a test that runs on `windows-latest` and rests on process
   spawn/wait/kill, sockets or named pipes, file locks or atomic replace, or
   timeouts (a harness `run.py` scenario included) merges only after 20
-  clean hosted `windows-latest` runs of that test**, because the VM admits
-  what the runner then fails (#835: 0 of 525 on the VM, 3 of 5 hosted);
-  until the stress dispatch (issue #856) lands, the PR names that issue and
-  says the loop was not run, and the dispatch PR deletes this clause.
+  clean hosted `windows-latest` runs of that test** (the Rust workflow's
+  `mode=stress` dispatch), because the VM admits what the runner then
+  fails (#835: 0 of 525 on the VM, 3 of 5 hosted).
 - **Windows-sensitive Rust changes** (`cfg(windows)` / `windows-sys`,
   process spawn/wait/kill, sockets or named pipes, file locks or atomic
   replace, timeouts, Windows parity slices) build on the VM and run the

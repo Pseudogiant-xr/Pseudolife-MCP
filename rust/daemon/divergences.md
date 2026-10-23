@@ -37,7 +37,6 @@ tool's answers by value.
 | Tool | Body owner | Missing service prerequisite |
 |---|---|---|
 | `memory_recall` | W2-D | Recall orchestration and result composition are absent; graph expansion is deferred by decision (PARITY.md, "Graph traversal deferred by decision"). |
-| `memory_graph` | W2-D | GraphStore helpers exist, but graph service selection, caps and MCP projection do not; traversal remains deferred. |
 | `document_search` | W2-D | No reference-pool search service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
 | `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
@@ -53,7 +52,7 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_world_search`, `memory_lesson_search`, `memory_supersede`,
 `memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
 `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
-`memory_relation_define`, `memory_consolidate`, `memory_agents` and
+`memory_relation_define`, `memory_graph`, `memory_consolidate`, `memory_agents` and
 `memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
@@ -69,17 +68,25 @@ harness-gated store body, and W2-F supplies the REST board. Their presence
 does not register MCP tool bodies: their projections remain the
 prerequisites listed above. Bound identity is enforced on the mount (M18).
 
-**MCP-REFUSAL-CLEANUP:** MCP refusals use the shared counted reader with the
-MCP 4 MiB budget, not the REST 256 KiB budget. Fully drained in-budget bodies
-preserve the connection. An exhausted budget, failed read, 250 ms cleanup
-deadline, or unread `Expect: 100-continue` body closes the connection. The
-selected response may be delayed by that deadline, unlike Python's immediate
-response and subsequent discard. Over-budget frame overshoot retains the
-shared HTTP bound. The strict MCP comparator retains any resulting connection
-header or transport differences; they are not normalized away. The live
-corpus at `73c4220c5` retains five `body_limit` differences (indices 0, 2,
-3, 4 and 5), all the added `Connection: close` header on a 413; response
-statuses and bodies match, and all six body-limit probes complete.
+**MCP-REFUSAL-CLEANUP** (narrowed 2026-10-20): every refusal, REST, hook
+or MCP, is answered at once, as uvicorn answers it. The rest of the body is
+then discarded, at most 8 MiB more (twice the largest admitted body) within
+250 ms; a body read to its end keeps the connection, as Python's does. An
+unread `Expect: 100-continue` body (never polled, so Hyper sends no interim
+100) or a declared `Content-Length` past that budget is not read, and that
+answer carries `Connection: close`, so no client pools a connection about to
+close; Python keeps both open and discards without a limit. A connection
+that closes (those two, a budget or deadline cut, a failed read) goes
+through the listener's lingering close (`src/linger.rs`): FIN after the
+answer, then discard until the client closes, 250 ms pass with nothing
+arriving, or 2 s pass. Before this the daemon closed with request bytes
+unread, its stack sent RST, and Windows clients discarded the answer they
+had already received: a read-after-send probe on Windows 11 lost 34 of 2000
+refusals idle and 117 of 2000 under 15 CPU burners, against 0 of 3800 for
+Python. The strict MCP corpus keeps two `body_limit` differences (indices 4
+and 5, GETs declaring 9999999 bytes: the added `Connection: close` on the
+413); `mcp_ci.py` declares exactly those. Indices 0, 2 and 3, which used to
+differ the same way, now match.
 
 **MCP-TOKENLESS-GUARD:** the Host/Origin helper exists inside the transport,
 but the production tokenless mount still returns 501 before reaching it.
@@ -165,7 +172,7 @@ binding"). What it cannot or does not reproduce:
 |---|---|---|
 | Noncanonical static drive-relative requests and lexical escapes through linked roots | captured oracle observations | `lexical-outside-root`: 403 before filesystem access, exact refusal headers/body; shipped Console asset paths are unchanged |
 | Windows nonempty dot/space-only segments except `.` and `..`, including `. ` and all-space segments | captured path-dependent refusal/fallback observations | `parent-space-refusal`: exact 403 before filesystem access; outside the shipped asset URLs |
-| HTTP-BODY-LIMITS: cap enforced at frame granularity | uvicorn sends the selected early response immediately, keeps the connection alive when permitted and discards unread body data after the response | Rust waits for bounded cleanup before replying (up to 250 ms; early Expect refusals skip polling), then sends Connection: close whenever REST/hook cleanup was needed, including complete drains; MCP preserves fully drained in-budget connections as described above; polling stops at the route budget or failure, with one in-flight frame and Hyper's final drop poll able to overshoot; a slow in-cap body can exceed the deliberate deadline |
+| HTTP-BODY-LIMITS: cap enforced at frame granularity | uvicorn sends the selected early response immediately, keeps the connection alive when permitted and discards unread body data after the response | Rust also answers at once and discards afterwards, but for at most 8 MiB more within 250 ms; a body read to its end keeps the connection, otherwise it closes after the answer through the lingering close, and an unread Expect body or a declared length past the budget is announced with `Connection: close` (MCP-REFUSAL-CLEANUP above). Polling stops at the discard budget or a failed read, with one in-flight frame and Hyper's final drop poll able to overshoot; a slow body can outlast the deliberate deadline |
 | Malformed or non-object SessionEnd bodies | becomes an empty object and returns 200 `{ok:true}` with no writes | deliberately returns 400 `invalid_json`: never acknowledge a close that did not happen; non-object SessionEnd bodies also use `invalid_json`, while other REST routes use `body_must_be_object`; empty bodies and valid objects retain their handling. The four HTTP-BODY-LIMITS scenarios now contain 132 live/golden cases, including 16 invalid SessionEnd probes. |
 | Noncanonical JSON bodies with `NaN`/`Infinity`, lone surrogate escapes, or nesting past serde's 128 levels | accepted (or a 500 past ~1000 levels); a truthy SessionEnd ID may enter its mutation handler | REST and SessionEnd return 400 `invalid_json`, preserving the native strict JSON domain; the HTTP-BODY-LIMITS corpus includes fixed/chunked `{"session_id": NaN}` probes whose Python replies are 200 `{ok:true}` with unchanged disposable bank state; outside shipped canonical SessionEnd producers |
 | Static types for extensions outside the Console build | platform `mimetypes` tables | `application/octet-stream` for unknown extensions; the shipped vendor Markdown notice uses its platform type |
@@ -177,14 +184,14 @@ binding"). What it cannot or does not reproduce:
 |---|---|---|---|
 | Graph identity Unicode version | runtime Unicode tables (3.11 uses Unicode 14; newer Python images may differ) | pinned Python 3.11 Unicode 14 lowercase and final-sigma context, verified exhaustively | W3-H; revisit when the oracle runtime changes |
 | Colliding inverse provenance | base-set iteration can select different source relation names for the same inverse triple depending on hash seed | choose the lexicographically smallest asserted source relation; exact triple and valid provenance membership are checked, with smallest-source choice pinned | W3-H; declared deterministic choice; all other provenance exact |
-| Whole graph caps, communities, graph service/MCP wiring, fact projection, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | store and GraphStore read-model helpers; these services are not wired (the four write tools are served: see "The graph store's write tools" below) | W3-H, subsequent increments |
+| Whole graph caps, communities, graph service/MCP wiring, fact projection, proposals, review judges/audit and deep dream graph pass | served graph and review behavior | store and GraphStore read-model helpers; these services are not wired (the four write tools and `memory_graph` are served: see "The graph store's write tools" and "memory_graph" below) | W3-H, subsequent increments |
 
 ## W2-D: GET /api/search
 
 | Item | Python | Rust | Why / owner |
 |---|---|---|---|
 | Reference pool (Chroma documents from `document_ingest`, `ref_top_k` 3) | queried on every search once `<data_dir>/chromadb` holds a store | never queried: no reference hits, no `reference` components | the store is a private chromadb 1.5.9 on-disk format (HNSW segments); delegate ruling 2026-10-09: declared, harness banks hold no documents. `document_search` is declared with it. |
-| **Cutover blocker:** reference store | Chroma on-disk format | none | needs v56 document table (Python change in flight; maintainer decision 2026-10-09: documents move to a pgvector table with exact cosine search); W2-D then ports the reference pool and `document_search` against it |
+| **Cutover blocker:** reference store | Chroma on-disk format | none | needs a Python document table at a future schema version (maintainer decision 2026-10-09: documents move to a pgvector table with exact cosine search; schema v56 shipped judge votes instead (#807), and no Python document-table PR is open as of 2026-10-19); W2-D then ports the reference pool and `document_search` against it |
 | Cross-encoder model | `memory.reranker.model_name` from the Hugging Face cache, lazily | the ONNX export in `PSEUDOLIFE_DAEMON_RERANK_DIR` (same checkpoint; `model_name` is only logged) | model packaging is cutover work (W3-J); parity of the export is proven by `harness/w2d_rerank_check.py` |
 | Retrieval-event session and episode | resolved from the resident active-session pointer and episode tree | read from `meta.active_session_pointer` and `episodes` per search (same values) | W2-E owns the resident resolver; the call sites switch when it lands |
 | `entries.access_count` persistence | resident counts written on the save cadence | resident counts only | W2-E (autosave) |
@@ -226,8 +233,8 @@ existing gates. The route inventory is `harness/goldens/routes.json`.
 | `w2d-model-provisioning` | Default automatic embedding and reranker artifact provisioning | Existing local ONNX graphs are required. The embedding override must contain the configured Qwen/MiniLM layout; the reranker override must be the configured cross-encoder checkpoint. W3-J owns installation/provisioning. No claim is made for arbitrary exported checkpoints. |
 | `w2d-query-cache-lifetime` | Multiple configured embedders in one process | The inherited outer query cache is process-global and keys raw query text; it is valid only for the daemon's single immutable service/model configuration. Per-embedder caching also remains. Hot model replacement or multiple service instances require cache ownership changes before support. |
 
-`no reference hits` remains the separate v56 dependency above: the Python
-Postgres document migration has not landed and no schema change is included.
+`no reference hits` remains the separate document-table dependency above: the
+Python Postgres document migration has not landed and no schema change is included.
 The typed cortex loader uses the live embedder dimension, while the shared
 startup and PostgreSQL schema guards still refuse incompatible banks; this
 is not authorization to migrate vectors or change the schema dimension.
@@ -356,6 +363,13 @@ of its own.
 | Several current facts owning one slot key (the slot-key fold) | `LIMIT 1` with no order | the same statement | declared free: both read one unordered row |
 | `POST /api/graph/relate` and `/api/graph/unrelate` (the Console's graph editor) | served over the same service bodies | not served | the Console REST rows (PARITY.md); the bodies are shared when they are |
 | File mode (`graph_requires_postgres`) | answered when no database is configured | not reachable: the daemon is PostgreSQL-only | the PostgreSQL-only rows above |
+
+### memory_graph (2026-10-19)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| The order of the inverse-derived edges that mirror asserted edges | `derive_edges` walks its inverse rule over a set of `(src, relation, dst)` tuples, so their order follows the per-process string hash | ordered by their source edge's relation, source and target (the read model's rule) | the "Colliding inverse provenance" row above: the harness compares them as a multiset in their slots. Asserted edges, transitive edges and the mirrors of transitive edges keep their exact order; an inverse edge only mirrors a pair already in the adjacency, so paths do not depend on it |
+| `GET /api/graph` (the Console's whole graph with `scope` and the `max_nodes` hub cap) | served over `_whole_graph` | not served; the MCP tool's whole graph (no scope, no cap) is | the Console REST rows (PARITY.md) |
 
 ## Coordination board completion (W2-F)
 
