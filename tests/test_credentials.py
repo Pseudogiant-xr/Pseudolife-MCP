@@ -442,10 +442,37 @@ def _file_owner_sid(path: Path) -> str:
 
 
 def _modify_only_folder(tmp_path: Path, sid: str) -> Path:
+    """A folder whose whole access list is one inheritable Modify entry for
+    the user. Set exactly, not with `icacls /inheritance:r /grant:r`: that
+    keeps a folder's explicit entries, and on GitHub's runner pytest's temp
+    folders carry explicit SYSTEM and Administrators full-control entries, so
+    an elevated runner token kept full control there (measured 2026-10-23,
+    batch #898 and a diagnostic stress run)."""
+    import ctypes
+    from ctypes import wintypes
+
     folder = tmp_path / "modify-only"
     folder.mkdir()
-    subprocess.run(["icacls", str(folder), "/inheritance:r", "/grant:r", f"*{sid}:(OI)(CI)M"],
-                   check=True, capture_output=True, timeout=60)
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(wintypes.DWORD)]
+    advapi.SetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    descriptor = ctypes.c_void_p()
+    # Modify (icacls M) = 0x1301bf; object and container inherit; protected.
+    assert advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        f"D:P(A;OICI;0x1301bf;;;{sid})", 1, ctypes.byref(descriptor), None)
+    try:
+        # DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
+        assert advapi.SetFileSecurityW(str(folder), 0x80000004, descriptor), ctypes.get_last_error()
+    finally:
+        kernel.LocalFree(descriptor)
+    listing = subprocess.run(["icacls", str(folder)], capture_output=True, text=True,
+                             timeout=60).stdout
+    entries = [line for line in listing.splitlines() if ":(" in line]
+    assert len(entries) == 1 and "(OI)(CI)(M)" in entries[0], listing
     return folder
 
 
@@ -456,11 +483,13 @@ def test_a_token_file_in_a_modify_only_folder_is_owner_only_whenever_the_token_a
     """A secondary drive often grants users Modify, not Full Control, so no
     WRITE_OWNER even on a file the user just created (2026-10-23, a
     `register_claude_desktop.py --token-file` on such a drive refused with
-    "permissions could not be protected"). Measured 2026-10-23 on the Windows
-    dev VM over SSH (elevated, SeTakeOwnership and SeRestore enabled) and
-    matched by the hosted runner: a new file is owned by Administrators;
-    replacing that owner succeeds with SeTakeOwnership enabled (SeRestore
-    alone does not suffice) and fails with error 5 without it. So the write
+    "permissions could not be protected"). Measured 2026-10-23: on an
+    elevated token a new file is owned by Administrators; replacing that
+    owner succeeds with SeTakeOwnership enabled (SeRestore alone does not
+    suffice) and fails with error 5 without it. The Windows dev VM's SSH
+    token has SeTakeOwnership enabled; GitHub's runner token holds it
+    disabled (enabled there: SeDebug, SeChangeNotify, SeImpersonate,
+    SeCreateGlobal), so the two take opposite branches here. So the write
     must end owner-only and user-owned when this token's files are already
     the user's (the access list alone is set) or SeTakeOwnership is enabled
     (the owner is replaced), and refuse, naming the error and the fix,
