@@ -275,3 +275,21 @@ rule (CLAUDE.md, "Shipping checklist" item 4): a batch merges through
 
 The maintainer runs it, or the session the maintainer delegated merging
 to.
+
+## Measuring batches
+
+`ops/batch_timeline.py` reports where each batch's time went, from GitHub's
+own record and without writing to it:
+
+```bash
+python ops/batch_timeline.py collect --since 2026-10-19 --out batches.json
+python ops/batch_timeline.py report batches.json --cutoff 2026-10-21T06:45:04Z
+```
+
+`report` works offline. It splits each member's wait (opened to the label,
+then to its first batch build) and each batch's time: build, local
+validation, the CI first pass along its critical path (runner wait against
+execution) and failure repair (reruns). It also flags reruns, drops and
+rebuilt batches. GitHub records no review event here, so review time stays
+inside "awaiting admission". The first measurement is in
+`evals/results/batch-lifecycle-20261023/`.
