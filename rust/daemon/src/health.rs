@@ -225,8 +225,28 @@ fn extractor(config: &Config) -> &'static str {
     }
 }
 
+/// `readiness.pending`: the unfinished startup stages, in `STAGES` order.
+/// `init`: the stores are published and the clock reseeded (`startup`, its
+/// flag read live). `principals`: the stored-principal view has completed a
+/// read; loaded once stays loaded, as a later stale view is a per-request
+/// refusal, not an unfinished startup.
+pub fn pending(
+    startup: Option<&crate::startup::StartupState>,
+    principals_loaded: bool,
+) -> Vec<&'static str> {
+    let initialized = startup.is_some_and(|s| !s.clock_state().hlc_reseed_pending);
+    let mut out = Vec::new();
+    if !initialized {
+        out.push("init");
+    }
+    if !principals_loaded {
+        out.push("principals");
+    }
+    out
+}
+
 /// `_build_health_payload`, in Python's key order.
-pub async fn payload(svc: &Service) -> Value {
+pub async fn payload(svc: &Service, principals: &crate::auth::PrincipalStore) -> Value {
     let mut p = Map::new();
     p.insert("status".into(), json!("ok"));
     p.insert("version".into(), json!(env!("CARGO_PKG_VERSION")));
@@ -304,6 +324,11 @@ pub async fn payload(svc: &Service) -> Value {
     if let Some(b) = last_backup(&svc.data_dir) {
         p.insert("last_backup".into(), b);
     }
+    // `readiness`: never changes `status`; last, once `status` is final.
+    let pending = pending(snap.startup.as_deref(), principals.loaded());
+    let ready = p["status"] == "ok" && pending.is_empty();
+    p.insert("ready".into(), json!(ready));
+    p.insert("pending".into(), json!(pending));
     Value::Object(p)
 }
 
@@ -321,10 +346,49 @@ mod tests {
             String::new(),
             false,
         );
+        let principals = crate::auth::PrincipalStore::new();
+        let p = payload(&service, &principals).await;
         assert_eq!(
-            payload(&service).await["schema"],
+            p["schema"],
             json!(crate::storage::schema::SCHEMA_META_VERSION)
         );
+        // Never initialized, and no principal read: not ready, status untouched.
+        assert_eq!(
+            (
+                p["status"].clone(),
+                p["ready"].clone(),
+                p["pending"].clone()
+            ),
+            (json!("ok"), json!(false), json!(["init", "principals"]))
+        );
+        let keys: Vec<&String> = p.as_object().unwrap().keys().collect();
+        assert_eq!(keys[keys.len() - 2..], ["ready", "pending"]);
+    }
+
+    #[test]
+    fn a_principal_store_is_loaded_after_its_first_read_even_when_stale() {
+        let store = crate::auth::PrincipalStore::new();
+        assert!(!store.loaded());
+        let long_ago = std::time::Instant::now()
+            .checked_sub(crate::auth::STALE_AFTER + std::time::Duration::from_secs(1))
+            .expect("monotonic clock far enough from its origin");
+        store.refresh(Vec::new(), None, &[], long_ago);
+        assert!(store.loaded() && !store.available());
+    }
+
+    #[test]
+    fn pending_names_each_unfinished_stage_in_order() {
+        let done = crate::startup::StartupState::for_test(false);
+        let reseeding = crate::startup::StartupState::for_test(true);
+        assert!(pending(Some(&done), true).is_empty());
+        assert_eq!(pending(None, true), ["init"], "initialization pending");
+        assert_eq!(
+            pending(Some(&reseeding), true),
+            ["init"],
+            "clock reseed pending"
+        );
+        assert_eq!(pending(Some(&done), false), ["principals"]);
+        assert_eq!(pending(None, false), ["init", "principals"]);
     }
 
     fn dir(name: &str) -> std::path::PathBuf {

@@ -34,6 +34,7 @@ import shutil
 import socket
 import sys
 import time
+import traceback
 import urllib.parse
 from pathlib import Path
 
@@ -47,6 +48,7 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "embedding":
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable as pg  # noqa: E402
+from mcp_wire import send_while_reading  # noqa: E402
 
 GOLDENS = HERE / "goldens"
 HEADERS_COMPARED = ("content-type", "cache-control", "location", "content-security-policy",
@@ -81,14 +83,23 @@ T_COLON = "tok:with:colons-0003"
 
 # ---- HTTP ---------------------------------------------------------------------------
 
-# A daemon that refuses before reading a request body closes with it unread,
-# so its stack answers the rest with RST, and Windows discards a received
-# response when that RST lands before the read: an immediate 403 to a 256 KiB
-# POST was lost to WinError 10053/10054 in 120 of 200 calls on an idle
-# Windows 11 host (2026-10-18); hosted runs 39033993990 and 39088038765 failed
-# security-open on it. Other hosts keep received data readable, so there a
-# reset without a response is the daemon's own fault and is never replayed.
+# Windows discards a received response when the daemon's reset lands before
+# it is read. _exchange keeps a receive waiting while it sends a body, which
+# catches nearly all of them, but not all: under full CPU load on the Windows
+# dev VM, 68 of 3000 refusals decided on the headers were still lost, and 2
+# of 3000 decided after reading a 4 MiB body (2026-10-19, #830). Against the
+# fake server of test_body_cases the body-decided loss was 1 in 1200 idle and
+# 1 and 6 in 1200 under load there, and hosted run 39253550659 lost 2 in at
+# most 50 calls, each on the reader's first read (2026-10-20). Replaying the
+# request headers-only recovers the first kind; the second waits for a body
+# the replay never sends and fails the case, so the Windows parity step keeps
+# a small exposure to it. Hosted runs 39033993990 and 39088038765 failed
+# security-open on the first kind before any receive was waiting. Other
+# hosts keep received data readable, so there a reset without a response is
+# the daemon's own fault and is never replayed.
 HOST_DISCARDS_ON_RESET = os.name == "nt"
+# How a send ends when the daemon refuses before reading all of the body.
+CUT_OFF_BY_REFUSAL = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
 def call(port: int, method: str, path: str, headers=(), body: bytes | None = None,
@@ -127,17 +138,44 @@ def _exchange(port: int, method: str, path: str, headers, body: bytes | None, *,
                  skip_accept_encoding=True)
     for k, v in headers:
         c.putheader(k, v)
-    if body is not None:
-        c.putheader("Transfer-Encoding", "chunked") if chunked else c.putheader("Content-Length", str(len(body)))
+    data = body
+    if body is not None and chunked:
+        c.putheader("Transfer-Encoding", "chunked")
+        width = max(1, (len(body) + 3) // 4)
+        data = (body[i:i + width] for i in range(0, len(body), width))
+    elif body is not None:
+        c.putheader("Content-Length", str(len(body)))
+    if body and not headers_only:
+        # A daemon that refuses a body and closes with the rest of it unread
+        # makes its stack reset the connection, and Windows discards a
+        # received response the reset overtakes before it is read. The Rust
+        # daemon did so until #860 (it now discards the rest and closes by
+        # lingering; the Python daemon never did), and this harness also
+        # drives fixture servers that still do. Read after the send,
+        # 1024 of 2000 refusals were lost on a Windows 11 host (2026-10-19):
+        # 882 of 1000 decided on the headers, 142 of 1000 after reading a
+        # 4 MiB body, chunked or not. A receive already waiting before the
+        # body is sent, as mcp_wire posts it, lost 0 of 2000 there (#830);
+        # elsewhere a small residual remains (HOST_DISCARDS_ON_RESET). A send
+        # cut off by the refusal is not an error when the response is
+        # complete; with no complete response the read's error is raised,
+        # for call() to judge. Any other send failure, such as a timeout
+        # because the daemon answered early but never read the body, still
+        # fails the case.
+        try:
+            r, raw, send_exc = send_while_reading(c, method, data, encode_chunked=chunked)
+            if send_exc is not None and not isinstance(send_exc, CUT_OFF_BY_REFUSAL):
+                raise send_exc
+        except Exception:
+            c.close()
+            raise
+        return _response(c, r, raw, path, started_at, compare_length, body_bytes)
     try:
         if headers_only:
             c.endheaders()
-        elif chunked and body is not None:
-            width = max(1, (len(body) + 3) // 4)
-            c.endheaders((body[i:i + width] for i in range(0, len(body), width)), encode_chunked=True)
         else:
-            c.endheaders(body)
-    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            c.endheaders(data, encode_chunked=chunked)
+    except CUT_OFF_BY_REFUSAL:
         # A server can send its refusal before the request finishes. Read
         # that response; a missing or failed response remains a case error.
         pass
@@ -163,6 +201,11 @@ def _exchange(port: int, method: str, path: str, headers, body: bytes | None, *,
     except Exception:
         c.close()
         raise
+    return _response(c, r, raw, path, started_at, compare_length, body_bytes)
+
+
+def _response(c, r, raw: bytes, path: str, started_at: float, compare_length: bool,
+              body_bytes: bool) -> dict:
     hdrs = {k.lower(): v for k, v in r.getheaders() if k.lower() in HEADERS_COMPARED
             or (compare_length and k.lower() == "content-length")}
     ctype = hdrs.get("content-type", "")
@@ -436,17 +479,20 @@ def diff_values(a, b, path="") -> list[str]:
 
 class Scenario:
     name = ""
+    case_in_flight: str | None = None  # named by a scenario error
     config_yaml: str | None = None
     env: dict[str, str] = {}
     seeds_principals = False
     seed_entries = False
     settle = True          # wait until both report db + embedder
     snapshot_settle = True  # early HTTP witnesses still wait before measuring bank state
-    # Wait for the stored-principal view before the cases: required when a
-    # case's bearer matches no environment token on a reachable bank. The
-    # readiness settle does not imply it (its search uses an environment
-    # token), and a failed first read retries only after REFRESH_EVERY.
-    principals_settle = False
+    # What Daemon.start waits for before any case (pseudolife_memory/
+    # readiness.py): None is /health `ready: true` (initialized, stored
+    # principals loaded). A daemon that never becomes ready by design waits
+    # for the stages it can still finish, so /health `pending` is the same
+    # in every run: ("principals",) on a reachable bank whose init is
+    # refused or blocked, () (the first HTTP answer) on an unreachable one.
+    start_stages: tuple[str, ...] | None = None
     hold_lease = False     # take each bank's writer lease before the daemons start
     unreachable_database = False  # HTTP-only cases never initialize storage/models
     loopback_bind_fixture = False
@@ -580,7 +626,6 @@ class Tokens(Scenario):
     (one paired, one revoked) written by Python's principal store."""
     name = "tokens"
     seeds_principals = True
-    principals_settle = True  # several cases' bearers resolve through the stored view
 
     def __init__(self):
         self.env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT,
@@ -773,6 +818,7 @@ class DbDown(Scenario):
     and the stored-principal view never loads."""
     name = "db-down"
     settle = False
+    start_stages = ()  # no database: never initializes, principals never load
     unreachable_database = True
 
     def __init__(self):
@@ -796,6 +842,7 @@ class LeaseHeld(Scenario):
     503, the backoff refusal on a call, then recovery once released."""
     name = "lease-held"
     settle = False
+    start_stages = ("principals",)  # the held lease keeps init not_ready until the timeline releases it
     hold_lease = True
 
     def __init__(self):
@@ -829,6 +876,7 @@ class Reaper(Scenario):
     init retry recovers them (PSEUDOLIFE_SESSION_REAP_SECONDS=5)."""
     name = "reaper"
     settle = False
+    start_stages = ("principals",)  # the held lease outlasts both warmups
     hold_lease = True
 
     def __init__(self):
@@ -876,6 +924,7 @@ class DimMismatch(Scenario):
     """entries.embedding is vector(384): init_refusal before any DDL."""
     name = "dim-mismatch"
     settle = False
+    start_stages = ("principals",)  # init_refusal: never initializes
     snapshot_settle = False  # schema refusal never reaches healthy initialization
     golden_replay = True  # the timeline only waits; its cases replay against the golden
 
@@ -910,6 +959,7 @@ class StampedBank(Scenario):
     """Future schema: Python downgrades; Rust deliberately refuses unchanged."""
     name = "stamped"
     settle = False
+    start_stages = ("principals",)  # Rust refuses the future schema
     snapshot_settle = False  # timeline settles Python and observes Rust's schema refusal
 
     def prepare_template(self, dsn: str) -> None:
@@ -1151,6 +1201,7 @@ class NullEmbedding(Scenario):
     """A stored row with a NULL vector: hydration fails, not_ready, backoff."""
     name = "null-embedding"
     settle = False
+    start_stages = ("principals",)  # hydration fails: not_ready
     snapshot_settle = False  # timeline observes failed hydration, not a healthy bank
 
     def prepare_template(self, dsn: str) -> None:
@@ -1177,6 +1228,7 @@ class UnconstrainedDims(Scenario):
     guard passes, the hydrated-dimension guard refuses (init_refusal)."""
     name = "unconstrained-dims"
     settle = False
+    start_stages = ("principals",)  # init_refusal: never initializes
     snapshot_settle = False  # timeline observes the hydrated-dimension refusal
 
     def prepare_template(self, dsn: str) -> None:
@@ -1237,9 +1289,6 @@ class Encodings(Scenario):
     name = "encodings"
     config_yaml = "coordination:\n  allowed_principals: [alice]\n"
     settle = False
-    # "matching nothing" reaches the stored-principal view; before its first
-    # read both daemons answer principals_unavailable instead of unauthorized.
-    principals_settle = True
 
     def __init__(self):
         # The singular token is UTF-8 "caf\u00e9" read as latin-1; the map's is "caf\u00e9".
@@ -1296,6 +1345,7 @@ class StaticBuild(Scenario):
     """Every file in the committed Console build, with no storage/model dependency."""
     name = "static-build"
     settle = False
+    start_stages = ()  # no database: never initializes
     unreachable_database = True
     read_only_bank = True
     env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
@@ -1465,6 +1515,7 @@ class StaticRootLink(StaticPaths):
 class BodyLimits(Scenario):
     name = "body-limits"
     settle = False
+    start_stages = ()  # no database: never initializes
     unreachable_database = True
     read_only_bank = True
     env = {"PSEUDOLIFE_MCP_TOKEN": T_DEFAULT}
@@ -1502,6 +1553,7 @@ class BodyPairBudget(BodyLimits):
 class SecurityOpen(Scenario):
     name = "security-open"
     settle = False
+    start_stages = ()  # no database: never initializes
     unreachable_database = True
     read_only_bank = True
 
@@ -1633,46 +1685,22 @@ def wait_settled(ports: list[int], timeout: float = 600.0, token: str | None = N
         raise RuntimeError(f"daemons on {sorted(pending)} did not settle within {timeout}s")
 
 
-PRINCIPAL_PROBE = b"Bearer pl-harness-principal-probe"
+def scenario_error(exc: BaseException, scn: Scenario) -> str:
+    """The exception, with the case in flight and the deepest harness line it passed through.
 
-
-def principals_ready(port: int) -> bool:
-    """The stored-principal view has loaded: a bearer no token matches is
-    refused 401, not 503 ``principals_unavailable``. Both daemons start the
-    refresher in the background (``PrincipalRefresher.start``, Rust
-    ``principals::spawn_refresher``), so requests can arrive before its first
-    read. The refusal comes before any handler, so the probe writes nothing;
-    any other answer (an open daemon would run the search) is a scenario
-    misconfiguration and raises."""
-    try:
-        r = call(port, "GET", "/api/search?q=", [("Authorization", PRINCIPAL_PROBE)], timeout=30)
-    except OSError:
-        return False
-    error = (r.get("json") or {}).get("error")
-    if r["status"] == 503 and error == "principals_unavailable":
-        return False
-    if r["status"] == 401 and error == "unauthorized":
-        return True
-    raise RuntimeError(f"principal probe on {port}: expected 401 or 503 principals_unavailable, "
-                       f"got {r['status']} {error!r}")
-
-
-def wait_principals(ports: list[int], timeout: float = 60.0) -> None:
-    deadline = time.monotonic() + timeout
-    pending = set(ports)
-    while pending and time.monotonic() < deadline:
-        pending = {p for p in pending if not principals_ready(p)}
-        if pending:
-            time.sleep(0.2)
-    if pending:
-        raise RuntimeError(f"stored principals on {sorted(pending)} did not load within {timeout}s")
+    A Windows dev VM golden run failed once on a bare "TimeoutError: [WinError
+    10060]" that named neither (#830)."""
+    where = [f"case {scn.case_in_flight!r}"] if scn.case_in_flight else []
+    frames = [f for f in traceback.extract_tb(exc.__traceback__)
+              if Path(f.filename).is_absolute() and Path(f.filename).resolve().parent == HERE]
+    if frames:
+        where.append(f"at {Path(frames[-1].filename).name}:{frames[-1].lineno} in {frames[-1].name}")
+    return f"{type(exc).__name__}: {exc}" + (f" ({'; '.join(where)})" if where else "")
 
 
 def settle_before_cases(scn: Scenario, ports: list[int]) -> None:
     if scn.settle:
         wait_settled(ports, token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"), check_db=not scn.settle_with_search)
-    if scn.principals_settle:
-        wait_principals(ports)
 
 
 def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) -> dict:
@@ -1823,8 +1851,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         procs["rust"] = daemons.rust_daemon(binary, home, daemons.free_port(),
                                             daemons.base_env(home, rust_env(env)))
         scn.configure_daemons(procs)
-        for d in procs.values():
-            d.start(240)
+        daemons.start_all(procs, 240, stages=scn.start_stages)
         settle_before_cases(scn, [d.port for d in procs.values()])
         rows = []
         golden_name = scn.name
@@ -1833,6 +1860,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         golden = load_golden(golden_name) if mode == "golden" else None
         cases = scn.timeline(procs, holders) or scn.cases()
         for i, c in enumerate(cases):
+            scn.case_in_flight = c["name"]
             if c.get("_answers"):
                 py_r, rs_r = c["_answers"]
                 if py_r is None and mode == "golden":
@@ -1855,6 +1883,8 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
             rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
+            # A generator timeline runs its next steps before the next case.
+            scn.case_in_flight = None
         if not scn.settle and scn.snapshot_settle and not scn.unreachable_database:
             from pseudolife_memory.principals import env_auth
             mapped, singular = env_auth(scn.env)
@@ -2119,7 +2149,7 @@ def main() -> int:
             except Exception as exc:  # a scenario that cannot complete is a failure, never a pass
                 answered = [compare_case(c, *c["_answers"]) for c in getattr(scn, "partial", [])]
                 r = {"scenario": n, "cases": answered + [{"case": "scenario error",
-                                                          "diffs": [f"{type(exc).__name__}: {exc}"],
+                                                          "diffs": [scenario_error(exc, scn)],
                                                           "declared": None}],
                      "db_diffs": [], "declared_db_writes": {}}
                 for name in pg.existing():

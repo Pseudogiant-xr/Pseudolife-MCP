@@ -40,6 +40,7 @@ class _Fixture:
         self.block_initialize = False
         self.initialize_blocked = Event()
         self.release_initialize = Event()
+        self.release_stall = Event()
         self.writes = 0
         self.server: _ReusableHTTPServer | None = None
         self.worker: Thread | None = None
@@ -134,7 +135,9 @@ class _Fixture:
                         })
                         return
                     if fault == "stall":
-                        time.sleep(0.5)
+                        # Held until the test releases it, so the call can
+                        # only end through the shim's deadline.
+                        owner.release_stall.wait(timeout=30)
                     if fault == "principals_503":
                         # The daemon's HTTP gate refusing an unresolvable
                         # bearer, byte for byte (web/api.py _send_json).
@@ -394,7 +397,10 @@ def _replace_token(path: Path, token: str) -> None:
 @asynccontextmanager
 async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
                         *, operation_timeout: float = 1.0, agent_headers: dict | None = None,
-                        prepare_delay: float = 0, coordination_refusal: str = ""):
+                        prepare_gate: Path | None = None, coordination_refusal: str = ""):
+    """``prepare_gate``: file claim preparation writes ``<gate>.started``,
+    then is held until the test creates ``<gate>`` (an ordering the test
+    controls, where a fixed delay would race the shim's deadline)."""
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -404,14 +410,23 @@ async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
         "PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS": str(operation_timeout),
     }
     env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+    held = (
+        "import pathlib, time\n"
+        "from pseudolife_memory import repository_claims\n"
+        f"_gate = pathlib.Path({str(prepare_gate)!r})\n"
+        "def _held(name, args):\n"
+        "    _gate.with_name(_gate.name + '.started').write_text('started')\n"
+        "    end = time.monotonic() + 30\n"
+        "    while not _gate.exists() and time.monotonic() < end:\n"
+        "        time.sleep(0.005)\n"
+        "    return {'action': 'claim', 'repository_id': 'a' * 64, 'path': 'file.py'}\n"
+        "repository_claims.prepare_claim_arguments = _held\n"
+    )
     code = (
         "import asyncio,json,sys; "
         "from pseudolife_memory.credentials import CredentialProvider; "
-        "from pseudolife_memory.shim import _proxy; "
-        + ("import time; from pseudolife_memory import repository_claims; "
-           "repository_claims.prepare_claim_arguments=lambda name,args: "
-           f"(time.sleep({prepare_delay}),{{'action':'claim','repository_id':'a'*64,'path':'file.py'}})[1]; "
-           if prepare_delay else "") +
+        "from pseudolife_memory.shim import _proxy\n"
+        + (held if prepare_gate else "") +
         "asyncio.run(_proxy(sys.argv[1],None,'fixture-session',"
         "provider=CredentialProvider.from_environment(),agent_headers=json.loads(sys.argv[2]),"
         "coordination_refusal=sys.argv[3]))"
@@ -494,45 +509,62 @@ def test_file_claim_preparation_uses_total_deadline_and_next_call_recovers(tmp_p
     token_file = tmp_path / "token"
     _replace_token(token_file, NEW_TOKEN)
 
+    gate = tmp_path / "prepare.release"
+
     async def drive():
+        # Preparation is held until released, so the answer can only come
+        # from the total deadline: an ordering check, where an elapsed-time
+        # bound (and a 0.15 s deadline the recovering call shared) raced a
+        # stalled runner.
         async with _proxy_client(upstream, token_file, tmp_path / "stderr.log",
-                                 operation_timeout=0.15, prepare_delay=1) as client:
-            started = time.monotonic()
+                                 operation_timeout=2, prepare_gate=gate) as client:
             with pytest.raises(Exception) as caught:
                 await client.call_tool("memory_agents", {
                     "action": "claim", "worktree": str(tmp_path), "path": "file.py"})
-            assert time.monotonic() - started < 0.7
+            assert (tmp_path / "prepare.release.started").exists()
             assert _error_data(caught.value) == {
                 "classification": "timeout", "phase": "initialize",
                 "operation_outcome": "not_dispatched"}
+            # A preparation that outlived its deadline must still not dispatch.
+            gate.write_text("release")
             recovered = await client.call_tool("read", {})
             assert not recovered.is_error
             await asyncio.sleep(1.1)
             assert not any(params.get("name") == "memory_agents" for method, _, params
                            in upstream.requests if method == "tools/call")
 
-    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+    # A hang guard only: the held fixture and the 2 s deadline decide.
+    asyncio.run(asyncio.wait_for(drive(), timeout=30))
 
 
 def test_cancelled_file_claim_preparation_cannot_dispatch_later(tmp_path, upstream):
     token_file = tmp_path / "token"
     _replace_token(token_file, NEW_TOKEN)
 
+    gate = tmp_path / "prepare.release"
+    started = tmp_path / "prepare.release.started"
+
     async def drive():
         async with _proxy_client(upstream, token_file, tmp_path / "stderr.log",
-                                 operation_timeout=5, prepare_delay=1) as client:
+                                 operation_timeout=5, prepare_gate=gate) as client:
             task = asyncio.create_task(client.call_tool("memory_agents", {
                 "action": "claim", "worktree": str(tmp_path), "path": "file.py"}))
-            await asyncio.sleep(0.2)
+            # Cancel while preparation is held, not after a fixed delay.
+            while not started.exists():
+                await asyncio.sleep(0.005)
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
+            # The shim reads its input in order, so once a later call has
+            # answered, the cancellation was handled before the release.
+            assert not (await client.call_tool("read", {})).is_error
+            gate.write_text("release")
             await asyncio.sleep(1.1)
             assert not any(params.get("name") == "memory_agents" for method, _, params
                            in upstream.requests if method == "tools/call")
-            assert not (await client.call_tool("read", {})).is_error
 
-    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+    # A hang guard only: the held fixture and the 2 s deadline decide.
+    asyncio.run(asyncio.wait_for(drive(), timeout=30))
 
 
 def _error_data(exc: BaseException) -> dict:
@@ -928,12 +960,16 @@ def test_call_timeout_is_unknown_and_next_operation_recovers(tmp_path, upstream)
     stderr = tmp_path / "stderr.log"
 
     async def drive():
+        # The stalled call is held until released, so it ends only at the
+        # deadline; 2 s leaves initialize and the recovering call room on a
+        # stalled runner, where 0.1 s raced them.
         async with _proxy_client(
-                upstream, token_file, stderr, operation_timeout=0.1) as client:
+                upstream, token_file, stderr, operation_timeout=2) as client:
             upstream.fault_method = "tools/call"
             upstream.fault = "stall"
             with pytest.raises(Exception) as caught:
                 await client.call_tool("read", {})
+            upstream.release_stall.set()
             assert _error_data(caught.value) == {
                 "classification": "timeout",
                 "phase": "call",
@@ -942,7 +978,8 @@ def test_call_timeout_is_unknown_and_next_operation_recovers(tmp_path, upstream)
             recovered = await client.call_tool("read", {})
             assert json.loads(recovered.content[0].text)["writes"] == 0
 
-    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+    # A hang guard only: the held fixture and the 2 s deadline decide.
+    asyncio.run(asyncio.wait_for(drive(), timeout=30))
 
 
 def test_missing_dynamic_credential_fails_closed_then_recovers(tmp_path, upstream):

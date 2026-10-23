@@ -50,10 +50,14 @@ def _disposable_bank(dsn):
         for attempt in range(2):
             try:
                 with psycopg.connect(admin_dsn, autocommit=True) as cleanup:
-                    # Two constructor-failure proofs on 2026-10-01 each timed out both
-                    # 5 s DROP attempts. A separate 30 s fixture-DDL budget leaves
-                    # cleanup headroom while retaining bounded retries.
-                    cleanup.execute("SET statement_timeout = '30s'")
+                    # DROP DATABASE waits for an immediate checkpoint, and a busy
+                    # fixture server's checkpoint can take minutes: on 2026-10-19 the
+                    # bench Postgres's largest took 150-172 s (93k-357k files to
+                    # fsync) under a 4-worker suite, and both 30 s attempts gave up.
+                    # Before that, 5 s attempts timed out (2026-10-01). 300 s outlasts
+                    # one such checkpoint plus the drop's own; the second attempt is
+                    # for a lost connection.
+                    cleanup.execute("SET statement_timeout = '300s'")
                     cleanup.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
                 break
             except Exception:

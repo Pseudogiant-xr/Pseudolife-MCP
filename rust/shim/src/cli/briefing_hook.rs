@@ -684,7 +684,15 @@ async fn briefing(argv: &[Argument]) -> u8 {
         Ok(v) => v,
         Err(code) => return code,
     };
-    let Some(health) = get(&url, "/health", None, Duration::from_millis(250), true).await else {
+    let Some(health) = get(
+        &url,
+        "/health",
+        None,
+        crate::lifecycle::hook_probe_budget(),
+        true,
+    )
+    .await
+    else {
         return 0;
     };
     match super::hook_json::input(&health) {

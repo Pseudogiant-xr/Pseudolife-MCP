@@ -244,16 +244,17 @@ def test_retry_that_meets_a_permanent_refusal_stops(monkeypatch, capsys):
     async def driver(handler, calls, inbox):
         await asyncio.sleep(0.1)
         daemon.mode = "unauthorized"
-        await asyncio.sleep(0.3)
+        # Board writes are refused as pending until the retry has met the
+        # refusal and stopped; the first one forwarded after that is today's
+        # behaviour: the daemon decides, and the result says once why, since
+        # the instructions asked for a check-in. Waiting on that event
+        # replaces a fixed 0.3 s the retry had to finish inside.
+        headers, first = await _until_registered(handler, calls)
         count = len(daemon.calls)
         await asyncio.sleep(0.2)
         assert len(daemon.calls) == count  # no more attempts
-        # Today's behaviour from here: forwarded, and the daemon decides;
-        # the first result says once why, since the instructions asked for
-        # a check-in.
-        texts = _texts(await handler(None, _update()))
-        assert "X-PL-Agent" not in calls[-1]["headers"]
-        assert any("stopped retrying" in text for text in texts)
+        assert "X-PL-Agent" not in headers
+        assert any("stopped retrying" in text for text in _texts(first))
         assert _texts(await handler(None, _update())) == []
 
     _board_session(monkeypatch, daemon, driver=driver)
@@ -435,14 +436,11 @@ def test_unanswered_probe_then_a_refusal_stops_quietly(monkeypatch, capsys):
     probe = _scripted_probe(None, False)
 
     async def driver(handler, calls, inbox):
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 5
-        while len(probe.asked) < 2 and loop.time() < deadline:
-            await asyncio.sleep(0.01)
-        await asyncio.sleep(0.1)
-        texts = _texts(await handler(None, _update()))
-        assert "X-PL-Agent" not in calls[-1]["headers"]
-        assert texts == []
+        # Board writes are refused as pending until the retry has heard the
+        # no and stopped: wait on that, not on a fixed 0.1 s after the ask.
+        headers, first = await _until_registered(handler, calls)
+        assert "X-PL-Agent" not in headers
+        assert _texts(first) == []
 
     _board_session(monkeypatch, daemon, driver=driver, coordination=None, probe=probe)
     assert len(probe.asked) == 2
@@ -611,7 +609,12 @@ def test_codex_session_end_stops_an_unanswered_board_check(monkeypatch):
     probe = _scripted_probe(None)
 
     async def driver(handler, calls, inbox):
-        await asyncio.sleep(0.2)
+        # End the session once the check has been retried, not after a fixed
+        # 0.2 s: the retry asks from a worker thread a stalled runner delays.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while len(probe.asked) < 2 and loop.time() < deadline:
+            await asyncio.sleep(0.01)
 
     _board_session(monkeypatch, Daemon(), driver=driver, coordination=None,
                    probe=probe, codex_registry=Registry)
@@ -623,18 +626,23 @@ def test_codex_doorbell_hears_when_a_late_board_check_says_no(monkeypatch, capsy
     """An explicit doorbell needs the board; the no that arrives after an
     unanswered startup check says it is off, as a startup no does."""
     probe = _scripted_probe(None, False)
+    line = "PSEUDOLIFE_CODEX_DOORBELL needs agent coordination"
+    err = []
 
     async def driver(handler, calls, inbox):
+        # End the session once the line is out, not a fixed 0.05 s after the
+        # second ask, which a stalled runner let the close overtake.
         loop = asyncio.get_running_loop()
         deadline = loop.time() + 5
-        while len(probe.asked) < 2 and loop.time() < deadline:
+        while line not in "".join(err) and loop.time() < deadline:
+            err.append(capsys.readouterr().err)
             await asyncio.sleep(0.01)
-        await asyncio.sleep(0.05)
 
     monkeypatch.setattr(shim, "_doorbell_setting", lambda environ=None: (True, True))
     _board_session(monkeypatch, Daemon(), driver=driver, coordination=None,
                    probe=probe, codex_registry=_codex_registry())
-    assert "PSEUDOLIFE_CODEX_DOORBELL needs agent coordination" in capsys.readouterr().err
+    err.append(capsys.readouterr().err)
+    assert line in "".join(err)
 
 
 def test_a_codex_board_check_answered_as_the_close_begins_builds_nothing(monkeypatch):
@@ -657,3 +665,271 @@ def test_a_codex_board_check_answered_as_the_close_begins_builds_nothing(monkeyp
     monkeypatch.setattr(shim, "_ADAPTER_RETRY_DELAYS", (0.001,))
     assert asyncio.run(run()) is True
     assert built == []
+
+
+OTHER_BANK = "00000000-0000-4000-8000-000000000002"
+
+
+class _CheckDaemon(Daemon):
+    """Up from the start. The next ``fail_checks`` read-only identity checks
+    (the one every board call makes before it is forwarded) fail as
+    ``blip`` says; ``checks`` counts them all."""
+
+    def __init__(self, blip):
+        super().__init__()
+        self.up = True
+        self.blip = blip
+        self.fail_checks = 0
+        self.checks = 0
+
+    async def __call__(self, request):
+        if (request.url.path.endswith("/context")
+                and json.loads(request.content).get("read_only")):
+            self.checks += 1
+            if self.fail_checks:
+                self.fail_checks -= 1
+                self.calls.append("context")
+                if self.blip == "dropped":
+                    raise httpx.ReadError("connection reset by peer", request=request)
+                if self.blip == "timeout":
+                    raise httpx.ReadTimeout("timed out", request=request)
+                if self.blip == "cold":
+                    # A daemon whose storage is not up yet refuses the
+                    # read-only check (coordination.dispatch) with a 500.
+                    return httpx.Response(500, json={"error": "coordination_unavailable"})
+                if self.blip == "other_bank":
+                    return httpx.Response(200, json={"bank_id": OTHER_BANK,
+                                                     "principal": "claude-code"})
+        return await super().__call__(request)
+
+
+def _checked_board_call(monkeypatch, blip, failures, params=None):
+    """Register, make the next ``failures`` identity checks fail, then make
+    one call (a board update unless ``params``). Returns what the call met:
+    its result or refusal, the identity checks it made, and whether it was
+    forwarded and with which headers."""
+    monkeypatch.setattr(shim, "_BOARD_CHECK_RETRY_DELAYS", (0.01,), raising=False)
+    daemon = _CheckDaemon(blip)
+    seen = {}
+
+    async def driver(handler, calls, inbox):
+        await _until_registered(handler, calls)
+        forwarded = len(calls)
+        daemon.fail_checks = failures
+        before = daemon.checks
+        try:
+            seen["result"] = await handler(None, params or _update())
+        except Exception as exc:  # noqa: BLE001 - asserted by the caller
+            seen["refusal"] = exc
+        seen["checks"] = daemon.checks - before
+        seen["forwarded"] = [call for call in calls[forwarded:] if "tool" in call]
+
+    _board_session(monkeypatch, daemon, driver=driver)
+    return seen
+
+
+@pytest.mark.parametrize("blip", ["dropped", "timeout", "cold"])
+def test_a_board_call_rides_out_one_failed_identity_check(monkeypatch, blip):
+    """2026-10-19: a delegate's ``memory_agents`` update (after a host
+    reboot) and ``memory_message`` receive (after an app sign-out) were
+    refused with "Coordination identity is unavailable; reattach
+    coordination and retry", and the same call seconds later worked. The
+    identity was fine: the read-only check every board call makes first had
+    failed once (a dropped connection, or a 5xx), and any failure of that
+    check refused the call. The shim now checks again before refusing."""
+    seen = _checked_board_call(monkeypatch, blip, failures=1)
+    assert "refusal" not in seen, seen.get("refusal")
+    assert seen["checks"] == 2
+    [call] = seen["forwarded"]
+    assert call["tool"] == "memory_agents"
+    assert call["headers"]["X-PL-Agent"] == "agent-late"
+
+
+@pytest.mark.parametrize("blip,cause", [
+    ("dropped", "got no answer"),
+    ("cold", "HTTP 500"),
+])
+def test_an_identity_check_that_keeps_failing_names_its_real_cause(monkeypatch, blip, cause):
+    """Still failing after the retries: refused, and the error says what
+    happened (the daemon did not confirm the identity), that nothing ran,
+    and to retry. It no longer tells the agent to "reattach coordination",
+    which no tool does and which is not what went wrong."""
+    seen = _checked_board_call(monkeypatch, blip, failures=99)
+    refusal = seen["refusal"]
+    assert seen["checks"] == 1 + len(shim._BOARD_CHECK_RETRY_DELAYS)
+    assert seen["forwarded"] == []
+    assert cause in refusal.message
+    assert "did not run" in refusal.message and "retry" in refusal.message
+    assert "reattach" not in refusal.message
+    assert refusal.data["classification"] == "coordination_unavailable"
+    assert refusal.data["operation_outcome"] == "not_dispatched"
+
+
+def test_a_permanent_identity_verdict_is_refused_without_retrying(monkeypatch):
+    """The near miss: a check the daemon answers with a different bank is a
+    verdict about the saved address, not a blip. Retrying cannot change it,
+    so the call is refused at once, as before."""
+    seen = _checked_board_call(monkeypatch, "other_bank", failures=99)
+    assert seen["checks"] == 1
+    assert seen["forwarded"] == []
+    assert seen["refusal"].data["classification"] == "coordination_unavailable"
+    assert seen["refusal"].message == (
+        "Coordination identity is unavailable; reattach coordination and retry.")
+
+
+def test_an_ordinary_memory_call_does_not_wait_for_the_identity_check(monkeypatch):
+    """Memory calls need no board identity: a failed check costs them no
+    retry and still sends them on, without instance headers."""
+    from mcp import types
+    seen = _checked_board_call(
+        monkeypatch, "dropped", failures=99,
+        params=types.CallToolRequestParams(name="memory_search", arguments={"query": "x"}))
+    assert "refusal" not in seen
+    assert seen["checks"] == 1
+    [call] = seen["forwarded"]
+    assert call["tool"] == "memory_search"
+    assert "X-PL-Agent" not in call["headers"]
+
+
+def test_a_pending_registration_refusal_is_not_retried_as_a_blip(monkeypatch):
+    """The near miss for a session that legitimately has no identity yet:
+    while a late registration is pending, a board write is refused at once
+    with its own message, which the identity-check retry neither waits
+    for, repeats nor replaces."""
+    monkeypatch.setattr(shim, "_BOARD_CHECK_RETRY_DELAYS", (5.0,), raising=False)
+    daemon = Daemon("refused")
+    seen = {}
+
+    async def driver(handler, calls, inbox):
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with pytest.raises(Exception) as caught:
+            await handler(None, _update())
+        seen["elapsed"] = loop.time() - started
+        seen["refusal"] = caught.value
+
+    _board_session(monkeypatch, daemon, driver=driver)
+    assert seen["refusal"].message == shim._BOARD_PENDING_REFUSAL
+    assert seen["elapsed"] < 2.0
+
+
+def _proxy_with_connections(monkeypatch, refuse, driver, fail_call=None):
+    """Run :func:`shim._proxy` with no board, its upstream faked; ``refuse(n)``
+    says whether the n-th upstream connection (1 is the startup instructions
+    fetch) fails before reaching the daemon. ``driver(handler)`` plays the
+    client; ``fail_call(n)`` makes the tool call on the n-th connection fail
+    after it was sent. Returns how many connections were opened."""
+    from mcp import types
+    from mcp.client import session, streamable_http
+    from mcp.server import Server, stdio
+
+    opened = []
+
+    @asynccontextmanager
+    async def http_client(**kwargs):
+        opened.append(1)
+        if refuse(len(opened)):
+            raise httpx.ConnectError("connection reset by peer")
+        yield object()
+
+    @asynccontextmanager
+    async def transport(*args, **kwargs):
+        yield object(), object()
+
+    class Remote:
+        def __init__(self, *args): self._tool_output_schemas = {}
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def initialize(self): return SimpleNamespace(instructions="fixture")
+        async def call_tool(self, name, arguments):
+            if fail_call is not None and fail_call(len(opened)):
+                raise httpx.ReadError("connection reset by peer")
+            return types.CallToolResult(content=[], is_error=False)
+
+    async def serve(server, *args, **kwargs):
+        await driver(server.get_request_handler("tools/call").handler)
+
+    monkeypatch.setattr(streamable_http, "create_mcp_http_client", http_client)
+    monkeypatch.setattr(streamable_http, "streamable_http_client", transport)
+    monkeypatch.setattr(session, "ClientSession", Remote)
+    monkeypatch.setattr(stdio, "stdio_server", transport)
+    monkeypatch.setattr(Server, "run", serve)
+    monkeypatch.setattr(shim, "_UNREACHED_RETRY_SECONDS", 0.0, raising=False)
+    monkeypatch.setattr(shim, "probe_health", lambda url, timeout=0.25: None)
+    monkeypatch.setattr(shim, "_ADAPTER_RETRY_DELAYS", (60.0,), raising=False)
+    asyncio.run(shim._proxy("http://fixture.invalid", "fixture-token", "s"))
+    return len(opened)
+
+
+def test_a_call_whose_one_connection_fails_is_sent_once_more(monkeypatch):
+    """2026-10-19 ~10:30: one ``memory_agents`` update was refused as "the
+    memory daemon is unreachable" while its /health answered in 10 ms. Each
+    call opens a fresh connection, so one that fails on the way (a tailnet
+    path re-forming after a resume) refused a call that a second connection
+    would have carried. Nothing ran, so the shim sends it once more."""
+    seen = {}
+
+    async def driver(handler):
+        seen["result"] = await handler(None, _update())
+
+    opened = _proxy_with_connections(monkeypatch, lambda n: n == 2, driver)
+    assert seen["result"].is_error is False
+    assert opened == 3  # instructions, the failed connection, the resend
+
+
+def test_a_daemon_that_stays_unreachable_is_reported_after_one_resend(monkeypatch):
+    """The near miss: a daemon that is really gone. The call is resent once,
+    then refused as unreachable; while the shim knows the daemon is down,
+    later calls are not resent, so an outage costs one extra attempt in all."""
+    seen = {}
+
+    async def driver(handler):
+        for key in ("first", "second"):
+            with pytest.raises(Exception) as caught:
+                await handler(None, _update())
+            seen[key] = caught.value
+
+    opened = _proxy_with_connections(monkeypatch, lambda n: n > 1, driver)
+    assert opened == 1 + 2 + 1
+    for refusal in seen.values():
+        assert refusal.message == shim._DAEMON_UNREACHABLE_MESSAGE
+        assert refusal.data["operation_outcome"] == "not_dispatched"
+
+
+def test_a_call_that_failed_after_it_was_sent_is_never_resent(monkeypatch):
+    """The near miss for the resend: a connection that drops after the call
+    went out may have run the tool, so the call is reported with an unknown
+    outcome and is not sent again."""
+    seen = {}
+
+    async def driver(handler):
+        with pytest.raises(Exception) as caught:
+            await handler(None, _update())
+        seen["refusal"] = caught.value
+
+    opened = _proxy_with_connections(
+        monkeypatch, lambda n: False, driver, fail_call=lambda n: n == 2)
+    assert opened == 2  # instructions, then the one call: no resend
+    assert seen["refusal"].data["operation_outcome"] == "unknown"
+
+
+def test_the_resend_stays_inside_the_operation_deadline(monkeypatch):
+    """Codex review 2026-10-19: the resend began a fresh timeout, so a call
+    could outlast ``PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS``. With no room
+    left for the pause, the call is refused at once instead."""
+    seen = {}
+
+    async def driver(handler):
+        monkeypatch.setattr(shim, "_UNREACHED_RETRY_SECONDS", 5.0)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with pytest.raises(Exception) as caught:
+            await handler(None, _update())
+        seen["elapsed"] = loop.time() - started
+        seen["refusal"] = caught.value
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "1")
+    opened = _proxy_with_connections(monkeypatch, lambda n: n == 2, driver)
+    assert opened == 2  # instructions, the failed connection: no resend
+    assert seen["elapsed"] < 1.0
+    assert seen["refusal"].message == shim._DAEMON_UNREACHABLE_MESSAGE
