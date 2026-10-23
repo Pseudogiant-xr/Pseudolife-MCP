@@ -255,7 +255,7 @@
     "ops/pytest_retry_once.py": "213f6297068459a9296bbba26fc7e4d19fbce78b85819e61b70349b7e86b5e2a",
     "ops/register_claude_desktop.py": "a653438874cb1af0ec859083239ba35adc5e74747d3aceae055640f80ee37534",
     "ops/remote-suite.ps1": "003e04513c035f0252d7dcc5646e59ec0fe49591c84b833a4a754349553187e1",
-    "ops/requirements.lock.txt": "fdaf482a989e4c4bccbdce50fc78bc7818f1408054a9f90ffb45032545643f26",
+    "ops/requirements.lock.txt": "4111a07384a6eb594f09bbc8229dc13b244fedcbc968a0f93ec584b4155b4816",
     "ops/restore.ps1": "96cd7f5920736c975fa0cf415d4674b9ca0e2a99f1eb0a3e26e9ab857b6703f5",
     "ops/restore.sh": "56286c9a5b191821f670fdcd497e2472dd95cec4094521f03587e2d20c0bac2f",
     "ops/restore_from_pt.py": "bceaeb79d8ff9a537ab41d2a8ac783a167cd370e75786275211ba5baa30c213e",
