@@ -505,6 +505,51 @@ def test_dream_answers_normalize_stall_clocks_and_run_cursors(harness):
                               "finished_at": "<clock>"}
 
 
+def test_deep_dream_scenarios_register_their_mutants_and_normalizers(harness, tmp_path):
+    names = sorted(n for n in harness.SCENARIOS if n.startswith("dream-deep-"))
+    assert names == ["dream-deep-apply", "dream-deep-apply-cautious", "dream-deep-bound",
+                     "dream-deep-dry", "dream-deep-exclusion", "dream-deep-snapshot-failed"]
+    for n in names:
+        # No background tick or sweep may run a deep dream behind the ops.
+        assert "auto_tick: false" in harness.SCENARIOS[n]["config"]
+        assert "dream:\n    enabled: false" in harness.SCENARIOS[n]["config"]
+    deep_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-deep-")]
+    assert len(deep_mutants) == 9
+    text = (Path(__file__).resolve().parents[1] / "src" / "dream" / "deep.rs").read_text(
+        encoding="utf-8")
+    assert all(f'"{m}"' in text for m in deep_mutants)
+    # Orphan ages compare numerically within 0.1 day, then mask; the
+    # snapshot name compares by shape.
+    def ages(*days):
+        return {"value": {"would_orphan": [{"entity": f"e{i}", "age_days": d}
+                                           for i, d in enumerate(days)]}}
+    py, rs = ages(1077.3, 0.0, 1077.3), ages(1077.4, 0.0, 1077.3)
+    assert harness.orphan_age_diffs(py, rs) == []
+    assert [o["age_days"] for o in py["value"]["would_orphan"]] == ["<age>"] * 3
+    assert py == rs
+    # 100 s apart is under 0.1 day, but a day apart is caught even when the
+    # order of ages agrees.
+    py, rs = ages(1077.3, 2.0), ages(1076.3, 2.0)
+    diffs = harness.orphan_age_diffs(py, rs)
+    assert len(diffs) == 1 and "would_orphan[0].age_days" in diffs[0]
+    py, rs = ages(1077.3, "x"), ages(1077.3, 2.0)
+    assert harness.orphan_age_diffs(py, rs) == []
+    assert py["value"]["would_orphan"][1]["age_days"] == "x"
+    got = harness.dream_tokens({"snapshot": "graph-20261020-121500.json",
+                                "would_orphan": [{"entity": "a", "age_days": 3.1}]}, {})
+    assert got["snapshot"] == "<snapshot>"
+    assert got["would_orphan"][0]["age_days"] == 3.1
+    # The snapshot file op reads the newest file and drops clocks.
+    snaps = tmp_path / "data" / "graph_snapshots"
+    snaps.mkdir(parents=True)
+    (snaps / "graph-20261020-121500.json").write_text('{"entities": []}', encoding="utf-8")
+    (snaps / "graph-20261020-121501.json").write_text(
+        '{"entities": [{"id": 1, "created_at": 5.5}], "edges": []}', encoding="utf-8")
+    v = harness.home_op({"op": "snapshot_file"}, tmp_path)["value"]
+    assert v["files"] == 2 and v["name_shape"]
+    assert v["tables"]["entities"] == {"columns": ["id", "created_at"], "rows": [[1, "<clock>"]]}
+
+
 def test_warmups_are_awaited_per_side_until_each_probe_lands(harness, monkeypatch):
     monkeypatch.setattr(harness.time, "sleep", lambda s: None)
     polls = {"python": 0, "rust": 0}

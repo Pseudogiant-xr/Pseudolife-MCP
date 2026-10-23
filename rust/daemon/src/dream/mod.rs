@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod cursors;
+pub mod deep;
 pub mod extractor;
 pub mod gates;
 pub mod judge_agreement;

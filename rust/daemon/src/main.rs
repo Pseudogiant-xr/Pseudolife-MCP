@@ -22,6 +22,7 @@ mod fact_resolve;
 mod fact_set;
 mod forget_tools;
 mod freshness;
+mod graph_consolidation;
 mod graph_read;
 mod graph_read_tools;
 mod graph_review;
@@ -44,6 +45,7 @@ mod meta_filter;
 mod mutants;
 mod onnx_artifacts;
 mod onnx_runtime;
+mod openblas_sdot;
 mod outcome_tools;
 #[cfg(feature = "principal-harness")]
 mod principal_probe;

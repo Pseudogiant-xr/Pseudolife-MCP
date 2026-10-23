@@ -104,7 +104,7 @@ fn truthy(s: &Option<String>) -> bool {
 /// lowercase letter, digit or punctuation, as CPython 3.11's `_sre` decides
 /// it (enumerated over every code point: only `i`, `k` and `s` gain non-ASCII
 /// partners).
-fn ci_eq(ch: char, pat: char) -> bool {
+pub(crate) fn ci_eq(ch: char, pat: char) -> bool {
     (ch.is_ascii() && ch.to_ascii_lowercase() == pat)
         || match pat {
             'i' => ch == '\u{130}' || ch == '\u{131}',
@@ -857,7 +857,7 @@ pub(crate) fn third_relate_relation(note: Option<&str>) -> Option<String> {
 
 /// A merge row's grouping key: its id, or (id-less) its display name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum Key {
+pub(crate) enum Key {
     Id(i64),
     Name(Option<String>),
 }
@@ -879,7 +879,7 @@ fn key_greater(ca: usize, a: &Key, cb: usize, b: &Key) -> Result<bool, String> {
 }
 
 /// `shared_pair_groups(pairs)`.
-fn shared_pair_groups(pairs: &[(Key, Key)]) -> Result<Vec<Option<Key>>, String> {
+pub(crate) fn shared_pair_groups(pairs: &[(Key, Key)]) -> Result<Vec<Option<Key>>, String> {
     let mut counts: HashMap<&Key, usize> = HashMap::new();
     for (a, b) in pairs {
         *counts.entry(a).or_default() += 1;
@@ -903,6 +903,69 @@ fn shared_pair_groups(pairs: &[(Key, Key)]) -> Result<Vec<Option<Key>>, String> 
         out.push(pick);
     }
     Ok(out)
+}
+
+/// A merge row's `judge` / `judge2` / `judge3` blocks, each present when its
+/// verdict is truthy, with `add_relate_relations`' `relation` stamped last
+/// on a relate verdict.
+pub(crate) fn judge_blocks(p: &EntityProposal) -> Vec<(&'static str, Value)> {
+    let (first, second) = relate_relations(p.judge_note.as_deref());
+    let third = third_relate_relation(p.judge_note.as_deref());
+    let block = |verdict: &Option<String>, fields: Vec<(&str, Value)>, relation: Option<String>| {
+        let mut b = Map::new();
+        b.insert("verdict".into(), json!(verdict));
+        for (k, v) in fields {
+            b.insert(k.into(), v);
+        }
+        if verdict.as_deref() == Some("relate")
+            && let Some(r) = relation
+        {
+            b.insert("relation".into(), json!(r));
+        }
+        Value::Object(b)
+    };
+    let mut out = Vec::new();
+    if truthy(&p.judge_verdict) {
+        out.push((
+            "judge",
+            block(
+                &p.judge_verdict,
+                vec![
+                    ("confidence", json!(p.judge_confidence)),
+                    ("note", json!(p.judge_note)),
+                    ("model", json!(p.judge_model)),
+                ],
+                first,
+            ),
+        ));
+    }
+    if truthy(&p.judge2_verdict) {
+        out.push((
+            "judge2",
+            block(
+                &p.judge2_verdict,
+                vec![
+                    ("confidence", json!(p.judge2_confidence)),
+                    ("model", json!(p.judge2_model)),
+                ],
+                second,
+            ),
+        ));
+    }
+    if truthy(&p.judge3_verdict) {
+        out.push((
+            "judge3",
+            block(
+                &p.judge3_verdict,
+                vec![
+                    ("confidence", json!(p.judge3_confidence)),
+                    ("model", json!(p.judge3_model)),
+                ],
+                third,
+            ),
+        ));
+    }
+    out
 }
 
 /// `merge_candidates(entity_proposals)`. `Err` carries the TypeError a
@@ -940,62 +1003,8 @@ pub(crate) fn merge_candidates(rows: &[EntityProposal]) -> Result<Vec<Map<String
             "group".into(),
             json!(g.and_then(|g| disp.get(&g).cloned().flatten())),
         );
-        let (first, second) = relate_relations(p.judge_note.as_deref());
-        let third = third_relate_relation(p.judge_note.as_deref());
-        let block =
-            |verdict: &Option<String>, fields: Vec<(&str, Value)>, relation: Option<String>| {
-                let mut b = Map::new();
-                b.insert("verdict".into(), json!(verdict));
-                for (k, v) in fields {
-                    b.insert(k.into(), v);
-                }
-                // `add_relate_relations`: stamped last, on a relate verdict only.
-                if verdict.as_deref() == Some("relate")
-                    && let Some(r) = relation
-                {
-                    b.insert("relation".into(), json!(r));
-                }
-                Value::Object(b)
-            };
-        if truthy(&p.judge_verdict) {
-            m.insert(
-                "judge".into(),
-                block(
-                    &p.judge_verdict,
-                    vec![
-                        ("confidence", json!(p.judge_confidence)),
-                        ("note", json!(p.judge_note)),
-                        ("model", json!(p.judge_model)),
-                    ],
-                    first,
-                ),
-            );
-        }
-        if truthy(&p.judge2_verdict) {
-            m.insert(
-                "judge2".into(),
-                block(
-                    &p.judge2_verdict,
-                    vec![
-                        ("confidence", json!(p.judge2_confidence)),
-                        ("model", json!(p.judge2_model)),
-                    ],
-                    second,
-                ),
-            );
-        }
-        if truthy(&p.judge3_verdict) {
-            m.insert(
-                "judge3".into(),
-                block(
-                    &p.judge3_verdict,
-                    vec![
-                        ("confidence", json!(p.judge3_confidence)),
-                        ("model", json!(p.judge3_model)),
-                    ],
-                    third,
-                ),
-            );
+        for (k, v) in judge_blocks(p) {
+            m.insert(k.into(), v);
         }
         merges.push(Value::Object(m));
     }
