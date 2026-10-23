@@ -10,7 +10,9 @@ pub struct Context {
 
 impl Context {
     pub fn parse(value: &Value) -> Result<Self, &'static str> {
-        let invalid = "bank_identity_mismatch";
+        // A body that is not a bank identity names no bank: an outage, not
+        // a verdict (Python `fetch_context`).
+        let invalid = "context_unreadable";
         let bank_id = value
             .get("bank_id")
             .and_then(Value::as_str)

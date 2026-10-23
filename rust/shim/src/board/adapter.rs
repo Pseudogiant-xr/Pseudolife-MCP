@@ -248,7 +248,7 @@ async fn fetch_context(
             failure
         }
     })?;
-    let context = Context::parse(&value).map_err(|_| Failure::local("context_unreadable"))?;
+    let context = Context::parse(&value).map_err(Failure::local)?;
     // A readable answer that does not prove this mailbox is a verdict.
     if let Some(saved) = saved {
         let credential = saved
