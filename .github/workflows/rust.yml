@@ -29,9 +29,10 @@ on:
       # Stress (rust/ci/stress.py): before a new live parity row or a
       # timing-sensitive test joins a required lane, it must pass 20 clean
       # hosted windows-latest runs (CLAUDE.md). Each iteration is its own
-      # job on a fresh runner, reusing this run's candidate build.
+      # job on a fresh runner, reusing this run's candidate build; a cargo
+      # selection's test binaries are built once, by stress-build.
       selection:
-        description: 'Stress only: row:<row>[/<case>], scenario:<run.py scenario>, or pytest node ids'
+        description: 'Stress only: row:<row>[/<case>], scenario:<run.py scenario>, cargo:<package>/<test binary>[::<test>] (space-separated), or pytest node ids'
         type: string
         required: false
       iterations:
@@ -1468,6 +1469,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       iterations: ${{ steps.plan.outputs.iterations }}
+      kind: ${{ steps.plan.outputs.kind }}
     steps:
       - uses: actions/checkout@v4
       - name: Check the selection and list the iterations
@@ -1477,10 +1479,80 @@ jobs:
           STRESS_ITERATIONS: ${{ inputs.iterations }}
         run: python3 rust/ci/stress.py plan --selection "$STRESS_SELECTION" --iterations "$STRESS_ITERATIONS" --github-output "$GITHUB_OUTPUT"
 
+  # A cargo selection's test binaries, compiled once as the Rust job's
+  # Nextest step compiles them, into a nextest archive every iteration runs.
+  # It runs on the iterations' OS: a hosted runner's checkout path is the
+  # same in every job, so the paths the tests compile in with env!() hold.
+  stress-build:
+    name: Stress / build ${{ inputs.os }}
+    needs: stress-plan
+    if: ${{ !cancelled() && needs.stress-plan.result == 'success' && needs.stress-plan.outputs.kind == 'cargo' }}
+    runs-on: ${{ inputs.os }}
+    # The Rust job's budget; this builds a subset of what it builds.
+    timeout-minutes: 45
+    env:
+      STRESS_SELECTION: ${{ inputs.selection }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted'
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          shared-key: stress-tests
+          cache-on-failure: true
+      - name: Install pinned nextest in the runner temporary directory
+        shell: pwsh
+        run: |
+          $nextestRoot = Join-Path $env:RUNNER_TEMP 'nextest-0.9.146'
+          New-Item -ItemType Directory -Force -Path $nextestRoot | Out-Null
+          if ($IsWindows) {
+            $nextestArchive = Join-Path $env:RUNNER_TEMP 'nextest.zip'
+            Invoke-WebRequest 'https://get.nexte.st/0.9.146/windows' -OutFile $nextestArchive
+            Expand-Archive -LiteralPath $nextestArchive -DestinationPath $nextestRoot
+          } else {
+            $nextestArchive = Join-Path $env:RUNNER_TEMP 'nextest.tar.gz'
+            Invoke-WebRequest 'https://get.nexte.st/0.9.146/linux' -OutFile $nextestArchive
+            tar -xzf $nextestArchive -C $nextestRoot
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $nextestRoot | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Build the selected test binaries into a nextest archive
+        shell: pwsh
+        run: |
+          python rust/ci/stress.py archive --selection $env:STRESS_SELECTION --archive-file (Join-Path $env:RUNNER_TEMP 'stress-tests.tar.zst')
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stress-tests-${{ runner.os }}
+          path: ${{ runner.temp }}/stress-tests.tar.zst
+          if-no-files-found: error
+
   stress:
     name: Stress / ${{ inputs.os }} / ${{ matrix.iteration }}
-    needs: [stress-plan, candidate]
-    if: ${{ !cancelled() && needs.stress-plan.result == 'success' && needs.candidate.result == 'success' }}
+    needs: [stress-plan, candidate, stress-build]
+    if: ${{ !cancelled() && needs.stress-plan.result == 'success' && needs.candidate.result == 'success' && (needs.stress-plan.outputs.kind != 'cargo' || needs.stress-build.result == 'success') }}
     strategy:
       fail-fast: false
       # Half the account's 20-job cap, so a loop never starves other runs.
@@ -1492,6 +1564,7 @@ jobs:
     timeout-minutes: 45
     env:
       STRESS_SELECTION: ${{ inputs.selection }}
+      STRESS_KIND: ${{ needs.stress-plan.outputs.kind }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1509,7 +1582,14 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: pyproject.toml
+      # A cargo iteration gets what the Rust job's Nextest step has: the
+      # Python SDK fixture dependency, no checkout install, no PostgreSQL
+      # and no event oracle.
+      - name: Install the Python SDK fixture dependency
+        if: env.STRESS_KIND == 'cargo'
+        run: python -m pip install "mcp==2.2.0"
       - name: Install checkout and test dependencies
+        if: env.STRESS_KIND != 'cargo'
         timeout-minutes: 15
         shell: pwsh
         run: |
@@ -1528,11 +1608,34 @@ jobs:
       - name: Restore executable permission
         if: runner.os == 'Linux'
         run: chmod +x rust/target/release/*
+      - name: Install pinned nextest in the runner temporary directory
+        if: env.STRESS_KIND == 'cargo'
+        shell: pwsh
+        run: |
+          $nextestRoot = Join-Path $env:RUNNER_TEMP 'nextest-0.9.146'
+          New-Item -ItemType Directory -Force -Path $nextestRoot | Out-Null
+          if ($IsWindows) {
+            $nextestArchive = Join-Path $env:RUNNER_TEMP 'nextest.zip'
+            Invoke-WebRequest 'https://get.nexte.st/0.9.146/windows' -OutFile $nextestArchive
+            Expand-Archive -LiteralPath $nextestArchive -DestinationPath $nextestRoot
+          } else {
+            $nextestArchive = Join-Path $env:RUNNER_TEMP 'nextest.tar.gz'
+            Invoke-WebRequest 'https://get.nexte.st/0.9.146/linux' -OutFile $nextestArchive
+            tar -xzf $nextestArchive -C $nextestRoot
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $nextestRoot | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - uses: actions/download-artifact@v4
+        if: env.STRESS_KIND == 'cargo'
+        with:
+          name: stress-tests-${{ runner.os }}
+          path: ${{ runner.temp }}/stress-tests
       # Best effort: the event oracle binds only for a master dispatch with
       # frozen_head. The CLI and daemon harnesses never read it; pytest
       # selections under evals/rust_port that call selected_oracle() need it,
       # and on a branch they fail with its "select the event oracle" error.
       - name: Bind the event-selected Python oracle when the dispatch has one
+        if: env.STRESS_KIND != 'cargo'
         continue-on-error: true
         shell: pwsh
         env:
@@ -1541,6 +1644,7 @@ jobs:
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
       - name: Prepare disposable PostgreSQL
+        if: env.STRESS_KIND != 'cargo'
         timeout-minutes: 10
         shell: pwsh
         env:
@@ -1561,7 +1665,7 @@ jobs:
       - name: Run the selection once
         shell: pwsh
         run: |
-          python rust/ci/stress.py run --selection $env:STRESS_SELECTION --iteration ${{ matrix.iteration }} --candidates rust/target/release --out (Join-Path $env:RUNNER_TEMP 'stress/stress-row-${{ matrix.iteration }}.json')
+          python rust/ci/stress.py run --selection $env:STRESS_SELECTION --iteration ${{ matrix.iteration }} --candidates rust/target/release --archive-file (Join-Path $env:RUNNER_TEMP 'stress-tests/stress-tests.tar.zst') --out (Join-Path $env:RUNNER_TEMP 'stress/stress-row-${{ matrix.iteration }}.json')
           exit $LASTEXITCODE
       - name: Retain this iteration
         if: always()

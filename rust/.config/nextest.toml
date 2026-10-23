@@ -1,2 +1,14 @@
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 2 }
+
+# rust.yml's stress loops over cargo: selections (rust/ci/stress.py). The
+# default profile's settings, no retries (a retry would turn a flake into a
+# pass), and a JUnit report listing every skipped test, which is how an
+# iteration proves each selected test ran.
+[profile.stress]
+retries = 0
+fail-fast = false
+
+[profile.stress.junit]
+path = "junit.xml"
+report-skipped = "all"

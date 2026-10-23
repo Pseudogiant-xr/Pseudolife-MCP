@@ -1,0 +1,4 @@
+### Added (2026-10-23 — stress loops can run Rust integration test binaries)
+
+- A `mode=stress` loop now accepts `cargo:<package>/<test binary>[::<test>]` selections, several separated by spaces (for example `cargo:pseudolife-stdio/board_retry_contract cargo:pseudolife-stdio/shim_transport_recovery_contract`). A new `stress-build` job compiles the selected binaries once, as the Rust job's Nextest step compiles them, into a nextest archive. Each iteration runs that archive under nextest's new `stress` profile, with no retries and a JUnit report, and gets the Rust job's environment: the Python SDK fixture dependency and no PostgreSQL. A Rust test resting on process, socket, lock or timing behaviour can now meet the 20 clean hosted `windows-latest` runs rule.
+- An iteration passes only if every selected test ran and passed. A skipped or `#[ignore]`d selected test, a flaky attempt, a missing JUnit report, or a binary or test name that matched nothing fails it.
