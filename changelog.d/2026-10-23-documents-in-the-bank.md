@@ -31,8 +31,7 @@
   import. A failed document query inside `memory_search` serves no
   reference hits instead of failing the search.
 - The same bump adds `cms_counters`, one row for the counters
-  `memory_state/weights.pt` holds (interaction and logical-turn counts,
-  retrieval hits, surprise history, consolidation events). Nothing writes it
-  yet; it stays out of logical transfers, like the file.
+  `memory_state/weights.pt` held (see the counters entry); it stays out of
+  logical transfers, like the file.
 - `chromadb` stays a dependency for now, used only to read a pre-v57 store
   once; it can go after a release has carried the import.

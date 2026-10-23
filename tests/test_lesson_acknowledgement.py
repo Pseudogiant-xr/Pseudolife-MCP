@@ -38,8 +38,11 @@ class Bank:
         self.bands = []
         self.saved = []
 
-    def save_weights(self, path):
-        self.saved.append(path)
+    def counters_state(self):
+        self.saved.append("counters")
+        return {"preset_name": "flat", "interaction_count": 0,
+                "logical_turn_count": 0, "tier_queries": 0, "tier_hits": {},
+                "surprise_history": {}, "consolidation_events": []}
 
 
 def make_service(path, pg_url):
@@ -336,7 +339,7 @@ def test_latched_reconciliation_still_persists_everything_but_lessons(svc, monke
     monkeypatch.setattr(svc, "_save_lessons", lambda: calls.append("lessons"))
     with pytest.raises(PersistenceError, match="reconciliation required"):
         svc._persist_all(kind="auto")
-    assert svc._cms.saved == [svc.config.memory.save_dir]
+    assert svc._cms.saved == ["counters"]
     assert calls == ["access_counts", "cortex", "world"]
 
 

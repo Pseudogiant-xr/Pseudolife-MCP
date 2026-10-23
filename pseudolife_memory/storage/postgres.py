@@ -2108,6 +2108,43 @@ class PostgresStorage:
         with self._txn():
             return self.conn.execute("DELETE FROM reference_chunks").rowcount
 
+    # ── CMS counters (schema v57; ContinuumMemorySystem.counters_state) ────
+
+    _CMS_COUNTER_COLUMNS = (
+        "preset_name", "interaction_count", "logical_turn_count",
+        "tier_queries", "tier_hits", "surprise_history",
+        "consolidation_events")
+
+    def cms_counters_get(self) -> dict | None:
+        """The counters row as a ``counters_state()`` dict, or None when the
+        bank has none yet (a fresh bank, or one not started since v57)."""
+        row = self.conn.execute(
+            "SELECT " + ", ".join(self._CMS_COUNTER_COLUMNS)
+            + " FROM cms_counters WHERE id = 1").fetchone()
+        return None if row is None else dict(zip(self._CMS_COUNTER_COLUMNS, row))
+
+    def cms_counters_put(self, state: dict) -> None:
+        """Write the counters row (``id = 1``), replacing the one there."""
+        with self._txn():
+            self.conn.execute(
+                "INSERT INTO cms_counters (id, preset_name, interaction_count, "
+                "logical_turn_count, tier_queries, tier_hits, surprise_history, "
+                "consolidation_events, updated_at) "
+                "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET "
+                "preset_name = EXCLUDED.preset_name, "
+                "interaction_count = EXCLUDED.interaction_count, "
+                "logical_turn_count = EXCLUDED.logical_turn_count, "
+                "tier_queries = EXCLUDED.tier_queries, "
+                "tier_hits = EXCLUDED.tier_hits, "
+                "surprise_history = EXCLUDED.surprise_history, "
+                "consolidation_events = EXCLUDED.consolidation_events, "
+                "updated_at = EXCLUDED.updated_at",
+                (str(state["preset_name"]), int(state["interaction_count"]),
+                 int(state["logical_turn_count"]), int(state["tier_queries"]),
+                 Jsonb(state["tier_hits"]), Jsonb(state["surprise_history"]),
+                 Jsonb(state["consolidation_events"]), time.time()))
+
     # ── outcome signals (append-only log the dream drains into lessons) ─────
 
     def add_signal(self, task: str, outcome: str, about: str | None = None,

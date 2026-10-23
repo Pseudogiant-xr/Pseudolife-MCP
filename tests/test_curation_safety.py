@@ -35,8 +35,10 @@ class Vectors:
 class Bank:
     bands = []
 
-    def save_weights(self, path):
-        pass
+    def counters_state(self):
+        return {"preset_name": "flat", "interaction_count": 0,
+                "logical_turn_count": 0, "tier_queries": 0, "tier_hits": {},
+                "surprise_history": {}, "consolidation_events": []}
 
 
 def make_service(path, database_url):

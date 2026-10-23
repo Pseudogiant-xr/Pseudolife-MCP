@@ -2287,38 +2287,50 @@ class ContinuumMemorySystem:
         self._loaded_schema_version = SCHEMA_VERSION
 
     # ------------------------------------------------------------------
-    # Weights-only persistence (v0.2 — entries live in Postgres)
+    # Counter persistence (storage mode — entries live in Postgres)
     # ------------------------------------------------------------------
 
-    def save_weights(self, directory: str | Path) -> None:
-        """Atomically persist band weights + counters to ``weights.pt``.
-
-        No entries: in storage mode they are transactional in Postgres,
-        so this file is a disposable, retrainable cache. tmp+rename plus
-        a single ``.bak`` rotation — see :mod:`utils.atomic_io`.
-        """
-        from pseudolife_memory.utils.atomic_io import atomic_torch_save
-        directory = Path(directory)
-        state = {
-            "schema_version": SCHEMA_VERSION,
-            "kind": "weights",
+    def counters_state(self) -> dict:
+        """The counters storage mode persists, keyed as ``cms_counters``'s
+        columns (schema v57): what ``weights.pt`` held before, despite its
+        name never weights since v0.5. Copies, so a later store or retrieve
+        cannot change a state already handed to the writer."""
+        return {
             "preset_name": self.config.miras.preset,
-            "interaction_count": self._interaction_count,
-            "logical_turn_count": self._logical_turn_count,
-            "surprise_history": self._surprise_history,
-            "consolidation_events": self._consolidation_events,
-            "tier_hits": self._tier_hits,
-            "tier_queries": self._tier_queries,
+            "interaction_count": int(self._interaction_count),
+            "logical_turn_count": int(self._logical_turn_count),
+            "tier_queries": int(self._tier_queries),
+            "tier_hits": dict(self._tier_hits),
+            "surprise_history": {
+                name: list(history)
+                for name, history in self._surprise_history.items()},
+            "consolidation_events": [
+                dict(event) for event in self._consolidation_events],
         }
-        atomic_torch_save(state, directory / "weights.pt")
+
+    def apply_counters(self, state: dict) -> None:
+        """Restore counters from a ``counters_state()``-shaped dict (the
+        ``cms_counters`` row, or a ``weights.pt`` payload). Per-band maps
+        merge into the current bands' fresh entries, so a band the state
+        does not name keeps its zero and one it names that the preset no
+        longer has is kept, as ``load_weights`` always did. Never touches
+        band entries."""
+        self._interaction_count = state.get("interaction_count", 0)
+        self._logical_turn_count = state.get("logical_turn_count", 0)
+        self._surprise_history.update(state.get("surprise_history") or {})
+        self._consolidation_events = state.get("consolidation_events") or []
+        self._tier_hits.update(state.get("tier_hits") or {})
+        self._tier_queries = state.get("tier_queries", 0)
 
     def load_weights(self, directory: str | Path) -> bool:
-        """Restore band weights + counters from ``weights.pt`` (or .bak).
+        """Restore counters from a pre-v57 ``weights.pt`` (or its .bak).
 
-        Returns True on success, False when absent (fresh install) or
-        corrupt — the corrupt case additionally sets ``weights_reset``
-        so ``stats()`` surfaces that the MLPs restarted from scratch.
-        Never touches band entries.
+        Since schema v57 the counters live in the bank (``cms_counters``)
+        and nothing writes this file; the service reads it once, to import
+        it when the bank has no counters row yet. Returns True on success,
+        False when absent or corrupt; the corrupt case additionally sets
+        ``weights_reset`` so ``stats()`` surfaces that the counters
+        restarted from scratch. Never touches band entries.
         """
         from pseudolife_memory.utils.atomic_io import (
             WeightsCorrupt, load_with_backup,
@@ -2335,12 +2347,7 @@ class ContinuumMemorySystem:
             return False
         if used_backup:
             logger.warning("weights.pt corrupt — restored from .bak.")
-        self._interaction_count = state.get("interaction_count", 0)
-        self._logical_turn_count = state.get("logical_turn_count", 0)
-        self._surprise_history.update(state.get("surprise_history") or {})
-        self._consolidation_events = state.get("consolidation_events") or []
-        self._tier_hits.update(state.get("tier_hits") or {})
-        self._tier_queries = state.get("tier_queries", 0)
+        self.apply_counters(state)
         return True
 
     def load(self, directory: str | Path) -> None:

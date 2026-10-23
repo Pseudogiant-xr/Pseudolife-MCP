@@ -1481,17 +1481,42 @@ class MemoryService(DreamOps, MaintainerOps):
             "bank (%s). Nothing is served or written until a retry "
             "succeeds; next attempt in %.0fs.", reason, self._init_backoff_s)
 
+    def _load_counters(self) -> None:
+        """Restore the CMS counters from the bank's ``cms_counters`` row.
+
+        A bank without one (fresh, or first started on v57) imports a
+        pre-v57 ``memory_state/weights.pt`` once, if there is one, and
+        writes it as the row; the file is left in place and never read
+        again, because the row exists from then on. A failed read or write
+        of the row raises, like any other failed hydration: serving on and
+        autosaving fresh counters would overwrite the real ones. A corrupt
+        file only sets ``weights_reset``, as it always has."""
+        assert self._cms is not None and self._storage is not None
+        row = self._storage.cms_counters_get()
+        if row is not None:
+            self._cms.apply_counters(row)
+            return
+        save_dir = self.config.memory.save_dir
+        if self._cms.load_weights(save_dir):
+            self._storage.cms_counters_put(self._cms.counters_state())
+            logger.warning(
+                "imported the CMS counters from %s into the bank "
+                "(cms_counters); the file is left in place and no longer "
+                "read", Path(save_dir) / "weights.pt")
+
     def _hydrate_resident_stores(self) -> None:
         """Build the resident stores and fill them from storage (or the
         v0.1 files). A failed Postgres hydration of entries, cortex, world
         facts or lessons raises, as does any other unhandled failure, and
         ``_ensure_init`` then drops whatever was built
         (:meth:`_abandon_partial_init`): a store that failed to load is
-        never served or saved from. Five steps keep their own deliberate
-        tolerance: the legacy ``.pt`` import (resumable, surfaced as
-        ``migration_partial``), the weights file, the optional reference
-        bank, dream tracking (a failure disables the dream alone, surfaced
-        as ``dream_tracking_error``), and the v0.1 file-mode loads."""
+        never served or saved from, and so does a failed read of the
+        counters row (``_load_counters``). Five steps keep their own
+        deliberate tolerance: the legacy ``.pt`` import (resumable, surfaced
+        as ``migration_partial``), a corrupt pre-v57 ``weights.pt``
+        (``weights_reset``), the pre-v57 chromadb document import, dream
+        tracking (a failure disables the dream alone, surfaced as
+        ``dream_tracking_error``), and the v0.1 file-mode loads."""
         # Documents live in the Postgres bank (schema v57); file mode has no
         # document store, like it has no cortex. A pre-v57 chromadb store in
         # the data dir is copied in once first. A failed import never fails
@@ -1569,10 +1594,7 @@ class MemoryService(DreamOps, MaintainerOps):
             except Exception as exc:
                 raise RuntimeError(f"entry hydration failed: {exc}") from exc
             logger.info("hydrated %d entries from storage", n)
-            try:
-                self._cms.load_weights(self.config.memory.save_dir)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("weights load skipped: %s", exc)
+            self._load_counters()
         else:
             # File mode (v0.1) — restore persisted state if any.
             try:
@@ -3808,9 +3830,10 @@ class MemoryService(DreamOps, MaintainerOps):
     def _persist_all(self, *, kind: str) -> dict[str, Any]:
         """Shared body of save/autosave/flush. Caller holds the lock.
 
-        Storage mode: weights are the only file artifact (atomic);
-        entries are already transactional in PG, so we only sync the
-        lazily-updated access counts and snapshot the cortex.
+        Storage mode: entries are already transactional in PG, so we write
+        the counters row (``cms_counters``, schema v57; until then the file
+        ``weights.pt``), sync the lazily-updated access counts and snapshot
+        the cortex.
         File mode: legacy full-bank torch.save (v0.1 behavior).
         """
         # A correction spans the resident bank itself, so unresolved state
@@ -3878,8 +3901,10 @@ class MemoryService(DreamOps, MaintainerOps):
             return result
 
         if self._storage is not None:
-            _timed("weights",
-                   lambda: self._cms.save_weights(self.config.memory.save_dir))
+            # "weights" names the counters weights.pt held; since schema v57
+            # they are the bank's cms_counters row.
+            _timed("weights", lambda: self._storage.cms_counters_put(
+                self._cms.counters_state()))
             pairs = [
                 (e.db_id, e.access_count)
                 for band in self._cms.bands

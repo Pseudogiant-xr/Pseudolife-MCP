@@ -53,13 +53,28 @@ def test_both_corrupt_raises(tmp_path):
         pass
 
 
+def _write_legacy_weights(cms, directory) -> None:
+    """A weights.pt exactly as pre-v57 ``save_weights`` wrote it (counters
+    only, no MLP weights since v0.5): the file the v57 import reads."""
+    atomic_torch_save({
+        "schema_version": 9, "kind": "weights",
+        "preset_name": cms.config.miras.preset,
+        "interaction_count": cms._interaction_count,
+        "logical_turn_count": cms._logical_turn_count,
+        "surprise_history": cms._surprise_history,
+        "consolidation_events": cms._consolidation_events,
+        "tier_hits": cms._tier_hits,
+        "tier_queries": cms._tier_queries,
+    }, directory / "weights.pt")
+
+
 def test_cms_weights_roundtrip_counters_only(tmp_path):
-    """v0.5: weights.pt carries only counters (no MLP weights — bands are
-    cosine stores). Counters round-trip; band entries are never touched."""
+    """A pre-v57 weights.pt carries only counters (no MLP weights — bands
+    are cosine stores). Counters load; band entries are never touched."""
     cms = ContinuumMemorySystem(MemoryConfig())
     cms.store("a fact", _emb(1), source="t")
     cms.store("another fact", _emb(2), source="t")
-    cms.save_weights(tmp_path)
+    _write_legacy_weights(cms, tmp_path)
 
     cms2 = ContinuumMemorySystem(MemoryConfig())
     # Hydration happens before weights load in storage mode — entries
@@ -68,15 +83,37 @@ def test_cms_weights_roundtrip_counters_only(tmp_path):
     ok = cms2.load_weights(tmp_path)
     assert ok is True and cms2.weights_reset is False
     assert cms2._interaction_count == cms._interaction_count  # counters restored
+    assert cms2.counters_state() == cms.counters_state()
     assert [e.text for e in cms2.bands[0].entries] == ["hydrated entry"]
 
 
 def test_cms_weights_corrupt_sets_flag(tmp_path):
     cms = ContinuumMemorySystem(MemoryConfig())
     cms.store("fact", _emb(4), source="t")
-    cms.save_weights(tmp_path)
+    _write_legacy_weights(cms, tmp_path)
     (tmp_path / "weights.pt").write_bytes(b"junk")
     cms2 = ContinuumMemorySystem(MemoryConfig())
     ok = cms2.load_weights(tmp_path)  # .bak doesn't exist -> corrupt
     assert ok is False and cms2.weights_reset is True
     assert cms2.stats()["weights_reset"] is True
+
+
+def test_counters_state_round_trips_and_merges_per_band(tmp_path):
+    """``apply_counters`` merges the per-band maps into the current bands'
+    entries: a band the state does not name keeps its zero, as
+    ``load_weights`` always did. The state is a copy: a later store does
+    not change one already taken."""
+    cms = ContinuumMemorySystem(MemoryConfig())
+    cms.store("a fact", _emb(5), source="t")
+    state = cms.counters_state()
+    before = {k: (dict(v) if isinstance(v, dict) else v) for k, v in state.items()}
+    cms.store("another fact", _emb(6), source="t")
+    assert state["interaction_count"] == before["interaction_count"]
+    assert state["surprise_history"] == before["surprise_history"]
+
+    band = cms.bands[0].name
+    partial = dict(state, tier_hits={}, surprise_history={})
+    cms2 = ContinuumMemorySystem(MemoryConfig())
+    cms2.apply_counters(partial)
+    assert cms2._interaction_count == state["interaction_count"]
+    assert cms2._tier_hits[band] == 0 and cms2._surprise_history[band] == []

@@ -75,6 +75,9 @@ CALLER_HOLDS_LOCK = {
     # The store-building body of _ensure_init (fail-closed hydration,
     # 2026-09-23), split out only so a failure can drop what it built.
     "_hydrate_resident_stores",
+    # Reads (and on a v57 bank's first start, imports) the CMS counters
+    # row; called only from _hydrate_resident_stores.
+    "_load_counters",
     # Drops stale resident stores after a writer handover; first step of
     # _ensure_init (the fixpoint below verifies its lock).
     "_rehydrate_if_bank_changed_hands",

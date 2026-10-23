@@ -74,7 +74,13 @@ def _admin():
 
 
 def create(name: str, template: str | None = None) -> str:
-    """Drop and recreate ``name`` (optionally as a copy of ``template``)."""
+    """Drop and recreate ``name`` (optionally as a copy of ``template``).
+
+    A copy starts without the rows of ``dbstate.UNPORTED_ROWS`` tables: a
+    seeding Python daemon's exit flush writes them (the cms_counters row,
+    schema v57), and the Python arm would restore what the Rust arm cannot
+    read yet. Before v57 those counters stayed in the seeder's own
+    weights.pt, out of both arms' reach, which this keeps."""
     drop(name)
     with _admin() as conn:
         assert_disposable_database(conn)
@@ -84,6 +90,12 @@ def create(name: str, template: str | None = None) -> str:
         else:
             conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
                 sql.Identifier(_check(name)), sql.Identifier(_check(template))))
+    if template is not None:
+        from rust.daemon.harness.dbstate import UNPORTED_ROWS
+        with psycopg.connect(dsn(name), autocommit=True) as conn:
+            for table in UNPORTED_ROWS:
+                if conn.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone()[0]:
+                    conn.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier("public", table)))
     return dsn(name)
 
 

@@ -153,6 +153,53 @@ def test_dump_reads_every_table_from_one_snapshot(monkeypatch):
         pg.drop(name)
 
 
+def test_dump_declares_tables_whose_writer_is_not_ported_yet():
+    # cms_counters (schema v57, D2): Python's flush writes the row, Rust's
+    # autosave is a no-op until B4. Its catalog is still dumped and compared;
+    # its rows are not, until B4 deletes the entry.
+    import dbstate
+    import psycopg
+    import pgdisposable as pg
+    assert dbstate.UNPORTED_ROWS == {"cms_counters": "B4"}
+    name = pg.name(pg.PREFIX + "dump_unported")
+    dsn = pg.create(name)
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("CREATE TABLE cms_counters (id int PRIMARY KEY)")
+            conn.execute("CREATE TABLE entries (id int PRIMARY KEY)")
+            conn.execute("INSERT INTO cms_counters VALUES (1)")
+            conn.execute("INSERT INTO entries VALUES (1)")
+        state = dbstate.dump(dsn)
+        assert state["rows"]["public.cms_counters"] == {"columns": ["id"], "rows": []}
+        assert state["rows"]["public.entries"]["rows"] == [[1]]
+        assert any(c[1] == "cms_counters" for c in state["catalog"]["columns"])
+    finally:
+        pg.drop(name)
+
+
+def test_a_cloned_bank_starts_without_unported_rows():
+    # A seeding Python daemon's exit flush writes the cms_counters row into
+    # the template; each arm's clone starts without it, as both arms did
+    # when the counters lived in the seeder's own weights.pt.
+    import psycopg
+    import pgdisposable as pg
+    template, clone = pg.name(pg.PREFIX + "clone_t"), pg.name(pg.PREFIX + "clone_a")
+    try:
+        with psycopg.connect(pg.create(template), autocommit=True) as conn:
+            conn.execute("CREATE TABLE cms_counters (id int PRIMARY KEY)")
+            conn.execute("CREATE TABLE entries (id int PRIMARY KEY)")
+            conn.execute("INSERT INTO cms_counters VALUES (1)")
+            conn.execute("INSERT INTO entries VALUES (1)")
+        with psycopg.connect(pg.create(clone, template=template)) as conn:
+            assert conn.execute("SELECT count(*) FROM cms_counters").fetchone()[0] == 0
+            assert conn.execute("SELECT count(*) FROM entries").fetchone()[0] == 1
+        with psycopg.connect(pg.dsn(template)) as conn:
+            assert conn.execute("SELECT count(*) FROM cms_counters").fetchone()[0] == 1
+    finally:
+        pg.drop(clone)
+        pg.drop(template)
+
+
 def test_dump_never_deadlocks_a_concurrent_schema_transaction(monkeypatch):
     # A daemon's ensure_schema is one transaction taking ACCESS EXCLUSIVE
     # locks in schema order; the harness polls dumps (table-name order)

@@ -26,6 +26,16 @@ from psycopg import sql
 # (table, column) -> why its value is not reproducible across two runs.
 NONDETERMINISTIC: dict[tuple[str, str], str] = {}
 
+# Tables whose rows the Python oracle writes and the Rust daemon does not
+# yet, with the batch that ports the writer. Each is dumped with its catalog
+# and no rows, and is a declared divergence in rust/daemon/divergences.md;
+# the porting batch deletes its entry and proves the rows instead.
+UNPORTED_ROWS: dict[str, str] = {
+    # Python's autosave and clean-exit flush write the counters row (D2,
+    # schema v57); Rust's are no-ops until B4.
+    "cms_counters": "B4",
+}
+
 _CATALOG = {
     "extensions": "SELECT extname, extversion, n.nspname FROM pg_extension e "
                   "JOIN pg_namespace n ON n.oid = e.extnamespace ORDER BY extname",
@@ -171,7 +181,7 @@ def _dump_once(dsn: str) -> dict:
             select = ", ".join(
                 f'"{c}"::text' if t == "USER-DEFINED" else f'"{c}"' for c, t in cols)
             ordering = ", ".join(f'"{c}"::text' for c in order) or "1"
-            rows = conn.execute(
+            rows = [] if schema == "public" and table in UNPORTED_ROWS else conn.execute(
                 f'SELECT {select} FROM "{schema}"."{table}" ORDER BY {ordering}').fetchall()
             out["rows"][f"{schema}.{table}"] = {
                 "columns": [c for c, _ in cols],
