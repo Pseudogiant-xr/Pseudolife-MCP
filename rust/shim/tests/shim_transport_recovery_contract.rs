@@ -690,3 +690,101 @@ fn test_call_timeout_is_unknown_and_next_operation_recovers() {
     assert!(shim.finish().is_empty());
     fixture.assert_deleted();
 }
+
+// Port of Python #838: each call opens a fresh upstream connection, and one
+// that fails before reaching the daemon, while the daemon was answering, is
+// sent once more inside the same operation deadline.
+fn upstream_initializations(fixture: &Fixture) -> usize {
+    fixture
+        .records
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|r| r.verb == "POST" && r.message["method"] == "initialize")
+        .count()
+}
+fn startup_initialization() -> Reply {
+    Reply::Result(
+        json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"fixture","version":"1"},"instructions":"fixture"}),
+    )
+}
+#[test]
+fn test_a_call_whose_one_connection_fails_is_sent_once_more() {
+    let fixture = Fixture::start_with(Setup {
+        initialize: vec![startup_initialization(), Reply::Close],
+        ..Default::default()
+    });
+    let mut shim = Shim::start(&fixture.url);
+    initialize(&mut shim);
+    let response = request(
+        &mut shim,
+        "read",
+        "tools/call",
+        json!({"name":"read","arguments":{}}),
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(response["result"]["content"][0]["text"].as_str().unwrap())
+            .unwrap()["writes"],
+        0,
+        "{response}"
+    );
+    // The startup instructions, the failed connection, the resend.
+    assert_eq!(upstream_initializations(&fixture), 3);
+    assert!(shim.finish().is_empty());
+}
+#[test]
+fn test_a_daemon_that_stays_unreachable_is_reported_after_one_resend() {
+    // The near miss: a daemon that is really gone. The call is resent once,
+    // then refused; while the shim knows the daemon is down, the next call
+    // is not resent, so an outage costs one extra attempt in all.
+    let fixture = Fixture::start();
+    let mut shim = Shim::start(&fixture.url);
+    initialize(&mut shim);
+    fixture
+        .mcp_enabled
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    for id in ["first", "second"] {
+        let refused = request(
+            &mut shim,
+            id,
+            "tools/call",
+            json!({"name":"read","arguments":{}}),
+        );
+        assert_eq!(
+            refused["error"]["message"],
+            pseudolife_stdio::lifecycle::DAEMON_UNREACHABLE_MESSAGE
+        );
+        assert_eq!(
+            refused["error"]["data"]["operation_outcome"],
+            "not_dispatched"
+        );
+    }
+    assert_eq!(upstream_initializations(&fixture), 1 + 2 + 1);
+    assert!(shim.finish().is_empty());
+}
+#[test]
+fn test_the_resend_stays_inside_the_operation_deadline() {
+    // Codex review of #838: with no room left for the pause, the call is
+    // refused at once instead of outliving PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS.
+    let fixture = Fixture::start_with(Setup {
+        initialize: vec![startup_initialization(), Reply::Close],
+        ..Default::default()
+    });
+    let mut shim = Shim::start_with_env(
+        &fixture.url,
+        &[("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "0.45")],
+    );
+    initialize(&mut shim);
+    let refused = request(
+        &mut shim,
+        "read",
+        "tools/call",
+        json!({"name":"read","arguments":{}}),
+    );
+    assert_eq!(
+        refused["error"]["message"],
+        pseudolife_stdio::lifecycle::DAEMON_UNREACHABLE_MESSAGE
+    );
+    assert_eq!(upstream_initializations(&fixture), 2);
+    assert!(shim.finish().is_empty());
+}

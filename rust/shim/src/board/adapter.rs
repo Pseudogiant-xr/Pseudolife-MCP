@@ -155,7 +155,14 @@ async fn request(
         .map_err(|_| Failure::local("transport_unavailable"))?;
     current(&config.provider, snapshot)?;
     let status = response.status().as_u16();
-    let value = response.json::<Value>().await;
+    // A body that stops arriving is a transport failure, as in Python, where
+    // httpx reads it inside the request; only a complete body that does not
+    // parse is an invalid response.
+    let body = response
+        .bytes()
+        .await
+        .map_err(|_| Failure::local("transport_unavailable"))?;
+    let value = serde_json::from_slice::<Value>(&body);
     current(&config.provider, snapshot)?;
     if status != 200 {
         let code = if action == "context" {
@@ -202,12 +209,18 @@ async fn fetch_context(
     config: &Config,
     snapshot: &CredentialSnapshot,
     saved: Option<&Value>,
+    read_only: bool,
 ) -> Result<Context, Failure> {
     let nonce = uuid::Uuid::new_v4().simple().to_string();
-    let body = saved.map_or_else(
+    let mut body = saved.map_or_else(
         || json!({}),
         |identity| json!({"agent_id":identity["agent_id"],"nonce":nonce}),
     );
+    if read_only {
+        // An existing authority check must never initialize the bank
+        // identity or its audit history (Python `validate_snapshot`).
+        body["read_only"] = json!(true);
+    }
     let value = request(
         client,
         config,
@@ -216,7 +229,16 @@ async fn fetch_context(
         &body,
         bearer(snapshot)?,
     )
-    .await?;
+    .await
+    .map_err(|failure| {
+        // An answer that cannot be read as a bank identity verifies none
+        // (Python `fetch_context`).
+        if failure.code == "invalid_response" {
+            Failure::local("bank_identity_mismatch")
+        } else {
+            failure
+        }
+    })?;
     let context = Context::parse(&value).map_err(Failure::local)?;
     if let Some(saved) = saved {
         let credential = saved
@@ -289,7 +311,7 @@ impl Adapter {
             .map(Ok)
             .unwrap_or_else(|| config.provider.snapshot())
             .map_err(|_| Failure::local("credential_unavailable"))?;
-        let mut context = fetch_context(&client, &config, &snapshot, None).await?;
+        let mut context = fetch_context(&client, &config, &snapshot, None, false).await?;
         current(&config.provider, &snapshot)?;
         // State-file steps go through `state::offload`: off the runtime, and
         // ordered behind any save an earlier, abandoned attempt still runs.
@@ -332,7 +354,8 @@ impl Adapter {
         let mut identity = if let Some(mut saved) = saved {
             match saved.get("version") {
                 None => {
-                    let proved = fetch_context(&client, &config, &snapshot, Some(&saved)).await?;
+                    let proved =
+                        fetch_context(&client, &config, &snapshot, Some(&saved), false).await?;
                     if proved != context {
                         return Err(Failure::local("bank_identity_mismatch"));
                     }
@@ -367,7 +390,7 @@ impl Adapter {
             }
             saved
         } else {
-            context = fetch_context(&client, &config, &snapshot, None).await?;
+            context = fetch_context(&client, &config, &snapshot, None, false).await?;
             let mut capabilities = if config.codex {
                 json!({"pull":true,"channel":false,"codex":config.wake,"resumable":config.state.is_some()})
             } else {
@@ -424,7 +447,7 @@ impl Adapter {
             saved
         };
         // Every instance request validates the current bank before exposing its key.
-        context = fetch_context(&client, &config, &snapshot, None).await?;
+        context = fetch_context(&client, &config, &snapshot, None, false).await?;
         context.check_binding(&identity).map_err(Failure::local)?;
         let attachment = uuid::Uuid::new_v4().simple().to_string();
         let mut body =
@@ -586,20 +609,17 @@ impl Adapter {
         if self.closing.load(Ordering::Acquire) {
             return Err(Failure::local("closing"));
         }
-        let context = match fetch_context(&self.client, &self.config, snapshot, None).await {
-            Ok(context) => context,
-            Err(failure) => {
-                self.record_failure(failure.clone()).await;
-                return Err(failure);
-            }
-        };
+        // A per-call check records no failure, as Python's validate_snapshot
+        // records none: its caller refuses or downgrades that one call, and
+        // background delivery is judged by its own requests (heartbeat,
+        // receive and attempt record what they meet through post_retry).
+        // Recording here let one blip mark delivery degraded and start a
+        // reattach, and one unreadable answer stop delivery outright.
+        let context = fetch_context(&self.client, &self.config, snapshot, None, true).await?;
         let mut mailbox = self.mailbox.lock().await;
-        if let Err(code) = context.check_binding(&mailbox.identity) {
-            let failure = Failure::local(code);
-            drop(mailbox);
-            self.record_failure(failure.clone()).await;
-            return Err(failure);
-        }
+        context
+            .check_binding(&mailbox.identity)
+            .map_err(Failure::local)?;
         current(&self.config.provider, snapshot)?;
         mailbox.context = context;
         if mailbox.failure.as_ref().is_some_and(|failure| {
@@ -616,6 +636,19 @@ impl Adapter {
             mailbox.failure = None;
             mailbox.failed_generation = None;
         }
+        bound_headers(snapshot, &mailbox.context, &mailbox.identity, true)
+    }
+    /// This adapter's identity headers from its last verified context,
+    /// without another check (Python `instance_headers`).
+    pub async fn instance_headers(
+        &self,
+        snapshot: &CredentialSnapshot,
+    ) -> Result<HeaderMap, Failure> {
+        if self.closing.load(Ordering::Acquire) {
+            return Err(Failure::local("closing"));
+        }
+        current(&self.config.provider, snapshot)?;
+        let mailbox = self.mailbox.lock().await;
         bound_headers(snapshot, &mailbox.context, &mailbox.identity, true)
     }
     pub async fn note_turn(&self) {
@@ -821,7 +854,7 @@ impl Adapter {
             .provider
             .snapshot()
             .map_err(|_| Failure::local("credential_unavailable"))?;
-        let context = fetch_context(&self.client, &self.config, &snapshot, None).await?;
+        let context = fetch_context(&self.client, &self.config, &snapshot, None, false).await?;
         let wake = self.wake.load(Ordering::Acquire);
         let mut capabilities = if self.config.codex {
             json!({"pull":true,"channel":false,"codex":wake,"resumable":false})
@@ -1279,7 +1312,8 @@ impl Adapter {
         self.tasks.wait().await;
         let snapshot = self.config.provider.snapshot().ok();
         if let Some(snapshot) = snapshot
-            && let Ok(context) = fetch_context(&self.client, &self.config, &snapshot, None).await
+            && let Ok(context) =
+                fetch_context(&self.client, &self.config, &snapshot, None, false).await
         {
             let mailbox = self.mailbox.lock().await;
             if context.check_binding(&mailbox.identity).is_ok()
