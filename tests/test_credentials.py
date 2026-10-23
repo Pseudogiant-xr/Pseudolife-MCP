@@ -414,6 +414,33 @@ def _take_ownership(mode: str):
             assert _token_privilege(TAKE_OWNERSHIP, enable=True)
 
 
+def _file_owner_sid(path: Path) -> str:
+    """The owner of `path` as a SID string, read here rather than through the
+    code under test, so these tests judge it independently."""
+    import ctypes
+    from ctypes import wintypes
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi.GetNamedSecurityInfoW.argtypes = [
+        wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    owner, descriptor, text = ctypes.c_void_p(), ctypes.c_void_p(), wintypes.LPWSTR()
+    assert advapi.GetNamedSecurityInfoW(str(path), 1, 1, ctypes.byref(owner), None, None, None,
+                                        ctypes.byref(descriptor)) == 0
+    try:
+        assert advapi.ConvertSidToStringSidW(owner, ctypes.byref(text))
+        try:
+            return text.value
+        finally:
+            kernel.LocalFree(text)
+    finally:
+        kernel.LocalFree(descriptor)
+
+
 def _modify_only_folder(tmp_path: Path, sid: str) -> Path:
     folder = tmp_path / "modify-only"
     folder.mkdir()
@@ -446,7 +473,7 @@ def test_a_token_file_in_a_modify_only_folder_is_owner_only_whenever_the_token_a
         with _take_ownership(take_ownership):
             probe = folder / "probe"
             probe.write_text("", encoding="utf-8")
-            own_files = credentials._windows_owner_sid(probe) == sid
+            own_files = _file_owner_sid(probe) == sid
             can_take = _token_privilege(TAKE_OWNERSHIP)
             record_property("new_files_owned_by_user", own_files)
             record_property("take_ownership_enabled", can_take)
@@ -456,7 +483,7 @@ def test_a_token_file_in_a_modify_only_folder_is_owner_only_whenever_the_token_a
                     private_token(path, "fixture-secret")
                 return
             private_token(path, "fixture-secret")
-        assert credentials._windows_owner_sid(path) == sid
+        assert _file_owner_sid(path) == sid
         fd = os.open(path, os.O_RDONLY)
         try:
             assert credentials._windows_owner_only(fd)
