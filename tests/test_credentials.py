@@ -335,6 +335,68 @@ def _run_repair(path: Path) -> subprocess.CompletedProcess:
                            str(path)], capture_output=True, text=True, timeout=60)
 
 
+def _current_user_sid() -> str:
+    whoami = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "whoami.exe"
+    out = subprocess.run([str(whoami), "/user", "/fo", "csv", "/nh"], check=True,
+                         capture_output=True, text=True).stdout
+    return out.strip().split(",")[-1].strip('"')
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
+def test_a_token_file_is_protected_in_a_directory_granting_modify_only(tmp_path: Path) -> None:
+    """A secondary drive often grants users Modify, not Full Control: no
+    WRITE_OWNER, even on a file the user just created and owns. Setting the
+    owner it already has must not be required there (2026-10-23, a
+    `register_claude_desktop.py --token-file` on such a drive refused with
+    "permissions could not be protected")."""
+    from pseudolife_memory import credentials
+
+    folder = tmp_path / "modify-only"
+    folder.mkdir()
+    sid = _current_user_sid()
+    subprocess.run(["icacls", str(folder), "/inheritance:r", "/grant:r", f"*{sid}:(OI)(CI)M"],
+                   check=True, capture_output=True)
+    try:
+        path = folder / "token"
+        import ctypes
+        if ctypes.windll.shell32.IsUserAnAdmin():
+            # Elevated (GitHub's runners): a new file's owner defaults to
+            # Administrators, which must still be replaced and cannot be here;
+            # the refusal then names the Windows error and the fix.
+            with pytest.raises(CredentialError, match=r"Windows error 5 .*full control"):
+                private_token(path, "fixture-secret")
+            return
+        private_token(path, "fixture-secret")
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            assert credentials._windows_owner_only(fd)
+        finally:
+            os.close(fd)
+        assert CredentialProvider(path=path).snapshot().token == "fixture-secret"
+    finally:
+        subprocess.run(["icacls", str(folder), "/reset", "/T"], capture_output=True)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
+def test_an_owner_other_than_the_user_is_still_pinned_or_refused(tmp_path: Path,
+                                                                 monkeypatch) -> None:
+    """The near miss: the DACL-only shortcut is for a file the user already
+    owns. Any other owner (an elevated token's Administrators default) must
+    be replaced, so where that is denied the write refuses, naming why."""
+    from pseudolife_memory import credentials
+
+    folder = tmp_path / "modify-only"
+    folder.mkdir()
+    subprocess.run(["icacls", str(folder), "/inheritance:r", "/grant:r",
+                    f"*{_current_user_sid()}:(OI)(CI)M"], check=True, capture_output=True)
+    monkeypatch.setattr(credentials, "_windows_owner_sid", lambda path: "S-1-5-32-544")
+    try:
+        with pytest.raises(CredentialError, match=r"Windows error 5 setting the owner"):
+            private_token(folder / "token", "fixture-secret")
+    finally:
+        subprocess.run(["icacls", str(folder), "/reset", "/T"], capture_output=True)
+
+
 # (WD), not W: FILE_GENERIC_WRITE carries SYNCHRONIZE, and denying it makes
 # the file unopenable, which is a different refusal.
 @pytest.mark.skipif(os.name != "nt", reason="Windows explicit ACL entries")
