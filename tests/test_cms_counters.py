@@ -110,6 +110,36 @@ def test_a_pre_v57_weights_file_is_imported_once(
         _close(again)
 
 
+def test_a_start_refused_for_a_newer_bank_leaves_the_counters_alone(
+        tmp_path, pg_url, pg_conn, monkeypatch):  # noqa: F811
+    """A bank a newer build upgraded is refused before anything is read
+    (schema.ensure_schema), so weights.pt keeps its name and no counters
+    row is written: rolling back to the build that wrote the file, or
+    restarting a newer one, still finds both as they were."""
+    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+
+    state_dir = tmp_path / "memory_state"
+    _legacy_weights(state_dir, interactions=500)
+    rows = pg_conn.execute("SELECT count(*) FROM cms_counters").fetchone()[0]
+    pg_conn.execute(
+        "UPDATE meta SET value = %s::jsonb WHERE key = 'schema_version'",
+        (str(SCHEMA_META_VERSION + 1),))
+    pg_conn.commit()
+    try:
+        with pytest.raises(RuntimeError, match="is newer than this build"):
+            _service(tmp_path, monkeypatch, pg_url)
+        assert (state_dir / "weights.pt").exists()
+        assert not list(state_dir.glob("*.imported*"))
+        assert pg_conn.execute(
+            "SELECT count(*) FROM cms_counters").fetchone()[0] == rows
+    finally:
+        pg_conn.rollback()
+        pg_conn.execute(
+            "UPDATE meta SET value = %s::jsonb WHERE key = 'schema_version'",
+            (str(SCHEMA_META_VERSION),))
+        pg_conn.commit()
+
+
 def test_a_bank_without_the_row_does_not_import_a_set_aside_file(
         tmp_path, pg_url, pg_conn, monkeypatch):  # noqa: F811
     """A fresh database (a transfer target, a recreated bank) on a data dir
@@ -182,6 +212,40 @@ def test_a_failed_counters_write_does_not_stop_the_save(
         monkeypatch.setattr(svc, "_save_cortex", lambda: saved.append("cortex"))
         svc._persist_all(kind="auto")  # noqa: SLF001
         assert saved == ["cortex"]
+    finally:
+        _close(svc)
+
+
+def test_a_failed_counters_write_is_retried_by_the_next_autosave(
+        tmp_path, pg_url, pg_conn, monkeypatch):  # noqa: F811
+    """The autosave skips a save while entries and cortex are unchanged.
+    A counters write that failed is retried by the next autosave anyway,
+    not left stale until something else changes; once it lands, an
+    unchanged service saves nothing again."""
+    svc = _service(tmp_path, monkeypatch, pg_url)
+    try:
+        storage = svc._storage  # noqa: SLF001
+        real_put = storage.cms_counters_put
+        attempts = []
+
+        def flaky(state):
+            attempts.append(state["interaction_count"])
+            if len(attempts) == 1:
+                raise RuntimeError("lock timeout")
+            real_put(state)
+
+        monkeypatch.setattr(storage, "cms_counters_put", flaky)
+        _count(svc, interactions=12, turns=3, queries=5)
+        svc._last_saved_fingerprint = None  # noqa: SLF001 — force a first save
+        svc.autosave_if_changed()
+        assert attempts == [12]
+
+        svc.autosave_if_changed()
+        assert attempts == [12, 12]
+        assert storage.cms_counters_get()["interaction_count"] == 12
+
+        svc.autosave_if_changed()
+        assert attempts == [12, 12]
     finally:
         _close(svc)
 

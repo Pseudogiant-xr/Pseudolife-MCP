@@ -16,3 +16,9 @@
   counters fresh. Upgrading again keeps the bank's counters and sets that
   release's file aside: a file newer than the row is imported only when it
   counts at least as many interactions, since counters only grow.
+- An older daemon that refuses a newer bank is rolled back by restoring the
+  backup taken before the upgrade. Restore its state archive with the dump
+  (`ops/restore.ps1 -StateArchive` / `ops/restore.sh --state-archive`) and
+  the older build finds its `weights.pt` again; restoring only the dump
+  leaves the file set aside as `weights.pt.imported`, so rename it back to
+  `weights.pt` before starting the older build, or its counters start fresh.

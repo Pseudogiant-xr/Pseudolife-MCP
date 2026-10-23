@@ -3485,8 +3485,8 @@ is **Postgres**, which lives in an *external* Docker volume —
 `pseudolife-mcp-bank` by default (entries + facts + graph). A second
 external volume, `pseudolife-mcp-state`, holds the cortex snapshot, and
 any pre-v57 ChromaDB document store and counter file `weights.pt` (both kept
-on disk after their one-time import; ingested documents and the CMS counters
-live in the bank since v57).
+on disk after their one-time import, the file as `weights.pt.imported`;
+ingested documents and the CMS counters live in the bank since v57).
 Both are declared `external` in `ops/docker-compose.yml` precisely so a
 container teardown can't take them with it. The host `data/` dir then holds
 only backups (`data/backups/` from `ops/backup.ps1` — a `pg_dump` of the

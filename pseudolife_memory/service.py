@@ -907,6 +907,9 @@ class MemoryService(DreamOps, MaintainerOps):
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
         self._last_saved_fingerprint = None
+        # A counters-row write that failed: the next autosave saves even
+        # when the fingerprint has not moved, so the row is not left stale.
+        self._counters_save_pending = False
         # Poison-pill guard for the dream: consecutive extraction-failure
         # counts per entry (db_id). In-memory only — a daemon restart resets
         # the strikes, which just means a poison entry needs its three
@@ -3682,7 +3685,8 @@ class MemoryService(DreamOps, MaintainerOps):
             if self._cms is None:
                 return None
             fp = self._entry_fingerprint()
-            if fp == self._last_saved_fingerprint:
+            if (fp == self._last_saved_fingerprint
+                    and not self._counters_save_pending):
                 return None
             out = self._persist_all(kind="auto")
             self._last_saved_fingerprint = fp
@@ -3958,11 +3962,14 @@ class MemoryService(DreamOps, MaintainerOps):
             # "weights" names the counters weights.pt held; since schema v57
             # they are the bank's cms_counters row. Like the access counts
             # below, a failed write is logged and the facts still save: the
-            # counters are a cache the next save rewrites.
+            # counters are a cache the next save rewrites, and the next
+            # autosave retries it even when nothing else changed.
             try:
                 _timed("weights", lambda: self._storage.cms_counters_put(
                     self._cms.counters_state()))
+                self._counters_save_pending = False
             except Exception as exc:  # noqa: BLE001
+                self._counters_save_pending = True
                 logger.warning("counters save failed: %s", exc)
             pairs = [
                 (e.db_id, e.access_count)
