@@ -268,6 +268,15 @@ def _placeholder(job: dict) -> bool:
         not job.get("steps") and c is not None and e is not None and e < c)
 
 
+def _unfinished_jobs(batch: dict) -> int:
+    """Jobs of the batch's CI with no completion yet (skipped and matrix
+    placeholder jobs aside)."""
+    return sum(1 for run in batch.get("runs") or [] if run.get("event") in CI_EVENTS
+               for attempt in run["attempts"] for job in attempt["jobs"]
+               if not job.get("completed_at") and not _placeholder(job)
+               and (job.get("conclusion") or "").lower() != "skipped")
+
+
 def _jobs(batch: dict) -> list[dict]:
     """Every job a batch's CI executed, attempt by attempt. A job a rerun
     retained from an earlier attempt (it started before the rerun did) and
@@ -372,6 +381,13 @@ def _batch(b: dict, cutoff: dt.datetime | None) -> dict:
     final_end = max((j["completed"] for j in jobs), default=None)
     reruns = _reruns(b, jobs)
     chain, note = _critical_path(first)
+    running = _unfinished_jobs(b)
+    if running:
+        # An open batch collected mid-run: the jobs that have finished say
+        # nothing about when the pass will, so its CI phases stay unknown.
+        first_end = final_end = chain = None
+        note = (f"CI still running when collected ({running} job"
+                f"{'s' if running != 1 else ''} unfinished); collect again once it is done")
     ci_first = _secs(created, first_end)
     wait = execution = orchestration = None
     if chain is not None and ci_first is not None:
@@ -425,10 +441,12 @@ def _members(art: dict, batches: list[dict]) -> list[dict]:
         if own is not None:
             landed = next((b for b in carried
                            if abs(_secs(_t(b["merged"]), own)) <= 300), None)
-        else:
+        elif (info.get("state") or "").upper() == "CLOSED":
             # GitHub marked no merge (#850 squashed, so its members read
             # closed): the batch that carried it is the only record.
             landed = carried[0] if carried else None
+        else:
+            landed = None   # still open: a batch carried an older head only
         first_build = where[0]["build_start"] or _t(where[0]["created"])
         events = info.get("events") or []
 
@@ -449,6 +467,7 @@ def _members(art: dict, batches: list[dict]) -> list[dict]:
         anchor = max(opened, last_push) if opened and last_push else opened
         outcome = "merged" if landed else (
             "carried, merged outside a batch" if carried and own is not None else
+            "carried, still open" if carried and (info.get("state") or "").upper() == "OPEN" else
             "dropped" if any(n in [d["number"] for d in b["dropped"]] for b in where)
             else where[-1]["outcome"])
         out.append({

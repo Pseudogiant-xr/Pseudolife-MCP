@@ -411,6 +411,31 @@ def test_a_carried_member_that_then_merged_outside_a_batch_is_a_direct_merge():
     assert [d["number"] for d in rep["direct_merges"]] == [891]
 
 
+def test_an_open_member_an_older_head_of_which_was_carried_has_not_landed():
+    members = members_892()
+    members["891"].update(state="OPEN", mergedAt=None)
+    early = _earlier_batch_with(891)
+    later = batch_892()
+    later["body"] = later["body"].replace(
+        "| #891 fix(console): close the vite alerts | `5cddf0ec32cb009e102445636ab970700b66eac0` "
+        "| https://github.com/o/r/pull/891 (none) | pending |\n", "")
+    m = {r["number"]: r for r in timeline.report(
+        artifact(early, later, members=members))["members"]}
+    assert m[891]["batch"] is None and m[891]["lead"] is None
+    assert m[891]["outcome"] == "carried, still open"
+
+
+def test_ci_still_running_leaves_the_ci_phases_unknown():
+    b = batch_892()
+    b.update(state="OPEN", mergedAt=None, closedAt=None)
+    for job_ in b["runs"][1]["attempts"][0]["jobs"][4:]:
+        job_["completed_at"] = None
+        job_["conclusion"] = None
+    p = timeline.report(artifact(b, members=members_892()))["batches"][0]
+    assert p["phases"]["ci_first_pass"] is None and p["phases"]["ci_queue_wait"] is None
+    assert p["critical_path"] is None and "still running" in p["critical_path_note"]
+
+
 def test_a_rerun_never_names_a_matrix_placeholder_as_its_cause():
     b = batch_892()
     b["runs"][0]["attempts"][0]["jobs"].append(job(
