@@ -38,7 +38,6 @@ tool's answers by value.
 |---|---|---|
 | `document_search` | W2-D | No reference-pool search service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
-| `memory_dream` | W3-H | Cursor storage exists, but dream cycle orchestration does not. |
 
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset` and, since their body registrations, `memory_store`,
@@ -51,8 +50,9 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
 `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
 `memory_relation_define`, `memory_graph`, `memory_recall`,
-`memory_graph_review` (all but two actions, below), `memory_consolidate`,
-`memory_agents` and `memory_message`. The two board tools
+`memory_graph_review` (all but one `restore_slot` case, below), `memory_consolidate`,
+`memory_dream` (all but `deep` and `rollback`, below), `memory_agents` and
+`memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -297,8 +297,8 @@ The remaining write work is deliberately split into subsequent increments:
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| `write_fact` with `force_contend=True` (consolidation quarantine), `dream=True` (the dream's claim writes: direct-write guard, echo tier cap, `dream:<tier>` marks on insert and park) or `support="assistant"` (assistant-origin park) | ported in `memory/cortex.py` | not ported; `stores/cortex_write.rs` takes no such inputs | unreachable over MCP (`memory_fact_set` passes user/action/agent, no stance, no provenance); the consolidation and dream slices (W3-H) add them with their callers |
-| `stance` and `provenance` on a fact write | written by the dream and consolidation | always none (a confirm still clears a stored stance, as Python's does) | same |
+| `write_fact` with `force_contend=True` (consolidation quarantine), `dream=True` (the dream's claim writes: direct-write guard, echo tier cap, `dream:<tier>` marks on insert and park) or `support="assistant"` (assistant-origin park) | `memory/cortex.py:500-619`; the service skips the correction signal for a dream write (`service.py:4024`) | ported (`FactWrite` in `stores/cortex_write.rs`; the service function `fact_set::cortex_write` takes them in `CortexWriteArgs`); replayed against the Python store by the `quarantine`, `dream`, `dream_newer_wins` and `assistant` golden sequences (`harness/goldens/w2e-cortex-write.json`) | unreachable over MCP until the dream (P1) calls them: `memory_fact_set` binds support user/action/agent, no stance, no provenance, neither flag. Not ported: `service.cortex_write`'s `now` and `write_fact`'s `tx_time` / `valid_time`, which no caller passes |
+| `stance` and `provenance` on a fact write | written by the dream and consolidation | ported: the stance follows the latest asserting write, provenance is cleaned (`_clean_prov`) and unioned on a confirm; over MCP both stay none (a confirm still clears a stored stance, as Python's does) | same |
 | A read concurrent with a fact write | waits for the service lock, so it sees the write or none of it | reads the snapshot it took: it may predate a write still in progress, or show the written record before that write has persisted or answered its caller | readers never hold a lock across an await; each read is internally consistent, and a read that starts after a write returns sees it |
 | `_entity_kind_cache` reset when a changed writer lease rehydrates the service (`service.py:1416`) | the next `"auto"` fact write rereads `entity_kinds` | kept for the process | the rehydrate path is the per-call `_ensure_init` row above (W2-E writer-session work) |
 | Fact embeddings | torch fp32 | ONNX Runtime fp32 | compared within the store tolerances per fact id (`harness/w2e.py`); a routing decision never depends on them |
@@ -308,15 +308,15 @@ The remaining write work is deliberately split into subsequent increments:
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| `add_member` with `support="assistant"` (the conversion guard and the join park, `cortex.py:891, 995`), a support tier under `protect_provenance` (the conversion tier guard, `:897`) or `dream=True` (the direct-write guard and the `dream:<tier>` mark, `:901, 1029`); provenance on a member write | ported in `memory/cortex.py` | not ported; `stores/cortex_members.rs` takes no such inputs | unreachable over MCP (`service.set_add` passes `origin=None`, no provenance, `dream=False`); the dream and rollback slices (W3-H) add them with their callers |
-| `remove_member` refusal (`member_remove_refused`: an assistant, lower-tier or dream retraction, `cortex.py:1121-1128`) | ported | not ported; the note text is served for parity | unreachable over MCP (`service.set_remove` passes `origin=None`, `dream=False`) |
+| `add_member` with `support="assistant"` (the conversion guard and the join park, `cortex.py:891, 995`), a support tier under `protect_provenance` (the conversion tier guard, `:897`) or `dream=True` (the direct-write guard and the `dream:<tier>` mark, `:901, 1029`); provenance on a member write | `memory/cortex.py`; a new member row stores `support` as passed, not normalised (`:1028`) | ported, that verbatim tier included (`MemberWrite` in `stores/cortex_members.rs`; the service function `set_members::set_add` takes them in `SetAddArgs`); replayed by the `member_guards` and `member_guards_newer_wins` golden sequences | unreachable over MCP until the dream (P1) calls them: `memory_set_add` passes `origin=None`, no provenance, `dream=False` |
+| `remove_member` refusal (`member_remove_refused`: an assistant, lower-tier or dream retraction, `cortex.py:1121-1128`) | ported | ported (`remove_member`'s `support` and `dream`; `set_members::set_remove` takes them in `SetRemoveArgs`), replayed by the same sequences | unreachable over MCP until the dream (P1) calls it: `memory_set_remove` passes `origin=None`, `dream=False` |
 | The member dedup cosine at exactly 0.9 | torch float32 `dot` and `norm` (BLAS / vectorized reduction order) | float32 products summed in f64, rounded once to f32 | within one f32 step of torch (measured on 2,000 unit 1024-vectors: at most 4.5e-8 apart); a cosine that close to 0.9 may decide `member_confirmed` against `member_added` differently, as may the ONNX/torch embedding gap (about 1e-6) itself; the harness members sit at least 0.08 from the line |
 
 ### memory_fact_resolve (2026-10-17)
 
 | Item | Python | Rust | Owner / why |
 |---|---|---|---|
-| `resolve` with `expect_value` (`refused_changed`, `cortex.py:1477-1479`; the service's `contender_changed` answer, `service.py:4513-4516`) or `dream=True` (`refused_direct` against a direct-backed current, `:1480-1485`, the `direct_write` answer, `:4509-4512`, and the `dream:<tier>` mark on the promoted contender) | ported | not ported; `stores/cortex_resolve.rs` takes no such inputs | unreachable over MCP (`service.cortex_resolve` gets `support="user"`, `dream=False`, `expect_value=None`); the consolidation quarantine (W3-H) adds them with its caller |
+| `resolve` with `expect_value` (`refused_changed`, `cortex.py:1477-1479`; the service's `contender_changed` answer, `service.py:4513-4516`) or `dream=True` (`refused_direct` against a direct-backed current, `:1480-1485`, the `direct_write` answer, `:4509-4512`, and the `dream:<tier>` mark on the promoted contender) | ported | ported (`stores/cortex_resolve.rs`; the service function `fact_resolve::cortex_resolve` takes `support`, `dream` and `expect_value` in `ResolveArgs` and answers both refusals unsaved); replayed by the `quarantine`, `resolve_inputs` and `resolve_newer_wins` golden sequences | unreachable over MCP until the dream's quarantine promotion (P1) calls them: `memory_fact_resolve` passes `support="user"`, `dream=False`, `expect_value=None` |
 
 The WRITE-CMS, WRITE-CORTEX and CONTRADICTION parity rows remain deferred;
 this increment does not claim the complete write boundary or cutover readiness.
@@ -397,6 +397,28 @@ of its own.
 | A NaN in a REAL proposal or decision column | serialized as `NaN` | `null` | NaN is not a stored score |
 | The judges (merge two- and three-vote, link, junk, curation, candidates), their freshness and the sweep tick that runs them | served by the background sweep | not run | task O2, with the dream (task P), behind a stub extractor |
 | Wrong-type `memory.deep_dream.judges_enabled` / `analyzer_file_duplicates` | taken by truthiness | refused at config load | the existing config-type substitution |
+
+### memory_dream: status, pull, commit, runs and the consolidation pass (2026-10-20)
+
+| Item | Python | Rust | Owner / why |
+|---|---|---|---|
+| `run` while lesson synthesis or outcome inference (`memory.lessons.enabled` with `synthesize_in_dream` or `infer_outcomes`), digests (`memory.dream.digest_enabled`) or graph insight (`memory.graph_insight.enabled`) is on, which is the default | runs those stages | refused (`not_implemented`, naming the stage) | tasks P1b (lessons, outcomes, digests) and P2b (graph insight); with them off the pass is served |
+| `deep` and `rollback` | served | refused | tasks P2a (deep dream) and the rollback increment |
+| When dream tracking initializes (rows with no dream state classified) | at hydration | at the first `memory_dream` call | a Rust boot must not change the bank (the W1 boot comparison); every answer is the same once the call runs |
+| A pending entry whose row is missing at a write failure | re-flushed (`cms.reflush_entries`) | detected, not re-inserted | the store slice's persistence follow-up; the answer (a write hold) is the same |
+| The stall record's board notice and the overdue rule | posted by the sweep | logged; the overdue rule is never armed | the sweep (task P4) |
+| The date mask, `isdigit` and NFC/NFKC in the gates | Python's `re` and `unicodedata` (Unicode 14) | the regex crate's Unicode `\b`/`\d`/`\s` and case folding, an approximated `isdigit`, the normalization crate's tables | rare characters only; `\w` and category M use CPython's exact tables |
+| Cosine ranking of slots, facts, slot matches and alias candidates | torch float32 matmul | f32 dot products | a near-tie can reorder the vocabulary hint and so the request bytes; the embeddings themselves differ within the measured tolerance |
+| A reply character in U+10F800–U+10FFFF | written | taken as a lone-surrogate stand-in: the write fails | the reply parser keeps lone surrogates as private code points so a write fails where Python's encoding fails |
+| A lone surrogate in a claim's `stance` | the resident record is written and the entity minted, then the write holds | the write holds before them | failure path only |
+| A lone surrogate in a `/models` reply | the served id is returned | none | status display only |
+| Reply nesting between about 900 and the interpreter's depth limit | parsed | `RecursionError` | Python's limit depends on the stack; Rust's is a fixed 900 |
+| TLS failures, a partial status line, headers hyper rejects | Python's class names (`SSLCertVerificationError`, `BadStatusLine`) or success | `OSError`, `RemoteDisconnected`, `BadStatusLine` | transport edge cases |
+| The extractor timeout | per socket operation | for the whole request | a slow, steady reply can time out only in Rust |
+| Errno values with no Rust `ErrorKind` (ESHUTDOWN) | Python's class (`BrokenPipeError`) | `OSError` | transport edge case |
+| URL credentials in a base URL | percent-decoded before the host split; shown in its log | not decoded; redacted in logs | credentials in an extractor URL are refused on both sides before connecting |
+| A redirect target's text | `quote()` / `urljoin()` | the `url` crate's join | only auth-word matching on unusual `Location` values |
+| An environment integer past i64 (`PSEUDOLIFE_DREAM_MAX_TOKENS`) | kept | the configured default | no producer sets one |
 
 ## Coordination board completion (W2-F)
 

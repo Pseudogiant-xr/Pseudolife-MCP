@@ -332,7 +332,7 @@ fn is_version(n: &str) -> bool {
 }
 
 /// `relation_quality.infer_type`: a coarse entity type, or None.
-pub(super) fn infer_type(name: &str) -> Option<&'static str> {
+pub(crate) fn infer_type(name: &str) -> Option<&'static str> {
     let n = py_lower(py_strip(name));
     let n = n.as_str();
     if n.is_empty() {
@@ -414,7 +414,7 @@ fn type_constraint(relation: &str) -> Option<(&'static [&'static str], &'static 
 }
 
 /// `relation_quality.is_hard_type_violation`.
-pub(super) fn is_hard_type_violation(src: &str, relation: &str, dst: &str) -> bool {
+pub(crate) fn is_hard_type_violation(src: &str, relation: &str, dst: &str) -> bool {
     let Some((src_ok, dst_ok)) = type_constraint(relation) else {
         return false;
     };
@@ -425,7 +425,7 @@ pub(super) fn is_hard_type_violation(src: &str, relation: &str, dst: &str) -> bo
 }
 
 /// `relation_quality.edge_confidence`.
-pub(super) fn edge_confidence(src: &str, relation: &str, dst: &str) -> f64 {
+pub(crate) fn edge_confidence(src: &str, relation: &str, dst: &str) -> f64 {
     let mut base = if relation == "related-to" { 0.45 } else { 0.70 };
     if is_hard_type_violation(src, relation, dst) {
         base *= 0.25;
@@ -837,7 +837,7 @@ fn text_param(v: Option<&Value>) -> Result<Option<String>, ToolError> {
 
 /// `insert_proposal` (3400-3412). A conflict still burns the sequence value.
 #[allow(clippy::too_many_arguments)]
-async fn insert_proposal(
+pub(crate) async fn insert_proposal(
     client: &Client,
     src_id: i64,
     relation: &str,

@@ -1,0 +1,530 @@
+{
+ "bodies": [
+  {
+   "body": "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You consolidate numbered notes into canonical facts. Extract durable, current-state facts as JSON: {\\\"claims\\\":[{\\\"entity\\\":..,\\\"attribute\\\":..,\\\"value\\\":..,\\\"confidence\\\":0..1,\\\"source\\\":<number of the note the fact came from>}]}. One slot per real fact; skip narrative, opinions, and obsolete states. When several notes state or update the SAME fact, use one consistent entity and attribute for it and emit only the CURRENT value (source = the note stating it). Reuse existing slot keys when they fit. When a note quotes or summarizes a DOCUMENT (a spec, policy, protocol, runbook, or guide), what the document prescribes is itself a durable fact \\u2014 extract it with entity = the document's subject, even when other notes show something different being done.\\nExample. Notes: [1] we moved the deploy target from staging to prod-eu. [2] the release runbook says every release needs a signed tag. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"deploy target\\\",\\\"attribute\\\":\\\"environment\\\",\\\"value\\\":\\\"prod-eu\\\",\\\"confidence\\\":0.9,\\\"source\\\":1},{\\\"entity\\\":\\\"releases\\\",\\\"attribute\\\":\\\"documented requirement\\\",\\\"value\\\":\\\"signed tag (per release runbook)\\\",\\\"confidence\\\":0.8,\\\"source\\\":2}]}\\nWhen a note adds or removes an item from a COLLECTION the user maintains (restaurants tried, bikes owned, pending tasks), add an \\\"op\\\":\\\"add\\\" or \\\"op\\\":\\\"remove\\\" field to that claim instead of a plain supersede. op is ONLY for collection membership \\u2014 a value that simply changed (a new job, a moved city) stays a plain claim with no op. Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the penny-farthing, no longer biking to work. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"restaurants tried\\\",\\\"value\\\":\\\"Rosa's Diner\\\",\\\"op\\\":\\\"add\\\",\\\"confidence\\\":0.8,\\\"source\\\":3},{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"bikes owned\\\",\\\"value\\\":\\\"penny-farthing\\\",\\\"op\\\":\\\"remove\\\",\\\"confidence\\\":0.8,\\\"source\\\":4}]}\\nCOUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note states or updates how many of something the user has (a running count, a total, a follower number, a quantity), emit a plain claim whose value is the NEW number, with no \\\"op\\\" field \\u2014 even when the note also names the item that changed the count. For example, the note [5] saw a Gallowmere Teal today, that makes 41 species at Kelmarsh Reserve now \\u2014 yields the single claim {\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"bird species seen at Kelmarsh Reserve\\\",\\\"value\\\":\\\"41\\\",\\\"confidence\\\":0.9,\\\"source\\\":5} inside the one claims array, and NO \\\"op\\\":\\\"add\\\" claim for Gallowmere Teal. The same holds when the count is of items from a source: the note [6] cooked the Marrowgate stew tonight, that makes 9 of the Quillon Larder's recipes I've tried now \\u2014 yields only the single claim {\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"Quillon Larder recipes tried\\\",\\\"value\\\":\\\"9\\\",\\\"confidence\\\":0.9,\\\"source\\\":6} inside the one claims array, and NO \\\"op\\\":\\\"add\\\" claim for the stew.\\nHEDGES GO IN A STANCE FIELD: when the note itself hedges a fact (\\\"probably\\\", \\\"might\\\", \\\"unconfirmed\\\", \\\"not final\\\", \\\"per the runbook\\\"), keep the value CLEAN and put the note's own hedge words in a \\\"stance\\\" field on that claim \\u2014 never inside the value, and never invent a stance the note does not carry; a plainly stated fact has no stance field. A hedged update is STILL an update: use the same entity and attribute as the fact it changes and emit only the CURRENT value, exactly as for a plain fact. For example, a later note [7] we'll probably move the deploy target again, to eu-west-1 next quarter \\u2014 updates the deploy target slot from the earlier example to the single claim {\\\"entity\\\":\\\"deploy target\\\",\\\"attribute\\\":\\\"environment\\\",\\\"value\\\":\\\"eu-west-1\\\",\\\"stance\\\":\\\"probably\\\",\\\"confidence\\\":0.6,\\\"source\\\":7} inside the one claims array.\\nReturn {\\\"claims\\\":[]} if nothing qualifies.\\nTHE ASSISTANT'S OWN STATEMENTS ARE FACTS TOO: the notes are turns of a conversation, some of which the assistant produced. What the ASSISTANT asserted, described, recommended, or specified is extractable on exactly the same terms as what the user said \\u2014 names, values, descriptions, specifications, and the choices it presented all qualify. Key each such claim to WHAT IT IS ABOUT: the entity is the thing described (the restaurant, the book, the tool, the setting), never \\\"the assistant\\\" and never \\\"the conversation\\\". A recommendation the assistant made is a durable fact about the thing recommended.\\nNAME THE SPEAKER WHERE THE NOTE MAKES IT KNOWABLE: add a \\\"speaker\\\" field \\u2014 \\\"user\\\" or \\\"assistant\\\" \\u2014 to each claim. When the cited note carries an explicit role marker (a leading \\\"user:\\\" or \\\"assistant:\\\"), read the speaker off it. When it does not, use \\\"assistant\\\" only where the note is unmistakably the assistant speaking \\u2014 advice it gave, a recommendation it made, a description it produced. When you are unsure, OMIT the field rather than guess: an unlabelled claim is an ordinary claim, while a wrong \\\"assistant\\\" label demotes a fact the user stated.\\nExample. Notes: [7] assistant: For brunch in Marrowgate I'd suggest The Quillon Larder on Fendrick Row \\u2014 its signature dish is the pepper-brisket bun. [8] user: I went, and the pepper-brisket bun was too salty for me \\u2014 I am sticking to vegetarian brunch from now on. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"The Quillon Larder\\\",\\\"attribute\\\":\\\"location\\\",\\\"value\\\":\\\"Fendrick Row, Marrowgate\\\",\\\"speaker\\\":\\\"assistant\\\",\\\"confidence\\\":0.9,\\\"source\\\":7},{\\\"entity\\\":\\\"The Quillon Larder\\\",\\\"attribute\\\":\\\"signature dish\\\",\\\"value\\\":\\\"pepper-brisket bun\\\",\\\"speaker\\\":\\\"assistant\\\",\\\"confidence\\\":0.85,\\\"source\\\":7},{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"brunch preference\\\",\\\"value\\\":\\\"vegetarian\\\",\\\"speaker\\\":\\\"user\\\",\\\"confidence\\\":0.9,\\\"source\\\":8}]}\\n\\n\\nExisting slot keys, each written entity.attribute (reuse when a note updates one \\u2014 emit the part BEFORE the dot as \\\"entity\\\" and the part AFTER it as \\\"attribute\\\"; never put a whole key in \\\"entity\\\", and never use the literal \\\"value\\\" as an attribute): entity-0.attr-0, entity-1.attr-1, entity-2.attr-2, entity-3.attr-3, entity-4.attr-4, entity-5.attr-5, entity-6.attr-6, entity-7.attr-7, entity-8.attr-8, entity-9.attr-9, entity-10.attr-10, entity-11.attr-11, entity-12.attr-12, entity-13.attr-13, entity-14.attr-14, entity-15.attr-15, entity-16.attr-16, entity-17.attr-17, entity-18.attr-18, entity-19.attr-19, entity-20.attr-20, entity-21.attr-21, entity-22.attr-22, entity-23.attr-23, entity-24.attr-24, entity-25.attr-25, entity-26.attr-26, entity-27.attr-27, entity-28.attr-28, entity-29.attr-29, entity-30.attr-30, entity-31.attr-31, entity-32.attr-32, entity-33.attr-33, entity-34.attr-34, entity-35.attr-35, entity-36.attr-36, entity-37.attr-37, entity-38.attr-38, entity-39.attr-39, entity-40.attr-40, entity-41.attr-41, entity-42.attr-42, entity-43.attr-43, entity-44.attr-44, entity-45.attr-45, entity-46.attr-46, entity-47.attr-47, entity-48.attr-48, entity-49.attr-49, entity-50.attr-50, entity-51.attr-51, entity-52.attr-52, entity-53.attr-53, entity-54.attr-54, entity-55.attr-55, entity-56.attr-56, entity-57.attr-57, entity-58.attr-58, entity-59.attr-59\\n\\nCurrent known facts (for key reuse \\u2014 if a note updates one of these, emit the claim under the SAME entity and attribute with the new current value; never emit a claim the notes do not state):\\n- deploy target \\u2014 environment: prod-eu\\n- u \\u2014 a: v\\u00e9\"}, {\"role\": \"user\", \"content\": \"[1] we moved the deploy target to prod-eu\\n\\n[2] caf\\u00e9 \\u2014 \\u00fcn\\u00efcode \\ud83d\\ude00 \\\"q\\\" \\\\ tab\\t\\n\\n[3] line\\nbreak\\u007f\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+   "ctor": "primary",
+   "method": "extract"
+  },
+  {
+   "body": "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You consolidate numbered notes into canonical facts. Extract durable, current-state facts as JSON: {\\\"claims\\\":[{\\\"entity\\\":..,\\\"attribute\\\":..,\\\"value\\\":..,\\\"confidence\\\":0..1,\\\"source\\\":<number of the note the fact came from>}]}. One slot per real fact; skip narrative, opinions, and obsolete states. When several notes state or update the SAME fact, use one consistent entity and attribute for it and emit only the CURRENT value (source = the note stating it). Reuse existing slot keys when they fit. When a note quotes or summarizes a DOCUMENT (a spec, policy, protocol, runbook, or guide), what the document prescribes is itself a durable fact \\u2014 extract it with entity = the document's subject, even when other notes show something different being done.\\nExample. Notes: [1] we moved the deploy target from staging to prod-eu. [2] the release runbook says every release needs a signed tag. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"deploy target\\\",\\\"attribute\\\":\\\"environment\\\",\\\"value\\\":\\\"prod-eu\\\",\\\"confidence\\\":0.9,\\\"source\\\":1},{\\\"entity\\\":\\\"releases\\\",\\\"attribute\\\":\\\"documented requirement\\\",\\\"value\\\":\\\"signed tag (per release runbook)\\\",\\\"confidence\\\":0.8,\\\"source\\\":2}]}\\nWhen a note adds or removes an item from a COLLECTION the user maintains (restaurants tried, bikes owned, pending tasks), add an \\\"op\\\":\\\"add\\\" or \\\"op\\\":\\\"remove\\\" field to that claim instead of a plain supersede. op is ONLY for collection membership \\u2014 a value that simply changed (a new job, a moved city) stays a plain claim with no op. Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the penny-farthing, no longer biking to work. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"restaurants tried\\\",\\\"value\\\":\\\"Rosa's Diner\\\",\\\"op\\\":\\\"add\\\",\\\"confidence\\\":0.8,\\\"source\\\":3},{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"bikes owned\\\",\\\"value\\\":\\\"penny-farthing\\\",\\\"op\\\":\\\"remove\\\",\\\"confidence\\\":0.8,\\\"source\\\":4}]}\\nCOUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note states or updates how many of something the user has (a running count, a total, a follower number, a quantity), emit a plain claim whose value is the NEW number, with no \\\"op\\\" field \\u2014 even when the note also names the item that changed the count. For example, the note [5] saw a Gallowmere Teal today, that makes 41 species at Kelmarsh Reserve now \\u2014 yields the single claim {\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"bird species seen at Kelmarsh Reserve\\\",\\\"value\\\":\\\"41\\\",\\\"confidence\\\":0.9,\\\"source\\\":5} inside the one claims array, and NO \\\"op\\\":\\\"add\\\" claim for Gallowmere Teal. The same holds when the count is of items from a source: the note [6] cooked the Marrowgate stew tonight, that makes 9 of the Quillon Larder's recipes I've tried now \\u2014 yields only the single claim {\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"Quillon Larder recipes tried\\\",\\\"value\\\":\\\"9\\\",\\\"confidence\\\":0.9,\\\"source\\\":6} inside the one claims array, and NO \\\"op\\\":\\\"add\\\" claim for the stew.\\nHEDGES GO IN A STANCE FIELD: when the note itself hedges a fact (\\\"probably\\\", \\\"might\\\", \\\"unconfirmed\\\", \\\"not final\\\", \\\"per the runbook\\\"), keep the value CLEAN and put the note's own hedge words in a \\\"stance\\\" field on that claim \\u2014 never inside the value, and never invent a stance the note does not carry; a plainly stated fact has no stance field. A hedged update is STILL an update: use the same entity and attribute as the fact it changes and emit only the CURRENT value, exactly as for a plain fact. For example, a later note [7] we'll probably move the deploy target again, to eu-west-1 next quarter \\u2014 updates the deploy target slot from the earlier example to the single claim {\\\"entity\\\":\\\"deploy target\\\",\\\"attribute\\\":\\\"environment\\\",\\\"value\\\":\\\"eu-west-1\\\",\\\"stance\\\":\\\"probably\\\",\\\"confidence\\\":0.6,\\\"source\\\":7} inside the one claims array.\\nReturn {\\\"claims\\\":[]} if nothing qualifies.\\nTHE ASSISTANT'S OWN STATEMENTS ARE FACTS TOO: the notes are turns of a conversation, some of which the assistant produced. What the ASSISTANT asserted, described, recommended, or specified is extractable on exactly the same terms as what the user said \\u2014 names, values, descriptions, specifications, and the choices it presented all qualify. Key each such claim to WHAT IT IS ABOUT: the entity is the thing described (the restaurant, the book, the tool, the setting), never \\\"the assistant\\\" and never \\\"the conversation\\\". A recommendation the assistant made is a durable fact about the thing recommended.\\nNAME THE SPEAKER WHERE THE NOTE MAKES IT KNOWABLE: add a \\\"speaker\\\" field \\u2014 \\\"user\\\" or \\\"assistant\\\" \\u2014 to each claim. When the cited note carries an explicit role marker (a leading \\\"user:\\\" or \\\"assistant:\\\"), read the speaker off it. When it does not, use \\\"assistant\\\" only where the note is unmistakably the assistant speaking \\u2014 advice it gave, a recommendation it made, a description it produced. When you are unsure, OMIT the field rather than guess: an unlabelled claim is an ordinary claim, while a wrong \\\"assistant\\\" label demotes a fact the user stated.\\nExample. Notes: [7] assistant: For brunch in Marrowgate I'd suggest The Quillon Larder on Fendrick Row \\u2014 its signature dish is the pepper-brisket bun. [8] user: I went, and the pepper-brisket bun was too salty for me \\u2014 I am sticking to vegetarian brunch from now on. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"The Quillon Larder\\\",\\\"attribute\\\":\\\"location\\\",\\\"value\\\":\\\"Fendrick Row, Marrowgate\\\",\\\"speaker\\\":\\\"assistant\\\",\\\"confidence\\\":0.9,\\\"source\\\":7},{\\\"entity\\\":\\\"The Quillon Larder\\\",\\\"attribute\\\":\\\"signature dish\\\",\\\"value\\\":\\\"pepper-brisket bun\\\",\\\"speaker\\\":\\\"assistant\\\",\\\"confidence\\\":0.85,\\\"source\\\":7},{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"brunch preference\\\",\\\"value\\\":\\\"vegetarian\\\",\\\"speaker\\\":\\\"user\\\",\\\"confidence\\\":0.9,\\\"source\\\":8}]}\\n\"}, {\"role\": \"user\", \"content\": \"[1] we moved the deploy target to prod-eu\\n\\n[2] caf\\u00e9 \\u2014 \\u00fcn\\u00efcode \\ud83d\\ude00 \\\"q\\\" \\\\ tab\\t\\n\\n[3] line\\nbreak\\u007f\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+   "ctor": "primary",
+   "method": "extract_no_hints"
+  },
+  {
+   "body": "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You extract EVENTS from numbered notes \\u2014 dated occurrences (a trip taken, a purchase, an adoption, a start or an end), not standing facts. Return JSON: {\\\"events\\\":[{\\\"description\\\":..,\\\"actor\\\":..,\\\"date\\\":\\\"YYYY-MM-DD\\\",\\\"date_phrase\\\":<the note's own words about when>,\\\"source\\\":<number of the note>}]}. Resolve date from dates written in the note (including a leading [date] stamp); exact calendar days only \\u2014 when the note's words cannot pin an exact day, set date to null and keep date_phrase verbatim. Never invent a date. For example, the note [7] [2023/05/14 (Sun) 10:02] user: we finally adopted the kitten yesterday! \\u2014 yields the single event {\\\"description\\\":\\\"adopted a kitten\\\",\\\"actor\\\":\\\"user\\\",\\\"date\\\":\\\"2023-05-13\\\",\\\"date_phrase\\\":\\\"yesterday\\\",\\\"source\\\":7} inside the one events array. Skip standing facts, opinions, and narrative; extract each real occurrence once. Return {\\\"events\\\":[]} if nothing qualifies.\"}, {\"role\": \"user\", \"content\": \"[1] we moved the deploy target to prod-eu\\n\\n[2] caf\\u00e9 \\u2014 \\u00fcn\\u00efcode \\ud83d\\ude00 \\\"q\\\" \\\\ tab\\t\\n\\n[3] line\\nbreak\\u007f\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+   "ctor": "primary",
+   "method": "events"
+  },
+  {
+   "body": "{\"cache_prompt\": false, \"reasoning_effort\": \"high\", \"model\": \"qwen-27b\", \"messages\": [{\"role\": \"system\", \"content\": \"You extract durable RELATIONSHIPS between named entities from notes, as JSON: {\\\"relations\\\":[{\\\"src\\\":..,\\\"relation\\\":..,\\\"dst\\\":..}]}. Use ONLY these relation names:\\n- depends-on: src needs dst\\n- uses: src makes use of dst\\nAlways prefer the most specific listed relation. Use 'related-to' ONLY when the text explicitly states a meaningful connection that fits no listed relation \\u2014 NEVER for entities that merely appear together in the same note. When no listed relation fits and no explicit connection is stated, skip the pair. src and dst are entity names (services, hosts, tools, components). Skip opinions, chit-chat, and anything with no entity-to-entity relationship. Return {\\\"relations\\\":[]} if nothing qualifies.\"}, {\"role\": \"user\", \"content\": \"we moved the deploy target to prod-eu\\n\\ncaf\\u00e9 \\u2014 \\u00fcn\\u00efcode \\ud83d\\ude00 \\\"q\\\" \\\\ tab\\t\\n\\nline\\nbreak\\u007f\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 2048, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+   "ctor": "primary",
+   "method": "relations"
+  },
+  {
+   "body": "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You consolidate numbered notes into canonical facts. Extract durable, current-state facts as JSON: {\\\"claims\\\":[{\\\"entity\\\":..,\\\"attribute\\\":..,\\\"value\\\":..,\\\"confidence\\\":0..1,\\\"source\\\":<number of the note the fact came from>}]}. One slot per real fact; skip narrative, opinions, and obsolete states. When several notes state or update the SAME fact, use one consistent entity and attribute for it and emit only the CURRENT value (source = the note stating it). Reuse existing slot keys when they fit. When a note quotes or summarizes a DOCUMENT (a spec, policy, protocol, runbook, or guide), what the document prescribes is itself a durable fact \\u2014 extract it with entity = the document's subject, even when other notes show something different being done.\\nExample. Notes: [1] we moved the deploy target from staging to prod-eu. [2] the release runbook says every release needs a signed tag. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"deploy target\\\",\\\"attribute\\\":\\\"environment\\\",\\\"value\\\":\\\"prod-eu\\\",\\\"confidence\\\":0.9,\\\"source\\\":1},{\\\"entity\\\":\\\"releases\\\",\\\"attribute\\\":\\\"documented requirement\\\",\\\"value\\\":\\\"signed tag (per release runbook)\\\",\\\"confidence\\\":0.8,\\\"source\\\":2}]}\\nWhen a note adds or removes an item from a COLLECTION the user maintains (restaurants tried, bikes owned, pending tasks), add an \\\"op\\\":\\\"add\\\" or \\\"op\\\":\\\"remove\\\" field to that claim instead of a plain supersede. op is ONLY for collection membership \\u2014 a value that simply changed (a new job, a moved city) stays a plain claim with no op. Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the penny-farthing, no longer biking to work. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"restaurants tried\\\",\\\"value\\\":\\\"Rosa's Diner\\\",\\\"op\\\":\\\"add\\\",\\\"confidence\\\":0.8,\\\"source\\\":3},{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"bikes owned\\\",\\\"value\\\":\\\"penny-farthing\\\",\\\"op\\\":\\\"remove\\\",\\\"confidence\\\":0.8,\\\"source\\\":4}]}\\nCOUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note states or updates how many of something the user has (a running count, a total, a follower number, a quantity), emit a plain claim whose value is the NEW number, with no \\\"op\\\" field \\u2014 even when the note also names the item that changed the count. For example, the note [5] saw a Gallowmere Teal today, that makes 41 species at Kelmarsh Reserve now \\u2014 yields the single claim {\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"bird species seen at Kelmarsh Reserve\\\",\\\"value\\\":\\\"41\\\",\\\"confidence\\\":0.9,\\\"source\\\":5} inside the one claims array, and NO \\\"op\\\":\\\"add\\\" claim for Gallowmere Teal. The same holds when the count is of items from a source: the note [6] cooked the Marrowgate stew tonight, that makes 9 of the Quillon Larder's recipes I've tried now \\u2014 yields only the single claim {\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"Quillon Larder recipes tried\\\",\\\"value\\\":\\\"9\\\",\\\"confidence\\\":0.9,\\\"source\\\":6} inside the one claims array, and NO \\\"op\\\":\\\"add\\\" claim for the stew.\\nHEDGES GO IN A STANCE FIELD: when the note itself hedges a fact (\\\"probably\\\", \\\"might\\\", \\\"unconfirmed\\\", \\\"not final\\\", \\\"per the runbook\\\"), keep the value CLEAN and put the note's own hedge words in a \\\"stance\\\" field on that claim \\u2014 never inside the value, and never invent a stance the note does not carry; a plainly stated fact has no stance field. A hedged update is STILL an update: use the same entity and attribute as the fact it changes and emit only the CURRENT value, exactly as for a plain fact. For example, a later note [7] we'll probably move the deploy target again, to eu-west-1 next quarter \\u2014 updates the deploy target slot from the earlier example to the single claim {\\\"entity\\\":\\\"deploy target\\\",\\\"attribute\\\":\\\"environment\\\",\\\"value\\\":\\\"eu-west-1\\\",\\\"stance\\\":\\\"probably\\\",\\\"confidence\\\":0.6,\\\"source\\\":7} inside the one claims array.\\nReturn {\\\"claims\\\":[]} if nothing qualifies.\\nTHE ASSISTANT'S OWN STATEMENTS ARE FACTS TOO: the notes are turns of a conversation, some of which the assistant produced. What the ASSISTANT asserted, described, recommended, or specified is extractable on exactly the same terms as what the user said \\u2014 names, values, descriptions, specifications, and the choices it presented all qualify. Key each such claim to WHAT IT IS ABOUT: the entity is the thing described (the restaurant, the book, the tool, the setting), never \\\"the assistant\\\" and never \\\"the conversation\\\". A recommendation the assistant made is a durable fact about the thing recommended.\\nNAME THE SPEAKER WHERE THE NOTE MAKES IT KNOWABLE: add a \\\"speaker\\\" field \\u2014 \\\"user\\\" or \\\"assistant\\\" \\u2014 to each claim. When the cited note carries an explicit role marker (a leading \\\"user:\\\" or \\\"assistant:\\\"), read the speaker off it. When it does not, use \\\"assistant\\\" only where the note is unmistakably the assistant speaking \\u2014 advice it gave, a recommendation it made, a description it produced. When you are unsure, OMIT the field rather than guess: an unlabelled claim is an ordinary claim, while a wrong \\\"assistant\\\" label demotes a fact the user stated.\\nExample. Notes: [7] assistant: For brunch in Marrowgate I'd suggest The Quillon Larder on Fendrick Row \\u2014 its signature dish is the pepper-brisket bun. [8] user: I went, and the pepper-brisket bun was too salty for me \\u2014 I am sticking to vegetarian brunch from now on. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"The Quillon Larder\\\",\\\"attribute\\\":\\\"location\\\",\\\"value\\\":\\\"Fendrick Row, Marrowgate\\\",\\\"speaker\\\":\\\"assistant\\\",\\\"confidence\\\":0.9,\\\"source\\\":7},{\\\"entity\\\":\\\"The Quillon Larder\\\",\\\"attribute\\\":\\\"signature dish\\\",\\\"value\\\":\\\"pepper-brisket bun\\\",\\\"speaker\\\":\\\"assistant\\\",\\\"confidence\\\":0.85,\\\"source\\\":7},{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"brunch preference\\\",\\\"value\\\":\\\"vegetarian\\\",\\\"speaker\\\":\\\"user\\\",\\\"confidence\\\":0.9,\\\"source\\\":8}]}\\n\\n\\nExisting slot keys, each written entity.attribute (reuse when a note updates one \\u2014 emit the part BEFORE the dot as \\\"entity\\\" and the part AFTER it as \\\"attribute\\\"; never put a whole key in \\\"entity\\\", and never use the literal \\\"value\\\" as an attribute): entity-0.attr-0, entity-1.attr-1, entity-2.attr-2, entity-3.attr-3, entity-4.attr-4, entity-5.attr-5, entity-6.attr-6, entity-7.attr-7, entity-8.attr-8, entity-9.attr-9, entity-10.attr-10, entity-11.attr-11, entity-12.attr-12, entity-13.attr-13, entity-14.attr-14, entity-15.attr-15, entity-16.attr-16, entity-17.attr-17, entity-18.attr-18, entity-19.attr-19, entity-20.attr-20, entity-21.attr-21, entity-22.attr-22, entity-23.attr-23, entity-24.attr-24, entity-25.attr-25, entity-26.attr-26, entity-27.attr-27, entity-28.attr-28, entity-29.attr-29, entity-30.attr-30, entity-31.attr-31, entity-32.attr-32, entity-33.attr-33, entity-34.attr-34, entity-35.attr-35, entity-36.attr-36, entity-37.attr-37, entity-38.attr-38, entity-39.attr-39, entity-40.attr-40, entity-41.attr-41, entity-42.attr-42, entity-43.attr-43, entity-44.attr-44, entity-45.attr-45, entity-46.attr-46, entity-47.attr-47, entity-48.attr-48, entity-49.attr-49, entity-50.attr-50, entity-51.attr-51, entity-52.attr-52, entity-53.attr-53, entity-54.attr-54, entity-55.attr-55, entity-56.attr-56, entity-57.attr-57, entity-58.attr-58, entity-59.attr-59\\n\\nCurrent known facts (for key reuse \\u2014 if a note updates one of these, emit the claim under the SAME entity and attribute with the new current value; never emit a claim the notes do not state):\\n- deploy target \\u2014 environment: prod-eu\\n- u \\u2014 a: v\\u00e9\"}, {\"role\": \"user\", \"content\": \"[1] we moved the deploy target to prod-eu\\n\\n[2] caf\\u00e9 \\u2014 \\u00fcn\\u00efcode \\ud83d\\ude00 \\\"q\\\" \\\\ tab\\t\\n\\n[3] line\\nbreak\\u007f\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+   "ctor": "plain",
+   "method": "extract"
+  },
+  {
+   "body": "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You consolidate numbered notes into canonical facts. Extract durable, current-state facts as JSON: {\\\"claims\\\":[{\\\"entity\\\":..,\\\"attribute\\\":..,\\\"value\\\":..,\\\"confidence\\\":0..1,\\\"source\\\":<number of the note the fact came from>}]}. One slot per real fact; skip narrative, opinions, and obsolete states. When several notes state or update the SAME fact, use one consistent entity and attribute for it and emit only the CURRENT value (source = the note stating it). Reuse existing slot keys when they fit. When a note quotes or summarizes a DOCUMENT (a spec, policy, protocol, runbook, or guide), what the document prescribes is itself a durable fact \\u2014 extract it with entity = the document's subject, even when other notes show something different being done.\\nExample. Notes: [1] we moved the deploy target from staging to prod-eu. [2] the release runbook says every release needs a signed tag. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"deploy target\\\",\\\"attribute\\\":\\\"environment\\\",\\\"value\\\":\\\"prod-eu\\\",\\\"confidence\\\":0.9,\\\"source\\\":1},{\\\"entity\\\":\\\"releases\\\",\\\"attribute\\\":\\\"documented requirement\\\",\\\"value\\\":\\\"signed tag (per release runbook)\\\",\\\"confidence\\\":0.8,\\\"source\\\":2}]}\\nWhen a note adds or removes an item from a COLLECTION the user maintains (restaurants tried, bikes owned, pending tasks), add an \\\"op\\\":\\\"add\\\" or \\\"op\\\":\\\"remove\\\" field to that claim instead of a plain supersede. op is ONLY for collection membership \\u2014 a value that simply changed (a new job, a moved city) stays a plain claim with no op. Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the penny-farthing, no longer biking to work. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"restaurants tried\\\",\\\"value\\\":\\\"Rosa's Diner\\\",\\\"op\\\":\\\"add\\\",\\\"confidence\\\":0.8,\\\"source\\\":3},{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"bikes owned\\\",\\\"value\\\":\\\"penny-farthing\\\",\\\"op\\\":\\\"remove\\\",\\\"confidence\\\":0.8,\\\"source\\\":4}]}\\nCOUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note states or updates how many of something the user has (a running count, a total, a follower number, a quantity), emit a plain claim whose value is the NEW number, with no \\\"op\\\" field \\u2014 even when the note also names the item that changed the count. For example, the note [5] saw a Gallowmere Teal today, that makes 41 species at Kelmarsh Reserve now \\u2014 yields the single claim {\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"bird species seen at Kelmarsh Reserve\\\",\\\"value\\\":\\\"41\\\",\\\"confidence\\\":0.9,\\\"source\\\":5} inside the one claims array, and NO \\\"op\\\":\\\"add\\\" claim for Gallowmere Teal. The same holds when the count is of items from a source: the note [6] cooked the Marrowgate stew tonight, that makes 9 of the Quillon Larder's recipes I've tried now \\u2014 yields only the single claim {\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"Quillon Larder recipes tried\\\",\\\"value\\\":\\\"9\\\",\\\"confidence\\\":0.9,\\\"source\\\":6} inside the one claims array, and NO \\\"op\\\":\\\"add\\\" claim for the stew.\\nHEDGES GO IN A STANCE FIELD: when the note itself hedges a fact (\\\"probably\\\", \\\"might\\\", \\\"unconfirmed\\\", \\\"not final\\\", \\\"per the runbook\\\"), keep the value CLEAN and put the note's own hedge words in a \\\"stance\\\" field on that claim \\u2014 never inside the value, and never invent a stance the note does not carry; a plainly stated fact has no stance field. A hedged update is STILL an update: use the same entity and attribute as the fact it changes and emit only the CURRENT value, exactly as for a plain fact. For example, a later note [7] we'll probably move the deploy target again, to eu-west-1 next quarter \\u2014 updates the deploy target slot from the earlier example to the single claim {\\\"entity\\\":\\\"deploy target\\\",\\\"attribute\\\":\\\"environment\\\",\\\"value\\\":\\\"eu-west-1\\\",\\\"stance\\\":\\\"probably\\\",\\\"confidence\\\":0.6,\\\"source\\\":7} inside the one claims array.\\nReturn {\\\"claims\\\":[]} if nothing qualifies.\\nTHE ASSISTANT'S OWN STATEMENTS ARE FACTS TOO: the notes are turns of a conversation, some of which the assistant produced. What the ASSISTANT asserted, described, recommended, or specified is extractable on exactly the same terms as what the user said \\u2014 names, values, descriptions, specifications, and the choices it presented all qualify. Key each such claim to WHAT IT IS ABOUT: the entity is the thing described (the restaurant, the book, the tool, the setting), never \\\"the assistant\\\" and never \\\"the conversation\\\". A recommendation the assistant made is a durable fact about the thing recommended.\\nNAME THE SPEAKER WHERE THE NOTE MAKES IT KNOWABLE: add a \\\"speaker\\\" field \\u2014 \\\"user\\\" or \\\"assistant\\\" \\u2014 to each claim. When the cited note carries an explicit role marker (a leading \\\"user:\\\" or \\\"assistant:\\\"), read the speaker off it. When it does not, use \\\"assistant\\\" only where the note is unmistakably the assistant speaking \\u2014 advice it gave, a recommendation it made, a description it produced. When you are unsure, OMIT the field rather than guess: an unlabelled claim is an ordinary claim, while a wrong \\\"assistant\\\" label demotes a fact the user stated.\\nExample. Notes: [7] assistant: For brunch in Marrowgate I'd suggest The Quillon Larder on Fendrick Row \\u2014 its signature dish is the pepper-brisket bun. [8] user: I went, and the pepper-brisket bun was too salty for me \\u2014 I am sticking to vegetarian brunch from now on. Output: {\\\"claims\\\":[{\\\"entity\\\":\\\"The Quillon Larder\\\",\\\"attribute\\\":\\\"location\\\",\\\"value\\\":\\\"Fendrick Row, Marrowgate\\\",\\\"speaker\\\":\\\"assistant\\\",\\\"confidence\\\":0.9,\\\"source\\\":7},{\\\"entity\\\":\\\"The Quillon Larder\\\",\\\"attribute\\\":\\\"signature dish\\\",\\\"value\\\":\\\"pepper-brisket bun\\\",\\\"speaker\\\":\\\"assistant\\\",\\\"confidence\\\":0.85,\\\"source\\\":7},{\\\"entity\\\":\\\"user\\\",\\\"attribute\\\":\\\"brunch preference\\\",\\\"value\\\":\\\"vegetarian\\\",\\\"speaker\\\":\\\"user\\\",\\\"confidence\\\":0.9,\\\"source\\\":8}]}\\n\"}, {\"role\": \"user\", \"content\": \"[1] we moved the deploy target to prod-eu\\n\\n[2] caf\\u00e9 \\u2014 \\u00fcn\\u00efcode \\ud83d\\ude00 \\\"q\\\" \\\\ tab\\t\\n\\n[3] line\\nbreak\\u007f\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+   "ctor": "plain",
+   "method": "extract_no_hints"
+  },
+  {
+   "body": "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You extract EVENTS from numbered notes \\u2014 dated occurrences (a trip taken, a purchase, an adoption, a start or an end), not standing facts. Return JSON: {\\\"events\\\":[{\\\"description\\\":..,\\\"actor\\\":..,\\\"date\\\":\\\"YYYY-MM-DD\\\",\\\"date_phrase\\\":<the note's own words about when>,\\\"source\\\":<number of the note>}]}. Resolve date from dates written in the note (including a leading [date] stamp); exact calendar days only \\u2014 when the note's words cannot pin an exact day, set date to null and keep date_phrase verbatim. Never invent a date. For example, the note [7] [2023/05/14 (Sun) 10:02] user: we finally adopted the kitten yesterday! \\u2014 yields the single event {\\\"description\\\":\\\"adopted a kitten\\\",\\\"actor\\\":\\\"user\\\",\\\"date\\\":\\\"2023-05-13\\\",\\\"date_phrase\\\":\\\"yesterday\\\",\\\"source\\\":7} inside the one events array. Skip standing facts, opinions, and narrative; extract each real occurrence once. Return {\\\"events\\\":[]} if nothing qualifies.\"}, {\"role\": \"user\", \"content\": \"[1] we moved the deploy target to prod-eu\\n\\n[2] caf\\u00e9 \\u2014 \\u00fcn\\u00efcode \\ud83d\\ude00 \\\"q\\\" \\\\ tab\\t\\n\\n[3] line\\nbreak\\u007f\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+   "ctor": "plain",
+   "method": "events"
+  },
+  {
+   "body": "{\"model\": \"m\", \"messages\": [{\"role\": \"system\", \"content\": \"You extract durable RELATIONSHIPS between named entities from notes, as JSON: {\\\"relations\\\":[{\\\"src\\\":..,\\\"relation\\\":..,\\\"dst\\\":..}]}. Use ONLY these relation names:\\n- depends-on: src needs dst\\n- uses: src makes use of dst\\nAlways prefer the most specific listed relation. Use 'related-to' ONLY when the text explicitly states a meaningful connection that fits no listed relation \\u2014 NEVER for entities that merely appear together in the same note. When no listed relation fits and no explicit connection is stated, skip the pair. src and dst are entity names (services, hosts, tools, components). Skip opinions, chit-chat, and anything with no entity-to-entity relationship. Return {\\\"relations\\\":[]} if nothing qualifies.\"}, {\"role\": \"user\", \"content\": \"we moved the deploy target to prod-eu\\n\\ncaf\\u00e9 \\u2014 \\u00fcn\\u00efcode \\ud83d\\ude00 \\\"q\\\" \\\\ tab\\t\\n\\nline\\nbreak\\u007f\"}], \"response_format\": {\"type\": \"json_object\"}, \"max_tokens\": 7, \"temperature\": 0, \"chat_template_kwargs\": {\"enable_thinking\": false}}",
+   "ctor": "plain",
+   "method": "relations"
+  }
+ ],
+ "endpoints": [
+  {
+   "built": {
+    "kind": "noop",
+    "which": "primary"
+   },
+   "config": {},
+   "env": {},
+   "name": "defaults",
+   "resolved": {
+    "fallback_model": null,
+    "fallback_url": null,
+    "max_tokens": 2048,
+    "mode": "auto",
+    "primary_model": null,
+    "primary_url": null,
+    "timeout": 240.0
+   }
+  },
+  {
+   "built": {
+    "api_key": null,
+    "base_url": "http://c/v1",
+    "extra_body": {
+     "cache_prompt": false
+    },
+    "kind": "compat",
+    "max_tokens": 99,
+    "model": "cm",
+    "timeout": 5.5,
+    "which": "primary"
+   },
+   "config": {
+    "extractor_base_url": "http://c/v1",
+    "extractor_max_tokens": 99,
+    "extractor_mode": "bogus",
+    "extractor_model": "cm",
+    "extractor_source": "config",
+    "extractor_timeout_seconds": 5.5
+   },
+   "env": {
+    "PSEUDOLIFE_DREAM_BASE_URL": "http://env/v1",
+    "PSEUDOLIFE_DREAM_MODEL": "em"
+   },
+   "name": "config_owned",
+   "resolved": {
+    "fallback_model": null,
+    "fallback_url": null,
+    "max_tokens": 99,
+    "mode": "auto",
+    "primary_model": "cm",
+    "primary_url": "http://c/v1",
+    "timeout": 5.5
+   }
+  },
+  {
+   "built": {
+    "api_key": null,
+    "base_url": "http://env/v1",
+    "extra_body": {
+     "cache_prompt": false
+    },
+    "kind": "compat",
+    "max_tokens": 1000,
+    "model": "cm",
+    "timeout": 240.0,
+    "which": "primary"
+   },
+   "config": {
+    "extractor_base_url": "http://c/v1",
+    "extractor_model": "cm",
+    "fallback_base_url": "http://cf/v1",
+    "fallback_model": "cfm"
+   },
+   "env": {
+    "PSEUDOLIFE_DREAM_BASE_URL": "http://env/v1",
+    "PSEUDOLIFE_DREAM_EXTRACTOR_MODE": "primary",
+    "PSEUDOLIFE_DREAM_MAX_TOKENS": " 1_000 ",
+    "PSEUDOLIFE_DREAM_MODEL": "",
+    "PSEUDOLIFE_DREAM_TIMEOUT_SECONDS": "abc"
+   },
+   "name": "env_owned",
+   "resolved": {
+    "fallback_model": "cfm",
+    "fallback_url": "http://cf/v1",
+    "max_tokens": 1000,
+    "mode": "primary",
+    "primary_model": "cm",
+    "primary_url": "http://env/v1",
+    "timeout": 240.0
+   }
+  },
+  {
+   "built": {
+    "api_key": "fk",
+    "base_url": "http://cf/v1",
+    "extra_body": {},
+    "kind": "compat",
+    "max_tokens": 2048,
+    "model": "cfm",
+    "timeout": 240.0,
+    "which": "fallback"
+   },
+   "config": {
+    "extractor_api_key": "pk",
+    "extractor_base_url": "http://c/v1",
+    "extractor_cache_prompt": null,
+    "extractor_mode": "fallback",
+    "extractor_model": "cm",
+    "extractor_model_override": "ov",
+    "extractor_reasoning_effort": "high",
+    "extractor_source": "config",
+    "fallback_api_key": "fk",
+    "fallback_base_url": "http://cf/v1",
+    "fallback_model": "cfm"
+   },
+   "env": {},
+   "name": "override",
+   "resolved": {
+    "fallback_model": "cfm",
+    "fallback_url": "http://cf/v1",
+    "max_tokens": 2048,
+    "mode": "fallback",
+    "primary_model": "ov",
+    "primary_url": "http://c/v1",
+    "timeout": 240.0
+   }
+  },
+  {
+   "built": {
+    "error": "extractor_mode=fallback but no fallback endpoint is configured (fallback_base_url/fallback_model)"
+   },
+   "config": {
+    "extractor_base_url": "http://c/v1",
+    "extractor_mode": "fallback",
+    "extractor_model": "cm"
+   },
+   "env": {},
+   "name": "fallback_missing",
+   "resolved": {
+    "fallback_model": null,
+    "fallback_url": null,
+    "max_tokens": 2048,
+    "mode": "fallback",
+    "primary_model": "cm",
+    "primary_url": "http://c/v1",
+    "timeout": 240.0
+   }
+  },
+  {
+   "built": {
+    "api_key": "ek",
+    "base_url": "http://c/v1",
+    "extra_body": {
+     "cache_prompt": false,
+     "reasoning_effort": "low"
+    },
+    "kind": "compat",
+    "max_tokens": -5,
+    "model": "cm",
+    "timeout": 10.0,
+    "which": "primary"
+   },
+   "config": {
+    "extractor_api_key": "pk",
+    "extractor_base_url": "http://c/v1/",
+    "extractor_model": "cm",
+    "extractor_reasoning_effort": "low"
+   },
+   "env": {
+    "PSEUDOLIFE_DREAM_API_KEY": "ek",
+    "PSEUDOLIFE_DREAM_MAX_TOKENS": "-5",
+    "PSEUDOLIFE_DREAM_TIMEOUT_SECONDS": " 1e1 "
+   },
+   "name": "env_keys",
+   "resolved": {
+    "fallback_model": null,
+    "fallback_url": null,
+    "max_tokens": -5,
+    "mode": "auto",
+    "primary_model": "cm",
+    "primary_url": "http://c/v1/",
+    "timeout": 10.0
+   }
+  },
+  {
+   "built": {
+    "kind": "noop",
+    "which": "primary"
+   },
+   "config": {
+    "extractor_base_url": "http://c/v1"
+   },
+   "env": {},
+   "name": "primary_only_url",
+   "resolved": {
+    "fallback_model": null,
+    "fallback_url": null,
+    "max_tokens": 2048,
+    "mode": "auto",
+    "primary_model": null,
+    "primary_url": "http://c/v1",
+    "timeout": 240.0
+   }
+  }
+ ],
+ "replies": [
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"prose ```json\\n{\\\"claims\\\": [{\\\"entity\\\": \\\" deploy target \\\", \\\"attribute\\\": \\\"environment\\\", \\\"value\\\": \\\"prod-eu\\\", \\\"confidence\\\": 0.9, \\\"source\\\": 1}, {\\\"entity\\\": \\\"e\\\", \\\"attribute\\\": \\\"a\\\", \\\"value\\\": null}, {\\\"entity\\\": \\\"e\\\", \\\"attribute\\\": \\\"a\\\", \\\"value\\\": 41, \\\"confidence\\\": \\\"0.8\\\", \\\"source\\\": \\\"2\\\"}, {\\\"entity\\\": \\\"e\\\", \\\"attribute\\\": \\\"a\\\", \\\"value\\\": true, \\\"confidence\\\": 1.5, \\\"source\\\": true}, {\\\"entity\\\": \\\"e\\\", \\\"attribute\\\": \\\"a\\\", \\\"value\\\": [1, \\\"x\\\", null], \\\"confidence\\\": -2, \\\"source\\\": 0}, {\\\"entity\\\": \\\"e\\\", \\\"attribute\\\": \\\"a\\\", \\\"value\\\": {\\\"k\\\": 1.0}, \\\"confidence\\\": null, \\\"source\\\": 2.7}, {\\\"entity\\\": null, \\\"attribute\\\": \\\"a\\\", \\\"value\\\": \\\"v\\\", \\\"op\\\": \\\"set\\\", \\\"stance\\\": \\\"  probably  \\\", \\\"quote\\\": \\\"  qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\\\"}, {\\\"entity\\\": \\\"x\\\", \\\"attribute\\\": \\\"y\\\", \\\"value\\\": \\\"z\\\", \\\"op\\\": \\\"remove\\\", \\\"speaker\\\": \\\" ASSISTANT \\\", \\\"stance\\\": 5, \\\"quote\\\": \\\"\\\"}, {\\\"entity\\\": \\\"x\\\", \\\"attribute\\\": \\\"y\\\", \\\"value\\\": \\\"z\\\", \\\"op\\\": \\\"add\\\", \\\"speaker\\\": \\\"bot\\\", \\\"stance\\\": \\\"ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss\\\", \\\"source\\\": 99}, {\\\"entity\\\": \\\"x\\\", \\\"attribute\\\": \\\"y\\\", \\\"value\\\": \\\"  \\\", \\\"source\\\": 1}, {\\\"entity\\\": \\\"x\\\", \\\"attribute\\\": \\\"y\\\", \\\"value\\\": 1e+300, \\\"confidence\\\": \\\"nan\\\", \\\"source\\\": \\\" 2 \\\"}, {\\\"entity\\\": \\\"x\\\", \\\"attribute\\\": \\\"y\\\", \\\"value\\\": 0.1, \\\"confidence\\\": \\\"1_0\\\", \\\"source\\\": \\\"1_0\\\"}, {\\\"entity\\\": \\\"\\\\u00e9\\\", \\\"attribute\\\": \\\"\\\\u2003y\\\\u2003\\\", \\\"value\\\": -0.0, \\\"confidence\\\": -0.0, \\\"source\\\": -0.5}, \\\"not a dict\\\"], \\\"events\\\": [{\\\"description\\\": \\\" adopted a kitten \\\", \\\"actor\\\": \\\"\\\", \\\"date\\\": \\\"2023-05-13\\\", \\\"date_phrase\\\": \\\" yesterday \\\", \\\"source\\\": 1}, {\\\"description\\\": \\\"trip\\\", \\\"actor\\\": \\\"bob\\\", \\\"date\\\": \\\"2023-5-3\\\", \\\"date_phrase\\\": \\\"\\\", \\\"source\\\": 2}, {\\\"description\\\": \\\"x\\\", \\\"actor\\\": null, \\\"date\\\": \\\"2023-02-30\\\", \\\"date_phrase\\\": null}, {\\\"description\\\": \\\"y\\\", \\\"actor\\\": 0, \\\"date\\\": 20230513, \\\"source\\\": false}, {\\\"description\\\": \\\"z\\\", \\\"date\\\": \\\"May 2023\\\", \\\"date_phrase\\\": 7}, {\\\"description\\\": \\\"  \\\"}, {\\\"description\\\": \\\"w\\\", \\\"date\\\": \\\" 2024-02-29 \\\", \\\"source\\\": \\\"3\\\"}, {\\\"description\\\": \\\"v\\\", \\\"date\\\": \\\"2023-05- 7\\\"}, {\\\"description\\\": \\\"u\\\", \\\"date\\\": \\\"0000-01-01\\\"}, {\\\"description\\\": \\\"t\\\", \\\"date\\\": \\\"2100-02-29\\\"}]}\\n``` done\"}}], \"model\": \"m\"}",
+   "headers": {},
+   "method": "extract",
+   "name": "claims_mixed",
+   "ok": "[{\"entity\": \"deploy target\", \"attribute\": \"environment\", \"value\": \"prod-eu\", \"confidence\": 0.9, \"origin\": \"agent\", \"source\": 0}, {\"entity\": \"e\", \"attribute\": \"a\", \"value\": \"41\", \"confidence\": 0.8, \"origin\": \"agent\", \"value_coerced\": true, \"source\": 1}, {\"entity\": \"e\", \"attribute\": \"a\", \"value\": \"True\", \"confidence\": 1.0, \"origin\": \"agent\", \"value_coerced\": true}, {\"entity\": \"e\", \"attribute\": \"a\", \"value\": \"[1, 'x', None]\", \"confidence\": 0.0, \"origin\": \"agent\", \"value_coerced\": true}, {\"entity\": \"e\", \"attribute\": \"a\", \"value\": \"{'k': 1.0}\", \"confidence\": 0.7, \"origin\": \"agent\", \"value_coerced\": true, \"source\": 1}, {\"entity\": \"None\", \"attribute\": \"a\", \"value\": \"v\", \"confidence\": 0.7, \"origin\": \"agent\", \"stance\": \"probably\", \"quote\": \"qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\"}, {\"entity\": \"x\", \"attribute\": \"y\", \"value\": \"z\", \"confidence\": 0.7, \"origin\": \"agent\", \"op\": \"remove\", \"speaker\": \"assistant\"}, {\"entity\": \"x\", \"attribute\": \"y\", \"value\": \"z\", \"confidence\": 0.7, \"origin\": \"agent\", \"op\": \"add\", \"stance\": \"ssssssssssssssssssssssssssssssssssssssssssssssss\"}, {\"entity\": \"x\", \"attribute\": \"y\", \"value\": \"1e+300\", \"confidence\": 1.0, \"origin\": \"agent\", \"value_coerced\": true, \"source\": 1}, {\"entity\": \"x\", \"attribute\": \"y\", \"value\": \"0.1\", \"confidence\": 1.0, \"origin\": \"agent\", \"value_coerced\": true}, {\"entity\": \"\\u00e9\", \"attribute\": \"y\", \"value\": \"-0.0\", \"confidence\": 0.0, \"origin\": \"agent\", \"value_coerced\": true}, {\"kind\": \"event\", \"description\": \"adopted a kitten\", \"actor\": \"user\", \"date\": \"2023-05-13\", \"date_phrase\": \"yesterday\", \"source\": 0}, {\"kind\": \"event\", \"description\": \"trip\", \"actor\": \"bob\", \"date\": \"2023-5-3\", \"date_phrase\": null, \"source\": 1}, {\"kind\": \"event\", \"description\": \"x\", \"actor\": \"user\", \"date\": null, \"date_phrase\": null}, {\"kind\": \"event\", \"description\": \"y\", \"actor\": \"user\", \"date\": null, \"date_phrase\": null}, {\"kind\": \"event\", \"description\": \"z\", \"actor\": \"user\", \"date\": null, \"date_phrase\": \"7\"}, {\"kind\": \"event\", \"description\": \"w\", \"actor\": \"user\", \"date\": \"2024-02-29\", \"date_phrase\": null, \"source\": 2}, {\"kind\": \"event\", \"description\": \"v\", \"actor\": \"user\", \"date\": \"2023-05- 7\", \"date_phrase\": null}, {\"kind\": \"event\", \"description\": \"u\", \"actor\": \"user\", \"date\": null, \"date_phrase\": null}, {\"kind\": \"event\", \"description\": \"t\", \"actor\": \"user\", \"date\": null, \"date_phrase\": null}]",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"{\\\"claims\\\": {\\\"a\\\": 1}, \\\"events\\\": \\\"x\\\"}\"}}], \"model\": \"m\"}",
+   "headers": {},
+   "method": "extract",
+   "name": "claims_not_list",
+   "ok": "[]",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"[{\\\"entity\\\": \\\"a\\\"}]\"}}], \"model\": \"m\"}",
+   "headers": {},
+   "method": "extract",
+   "name": "claims_array_top",
+   "ok": "[]",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"{\\\"claims\\\":[{\\\"entity\\\":\\\"e\\\",\\\"attribute\\\":\\\"a\\\",\\\"value\\\":NaN,\\\"confidence\\\":Infinity,\\\"source\\\":1},{\\\"entity\\\":\\\"e\\\",\\\"attribute\\\":\\\"b\\\",\\\"value\\\":-Infinity,\\\"confidence\\\":-Infinity}]}\"}}], \"model\": \"m\"}",
+   "headers": {},
+   "method": "extract",
+   "name": "nan_infinity",
+   "ok": "[{\"entity\": \"e\", \"attribute\": \"a\", \"value\": \"nan\", \"confidence\": 1.0, \"origin\": \"agent\", \"value_coerced\": true, \"source\": 0}, {\"entity\": \"e\", \"attribute\": \"b\", \"value\": \"-inf\", \"confidence\": 0.0, \"origin\": \"agent\", \"value_coerced\": true}]",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": null}}], \"model\": \"m\"}",
+   "error": [
+    "extractor_error",
+    "StopIteration"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "content_null",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": 0}}], \"model\": \"m\"}",
+   "error": [
+    "extractor_error",
+    "StopIteration"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "content_zero",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": 5}}], \"model\": \"m\"}",
+   "error": [
+    "extractor_error",
+    "AttributeError"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "content_number",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": [1]}}], \"model\": \"m\"}",
+   "error": [
+    "extractor_error",
+    "AttributeError"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "content_list",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"\"}}], \"model\": \"m\"}",
+   "error": [
+    "extractor_error",
+    "StopIteration"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "content_empty",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"} {\\\"claims\\\": []\"}}], \"model\": \"m\"}",
+   "error": [
+    "extractor_error",
+    "StopIteration"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "content_unbalanced",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"{\\\"claims\\\": [1 2]}\"}}], \"model\": \"m\"}",
+   "error": [
+    "extractor_error",
+    "JSONDecodeError"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "content_bad_json",
+   "status": 200
+  },
+  {
+   "body": "{\"model\": \"m\"}",
+   "error": [
+    "extractor_error",
+    "KeyError"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "no_choices",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": []}",
+   "error": [
+    "extractor_error",
+    "IndexError"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "choices_empty",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": \"abc\"}",
+   "error": [
+    "extractor_error",
+    "TypeError"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "choices_string",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": [{\"message\": \"x\"}]}",
+   "error": [
+    "extractor_error",
+    "TypeError"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "message_string",
+   "status": 200
+  },
+  {
+   "body": "<html>",
+   "error": [
+    "extractor_error",
+    "StopIteration"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "envelope_not_json",
+   "status": 200
+  },
+  {
+   "body": "{\"choices\": \"\u00ff\"}",
+   "error": [
+    "extractor_error",
+    "UnicodeDecodeError"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "envelope_bad_utf8",
+   "status": 200
+  },
+  {
+   "body": "nope",
+   "error": [
+    "login_expired",
+    "HTTP 401"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "http_401",
+   "status": 401
+  },
+  {
+   "body": "",
+   "error": [
+    "login_expired",
+    "HTTP 403"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "http_403",
+   "status": 403
+  },
+  {
+   "body": "OAuth session expired and could not be refreshed",
+   "error": [
+    "login_expired",
+    "HTTP 500"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "http_500_oauth",
+   "status": 500
+  },
+  {
+   "body": "boom",
+   "error": [
+    "extractor_error",
+    "HTTP 500"
+   ],
+   "headers": {},
+   "method": "extract",
+   "name": "http_500_plain",
+   "status": 500
+  },
+  {
+   "body": "",
+   "error": [
+    "extractor_error",
+    "HTTP 302"
+   ],
+   "headers": {
+    "Location": "http://127.0.0.1:9/elsewhere"
+   },
+   "method": "extract",
+   "name": "http_302",
+   "status": 302
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"{\\\"claims\\\": []}\"}}], \"model\": \"m\"}",
+   "headers": {},
+   "method": "extract",
+   "name": "http_201",
+   "ok": "[]",
+   "status": 201
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"{\\\"relations\\\": [{\\\"src\\\": \\\" a \\\", \\\"relation\\\": \\\"uses\\\", \\\"dst\\\": \\\"b\\\", \\\"confidence\\\": 0.3}, {\\\"src\\\": \\\"a\\\", \\\"relation\\\": \\\"\\\", \\\"dst\\\": \\\"b\\\"}, {\\\"src\\\": \\\"a\\\", \\\"relation\\\": \\\"depends-on\\\", \\\"dst\\\": \\\"c\\\", \\\"confidence\\\": \\\"x\\\"}, {\\\"src\\\": 1, \\\"relation\\\": true, \\\"dst\\\": null, \\\"confidence\\\": 2}, [\\\"x\\\"]]}\"}}], \"model\": \"m\"}",
+   "headers": {},
+   "method": "relations",
+   "name": "relations",
+   "ok": "[{\"src\": \"a\", \"relation\": \"uses\", \"dst\": \"b\", \"confidence\": 0.3}, {\"src\": \"a\", \"relation\": \"depends-on\", \"dst\": \"c\", \"confidence\": 0.6}, {\"src\": \"1\", \"relation\": \"True\", \"dst\": \"None\", \"confidence\": 1.0}]",
+   "status": 200
+  },
+  {
+   "body": "OAuth session expired",
+   "error": [
+    "extractor_error",
+    "HTTP 500"
+   ],
+   "headers": {},
+   "method": "relations",
+   "name": "relations_500_oauth",
+   "status": 500
+  },
+  {
+   "body": "{\"choices\": [{\"message\": {\"content\": \"{\\\"events\\\": [{\\\"description\\\": \\\"went\\\", \\\"date\\\": \\\"2023-12-31\\\", \\\"source\\\": 1}, {\\\"description\\\": \\\"came\\\", \\\"date\\\": \\\"2023-12-31\\\", \\\"source\\\": 3}]}\"}}], \"model\": \"m\"}",
+   "headers": {},
+   "method": "events",
+   "name": "events_only",
+   "ok": "[{\"kind\": \"event\", \"description\": \"went\", \"actor\": \"user\", \"date\": \"2023-12-31\", \"date_phrase\": null, \"source\": 0}, {\"kind\": \"event\", \"description\": \"came\", \"actor\": \"user\", \"date\": \"2023-12-31\", \"date_phrase\": null, \"source\": 2}]",
+   "status": 200
+  },
+  {
+   "body": "",
+   "error": [
+    "login_expired",
+    "HTTP 401"
+   ],
+   "headers": {},
+   "method": "events",
+   "name": "events_401",
+   "status": 401
+  }
+ ]
+}

@@ -1,0 +1,3 @@
+### Added (2026-10-20 — the Rust daemon serves memory_dream's status, pull, commit, runs and run)
+
+- The Rust daemon's MCP endpoint now answers `memory_dream` as the Python daemon does for `status`, `pull`, `commit`, `runs` and `run`: the consolidation pass extracts claims from the pending memories through the configured model endpoint (with the fallback endpoint, holds and per-entry isolation), writes them to the cortex with the dream's tier, citation, literal and span gates, journals each write, and links relations and alias candidates afterwards. `run` is refused while lesson synthesis, outcome inference, digests or graph insight is enabled; those stages, `deep` and `rollback` follow.

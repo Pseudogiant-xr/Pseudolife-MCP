@@ -315,6 +315,97 @@ def test_after_stop_sql_runs_once_the_seeding_daemon_has_stopped(harness, monkey
     assert harness.SCENARIOS["set-cap"]["seed"][0]["after_stop"] is True
 
 
+def test_dream_run_scenarios_switch_off_unported_stages_and_answer_every_request(harness):
+    names = [n for n in harness.SCENARIOS if n.startswith("dream-run")]
+    assert set(names) == {"dream-run", "dream-run-hold", "dream-run-empty", "dream-run-gates",
+                          "dream-run-fallback", "dream-run-hints", "dream-run-literal",
+                          "dream-run-outage", "dream-run-redirect", "dream-run-surrogate"}
+    for n in names:
+        scn = harness.SCENARIOS[n]
+        config = scn["config"]
+        # The Rust daemon refuses `run` while an unported stage is on.
+        for switch in ("lessons:\n    enabled: false", "graph_insight:\n    enabled: false",
+                       "stall_notice: false"):
+            assert switch in config, (n, switch)
+        # Only the fallback scenario configures a fallback endpoint (and so
+        # probes the primary on every run).
+        assert ("extractor_fallback" in scn) == (n == "dream-run-fallback")
+        for reply in scn["extractor"]["replies"]:
+            assert "sha256" not in reply, "vocab hints depend on embeddings: key by kind/user"
+            assert reply["kind"] in ("claims", "events", "relations")
+    run_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-run-")]
+    assert len(run_mutants) == 7
+    src = Path(__file__).resolve().parents[1] / "src" / "dream"
+    text = (src / "run.rs").read_text(encoding="utf-8") + (src / "relations.rs").read_text(
+        encoding="utf-8")
+    assert all(f'"{m}"' in text for m in run_mutants)
+    extractor_mutants = [m for m in harness.MUTANTS if m.startswith("mcp-dream-extractor-")]
+    assert len(extractor_mutants) == 4
+    text = (src / "extractor.rs").read_text(encoding="utf-8")
+    assert all(f'"{m}"' in text for m in extractor_mutants)
+
+
+def test_idle_seconds_compare_within_the_longest_step(harness):
+    py = {"isError": False, "value": {"backlog": 1, "idle_seconds": 12.5}}
+    assert harness.idle_diffs(py, {"value": {"idle_seconds": 13.4}}, 1.0) == []
+    assert harness.idle_diffs(py, {"value": {"idle_seconds": 14.0}}, 1.0) == [
+        "idle_seconds: python 12.500 vs rust 14.000 (apart by more than 1.000 s)"]
+    assert harness.idle_diffs(py, {"value": {"idle_seconds": -0.1}}, 5.0)[0].endswith(
+        "(not both >= 0)")
+    assert harness.idle_diffs(py, {"value": {"idle_seconds": None}}, 5.0)
+    assert harness.idle_diffs(py, {"value": {}}, 5.0)
+    assert harness.idle_diffs({"value": {"idle_seconds": 0.0}},
+                              {"value": {"idle_seconds": 0.0}}, 0.0) == []
+
+
+def test_run_clocks_never_finish_before_they_start(harness):
+    raw = {"rows": {"public.dream_runs": {"columns": ["id", "started_at", "finished_at"],
+                                          "rows": [[1, 10.0, 12.0], [2, 20.0, None],
+                                                   [3, 30.0, 29.5]]}}}
+    assert harness.run_clock_diffs("rust", raw) == [
+        "dream run clock (rust bank): finished_at 29.5 before started_at 30.0"]
+    answer = {"value": {"runs": [{"id": 1, "started_at": 5.0, "finished_at": 4.0}]}}
+    assert harness.run_clock_diffs("python", {"rows": {}}, answer) == [
+        "dream run clock (python answer): finished_at 4.0 before started_at 5.0"]
+
+
+def test_extractor_keys_reach_only_their_own_endpoint(harness):
+    from stub_extractor import auth_digest
+    scn = {"extractor_keys": {"primary": "kp", "fallback": "kf"}}
+    ok = [{"method": "GET", "path": "/health", "authorization": None},
+          {"method": "POST", "path": "/fallback/v1/chat/completions",
+           "authorization": auth_digest("Bearer kf")},
+          {"method": "POST", "path": "/v1/chat/completions",
+           "authorization": auth_digest("Bearer kp")}]
+    assert harness.extractor_key_diffs("rust", scn, ok) == []
+    bad = [{**ok[1], "authorization": auth_digest("Bearer kp")},
+           {**ok[0], "authorization": auth_digest("Bearer kp")}]
+    diffs = harness.extractor_key_diffs("rust", scn, bad)
+    assert len(diffs) == 2 and "expected the fallback key" in diffs[0]
+    assert "expected no key" in diffs[1]
+    assert harness.extractor_key_diffs("rust", {}, bad) == []
+    env = harness.extractor_env({**scn, "extractor": {}}, type("S", (), {
+        "base_url": "b", "fallback_base_url": "f"})())
+    assert env["PSEUDOLIFE_DREAM_API_KEY"] == "kp"
+    assert env["PSEUDOLIFE_DREAM_FALLBACK_API_KEY"] == "kf"
+
+
+def test_dream_answers_normalize_stall_clocks_and_run_cursors(harness):
+    ts = {1700000000.5: "<ts:3>"}
+    value = {"stall": {"since": 1.0, "reason": "extractor_error", "last_success_at": None},
+             "last_stall": {"since": 2.0, "recovered_at": 3.0},
+             "last_dream_extractor": {"which": "primary", "base_url": "http://stub/v1", "at": 4.0},
+             "runs": [{"id": 1, "cursor_before": 0.0, "cursor_after": 1700000000.5,
+                       "finished_at": 5.0}]}
+    out = harness.dream_tokens(value, ts)
+    assert out["stall"] == {"since": "<clock>", "reason": "extractor_error",
+                            "last_success_at": None}
+    assert out["last_stall"]["recovered_at"] == "<clock>"
+    assert out["last_dream_extractor"]["at"] == "<clock>"
+    assert out["runs"][0] == {"id": 1, "cursor_before": 0.0, "cursor_after": "<ts:3>",
+                              "finished_at": "<clock>"}
+
+
 def test_warmups_are_awaited_per_side_until_each_probe_lands(harness, monkeypatch):
     monkeypatch.setattr(harness.time, "sleep", lambda s: None)
     polls = {"python": 0, "rust": 0}
@@ -374,14 +465,14 @@ def test_the_init_snapshot_waits_for_both_warmups(harness, monkeypatch, tmp_path
                         {"config": config, "seed": [], "ops": [harness.sql("SELECT 1")]})
     monkeypatch.setattr(harness, "prepare_template", lambda *a: "template")
     monkeypatch.setattr(harness.pg, "create", lambda name, **kw: name)
-    monkeypatch.setattr(harness.dbstate, "dump", lambda dsn: events.append("dump") or {})
+    monkeypatch.setattr(harness.dbstate, "dump", lambda dsn: events.append("dump") or {"rows": {}})
     monkeypatch.setattr(harness.daemons, "python_daemon", Daemon)
     monkeypatch.setattr(harness.daemons, "rust_daemon", Daemon)
     monkeypatch.setattr(harness.w1a, "wait_settled", lambda *a, **kw: events.append("settled"))
     monkeypatch.setattr(harness, "wait_warmups", warmups)
     monkeypatch.setattr(harness, "Mcp", lambda port: SimpleNamespace(init=lambda: None))
     monkeypatch.setattr(harness, "run_op", lambda *a: {"isError": False, "value": None})
-    monkeypatch.setattr(harness, "normalize_state", lambda state, before: ({}, {}, {}))
+    monkeypatch.setattr(harness, "normalize_state", lambda state, before, *ts: ({}, {}, {}))
     monkeypatch.setattr(harness, "compare_response", lambda *a: [])
     result = harness._run_scenario("warmup-order", tmp_path / "candidate", tmp_path, "live",
                                    False, {}, None, [])

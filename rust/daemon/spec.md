@@ -512,9 +512,10 @@ and helpers; `storage/sync.py` `sync_cortex_slots` (225).
 Readers (`memory_fact_get`, the cortex block of `memory_search` and
 `/api/search`) take a snapshot of the resident cortex and never hold its
 lock across an await; the writer mutates it in place under `Ready.write`.
-Not reachable over MCP, so not ported: the quarantine park
-(`force_contend`), the dream guards and tier marks (`dream=True`) and the
-assistant-origin park (`support="assistant"`), see `divergences.md`.
+Not reachable over MCP, but ported for the dream (P1), which calls
+`fact_set::cortex_write` with them: the quarantine park (`force_contend`),
+the dream guards and tier marks (`dream=True`), the assistant-origin park
+(`support="assistant"`), stance and provenance, see `divergences.md`.
 
 `harness/w2e.py live --only fact-set-branches fact-set-newer-wins
 fact-set-tuned fact-set-freshness-auto fact-set-set-slot` compares every
@@ -558,9 +559,10 @@ settle and audit log; registered in `mcp::dispatch::registry`. Python:
 | SA10 | After `add_member`, whatever its action: `_ensure_subject_entity(entity)` (FS10; a blank, invalid or capped add can still mint the subject), then `_save_cortex` (FS11: member rows carry `value_norm` = `_norm_value(value)`, so the rewrite satisfies the one-current-member-per-value unique index). | `service.py:4087-4091`; `sync.py:170-209`; `schema.py:1565-1578` |
 | SA11 | `set_remove` under the service lock: no encode, no HLC tick, no writer resolution, no entity mint. `remove_member` takes the first current member (insertion order) whose `_norm_value` matches; none answers `member_not_found` and changes nothing. A match: slot dirty, `status` = `removed`, `superseded_at` = now, out of the member index (the row is kept), log `member_removed/user_removed` anchored on it with the raw `member` as `new_value`, `confidence_delta` 0.0, writer and session null; answers `member_removed`. Then `_save_cortex` and the SA2 answer. The removal refusal needs a support tier or `dream`, which the tool never passes. | `service.py:4100-4133`; `cortex.py:1083-1135` |
 
-Not reachable over MCP, so not ported: the assistant-origin guards, the
-conversion tier guard, the dream direct-write guard and tier mark, and the
-removal refusal (`divergences.md`).
+Not reachable over MCP, but ported for the dream (P1), which calls
+`set_members::set_add` / `set_remove` with them: the assistant-origin guards,
+the conversion tier guard, the dream direct-write guard and tier mark,
+provenance, and the removal refusal (`divergences.md`).
 
 `harness/w2e.py live --only set-add-branches set-add-aggregate set-cap`
 compares every answer and the full bank after each call, on templates
@@ -600,7 +602,7 @@ registered in `mcp::dispatch::registry`. Python: `mcp_server.py:1785-1801`;
 | FR5 | Accept: the slot is dirty. The current scalar (the slot's entry in the current index, if any) becomes `superseded` with `superseded_at` = now and `superseded_by_value` = the contender's value. The contender becomes `current`; `_norm_support("user") or "agent"` is marked (a direct tier clears its `dream:<tier>` provenance mark) and unioned into `support`; `last_confirmed` = `tx_time` = now; the fresh HLC stamp replaces its own; `supersedes_value` = the old current's value when there was one, else its own is kept; `asserted_at`, `valid_time`, confidence, labels, writer and session are unchanged. The current index names the contender. Log `resolved/accepted` anchored on the old current, or the contender when there is none (`new_value` the contender's value, `confidence_delta` = round(contender - anchor, 4), writer and session null). The action is `superseded`, naming the contender. | `cortex.py:1486-1508, 227-234, 731-751` |
 | FR6 | Reject: the slot is dirty; the contender becomes `retired` with `superseded_at` = now (`superseded_by_value` untouched); log `resolved/rejected` anchored as FR5. The action is `contested` (as Python names it), naming the current scalar, or the contender when the slot has none (a set slot, or one whose members were all removed). | `cortex.py:1509-1513` |
 | FR7 | After FR5 or FR6: `_save_cortex` (FS11), then the answer `{"resolved": true, "accepted": accept, "action", "current", "record"}`: `current` is `lookup(entity, attribute)` (the slot's current scalar, null for a set slot or an empty one) and `record` the named record, both as `_cortex_record_to_dict` with `age` and the stale policy (FS12). | `service.py:297-344, 4517-4528` |
-| FR8 | `refused_direct` (`dream=True` only) and `refused_changed` (`expect_value` only), with their `direct_write` and `contender_changed` answers, are unreachable over MCP and not ported (`divergences.md`). | `cortex.py:1477-1485`; `service.py:4509-4516` |
+| FR8 | `refused_direct` (`dream=True` only) and `refused_changed` (`expect_value` only), with their `direct_write` and `contender_changed` answers, are unreachable over MCP; ported for the dream's quarantine promotion (P1), which calls `fact_resolve::cortex_resolve` with them (`divergences.md`). | `cortex.py:1477-1485`; `service.py:4509-4516` |
 
 `harness/w2e.py live --only fact-resolve-scalar fact-resolve-set-slot`
 compares every answer and the full bank after each call, on templates whose
@@ -1336,6 +1338,56 @@ restores, the world audit-snapshot fallback; its `mcp-review-slot-meta-noop`,
 `-restore-oldest`, `-restore-over-live` and `-no-decision` mutants must be
 caught. The lesson-fallback prediction and the reconciliation classifier
 are unit-tested against Python's own functions.
+
+### memory_dream over MCP: status, pull, commit, runs and the consolidation pass (2026-10-20)
+
+`dream/extractor.rs` (endpoint resolution, probing, the OpenAI-compatible
+client, reply parsing and error classification), `dream/prompts.rs`,
+`dream/service.rs` (the tool, status and the cursor engine over the live
+bank), `dream/run.rs` (the pass, the run journal, the stall record),
+`dream/relations.rs` (the post-commit graph work), `dream/gates.rs` (the
+literal, span and citation gates, the constraint carrier) and
+`dream/judge_agreement.rs` (the review-queue block of status), over the
+cortex write paths' dream inputs (`stores/cortex_write.rs`,
+`cortex_members.rs`, `cortex_resolve.rs`) and the graph store. Python:
+`mcp_server.py` `memory_dream` (2171-2287); `service_dream.py`
+`dream_status` (3035-3118), `dream_pull` / `dream_commit` (1045-1302),
+`dream_runs` (1033-1043), `dream_run_auto` (2922-2951), `dream_run` and
+`_dream_run_locked` (1491-2394), the relation linking (367-466), the alias
+screen (1349-1489), the constraint carrier (2411-2475), the quarantine route
+(2494-2568) and the citation helpers (264-303); `memory/dream.py` (prompts
+147-371, parsing 619-880, the extractor 1189-1630, endpoint resolution and
+building 1999-2395); `memory/cortex.py` (the dream inputs of `write`,
+`add_member`, `remove_member` and `resolve`).
+
+| # | Exact item | Source |
+|---|---|---|
+| DR1 | Bound arguments: `memory_dream(action, limit=None, commit_token=None, cursor=None, apply=False, snippets=True, run_id=None)`; an unknown action answers `unknown_action` with the seven actions. `deep` and `rollback` answer the `not_implemented` refusal (tasks P2a and P1-rollback). | `mcp_server.py:2171-2238` |
+| DR2 | `status`: backlog, idle seconds, the display cursor, `would_fire`, the outcome-inference and digest counters, the deep-dream need block, the review queue with judge agreement, the stall record, then the extractor fields (with the alias served-model lookup and the primary probe when a fallback is set). | `service_dream.py:3035-3118,3677-3787`; `dream.py:2250-2275` |
+| DR3 | `pull`: the pending entries of the resident bank (not excluded sources, ordered by timestamp, row id and dream id, at most `limit or 40`, capped at 4096), with an HMAC commit token over them; `commit` acknowledges a token's entries (a legacy cursor or no token refused); `runs` lists recent run rows. Dream tracking covers entries stored after start. | `service_dream.py:1033-1302` |
+| DR4 | Endpoints: config or environment (`PSEUDOLIFE_DREAM_*`), the model override, the mode; `auto` with a fallback probes the primary's `/health` (a 404 retrying `/models`) twice, two seconds apart; the primary carries its key and `cache_prompt`/`reasoning_effort`, the fallback only its own key. No URL and model: a no-op extractor. | `dream.py:1999-2247,2366-2395` |
+| DR5 | Requests: `POST {base}/chat/completions` with Python's `json.dumps` bytes (default separators, `ensure_ascii`), the system prompt with the vocabulary hint (the top 60 of 120 slots ranked by cosine to the batch embedding) and the known-facts hint, the numbered notes; redirects refused; 240-second timeout. Replies: the outermost object of the content parsed as Python's `json.loads` would (lone surrogates and non-finite numbers included), each field coerced as `dream.py` does; failures classified (`login_expired`, `extractor_unreachable`, `extractor_error`) with Python's error class names. | `dream.py:619-880,1189-1630,2278-2308` |
+| DR6 | `run`: refused (`not_implemented`, naming the stage) while lesson synthesis, outcome inference, digests or graph insight is enabled; otherwise a single-flight guard (`dream_in_progress`), then the extraction of the pending batch (hold twice on a failure, isolate per entry on the third, quarantine what fails alone). | `service_dream.py:1491-1735` |
+| DR7 | Each claim: the write tier from the source entry, raised only when the claim's citation backs it; the assistant-speaker policy; the slot resolver; the literal gate (digit-bearing tokens must occur in the batch or source, Unicode digits folded as `float()` folds them) and the span gate; the trace skip; the constraint carrier; then the cortex write, set add or remove, or the quarantine route, each with `dream` set; a journal row and a trace with reinforcement for each, except the listed actions. Events go to the chronicle; a separate events pass follows. | `service_dream.py:264-303,1892-2270,2411-2568` |
+| DR8 | A write failure fails the run and holds (phase write); otherwise the batch is committed and the run stamped. After commit, unlocked and best effort: relations (the gates in order: generic hubs, junk names, the confidence floor, the cross-project and low-confidence proposals; write-dedup merge proposals for minted endpoints), alias candidates, the source backfill and the retype pass. The answer is Python's, key for key, with `extractor` last. | `service_dream.py:367-466,1349-1489,2270-2394,2922-2951` |
+
+`harness/w2e.py live --only dream-*` compares every answer, the full bank
+and, through `harness/stub_extractor.py`, the two daemons' model requests:
+each daemon talks to its own stub, which answers from the scenario's reply
+table (keyed by the request body's digest or by prompt kind and user
+content) and records method, path, body and a digest of the authorization
+header; the request sequences must be identical after every step, and a
+request with no table entry is itself a difference. **What this claims:**
+given identical model replies, both daemons send byte-identical requests and
+write identical banks. It claims nothing about model behaviour. The
+scenarios cover the basics (status, pull, commit, runs, refusals), a full
+run of every claim kind and relation gate, holds and isolation, the
+quarantine and span gates, an empty bank, the fallback endpoint and its
+stall, the hint knobs, the literal gate's modes, outages, refused redirects
+and login failures, and lone surrogates; the unported stages are switched
+off. The `mcp-dream-*` mutants must be caught. Request bodies and reply
+parsing are also unit-tested against Python's own extractor
+(`harness/goldens/dream-extractor.json`).
 
 ### Board tools over MCP (2026-10-16)
 

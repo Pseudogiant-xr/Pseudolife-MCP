@@ -270,7 +270,7 @@ pub fn py_repr(s: &str) -> String {
     out
 }
 
-fn py_printable(c: char) -> bool {
+pub(crate) fn py_printable(c: char) -> bool {
     let n = c as u32;
     if n < 0x80 {
         return (0x20..0x7f).contains(&n);

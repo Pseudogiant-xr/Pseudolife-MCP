@@ -140,7 +140,20 @@ pub(crate) async fn resolve_or_create(
     name: &str,
     etype: Option<&str>,
 ) -> Result<Value, ToolError> {
+    resolve_or_create_folded(client, name, etype)
+        .await
+        .map(|(v, _)| v)
+}
+
+/// `resolve_or_create`, and whether the slot-key fold re-entered with the
+/// owner's name (Python's recursion drops `propose_dupes` there).
+pub(crate) async fn resolve_or_create_folded(
+    client: &Client,
+    name: &str,
+    etype: Option<&str>,
+) -> Result<(Value, bool), ToolError> {
     let mut name = name.to_string();
+    let mut folded = false;
     loop {
         let n = norm_name(&name);
         let mut found = graph::find_entity(client, &n).await.map_err(internal)?;
@@ -163,7 +176,7 @@ pub(crate) async fn resolve_or_create(
                 found["etype"] = json!(t);
             }
             found["created"] = json!(false);
-            return Ok(found);
+            return Ok((found, folded));
         }
         // The slot-key fold: a name that is a current fact's slot key
         // resolves to that slot's owner.
@@ -172,14 +185,18 @@ pub(crate) async fn resolve_or_create(
             && norm_name(&owner) != n
         {
             name = owner;
+            folded = true;
             continue;
         }
         let display = py_strip(&name).to_string();
         let id = graph::ensure_entity(client, &n, Some(&display), etype)
             .await
             .map_err(internal)?;
-        return Ok(json!({"id": id, "canonical": n, "display": display,
-            "etype": etype, "aliases": [], "created": true}));
+        return Ok((
+            json!({"id": id, "canonical": n, "display": display,
+            "etype": etype, "aliases": [], "created": true}),
+            folded,
+        ));
     }
 }
 

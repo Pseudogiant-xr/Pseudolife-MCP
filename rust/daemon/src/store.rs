@@ -345,6 +345,9 @@ pub(crate) async fn admit(
         slots: found.slots.iter().map(Slot::to_json).collect(),
         authority: new.authority,
         distortion_tolerance: new.distortion,
+        // `MemoryEntry.dream_state` defaults to "pending", as the insert writes.
+        dream_state: (!crate::mutants::active("mcp-dream-store-not-pending"))
+            .then(|| "pending".into()),
         ..Default::default()
     };
     if let Some(i) = ws.log.stamp_target(new.session_key) {

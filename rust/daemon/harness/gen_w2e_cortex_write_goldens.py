@@ -14,6 +14,13 @@ record, then the final records, the slot indexes and the supersession log. The R
 reproduce all of it, so every engine branch is checked against the oracle,
 not against a hand-written expectation.
 
+The sequences after ``resolve`` also pass the inputs only the dream and the
+consolidation quarantine use (optional keys, absent meaning the neutral
+value): ``provenance``, ``stance``, ``force_contend`` and ``dream`` on a fact
+write; ``support`` (as passed), ``provenance`` and ``dream`` on an add;
+``support`` and ``dream`` on a remove; ``support``, ``dream`` and
+``expect_value`` on a resolve.
+
 Output: ``goldens/w2e-cortex-write.json``.
 
 usage: python gen_w2e_cortex_write_goldens.py
@@ -265,6 +272,268 @@ SEQUENCES["resolve"] = {
     ],
 }
 
+def fw(e, a, v, sup, conf, t, **kw):
+    """A fact write with dream/quarantine inputs: ``provenance``, ``stance``,
+    ``force_contend``, ``dream``, ``embedding`` beside ``w``'s own keywords."""
+    own = {k: kw.pop(k) for k in list(kw)
+           if k in ("provenance", "stance", "force_contend", "dream", "embedding")}
+    return {**w(e, a, v, sup, conf, t, **kw), **own}
+
+
+def dadd(e, a, m, emb, t, support=None, provenance=None, dream=False, **kw):
+    """An add with the dream's inputs (``support`` as passed)."""
+    return {**add(e, a, m, emb, t, **kw), "support": support,
+            "provenance": provenance or [], "dream": dream}
+
+
+def dremove(e, a, m, t, support=None, dream=False):
+    return {**remove(e, a, m, t), "support": support, "dream": dream}
+
+
+def dresolve(e, a, accept, t, support="user", dream=False, expect_value=None, logical=0):
+    return {**resolve(e, a, accept, t, logical=logical), "support": support,
+            "dream": dream, "expect_value": expect_value}
+
+
+SEQUENCES["quarantine"] = {
+    "config": DEFAULT_CONFIG,
+    "writes": [
+        # an empty slot: the first value parks currentless, logged against
+        # itself; empty and forged dream:* provenance is dropped
+        fw("box", "os", "Debian", "agent", 0.6, 1000.0, force_contend=True, stance="probably",
+           provenance=["quarantine:low_trust", "witness:a", "", "dream:user"]),
+        # the same value again confirms the contender: provenance unions,
+        # the stance follows the latest write
+        fw("Box", "OS", " debian ", "action", 0.5, 1001.0, force_contend=True,
+           provenance=["witness:b"]),
+        # a different value replaces the currentless contender
+        fw("box", "os", "Ubuntu", "user", 0.9, 1002.0, force_contend=True, dream=True,
+           provenance=["witness:c"]),
+        # promoted as the first current: no old value, the dream tier mark
+        dresolve("box", "os", True, 1003.0, support="user", dream=True,
+                 expect_value=" UBUNTU ", logical=1),
+        # matching the current still confirms under quarantine
+        fw("box", "os", "ubuntu", "agent", 0.4, 1004.0, force_contend=True, stance="maybe"),
+        # a conflicting stronger write parks whatever its tier
+        fw("box", "os", "Fedora", "user", 0.99, 1005.0, force_contend=True),
+        # an echo confirms before the quarantine is consulted
+        w("svc", "schedule", "the deploy pipeline runs nightly on the bench box", "user",
+          0.8, 1006.0),
+        fw("svc", "schedule", "deploy pipeline runs nightly", "agent", 0.9, 1007.0,
+           force_contend=True, stance="per the runbook", provenance=["ep9"]),
+        # stance on an insert, cleared by a plain supersede
+        fw("svc", "port", "8080", "agent", 0.7, 1008.0, stance="I think"),
+        fw("svc", "port", "8081", "agent", 0.7, 1009.0, provenance=["ep10", "ep10"]),
+    ],
+}
+
+SEQUENCES["dream"] = {
+    "config": DEFAULT_CONFIG,
+    "writes": [
+        # a dream insert at a direct tier is marked; a dream confirm keeps it
+        fw("db", "host", "10.0.0.5", "user", 0.8, 1100.0, dream=True, provenance=["n1"]),
+        fw("db", "host", "10.0.0.5", "user", 0.8, 1101.0, dream=True, provenance=["n2"]),
+        # a dream-written value updates on a later dream claim; the new
+        # record is marked
+        fw("db", "host", "10.0.0.6", "user", 0.9, 1102.0, dream=True),
+        # a direct user confirm clears the mark
+        w("db", "host", "10.0.0.6", "user", 0.5, 1103.0),
+        # now direct-backed: a dream claim parks (direct_write), marked
+        fw("db", "host", "10.0.0.7", "user", 0.99, 1104.0, dream=True, stance="likely"),
+        # the same contender again: a dream contender-confirm
+        fw("db", "host", "10.0.0.7", "action", 0.7, 1105.0, dream=True),
+        # an action-backed direct value parks an agent dream claim too
+        w("db", "port", "5432", "action", 0.8, 1106.0),
+        fw("db", "port", "5433", "agent", 0.9, 1107.0, dream=True),
+        # a dream echo never raises the retained value's tier ...
+        w("pipe", "schedule", "the deploy pipeline runs nightly on the bench box", "agent",
+          0.7, 1108.0),
+        fw("pipe", "schedule", "deploy pipeline runs nightly", "user", 0.7, 1109.0, dream=True),
+        # ... but one at or below its tier adds that tier
+        w("pipe2", "schedule", "the deploy pipeline runs nightly on the bench box", "user",
+          0.7, 1110.0),
+        fw("pipe2", "schedule", "deploy pipeline runs nightly", "agent", 0.7, 1111.0,
+           dream=True),
+        # a dream claim below the tier of an agent-only value parks as usual
+        w("nas", "disk", "4TB", "action", 0.8, 1112.0, writer="writer-b"),
+        fw("nas", "disk", "4TB", "user", 0.8, 1113.0, dream=True),
+        fw("nas", "disk", "8TB", "agent", 0.9, 1114.0, dream=True),
+        # a dream quarantine park at a direct tier is marked
+        fw("nas", "fs", "zfs", "agent", 0.8, 1115.0),
+        fw("nas", "fs", "btrfs", "action", 0.8, 1116.0, dream=True, force_contend=True),
+        # the parked dream value made current by a direct write: settled
+        w("nas", "fs", "btrfs", "action", 0.9, 1117.0),
+        # a dream-marked contender settled by an agent supersede: its tier
+        # rides over with the mark
+        fw("nas", "pool", "tank", "agent", 0.9, 1118.0),
+        fw("nas", "pool", "vault", "user", 0.6, 1119.0, dream=True, force_contend=True),
+        w("nas", "pool", "vault", "agent", 0.95, 1120.0),
+    ],
+}
+
+SEQUENCES["dream_newer_wins"] = {
+    "config": {"protect_provenance": False, "supersede_confidence_margin": 0.15,
+               "reinforce_rate": 0.34},
+    "writes": [
+        # the direct-write guard is gated on protect_provenance
+        w("db", "host", "a", "user", 0.9, 1200.0),
+        fw("db", "host", "b", "agent", 0.9, 1201.0, dream=True),
+        fw("db", "host", "c", "agent", 0.1, 1202.0, dream=True),
+        # the assistant park is not
+        fw("db", "host", "d", "assistant", 0.99, 1203.0),
+    ],
+}
+
+SEQUENCES["assistant"] = {
+    "config": DEFAULT_CONFIG,
+    "writes": [
+        w("user", "editor", "vim", "user", 0.8, 1300.0),
+        # an assistant value parks against any other origin
+        fw("user", "editor", "emacs", "assistant", 0.99, 1301.0, stance="I recall"),
+        # restating the current confirms it, assistant support added
+        fw("user", "editor", "VIM", "assistant", 0.5, 1302.0, provenance=["turn:7"]),
+        # an echo confirms before the guard
+        w("user", "shell", "zsh with oh my zsh and the agnoster theme", "agent", 0.7, 1303.0),
+        fw("user", "shell", "zsh with oh my zsh", "assistant", 0.7, 1304.0),
+        # an assistant-origin current is superseded by anything
+        fw("user", "font", "Fira Code", "assistant", 0.7, 1305.0),
+        fw("user", "font", "JetBrains Mono", "assistant", 0.7, 1306.0),
+        w("user", "font", "Iosevka", "agent", 0.7, 1307.0),
+        # an assistant contender is confirmed, then replaced
+        fw("user", "editor", "emacs", "assistant", 0.6, 1308.0),
+        fw("user", "editor", "helix", "assistant", 0.6, 1309.0),
+        # an unknown tier is no tier: it supersedes by the margin
+        fw("user", "theme", "dark", "agent", 0.7, 1310.0),
+        fw("user", "theme", "light", "boss", 0.7, 1311.0),
+    ],
+}
+
+SEQUENCES["member_guards"] = {
+    "config": DEFAULT_CONFIG,
+    "writes": [
+        {**w("garage", "tools", "drill", "user", 0.9, 1400.0), "embedding": [1.0, 0.0, 0.0]},
+        # an assistant add never converts another tier's scalar: it parks
+        # with the scalar's slot embedding
+        dadd("garage", "tools", "saw", [0.0, 1.0, 0.0], 1401.0, support="assistant",
+             provenance=["turn:1"]),
+        # an assistant add equal to the scalar confirms it
+        dadd("Garage", "Tools", " DRILL ", [1.0, 0.0, 0.0], 1402.0, support="assistant",
+             provenance=["turn:2", "dream:user"]),
+        # a weaker tier may not convert either (replaces the contender)
+        dadd("garage", "tools", "hammer", [0.0, 0.0, 1.0], 1403.0, support="agent"),
+        # a dream add never converts a direct user value
+        dadd("garage", "tools", "level", [0.6, 0.8, 0.0], 1404.0, support="user", dream=True),
+        # an agent add equal to the scalar confirms it (agent tier joins)
+        dadd("garage", "tools", "drill", [1.0, 0.0, 0.0], 1405.0, support="agent"),
+        # an unlabelled add converts as before, with cleaned provenance
+        dadd("garage", "tools", "wrench", [0.0, 1.0, 0.0], 1406.0,
+             provenance=["ep1", "", "dream:action", "ep1"]),
+        # an assistant join of a set another tier built parks currentless
+        dadd("garage", "tools", "pliers", [0.0, 0.0, 1.0], 1407.0, support="assistant"),
+        # restating a member confirms it, without assistant support
+        dadd("garage", "tools", "Drill", [0.0, 0.0, 1.0], 1408.0, support="assistant",
+             provenance=["turn:3"]),
+        # a dream near-duplicate confirms without raising the tier
+        dadd("garage", "tools", "wrench set", [0.0, 0.99, 0.1410674], 1409.0,
+             support="user", dream=True),
+        # a dream exact confirm marks the tier it adds; a direct one clears it
+        dadd("garage", "tools", "wrench", [0.0, 1.0, 0.0], 1410.0, support="action",
+             dream=True),
+        dadd("garage", "tools", "WRENCH", [0.0, 1.0, 0.0], 1411.0, support="user",
+             dream=True),
+        dadd("garage", "tools", "wrench", [0.0, 1.0, 0.0], 1412.0, support="action"),
+        # a dream add of a new member is marked
+        dadd("garage", "tools", "clamp", [0.7071068, 0.0, 0.7071068], 1413.0,
+             support="user", dream=True, provenance=["n5"]),
+        # removals: an assistant, a lower tier and a dream retraction of a
+        # direct-backed member are refused with nothing dirty
+        dremove("garage", "tools", "drill", 1414.0, support="assistant"),
+        dremove("garage", "tools", "drill", 1415.0, support="agent"),
+        dremove("garage", "tools", "drill", 1416.0, support="user", dream=True),
+        # a dream retraction of a dream-written member is allowed
+        dremove("garage", "tools", "clamp", 1417.0, support="user", dream=True),
+        # a tier at or above the member's retracts it
+        dremove("garage", "tools", "wrench", 1418.0, support="user"),
+        dremove("garage", "tools", "nothing", 1419.0, support="assistant"),
+        # an assistant-only slot is the assistant's to build and retract
+        dadd("shelf", "books", "Dune", [1.0, 0.0], 1420.0, support="assistant"),
+        dadd("shelf", "books", "Emma", [0.0, 1.0], 1421.0, support="assistant"),
+        dremove("shelf", "books", "dune", 1422.0, support="assistant"),
+        # an assistant scalar converts on an assistant add
+        fw("desk", "items", "lamp", "assistant", 0.7, 1423.0, embedding=[1.0, 0.0]),
+        dadd("desk", "items", "mug", [0.0, 1.0], 1424.0, support="assistant"),
+        # a dream-written scalar is not direct-backed: a dream add converts it
+        fw("bench", "parts", "gear", "user", 0.7, 1425.0, dream=True, embedding=[1.0, 0.0]),
+        dadd("bench", "parts", "axle", [0.0, 1.0], 1426.0, support="user", dream=True),
+        # an aggregate confirmed by a dream add: the mark and provenance land
+        w("tank", "fish count", "32", "agent", 0.7, 1427.0),
+        dadd("tank", "fish count", " 32 ", [1.0, 0.0], 1428.0, support="user", dream=True,
+             provenance=["n6"]),
+        dadd("tank", "fish count", "guppy", [0.0, 1.0], 1429.0, support="action", dream=True),
+        # a new member stores the tier as passed; the guards read it normalised
+        dadd("lab", "hosts", "alpha", [1.0, 0.0], 1430.0, support=" Action ", dream=True),
+        dadd("lab", "hosts", "beta", [0.0, 1.0], 1431.0, support="boss"),
+    ],
+}
+
+SEQUENCES["member_guards_newer_wins"] = {
+    "config": {"protect_provenance": False, "supersede_confidence_margin": 0.15,
+               "reinforce_rate": 0.34},
+    "writes": [
+        {**w("garage", "tools", "drill", "user", 0.9, 1500.0), "embedding": [1.0, 0.0]},
+        # tier and direct guards are off; the assistant guard is not
+        dadd("garage", "tools", "saw", [0.0, 1.0], 1501.0, support="assistant"),
+        dadd("garage", "tools", "hammer", [0.6, 0.8], 1502.0, support="agent", dream=True),
+        dremove("garage", "tools", "drill", 1503.0, support="agent", dream=True),
+        dadd("garage", "tools", "drill", [1.0, 0.0], 1504.0, support="user"),
+        dremove("garage", "tools", "drill", 1505.0, support="assistant"),
+    ],
+}
+
+SEQUENCES["resolve_inputs"] = {
+    "config": DEFAULT_CONFIG,
+    "writes": [
+        w("db", "host", "a", "user", 0.9, 1600.0),
+        w("db", "host", "b", "agent", 0.9, 1601.0),
+        # another value is parked than the one expected: refused, untouched
+        dresolve("db", "host", True, 1602.0, expect_value="c", logical=1),
+        # expect_value is checked before the dream guard
+        dresolve("db", "host", True, 1603.0, dream=True, expect_value="c", logical=1),
+        # a dream promotion never replaces a direct value
+        dresolve("db", "host", True, 1604.0, dream=True, expect_value="B", logical=1),
+        # expect_value does not bind a reject
+        dresolve("db", "host", False, 1605.0, expect_value="zzz"),
+        # a dream-written current may be replaced by a dream promotion,
+        # which marks the tier it adds
+        fw("svc", "port", "1", "user", 0.9, 1606.0, dream=True),
+        w("svc", "port", "2", "agent", 0.9, 1607.0),
+        dresolve("svc", "port", True, 1608.0, support="user", dream=True, expect_value="2",
+                 logical=2),
+        # a dream promotion at a tier the contender has keeps it unmarked
+        w("svc", "host", "x", "agent", 0.9, 1609.0, writer="writer-b"),
+        w("svc", "host", "y", "agent", 0.5, 1610.0),
+        dresolve("svc", "host", True, 1611.0, support="agent", dream=True, logical=3),
+        # the set guard precedes expect_value
+        {**w("Home Lab", "services", "Jellyfin", "user", 0.9, 1612.0),
+         "embedding": [1.0, 0.0]},
+        {**w("Home Lab", "services", "Pi-hole", "agent", 0.8, 1613.0),
+         "embedding": [0.0, 1.0]},
+        add("Home Lab", "services", "Nextcloud", [0.6, 0.8], 1614.0),
+        dresolve("home lab", "services", True, 1615.0, dream=True, expect_value="nope"),
+    ],
+}
+
+SEQUENCES["resolve_newer_wins"] = {
+    "config": {"protect_provenance": False, "supersede_confidence_margin": 0.15,
+               "reinforce_rate": 0.34},
+    "writes": [
+        w("db", "host", "a", "user", 0.9, 1700.0),
+        fw("db", "host", "b", "agent", 0.9, 1701.0, force_contend=True),
+        # the dream guard is gated on protect_provenance
+        dresolve("db", "host", True, 1702.0, support="action", dream=True, logical=1),
+    ],
+}
+
 FIELDS = ("entity", "attribute", "value", "polarity", "status", "kind", "confidence",
           "asserted_at", "last_confirmed", "supersedes_value", "superseded_by_value",
           "superseded_at", "tx_time", "valid_time", "hlc_phys", "hlc_logical", "writer_id",
@@ -300,26 +569,32 @@ def run(seq: dict) -> dict:
         if op == "add":
             res = store.add_member(
                 Slot(x["entity"], x["attribute"], x["value"]), torch.tensor(x["embedding"]),
-                confidence=x["confidence"], provenance=(), support=None, now=x["now"],
+                confidence=x["confidence"], provenance=x.get("provenance", ()),
+                support=x.get("support"), now=x["now"],
                 hlc=tuple(x["hlc"]), writer_id=x["writer_id"], session_id=x["session_id"],
-                dream=False)
+                dream=x.get("dream", False))
         elif op == "resolve":
             res = store.resolve(x["entity"], x["attribute"], x["accept"], now=x["now"],
-                                support="user",
+                                support=x.get("support", "user"),
                                 hlc=tuple(x["hlc"]) if x["hlc"] is not None else None,
-                                dream=False, expect_value=None)
+                                dream=x.get("dream", False),
+                                expect_value=x.get("expect_value"))
         elif op == "remove":
             res = store.remove_member(x["entity"], x["attribute"], x["value"], now=x["now"],
-                                      support=None, dream=False)
+                                      support=x.get("support"), dream=x.get("dream", False))
         else:
             res = store.write_fact(
                 Slot(x["entity"], x["attribute"], x["value"]),
                 torch.tensor(x.get("embedding", [1.0, 0.0])),
                 slot_embedding=torch.tensor([0.0, 1.0]), confidence=x["confidence"],
+                provenance=x.get("provenance", ()),
                 support=x["support"], now=x["now"], hlc=tuple(x["hlc"]),
                 writer_id=x["writer_id"], session_id=x["session_id"],
-                freshness_class=x["freshness_class"], authority=label(x["authority"]),
-                distortion_tolerance=label(x["distortion_tolerance"]))
+                freshness_class=x["freshness_class"],
+                force_contend=x.get("force_contend", False), stance=x.get("stance"),
+                authority=label(x["authority"]),
+                distortion_tolerance=label(x["distortion_tolerance"]),
+                dream=x.get("dream", False))
         if res is None:
             result = {"action": None, "record": None}
         else:
