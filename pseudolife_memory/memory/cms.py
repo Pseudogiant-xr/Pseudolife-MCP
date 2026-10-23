@@ -2312,13 +2312,23 @@ class ContinuumMemorySystem:
                 list(self._consolidation_events), default=float)),
         }
 
+    def reset_counters(self) -> None:
+        """The counters a fresh CMS starts with: zeros, one empty history
+        and hit count per current band, no consolidation events."""
+        self._interaction_count = 0
+        self._logical_turn_count = 0
+        self._surprise_history = {b.name: [] for b in self.bands}
+        self._consolidation_events = []
+        self._tier_hits = {b.name: 0 for b in self.bands}
+        self._tier_queries = 0
+
     def apply_counters(self, state: dict) -> None:
         """Restore counters from a ``counters_state()``-shaped dict (the
         ``cms_counters`` row, or a ``weights.pt`` payload). Per-band maps
-        merge into the current bands' fresh entries, so a band the state
-        does not name keeps its zero and one it names that the preset no
-        longer has is kept, as ``load_weights`` always did. Never touches
-        band entries."""
+        merge into the current bands' entries, so a band the state does not
+        name keeps its value and one it names that the preset no longer has
+        is kept, as ``load_weights`` always did. Never touches band
+        entries."""
         self._interaction_count = state.get("interaction_count", 0)
         self._logical_turn_count = state.get("logical_turn_count", 0)
         self._surprise_history.update(state.get("surprise_history") or {})
@@ -2326,32 +2336,42 @@ class ContinuumMemorySystem:
         self._tier_hits.update(state.get("tier_hits") or {})
         self._tier_queries = state.get("tier_queries", 0)
 
+    def read_weights(self, directory: str | Path) -> tuple[dict, str] | None:
+        """The payload of a pre-v57 ``weights.pt`` and the name of the file
+        it came from (``weights.pt``, or ``weights.pt.bak`` when the first is
+        unreadable), without applying it; None when neither file exists.
+        Raises :class:`~pseudolife_memory.utils.atomic_io.WeightsCorrupt`
+        when neither loads."""
+        from pseudolife_memory.utils.atomic_io import load_with_backup
+        path = Path(directory) / "weights.pt"
+        if not path.exists() and not path.with_suffix(".pt.bak").exists():
+            return None
+        state, used_backup = load_with_backup(path)
+        if used_backup:
+            logger.warning("weights.pt corrupt — read from .bak.")
+        return state, ("weights.pt.bak" if used_backup else "weights.pt")
+
     def load_weights(self, directory: str | Path) -> bool:
         """Restore counters from a pre-v57 ``weights.pt`` (or its .bak).
 
         Since schema v57 the counters live in the bank (``cms_counters``)
-        and nothing writes this file; the service reads it once, to import
-        it when the bank has no counters row yet. Returns True on success,
-        False when absent or corrupt; the corrupt case additionally sets
-        ``weights_reset`` so ``stats()`` surfaces that the counters
-        restarted from scratch. Never touches band entries.
+        and nothing writes this file; the service imports it through
+        :meth:`read_weights`. Returns True on success, False when absent or
+        corrupt; the corrupt case additionally sets ``weights_reset`` so
+        ``stats()`` surfaces that the counters restarted from scratch.
+        Never touches band entries.
         """
-        from pseudolife_memory.utils.atomic_io import (
-            WeightsCorrupt, load_with_backup,
-        )
-        path = Path(directory) / "weights.pt"
-        if not path.exists() and not path.with_suffix(".pt.bak").exists():
-            return False
+        from pseudolife_memory.utils.atomic_io import WeightsCorrupt
         try:
-            state, used_backup = load_with_backup(path)
+            got = self.read_weights(directory)
         except WeightsCorrupt as exc:
-            logger.warning("weights.pt unrecoverable (%s) — fresh MLPs; "
+            logger.warning("weights.pt unrecoverable (%s) — fresh counters; "
                            "entries are unaffected.", exc)
             self.weights_reset = True
             return False
-        if used_backup:
-            logger.warning("weights.pt corrupt — restored from .bak.")
-        self.apply_counters(state)
+        if got is None:
+            return False
+        self.apply_counters(got[0])
         return True
 
     def load(self, directory: str | Path) -> None:

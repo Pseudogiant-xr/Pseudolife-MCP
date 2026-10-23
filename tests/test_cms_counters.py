@@ -240,3 +240,86 @@ def test_a_failed_counters_read_fails_the_start(
     finally:
         if svc._storage is not None:  # noqa: SLF001
             svc._storage.close()  # noqa: SLF001
+
+
+def _saved_row(tmp_path, monkeypatch, url, interactions):
+    svc = _service(tmp_path, monkeypatch, url)
+    try:
+        _count(svc, interactions=interactions, turns=1, queries=2)
+        svc.save()
+        return svc._storage.cms_counters_get()["updated_at"]  # noqa: SLF001
+    finally:
+        _close(svc)
+
+
+def test_a_newer_file_that_counts_fewer_interactions_keeps_the_row(
+        tmp_path, pg_url, pg_conn, monkeypatch):  # noqa: F811
+    """A rollback's older release finds no weights.pt (it was set aside) and
+    counts from zero; upgrading again must not replace months of counts with
+    that window's. Counters only grow, so the smaller file is set aside,
+    beside (never over) the copy set aside before."""
+    import os
+
+    state_dir = tmp_path / "memory_state"
+    _legacy_weights(state_dir, interactions=400)  # the upgrade-day file
+    _close(_service(tmp_path, monkeypatch, pg_url))
+    saved_at = _saved_row(tmp_path, monkeypatch, pg_url, interactions=900)
+    first_copy = (state_dir / "weights.pt.imported").read_bytes()
+
+    _legacy_weights(state_dir, interactions=12)  # the rollback window
+    later = saved_at + 60
+    os.utime(state_dir / "weights.pt", (later, later))
+    svc = _service(tmp_path, monkeypatch, pg_url)
+    try:
+        assert svc._cms._interaction_count == 900  # noqa: SLF001
+        assert svc._storage.cms_counters_get()["interaction_count"] == 900  # noqa: SLF001
+    finally:
+        _close(svc)
+    assert (state_dir / "weights.pt.imported").read_bytes() == first_copy
+    assert (state_dir / "weights.pt.imported-2").exists()
+    assert not (state_dir / "weights.pt").exists()
+
+
+def test_freshness_is_judged_by_the_file_actually_read(
+        tmp_path, pg_url, pg_conn, monkeypatch):  # noqa: F811
+    """A torn weights.pt newer than the row falls back to a .bak older than
+    the row; that stale .bak must not replace the row."""
+    import os
+
+    state_dir = tmp_path / "memory_state"
+    saved_at = _saved_row(tmp_path, monkeypatch, pg_url, interactions=50)
+    _legacy_weights(state_dir, interactions=1000)
+    _legacy_weights(state_dir, interactions=2000)  # rotates 1000 into .bak
+    old = saved_at - 3600
+    os.utime(state_dir / "weights.pt.bak", (old, old))
+    (state_dir / "weights.pt").write_bytes(b"torn")
+    later = saved_at + 60
+    os.utime(state_dir / "weights.pt", (later, later))
+
+    svc = _service(tmp_path, monkeypatch, pg_url)
+    try:
+        assert svc._cms._interaction_count == 50  # noqa: SLF001
+    finally:
+        _close(svc)
+
+
+@pytest.mark.parametrize("payload", [
+    ["not", "a", "dict"],
+    {"interaction_count": 3, "surprise_history": ["a", "list"]},
+    {"interaction_count": None},
+], ids=["list", "history-list", "none-count"])
+def test_a_malformed_weights_file_does_not_block_the_start(
+        tmp_path, pg_url, pg_conn, monkeypatch, payload):  # noqa: F811
+    """A file that loads but is not counters is a bad file, as an unreadable
+    one is: logged, skipped and reported as weights_reset, never a start
+    that fails on every retry."""
+    state_dir = tmp_path / "memory_state"
+    state_dir.mkdir(parents=True)
+    atomic_torch_save(payload, state_dir / "weights.pt")
+
+    svc = _service(tmp_path, monkeypatch, pg_url)
+    try:
+        assert svc.stats()["weights_reset"] is True
+        assert svc._cms._interaction_count == 0  # noqa: SLF001
+    finally:
+        _close(svc)

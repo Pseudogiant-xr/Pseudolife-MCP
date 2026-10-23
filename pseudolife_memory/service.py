@@ -1485,33 +1485,61 @@ class MemoryService(DreamOps, MaintainerOps):
         """Restore the CMS counters from the bank's ``cms_counters`` row.
 
         A ``memory_state/weights.pt`` (or its ``.bak``) is imported instead,
-        and written as the row at once, when the bank has no row or the file
-        is newer than the row: a pre-v57 file on the first start, or one an
-        older release wrote after a rollback. An imported file is renamed
-        ``*.imported``, never deleted, so no later bank (a fresh database, a
-        transfer target) imports counters frozen at the upgrade; an older
-        file beside a newer row is set aside the same way. A failed read or
-        write of the row raises, like any other failed hydration: serving on
-        and autosaving fresh counters would overwrite the real ones. An
-        unreadable file sets ``weights_reset`` only when there is no row to
+        and written as the row at once, when the bank has no row, or when
+        the file actually read is newer than the row and counts at least as
+        many interactions: counters only grow, so a smaller newer file (an
+        older release that restarted from zero after a rollback) is set
+        aside and the row kept. Files are renamed ``*.imported`` (never
+        deleted, never over an earlier copy), so no later bank, such as a
+        fresh database or a transfer target, imports counters frozen at the
+        upgrade. A failed read or write of the row raises, like any other
+        failed hydration: serving on and autosaving fresh counters would
+        overwrite the real ones. A file that cannot be read as counters is
+        logged and skipped, setting ``weights_reset`` when no row exists to
         fall back on."""
         assert self._cms is not None and self._storage is not None
+        cms = self._cms
         row = self._storage.cms_counters_get()
         save_dir = Path(self.config.memory.save_dir)
         files = [p for p in (save_dir / "weights.pt", save_dir / "weights.pt.bak")
                  if p.exists()]
-        newest = max((p.stat().st_mtime for p in files), default=None)
-        if newest is not None and (row is None or newest > row["updated_at"]):
-            if self._cms.load_weights(save_dir):
-                self._storage.cms_counters_put(self._cms.counters_state())
-                logger.warning(
-                    "imported the CMS counters from %s into the bank "
-                    "(cms_counters)", save_dir / "weights.pt")
-                self._set_weights_files_aside(files)
-                return
+        candidate = None  # (counters_state, mtime of the file read)
+        if files:
+            try:
+                got = cms.read_weights(save_dir)
+                if got is not None:
+                    payload, name = got
+                    if not isinstance(payload, dict):
+                        raise TypeError(f"payload is {type(payload).__name__}")
+                    cms.reset_counters()
+                    cms.apply_counters(payload)
+                    candidate = (cms.counters_state(),
+                                 (save_dir / name).stat().st_mtime)
+            except Exception as exc:  # noqa: BLE001 — a bad file, never the bank
+                logger.warning("the counters in %s cannot be read (%s); "
+                               "skipping them", save_dir / "weights.pt", exc)
+                if row is None:
+                    cms.weights_reset = True
+            cms.reset_counters()
+        if candidate is not None and (
+                row is None or (candidate[1] > row["updated_at"]
+                                and candidate[0]["interaction_count"]
+                                >= row["interaction_count"])):
+            cms.apply_counters(candidate[0])
+            self._storage.cms_counters_put(candidate[0])
+            logger.warning("imported the CMS counters from %s into the bank "
+                           "(cms_counters)", save_dir / "weights.pt")
+            self._set_weights_files_aside(files)
+            return
         if row is not None:
-            self._cms.apply_counters(row)
-            self._cms.weights_reset = False
+            cms.apply_counters(row)
+            cms.weights_reset = False
+            if candidate is not None and candidate[1] > row["updated_at"]:
+                logger.warning(
+                    "%s is newer than the bank's counters but counts fewer "
+                    "interactions (%d < %d), as after a rollback that started "
+                    "from zero; keeping the bank's", save_dir / "weights.pt",
+                    candidate[0]["interaction_count"], row["interaction_count"])
             if files:
                 self._set_weights_files_aside(files)
 
@@ -1519,6 +1547,10 @@ class MemoryService(DreamOps, MaintainerOps):
     def _set_weights_files_aside(files: list[Path]) -> None:
         for path in files:
             target = path.with_name(path.name + ".imported")
+            n = 1
+            while target.exists():
+                n += 1
+                target = path.with_name(f"{path.name}.imported-{n}")
             try:
                 os.replace(path, target)
             except OSError as exc:

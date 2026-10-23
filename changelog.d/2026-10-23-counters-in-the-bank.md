@@ -13,5 +13,6 @@
   never overwrites real counters with fresh ones; a failed write is logged
   and the rest of the save goes on.
 - Rolling back to an older release finds no `weights.pt` and starts its
-  counters fresh; upgrading again imports the file that release wrote,
-  because it is newer than the bank's row.
+  counters fresh. Upgrading again keeps the bank's counters and sets that
+  release's file aside: a file newer than the row is imported only when it
+  counts at least as many interactions, since counters only grow.
