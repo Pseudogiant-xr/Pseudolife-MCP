@@ -1479,10 +1479,11 @@ jobs:
           STRESS_ITERATIONS: ${{ inputs.iterations }}
         run: python3 rust/ci/stress.py plan --selection "$STRESS_SELECTION" --iterations "$STRESS_ITERATIONS" --github-output "$GITHUB_OUTPUT"
 
-  # A cargo selection's test binaries, compiled once as the Rust job's
-  # Nextest step compiles them, into a nextest archive every iteration runs.
-  # It runs on the iterations' OS: a hosted runner's checkout path is the
-  # same in every job, so the paths the tests compile in with env!() hold.
+  # A cargo selection's test binaries, compiled once with the Rust job's
+  # toolchain, lockfile, profile and default features, into a nextest
+  # archive every iteration runs. It runs on the iterations' OS: a hosted
+  # runner's checkout path is the same in every job, so the paths the tests
+  # compile in with env!() hold; each iteration checks that before running.
   stress-build:
     name: Stress / build ${{ inputs.os }}
     needs: stress-plan
@@ -1546,7 +1547,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: stress-tests-${{ runner.os }}
-          path: ${{ runner.temp }}/stress-tests.tar.zst
+          path: |
+            ${{ runner.temp }}/stress-tests.tar.zst
+            ${{ runner.temp }}/stress-tests.tar.zst.workspace
           if-no-files-found: error
 
   stress:
