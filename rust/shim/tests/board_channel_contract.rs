@@ -118,7 +118,7 @@ async fn board_channel_parent_parameter_fallback_and_registry_failure_hints_pres
     let hint = board.finish_call(&call, &mut result).await.unwrap();
     assert_eq!(
         hint,
-        policy::registry_failure_hint("bank_identity_mismatch")
+        policy::registry_failure_hint("bank_identity_mismatch", None, true)
     );
     assert_eq!(result.is_error, Some(true));
     let error = board
@@ -470,7 +470,7 @@ async fn board_channel_registry_unavailable_fails_before_dispatch_and_reuses_fai
             .unwrap();
         assert_eq!(
             error.data.unwrap(),
-            json!({"classification":"coordination_unavailable","phase":"initialize","operation_outcome":"not_dispatched","hint":policy::registry_failure_hint("transport_unavailable")})
+            json!({"classification":"coordination_unavailable","phase":"initialize","operation_outcome":"not_dispatched","hint":policy::registry_failure_hint("context_unavailable", Some(503), false)})
         );
     }
     assert_eq!(fixture.count("context"), 1);
@@ -481,21 +481,47 @@ async fn board_channel_registry_unavailable_fails_before_dispatch_and_reuses_fai
     let mut result = rmcp::model::CallToolResult::success(vec![]);
     assert_eq!(
         board.finish_call(&call, &mut result).await.as_deref(),
-        Some(policy::registry_failure_hint("transport_unavailable"))
+        Some(policy::registry_failure_hint("context_unavailable", Some(503), false).as_str())
     );
     board.close().await;
     assert_eq!(fixture.count("/detach"), 0);
-    for (code, hint) in [
+    // Python #637 `_note_failure`: the hint names the step that failed.
+    for (code, status, validation, hint) in [
         (
             "credential_unavailable",
+            None,
+            true,
             "Coordination: credential source changed or is unavailable; saved identity was preserved. Retry after credential setup completes.",
         ),
         (
             "attachment_busy",
-            "Coordination: identity attachment unavailable; saved state was preserved. Check bank access or wait for the prior attachment lease to expire.",
+            Some(409),
+            false,
+            "Coordination: identity attachment is busy (attachment_busy); saved state was preserved. Wait for the prior attachment lease to expire.",
+        ),
+        (
+            "attachment_busy",
+            Some(409),
+            true,
+            "Coordination: authority validation unavailable; saved state was preserved. Check bank access and private adapter state.",
+        ),
+        (
+            "request_refused",
+            Some(403),
+            false,
+            "Coordination: identity attachment was refused by authentication or access policy; saved state was preserved. Check the configured credential and access.",
+        ),
+        (
+            "invalid_state",
+            None,
+            false,
+            "Coordination: identity attachment unavailable; saved state was preserved. Check bank access and private adapter state.",
         ),
     ] {
-        assert_eq!(policy::registry_failure_hint(code), hint);
+        assert_eq!(
+            policy::registry_failure_hint(code, status, validation),
+            hint
+        );
     }
 }
 
