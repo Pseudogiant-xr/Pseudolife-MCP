@@ -50,6 +50,23 @@ impl StartupState {
         Ok(())
     }
 
+    /// An empty state whose clock reseed is or is not pending.
+    #[cfg(test)]
+    pub fn for_test(hlc_reseed_pending: bool) -> StartupState {
+        StartupState {
+            episodes: Vec::new(),
+            current_episode: None,
+            cortex: Vec::new(),
+            world: Vec::new(),
+            lessons: Vec::new(),
+            metadata: Value::Null,
+            clock: RwLock::new(StartupClock {
+                hlc_highwater: (0, 0),
+                hlc_reseed_pending,
+            }),
+        }
+    }
+
     #[allow(dead_code)] // Read/write slices adopt this snapshot at their seam.
     pub fn dump(&self) -> Value {
         let clock = self.clock_state();

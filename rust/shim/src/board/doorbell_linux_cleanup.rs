@@ -59,7 +59,7 @@ fn number<T: std::str::FromStr>(bytes: &[u8]) -> io::Result<T> {
         .map_err(|_| invalid_stat())
 }
 
-fn parse_stat(bytes: &[u8], expected_pid: u32) -> io::Result<ProcessStat> {
+fn parse_stat(bytes: &[u8], expected_pid: u32) -> io::Result<Option<ProcessStat>> {
     let open = bytes
         .windows(2)
         .position(|part| part == b" (")
@@ -79,20 +79,38 @@ fn parse_stat(bytes: &[u8], expected_pid: u32) -> io::Result<ProcessStat> {
     if fields.len() < 20 || fields[0].len() != 1 || !b"RSDZTtXxKWPI".contains(&fields[0][0]) {
         return Err(invalid_stat());
     }
-    Ok(ProcessStat {
+    // Dead tasks are absent. X is EXIT_DEAD, past Z. do_task_stat reads the state
+    // first and fills ppid, group and session only while the task keeps its sighand,
+    // which __exit_signal clears on release; a released task prints the unset
+    // 0 -1 -1 beside whatever state it read. The unreaped leader shows neither.
+    if fields[0][0] == b'X' || (fields[1] == b"0" && fields[2] == b"-1" && fields[3] == b"-1") {
+        return Ok(None);
+    }
+    Ok(Some(ProcessStat {
         pid: expected_pid,
         state: fields[0][0],
         parent: number(fields[1])?,
         group: number(fields[2])?,
         session: number(fields[3])?,
         started: number(fields[19])?,
-    })
+    }))
 }
 
 fn read_stat(root: &Path, pid: u32) -> io::Result<Option<ProcessStat>> {
-    match fs::read(root.join(pid.to_string()).join("stat")) {
-        Ok(bytes) => parse_stat(&bytes, pid).map(Some),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+    stat_from_read(fs::read(root.join(pid.to_string()).join("stat")), pid)
+}
+
+fn stat_from_read(read: io::Result<Vec<u8>>, pid: u32) -> io::Result<Option<ProcessStat>> {
+    match read {
+        Ok(bytes) => parse_stat(&bytes, pid),
+        // A task reaped between open and read reports ESRCH: absent, like a missing entry.
+        // The leader stays unreaped until the fence passes, so its reads never see either.
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(libc::ESRCH) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(error),
     }
 }
@@ -135,7 +153,7 @@ fn group_is_terminal_until(
                 if stat.session != leader.pid {
                     return Err(io::Error::other("owned queue group session changed"));
                 }
-                // Match the lifecycle contract: /proc absence or Z confirms death.
+                // Match the lifecycle contract: /proc absence, X or Z confirms death.
                 if stat.state != b'Z' {
                     return Ok(false);
                 }

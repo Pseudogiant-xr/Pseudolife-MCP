@@ -165,7 +165,7 @@ p-value lands in a committed artifact per the house benchmark rule.
 
 ## Publication gate (before any number reaches the docs)
 
-Per CLAUDE.md "Publishing a benchmark number": commit the artifacts with
+Per `evals/README.md` "Eval discipline" (publishing a benchmark number): commit the artifacts with
 the claim, add rows to `tests/test_eval_evidence.py` in the same change,
 and mind the read-honestly framing — slice2 single-pass numbers are
 n=74 single-run; the ablation compares are 5-replicate paired.

@@ -175,6 +175,76 @@ async fn cleanup_refuses_a_child_outside_its_owned_session_group() {
     fs::remove_dir_all(&home.0).unwrap();
 }
 
+#[test]
+fn stat_of_a_process_reaped_after_open_counts_as_absent() {
+    // The group scan reads every /proc entry, and any process on the host can be
+    // reaped between the scan's open and read; the kernel then reports ESRCH.
+    let mut child = Command::new("sleep")
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let mut stat = fs::File::open(format!("/proc/{pid}/stat")).unwrap();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let mut bytes = Vec::new();
+    let read = io::Read::read_to_end(&mut stat, &mut bytes).map(|_| bytes);
+    assert_eq!(
+        read.as_ref().map_err(io::Error::raw_os_error).err(),
+        Some(Some(libc::ESRCH)),
+        "reading a reaped process's open stat file did not report ESRCH"
+    );
+    assert!(
+        stat_from_read(read, pid).unwrap().is_none(),
+        "a process reaped mid-scan was not treated as absent"
+    );
+}
+
+#[test]
+fn group_scan_treats_a_task_being_released_as_dead() {
+    // Captured on Linux 6.6 mid-scan: once release_task drops the signal struct,
+    // the kernel prints state X with ppid 0 and process group and session -1.
+    let releasing = b"611857 (true) X 0 -1 -1 0 -1 4227084 82 0 0 0 0 0 0 0 20 0 0 0 12629729 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 17 6 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+    assert!(
+        stat_from_read(Ok(releasing.to_vec()), 611857)
+            .unwrap()
+            .is_none()
+    );
+    assert!(stat_from_read(Ok(releasing.to_vec()), 611858).is_err());
+    // do_task_stat reads the state before the ids, so a task released in between
+    // prints its earlier state beside the same unset ids (shape from fs/proc/array.c).
+    for state in [b'Z', b'R', b'S'] {
+        let mut released = releasing.to_vec();
+        released[14] = state;
+        assert!(stat_from_read(Ok(released), 611857).unwrap().is_none());
+    }
+    // Only the kernel's exact unset triple means released; any other -1 stays invalid.
+    let partial = String::from_utf8(releasing.to_vec())
+        .unwrap()
+        .replacen("X 0 -1", "S 5 -1", 1);
+    assert!(stat_from_read(Ok(partial.into_bytes()), 611857).is_err());
+    let home = Home::new();
+    // The killed leader stays an unreaped zombie while the scan runs.
+    let leader = stat(400, b'Z', 400, 400, 123);
+    fs::create_dir(home.0.join("400")).unwrap();
+    fs::write(home.0.join("400/stat"), &leader).unwrap();
+    fs::create_dir(home.0.join("611857")).unwrap();
+    fs::write(home.0.join("611857/stat"), releasing).unwrap();
+    let leader = parse_stat(&leader, 400).unwrap().unwrap();
+    assert!(group_is_terminal(&home.0, &leader).unwrap());
+    // The unreaped leader can never be X, so its read still fails closed.
+    fs::write(
+        home.0.join("400/stat"),
+        b"400 (leader) X 0 -1 -1 0 -1 4227084 82 0 0 0 0 0 0 0 20 0 0 0 123 0\n",
+    )
+    .unwrap();
+    assert!(group_is_terminal(&home.0, &leader).is_err());
+    fs::remove_dir_all(&home.0).unwrap();
+}
+
 fn stat(pid: u32, state: u8, group: u32, session: u32, started: u64) -> Vec<u8> {
     let mut fields = vec![
         char::from(state).to_string(),
@@ -193,7 +263,7 @@ fn stat(pid: u32, state: u8, group: u32, session: u32, started: u64) -> Vec<u8> 
 #[test]
 fn stat_parser_and_group_scan_fail_closed_on_uncertain_identity() {
     let bytes = stat(400, b'Z', 400, 400, 123);
-    let leader = parse_stat(&bytes, 400).unwrap();
+    let leader = parse_stat(&bytes, 400).unwrap().unwrap();
     assert!(parse_stat(&bytes, 401).is_err());
     assert!(parse_stat(&stat(400, b'?', 400, 400, 123), 400).is_err());
     assert!(parse_stat(b"400 (name) Z 100 400 400", 400).is_err());

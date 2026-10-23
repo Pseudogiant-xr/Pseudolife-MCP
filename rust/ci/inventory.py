@@ -14,16 +14,18 @@ SYSTEMS = ["ubuntu-latest", "windows-latest"]
 SOURCE_EVENTS = "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
 PARITY_EVENT_GATE = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
-$docsOnly = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
+$docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
+$fastPr = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.full -ceq 'false'
 foreach ($job in @('rust', 'candidate', 'parity-checks')) {
-  if ($results[$job].result -cne 'success' -and -not ($docsOnly -and $results[$job].result -ceq 'skipped')) {
+  $skipChosen = $docsOnly -or ($fastPr -and $job -cne 'rust')
+  if ($results[$job].result -cne 'success' -and -not ($skipChosen -and $results[$job].result -ceq 'skipped')) {
     Write-Error "$job did not succeed"
     exit 1
   }
 }
 $sourceResult = $results['source-mutants'].result
-if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
-  Write-Error "source-mutants did not succeed outside the PR and push skip exception"
+if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
+  Write-Error "source-mutants did not succeed outside the PR, merge-group and push skip exception"
   exit 1
 }
 """
@@ -104,6 +106,9 @@ def check(workflow):
     from control_selection import runtime_controls
     from rust.cli_harness import core
 
+    from parity_scope import resolve
+    # The full matrix, as master pushes and the nightly run it.
+    workflow = resolve(workflow)
     declared = cli_controls()
     selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
     assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"
@@ -131,11 +136,15 @@ def check(workflow):
                for exceptions in EXCEPTIONS['cli_mutants'].values()), 'unknown source-control exception'
     jobs = workflow["jobs"]
     parity = jobs["parity-checks"]
-    ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'"
+    ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode == 'ci'"
     assert parity['if'] == (f"${{{{ !cancelled() && ({ordinary_ci}) && needs.candidate.result == 'success' "
                             "&& needs.rust.result == 'success' }}"), 'H5 PR event selection changed'
     matrix = parity["strategy"]["matrix"]
-    assert matrix["os"] == SYSTEMS and "exclude" not in matrix
+    assert matrix["os"] == SYSTEMS
+    # Only hosted Windows' live comparisons leave the required matrix; they
+    # run in the non-gating parity-live job (test_workflow.py pins it).
+    assert matrix.get("exclude") == [{"os": "windows-latest", "suite": "cli-live"}], \
+        'required parity matrix excludes more than the Windows live comparisons'
     assert set(SUITES) <= set(matrix["suite"]), "missing H5 suite"
     step = next(s for s in parity["steps"] if s.get("name") == "Ported rows and daemon controls")
     assert step["if"] == "startsWith(matrix.suite, 'h5-')"
@@ -170,7 +179,7 @@ def check(workflow):
     events = workflow.get('on', workflow.get(True))
     assert events.get('push') == {'branches': ['master']} \
         and events.get('schedule') == [{'cron': '23 3 * * *'}], 'source events dropped or changed'
-    assert 'pull_request' in events and 'workflow_dispatch' in events, 'source events dropped or changed'
+    assert {'pull_request', 'merge_group', 'workflow_dispatch'} <= set(events), 'source events dropped or changed'
     assert source['if'] == (f"${{{{ !cancelled() && ({SOURCE_EVENTS}) "
                             "&& needs.candidate.result == 'success' }}"), 'source event selection changed'
     gate = jobs['parity']

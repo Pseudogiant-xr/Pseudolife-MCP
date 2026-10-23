@@ -413,5 +413,111 @@
       0
     ],
     "scope": "Only Windows map-order in both modes is excepted; Linux map-order and both reversed-map modes remain selected."
+  },
+  "hosted_step_distribution": {
+    "date": "2026-10-21",
+    "step": "Ported rows and daemon controls",
+    "source": "gh job step timings for rust.yml runs created 2026-10-11T10:39Z to 2026-10-20T13:45Z, every attempt, successful steps only; a job a rerun attempt carried forward unchanged counts once (3,563 steps)",
+    "slow_runner": {
+      "run": 39430876862,
+      "job": 118664975012,
+      "head": "f82141c4",
+      "suite": "h5-graph-mutants",
+      "image": "ubuntu24 20261018.339.1, 4 logical CPUs",
+      "step_minutes": 14.2,
+      "outside_step_minutes": 9.0,
+      "mutants_finished": 7,
+      "mutants": 16,
+      "slowdown": "4.6x per store mutant (97 s vs 21 s on run 39422947014), 5.4x to the first mutant (231 s vs 43 s)",
+      "note": "No mutant survived; the rerun passed in 9.1 minutes. No other of 3,563 successful steps ran above 1.6x its cell median.",
+      "projected_step_minutes": 46,
+      "projection": "231 s to the first mutant, 16 mutants at 97 s, and the other 182 s of a normal step at 4.6x (44 minutes) or 5.4x (46 minutes)"
+    },
+    "suites": {
+      "h5-audit": {
+        "linux": {
+          "successes": 301,
+          "p50_s": 231,
+          "p99_s": 251,
+          "max_s": 262
+        },
+        "windows": {
+          "successes": 295,
+          "p50_s": 371,
+          "p99_s": 429,
+          "max_s": 458
+        }
+      },
+      "h5-backup": {
+        "linux": {
+          "successes": 306,
+          "p50_s": 79,
+          "p99_s": 98,
+          "max_s": 119
+        },
+        "windows": {
+          "successes": 299,
+          "p50_s": 108,
+          "p99_s": 139,
+          "max_s": 172
+        }
+      },
+      "h5-w1a": {
+        "linux": {
+          "successes": 295,
+          "p50_s": 451,
+          "p99_s": 473,
+          "max_s": 475
+        },
+        "windows": {
+          "successes": 285,
+          "p50_s": 577,
+          "p99_s": 617,
+          "max_s": 628
+        }
+      },
+      "h5-background": {
+        "linux": {
+          "successes": 303,
+          "p50_s": 104,
+          "p99_s": 120,
+          "max_s": 122
+        },
+        "windows": {
+          "successes": 302,
+          "p50_s": 150,
+          "p99_s": 179,
+          "max_s": 180
+        }
+      },
+      "h5-daemon-mutants": {
+        "linux": {
+          "successes": 305,
+          "p50_s": 219,
+          "p99_s": 257,
+          "max_s": 259
+        },
+        "windows": {
+          "successes": 288,
+          "p50_s": 750,
+          "p99_s": 805,
+          "max_s": 812
+        }
+      },
+      "h5-graph-mutants": {
+        "linux": {
+          "successes": 299,
+          "p50_s": 507,
+          "p99_s": 561,
+          "max_s": 630
+        },
+        "windows": {
+          "successes": 285,
+          "p50_s": 928,
+          "p99_s": 1083,
+          "max_s": 1192
+        }
+      }
+    }
   }
 }

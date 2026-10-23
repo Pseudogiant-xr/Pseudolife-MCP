@@ -19,6 +19,9 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+from pseudolife_memory import readiness  # noqa: E402  the one readiness contract
 
 # Environment variables the daemons read that must never leak in from the
 # caller's shell (a real token, a real bank, a real config).
@@ -40,13 +43,34 @@ class Daemon:
         self.proc: subprocess.Popen | None = None
         self.started_at_unix: float | None = None
 
-    def start(self, wait_s: float = 120.0, expect_exit: bool = False) -> "Daemon":
+    def start(self, wait_s: float = 120.0, expect_exit: bool = False,
+              stages: tuple[str, ...] | None = None) -> "Daemon":
+        """Start the daemon and wait until its /health reports ``ready:
+        true`` (pseudolife_memory/readiness.py): a 503 or ``ready: false``
+        is a daemon still starting. ``stages`` waits only until those
+        startup stages are no longer pending, whatever the status, for a
+        daemon that cannot become ready by design (no embedding model, a
+        leased bank, a refused schema); ``stages=()`` returns on the first
+        HTTP answer (an unreachable bank). ``expect_exit`` waits for the
+        process to exit. Several daemons: :func:`start_all`."""
+        self.launch()
+        return self.wait(wait_s, expect_exit=expect_exit, stages=stages)
+
+    def launch(self) -> "Daemon":
+        """Spawn the process without waiting (:meth:`wait` does)."""
         self._out = open(self.log, "wb")
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         self.started_at_unix = time.time()
         self.proc = subprocess.Popen(self.argv, env=self.env, cwd=self.cwd, stdout=self._out,
                                      stderr=subprocess.STDOUT, creationflags=flags)
+        return self
+
+    def wait(self, wait_s: float = 120.0, expect_exit: bool = False,
+             stages: tuple[str, ...] | None = None) -> "Daemon":
+        """:meth:`start`'s wait, for a daemon already launched."""
+        assert self.proc is not None
         deadline = time.monotonic() + wait_s
+        last = (None, None)
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:
                 if expect_exit:
@@ -57,16 +81,21 @@ class Daemon:
                 time.sleep(0.2)
                 continue
             try:
-                c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=2)
-                c.request("GET", "/health")
-                c.getresponse().read()
-                return self
-            except OSError:
+                last = readiness.read_health(f"http://127.0.0.1:{self.port}", 2)
+            except (OSError, ValueError, http.client.HTTPException):
                 time.sleep(0.2)
+                continue
+            if (readiness.is_ready(*last) if stages is None
+                    else readiness.stages_done(last[1], stages)):
+                return self
+            time.sleep(0.2)
         if expect_exit:
             raise RuntimeError(f"{self.kind} daemon did not exit within {wait_s}s")
         self.stop()
-        raise RuntimeError(f"{self.kind} daemon did not answer /health within {wait_s}s; log {self.log}")
+        wanted = ("report ready" if stages is None else
+                  f"finish {list(stages)}" if stages else "answer /health")
+        raise RuntimeError(f"{self.kind} daemon did not {wanted} within {wait_s}s "
+                           f"(last answer: {readiness.describe(*last)}); log {self.log}")
 
     def wait_exit(self, timeout: float = 60.0) -> int:
         assert self.proc is not None
@@ -89,6 +118,18 @@ class Daemon:
                 self.proc.wait(timeout=10)
         self._out.close()
         self.proc = None
+
+
+def start_all(daemons: "list[Daemon] | dict[str, Daemon]", wait_s: float = 120.0,
+              stages: tuple[str, ...] | None = None) -> None:
+    """Launch every daemon, then wait for each (:meth:`Daemon.wait`), so
+    they warm up side by side rather than one after another. A failed wait
+    stops that daemon; the caller stops the rest, as for :meth:`Daemon.start`."""
+    group = list(daemons.values()) if isinstance(daemons, dict) else list(daemons)
+    for d in group:
+        d.launch()
+    for d in group:
+        d.wait(wait_s, stages=stages)
 
 
 def base_env(home: Path, extra: dict[str, str]) -> dict[str, str]:

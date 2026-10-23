@@ -1247,19 +1247,25 @@ def test_negative_caps_read_as_off_not_as_a_one_short_slice():
     assert st.truncated is False
 
 
-def test_time_budget_stops_inside_the_expansion_loop():
+def test_time_budget_stops_inside_the_expansion_loop(monkeypatch):
     """The budget is checked per expanded node, not only at the search
     boundaries — a hop over a wide frontier is many ``graph_fn`` calls with
     no search in between, and a walk that only checked at the search
-    boundaries would run the whole hop out first."""
+    boundaries would run the whole hop out first.
+
+    The clock is fake and advances only inside ``graph_fn``: with a real
+    0.1 s budget a loaded CI runner spent it before the first expansion
+    (test-lite-linux, 2026-10-19, ``assert 0 == 2``)."""
+    import types
+    now = {"t": 0.0}
+    monkeypatch.setattr(rc, "time", types.SimpleNamespace(monotonic=lambda: now["t"]))
     slow = {"n": 0}
     edges = [(f"hub{i}", "depends-on", f"spoke{i}") for i in range(3)]
     inner = _FakeSvc(["three hubs"], edges)
 
     def slow_graph(entity, depth=1):
-        import time as _t
         slow["n"] += 1
-        _t.sleep(0.06)
+        now["t"] += 0.06
         return inner.graph(entity, depth)
 
     svc = _CountingSvc(inner)

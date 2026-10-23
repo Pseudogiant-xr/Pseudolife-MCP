@@ -142,6 +142,18 @@ def select(root, event_name, event, checkout_head, *, github_ref=None):
         release = release_cut(root, oracle, head)
         if release is not None:
             oracle = head
+    elif event_name == "merge_group":
+        # A queued group is a pull request against its own base: the group's
+        # base commit (master, or the queue entry ahead of it) is the oracle,
+        # and the group head, which is the checkout, is the candidate.
+        group = event["merge_group"]
+        base, head = commit(group["base_sha"]), commit(group["head_sha"])
+        if head != checkout_head:
+            raise ValueError("merge group head and checkout head differ")
+        oracle = merge_base(root, base, head)
+        release = release_cut(root, oracle, head)
+        if release is not None:
+            oracle = head
     elif event_name == "push":
         head = oracle = commit(event["after"])
         base = None
@@ -177,7 +189,10 @@ def selected_oracle(root=ROOT):
     name = observed["event"]
     event = ({"pull_request": {"base": {"sha": observed["base_head"]},
                                "head": {"sha": observed["candidate_head"]}}}
-             if name == "pull_request" else {"after": observed["candidate_head"]}
+             if name == "pull_request"
+             else {"merge_group": {"base_sha": observed["base_head"],
+                                   "head_sha": observed["candidate_head"]}}
+             if name == "merge_group" else {"after": observed["candidate_head"]}
              if name == "push" else {} if name == "schedule"
              else {"inputs": {"frozen_head": observed["candidate_head"]}})
     checked = select(root, name, event, observed["checkout_head"], github_ref=observed.get("github_ref"))

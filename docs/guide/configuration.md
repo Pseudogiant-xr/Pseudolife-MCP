@@ -2516,7 +2516,8 @@ also capped (below, and by the daemon's `wake` caps under
   seconds; a ring then fires up to 30 s later. Before 2026-10-05 the watcher
   stopped after 59 minutes, and a plugin from before then still does until
   `pseudolife-mcp update` moves the clients. `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT`
-  (seconds) shortens it. The watcher
+  (seconds) shortens it; even a wait its start-up already used looks for
+  mail once, and the last poll is cut to the time left. The watcher
   also stops when Claude Code exits. A clean exit removes the shim's digest,
   which ends the watch within one poll (5 s, or 30 s after the first hour).
   On Linux and macOS a crash is caught by `kill -0` at the next poll. On
