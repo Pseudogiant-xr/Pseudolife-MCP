@@ -394,6 +394,31 @@ def test_a_member_lands_with_the_batch_that_merged_its_final_head():
     assert m[891]["lead"] == 13633                   # 05:40:00 label -> 09:27:13
 
 
+def test_a_carried_member_that_then_merged_outside_a_batch_is_a_direct_merge():
+    # Carried by #876 with an old head, then merged on its own: not landed by
+    # any batch, so it must stay visible as a direct merge.
+    members = members_892()
+    members["891"]["mergedAt"] = "2026-10-21T12:00:00Z"
+    early = _earlier_batch_with(891)
+    later = batch_892()
+    later["body"] = later["body"].replace(
+        "| #891 fix(console): close the vite alerts | `5cddf0ec32cb009e102445636ab970700b66eac0` "
+        "| https://github.com/o/r/pull/891 (none) | pending |\n", "")
+    rep = timeline.report(artifact(early, later, members=members, direct=[
+        {"number": 891, "title": "vite", "mergedAt": "2026-10-21T12:00:00Z", "headRefName": "x"}]))
+    m = {r["number"]: r for r in rep["members"]}
+    assert m[891]["batch"] is None and m[891]["outcome"] == "carried, merged outside a batch"
+    assert [d["number"] for d in rep["direct_merges"]] == [891]
+
+
+def test_a_rerun_never_names_a_matrix_placeholder_as_its_cause():
+    b = batch_892()
+    b["runs"][0]["attempts"][0]["jobs"].append(job(
+        "lite / ${{ matrix.os }}", "08:11:20", "08:11:20", "08:11:19", "cancelled", 0))
+    (rerun,) = timeline.report(artifact(b, members=members_892()))["batches"][0]["reruns"]
+    assert [j["name"] for j in rerun["failed_jobs"]] == ["test-lite-macos"]
+
+
 def test_a_dropped_member_that_merged_directly_stays_a_direct_merge():
     b = batch_892()
     b["body"] = b["body"].replace("## Validation", "## Dropped\n\n- #884: census\n\n## Validation")
@@ -525,6 +550,26 @@ def test_committed_artifact_backs_the_findings():
     assert d(m[842]["rebuild_repair"]) == "1h47m" and d(m[853]["rebuild_repair"]) == "1h47m"
     assert m[860]["rebatched"] and m[860]["batch"] == 882
     assert (d(m[860]["rebuild_repair"]), d(m[860]["lead"])) == ("5h30m", "6h40m")
+    # "#860 ... took two more commits after its label"; "the 10 members of #850".
+    events = art["members"]["860"]["events"]
+    label = max(e["at"] for e in events if e.get("label") == "ready-to-batch"
+                and e["at"] < "2026-10-20T07:00:00Z")
+    assert sum(e["event"] == "committed" and e["at"] > label for e in events) == 2
+    assert len(b[850]["members"]) == 10
+    # The texts carry the figures this test recomputes.
+    note = (EVIDENCE / "README.md").read_text(encoding="utf-8")
+    for figure in ("7h47m", "2h35m", "29h54m", "3h21m", "4h38m", "1h05m", "1m08s", "5h15m",
+                   "10m09s", "8m01s", "10m41s", "9m36s", "1h17m", "2h55m", "58m52s", "15m07s",
+                   "2h23m", "14m16s", "25m21s", "15m43s", "1h09m", "1m35s", "6h40m", "1h27m",
+                   "6h47m", "3h54m", "37%", "25%", "19%", "35 minutes", "89 minutes",
+                   "28m57s", "13m20s", "09:09:55", "1h47m", "5h30m", "(8 of 8)",
+                   "33 landed members", "In the same window 12"):
+        assert figure in note, figure
+    pace = (ROOT / "rust" / "CUTOVER.md").read_text(encoding="utf-8")
+    pace = pace[pace.index("Measured per batch, 2026-10-23"):]
+    for figure in ("7h47m (n=21)", "4h38m", "2h35m", "1h17m (n=7)", "15m07s", "37% pooled",
+                   "19% without #868", "10m09s", "(8 of 8)", "1h16m", "15m43s"):
+        assert figure in pace, figure
 
 
 class FakeGh:

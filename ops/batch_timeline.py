@@ -260,6 +260,14 @@ def _suite(body: str) -> float | None:
     return None
 
 
+def _placeholder(job: dict) -> bool:
+    """A matrix job GitHub never expanded: its name keeps the `${{ }}`, or it
+    has no steps and ends before it was created."""
+    c, e = _t(job.get("created_at")), _t(job.get("completed_at"))
+    return "${{" in (job.get("name") or "") or (
+        not job.get("steps") and c is not None and e is not None and e < c)
+
+
 def _jobs(batch: dict) -> list[dict]:
     """Every job a batch's CI executed, attempt by attempt. A job a rerun
     retained from an earlier attempt (it started before the rerun did) and
@@ -274,14 +282,12 @@ def _jobs(batch: dict) -> list[dict]:
                 if (job.get("conclusion") or "").lower() == "skipped":
                     continue
                 c, s, e = (_t(job.get(k)) for k in ("created_at", "started_at", "completed_at"))
-                if c is None or e is None or "${{" in job["name"]:
+                if c is None or e is None or _placeholder(job):
                     continue
                 if attempt["attempt"] > 1 and s is not None and start is not None \
                         and _secs(s, start) > CHAIN_TOLERANCE:
                     continue
                 never = not job.get("steps") or s is None
-                if never and e < c:
-                    continue
                 out.append({
                     "name": f"{run['name']}: {job['name']}", "job": job["name"],
                     "run": run["name"], "run_id": run["id"], "attempt": attempt["attempt"],
@@ -334,7 +340,8 @@ def _reruns(batch: dict, jobs: list[dict]) -> list[dict]:
                         "required": j["name"] in REQUIRED_CHECKS, "never_started": True,
                         "annotations": _annotations(j)}
                        for j in prev_raw if (j.get("conclusion") or "").lower() in FAILED
-                       and not any(p["job"] == j["name"] for p in failed)]
+                       and not any(p["job"] == j["name"] for p in failed)
+                       and not _placeholder(j)]
             start = _t(attempt.get("run_started_at"))
             prev_end = max((j["completed"] for j in prev), default=None)
             end = max((j["completed"] for j in this), default=None)
@@ -415,9 +422,13 @@ def _members(art: dict, batches: list[dict]) -> list[dict]:
         # A member that took commits after a merged batch carried an older
         # head lands with a later batch: the one merged when GitHub marked
         # the member merged (#860: carried by #876, merged by #882).
-        landed = next((b for b in carried if own is not None
-                       and abs(_secs(_t(b["merged"]), own)) <= 300), None) \
-            or (carried[0] if carried else None)
+        if own is not None:
+            landed = next((b for b in carried
+                           if abs(_secs(_t(b["merged"]), own)) <= 300), None)
+        else:
+            # GitHub marked no merge (#850 squashed, so its members read
+            # closed): the batch that carried it is the only record.
+            landed = carried[0] if carried else None
         first_build = where[0]["build_start"] or _t(where[0]["created"])
         events = info.get("events") or []
 
@@ -437,6 +448,7 @@ def _members(art: dict, batches: list[dict]) -> list[dict]:
         last_push = max(pushes, default=None)
         anchor = max(opened, last_push) if opened and last_push else opened
         outcome = "merged" if landed else (
+            "carried, merged outside a batch" if carried and own is not None else
             "dropped" if any(n in [d["number"] for d in b["dropped"]] for b in where)
             else where[-1]["outcome"])
         out.append({

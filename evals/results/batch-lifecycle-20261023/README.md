@@ -58,8 +58,8 @@ so they do not add up.
    something was ready.
 2. **Queue wait is real but bursty.** Across the 8 merged batches the
    critical path took 6h47m of execution and 3h54m of queue wait (created to
-   started), 37% pooled; the median batch's share was 25%, and without #868
-   it was 19%. #868 waited 2h23m of its 2h55m first pass: its first job
+   started), 37% pooled; the median batch's share was 25%, and the pooled
+   share without #868 was 19%. #868 waited 2h23m of its 2h55m first pass: its first job
    queued 35 minutes and one Windows parity shard (`w1c-doctor`) 89 minutes,
    during the 2026-10-20 burst of batches. Queue wait includes the account's
    concurrent-job cap, not only the supply of hosted runners.
