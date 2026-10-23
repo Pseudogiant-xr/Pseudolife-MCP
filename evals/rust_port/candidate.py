@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import secrets
 import re
-import subprocess
 import time
+import subprocess
 
 from .harness import HttpClient, _base_url, isolated_env
 from .processes import owned_process
@@ -47,30 +47,27 @@ def launched_candidate(command, dsn, private, *, source_root, cache_overrides, s
     with (private / "candidate.log").open("wb") as log:
         with owned_process(command, cwd=source_root, env=env, stdin=subprocess.DEVNULL,
                            stdout=log, stderr=log) as process:
-            deadline = time.monotonic() + startup_timeout
-            client = HttpClient(url, timeout=1)
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    raise RuntimeError("owned candidate exited before readiness")
-                try:
-                    response = client.execute({"path": "/health"}, "http")
-                    body = response["body"]
-                    identity = body.get("baseline_instance", {}) if isinstance(body, dict) else {}
-                    observed = identity.get("nonce")
-                    if response["status"] == 200:
-                        if (not isinstance(observed, str) or not secrets.compare_digest(observed, nonce)
-                                or not process.owns_runtime_pid(identity.get("pid")) or body.get("status") != "ok"):
-                            raise RuntimeError("owned candidate readiness identity mismatch")
-                        cleanup["readiness_identity_verified"] = True
-                        break
-                except OSError:
-                    pass
-                time.sleep(.1)
-            else:
-                raise RuntimeError("owned candidate readiness timed out")
-            from evals.rust_baseline.daemon import wait_for_principals
-            cleanup["principals_unavailable_before_ready"] = wait_for_principals(
-                url, deadline, alive=lambda: process.poll() is None)
+            def verify(status, body):
+                # A listener that is not this owned candidate is refused at once.
+                if status != 200:
+                    return
+                identity = body.get("baseline_instance", {}) if isinstance(body, dict) else {}
+                observed = identity.get("nonce") if isinstance(identity, dict) else None
+                if (not isinstance(observed, str) or not secrets.compare_digest(observed, nonce)
+                        or not process.owns_runtime_pid(identity.get("pid")) or body.get("status") != "ok"):
+                    raise RuntimeError("owned candidate readiness identity mismatch")
+
+            from evals.rust_baseline.readiness_wait import StartupFailed, wait_started
+            try:
+                # The readiness contract: initialized, stored principals loaded.
+                _payload, evidence = wait_started(url, time.monotonic() + startup_timeout, check=verify,
+                                                  alive=lambda: process.poll() is None)
+            except StartupFailed as exc:
+                if exc.exited:
+                    raise RuntimeError("owned candidate exited before readiness") from exc
+                raise RuntimeError(f"owned candidate readiness timed out ({exc})") from exc
+            cleanup["readiness_identity_verified"] = True
+            cleanup.update(evidence)
             try:
                 yield url, cleanup
             finally:

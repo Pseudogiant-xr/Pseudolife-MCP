@@ -154,12 +154,20 @@ def test_failure_cleans_only_this_scenarios_databases(harness, monkeypatch, tmp_
             daemons.append(self)
 
         def start(self, timeout):
+            self.launch()
+            return self.wait(timeout)
+
+        def launch(self):  # daemons.start_all launches every arm, then waits
+            self.started = True
+            return self
+
+        def wait(self, timeout, stages=None):
             nonlocal starts
             starts += 1
-            self.started = True
             if (stage == "seed-start" or stage == "arm-start"
                     and starts == (2 if mode == "live" else 1)):
                 raise FixtureFailure(stage)
+            return self
 
         def stop(self):
             self.stopped = True
@@ -495,3 +503,108 @@ def test_dream_answers_normalize_stall_clocks_and_run_cursors(harness):
     assert out["last_dream_extractor"]["at"] == "<clock>"
     assert out["runs"][0] == {"id": 1, "cursor_before": 0.0, "cursor_after": "<ts:3>",
                               "finished_at": "<clock>"}
+
+
+def test_warmups_are_awaited_per_side_until_each_probe_lands(harness, monkeypatch):
+    monkeypatch.setattr(harness.time, "sleep", lambda s: None)
+    polls = {"python": 0, "rust": 0}
+
+    def landed(dsn, before):
+        polls[dsn] += 1
+        return polls[dsn] >= (2 if dsn == "python" else 4)
+
+    sides = {"python": "python", "rust": "rust"}
+    assert harness.wait_warmups(sides, {"python": {}, "rust": {}}, landed=landed) == []
+    assert polls == {"python": 2, "rust": 4}  # no side is polled once it has landed
+
+
+def test_a_probe_that_never_lands_is_a_difference_naming_its_side(harness, monkeypatch):
+    monkeypatch.setattr(harness.time, "sleep", lambda s: None)
+    diffs = harness.wait_warmups({"python": "py", "rust": "rs"}, {"python": {}, "rust": {}},
+                                 deadline_s=0, landed=lambda dsn, before: dsn == "py")
+    assert diffs == ["warmup: rust's startup probe event did not land within 0s"]
+
+
+@pytest.mark.parametrize("config,expected", [
+    (None, True), ("memory:\n  lessons:\n    enabled: false\n", True),
+    ("memory:\n  retrieval_log:\n    enabled: false\n", False),
+])
+def test_the_probe_is_expected_only_while_the_retrieval_log_is_on(harness, config, expected):
+    assert harness.warmup_expected({"config": config}) is expected
+    # Every scenario that turns the log off says so in its config.
+    assert any(not harness.warmup_expected(s) for s in harness.SCENARIOS.values())
+
+
+@pytest.mark.parametrize("log_on", [True, False])
+def test_the_init_snapshot_waits_for_both_warmups(harness, monkeypatch, tmp_path, log_on):
+    events = []
+
+    class Daemon:
+        def __init__(self, *args, **kwargs):
+            self.port = 1
+
+        def start(self, timeout):
+            pass
+
+        def launch(self):  # daemons.start_all launches every arm, then waits
+            return self
+
+        def wait(self, timeout, stages=None):
+            return self
+
+        def stop(self):
+            pass
+
+    def warmups(dsns, before):
+        events.append("warmup")
+        return ["warmup: rust's startup probe event did not land within 300s"]
+
+    config = None if log_on else "memory:\n  retrieval_log:\n    enabled: false\n"
+    monkeypatch.setitem(harness.SCENARIOS, "warmup-order",
+                        {"config": config, "seed": [], "ops": [harness.sql("SELECT 1")]})
+    monkeypatch.setattr(harness, "prepare_template", lambda *a: "template")
+    monkeypatch.setattr(harness.pg, "create", lambda name, **kw: name)
+    monkeypatch.setattr(harness.dbstate, "dump", lambda dsn: events.append("dump") or {"rows": {}})
+    monkeypatch.setattr(harness.daemons, "python_daemon", Daemon)
+    monkeypatch.setattr(harness.daemons, "rust_daemon", Daemon)
+    monkeypatch.setattr(harness.w1a, "wait_settled", lambda *a, **kw: events.append("settled"))
+    monkeypatch.setattr(harness, "wait_warmups", warmups)
+    monkeypatch.setattr(harness, "Mcp", lambda port: SimpleNamespace(init=lambda: None))
+    monkeypatch.setattr(harness, "run_op", lambda *a: {"isError": False, "value": None})
+    monkeypatch.setattr(harness, "normalize_state", lambda state, before, *ts: ({}, {}, {}))
+    monkeypatch.setattr(harness, "compare_response", lambda *a: [])
+    result = harness._run_scenario("warmup-order", tmp_path / "candidate", tmp_path, "live",
+                                   False, {}, None, [])
+    init = events.index("settled")
+    assert events[:init] == ["dump", "dump"]  # the pre-start states
+    assert events[init + 1:] == (["warmup"] if log_on else []) + ["dump"] * 4
+    first, second = result["steps"]
+    assert first["diffs"] == (warmups(None, None) if log_on else [])
+    assert second["diffs"] == []  # reported once, at the init step
+
+
+@pytest.mark.parametrize("before,prior", [
+    ({"rows": {}}, []),
+    ({"rows": {"public.retrieval_events": {"columns": ["query_text", "id"],
+                                           "rows": [["warmup probe", 1], ["other", 4]]}}}, [1, 4]),
+])
+def test_a_template_probe_does_not_count_as_this_boots_probe(harness, monkeypatch, before, prior):
+    seen = []
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params):
+            seen.append((" ".join(sql.split()), params))
+            return SimpleNamespace(fetchone=lambda: None)
+
+    monkeypatch.setitem(sys.modules, "psycopg",
+                        SimpleNamespace(connect=lambda dsn, autocommit: Conn()))
+    assert harness.warmup_landed("dsn", before) is False
+    (sql, params), = seen
+    assert "query_text = 'warmup probe'" in sql and "origin = 'search'" in sql
+    assert "NOT (id = ANY(%s::bigint[]))" in sql and params == (prior,)

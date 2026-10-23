@@ -317,7 +317,9 @@ def start(kind: str, scn: S.Scenario, binary: Path, root: Path, dsn: str, tag: s
         if os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"):
             env["PSEUDOLIFE_DAEMON_MUTANT"] = os.environ["PSEUDOLIFE_DAEMON_MUTANT"]
         d = daemons.rust_daemon(binary, home, port, env)
-    return d.start(240)
+    # The board's own tiers come after (wait_ready below): the Rust arm
+    # deliberately needs only storage, so init may never finish here.
+    return d.start(240, stages=("principals",))
 
 
 def wait_ready(port: int, timeout: float = 600.0, *, require_embedder: bool = True) -> None:

@@ -177,8 +177,18 @@ impl Default for RecallConfig {
             max_entities: 50,
             hub_gate: true,
             hub_percentile: 95.0,
+            // Bench-tuned with the hub gate (graphify-derived), as in Python.
             hub_floor: 8,
             expand_budget: 0,
+            // The three search caps were measured 2026-09-04 with
+            // `evals/recall_fanout_bench.py` on a restored copy of the live
+            // bank (1,296 entries, 5,504 entities; 20 relational questions,
+            // CPU, top_k=6, hops=3; `evals/results/recall-fanout-cap-20260904.json`).
+            // Uncapped, a recall issued a mean of 89.15 searches and took
+            // 25.25 s; at 6 per hop, 12.40 searches and 4.166 s with no
+            // expected target lost. 31 = 1 + 6 x 5 hops, so the ceiling never
+            // cuts a request the tool accepts. 20 s sits above the 7.51 s
+            // worst capped call. `utils/config.py:986-1022` has the full note.
             max_searches_per_hop: 6,
             max_total_searches: 31,
             time_budget_seconds: 20.0,

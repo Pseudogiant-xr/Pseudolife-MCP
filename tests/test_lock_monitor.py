@@ -67,11 +67,30 @@ def test_slow_wait_warns_with_waiter_name(caplog):
 
     lock = MonitoredLock("test", slow_seconds=0.05)
     entered = threading.Event()
+    waiting = threading.Event()
+    inner = lock._inner
+
+    class _Announcing:
+        """The real lock, announcing when the waiter starts to block."""
+
+        def acquire(self, *args):
+            waiting.set()
+            return inner.acquire(*args)
+
+        def release(self):
+            inner.release()
 
     def holder():
         with lock:
+            lock._inner = _Announcing()
             entered.set()
-            time.sleep(0.1)
+            # Hold until the waiter has been blocked longer than the slow
+            # threshold on its own clock: an ordering, not a fixed sleep the
+            # waiter could start after on a stalled runner.
+            assert waiting.wait(10), "the waiter never tried the lock"
+            blocked = time.perf_counter()
+            while time.perf_counter() - blocked < 0.06:
+                time.sleep(0.005)
 
     def slow_waiter():
         with lock:
@@ -79,7 +98,7 @@ def test_slow_wait_warns_with_waiter_name(caplog):
 
     t = threading.Thread(target=holder)
     t.start()
-    entered.wait(1.0)
+    assert entered.wait(10)
     with caplog.at_level(logging.WARNING):
         slow_waiter()
     t.join()

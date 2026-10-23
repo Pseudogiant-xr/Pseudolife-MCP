@@ -56,12 +56,29 @@ trap cleanup EXIT
 # hang outside any single test. 35 min: pytest took 11.8-15.5 min in the
 # four green master runs of 2026-09-23/24, and install plus a cold
 # embedder download (up to ~10 min) must still fit inside the job's 50.
+# PSEUDOLIFE_SUITE_PROFILE=1 also loads tests/suite_profile_plugin.py (worker
+# timeline, resource and test-server samples, run manifest) into
+# ci-results/profile and folds its summary; the selection, workers and exit
+# status are unchanged. Off by default until its overhead is measured.
+profile=()
+case "${PSEUDOLIFE_SUITE_PROFILE:-}" in
+    ""|0|off|false|no) ;;
+    *)
+        export PSEUDOLIFE_SUITE_PROFILE_DIR="$PWD/ci-results/profile"
+        profile=(-p tests.suite_profile_plugin)
+        ;;
+esac
 set +e
 /usr/bin/time -v -o ci-results/process.txt \
     timeout --signal=ABRT --kill-after=60s 35m \
-    python -m pytest -q -n 2 --dist loadfile -ra \
+    python -m pytest ${profile[@]+"${profile[@]}"} -q -n 2 --dist loadfile -ra \
     --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml "$@"
 test_status=$?
+if (( ${#profile[@]} )) && [[ -f ci-results/profile/manifest.json ]]; then
+    python evals/suite_profile_summary.py --profile-dir ci-results/profile \
+        --tag ci --out ci-results/profile-summary.json \
+        || echo "ci_tests: the profile summary failed" >&2
+fi
 set -e
 free -m > ci-results/memory-after.txt || true
 snapshot > ci-results/pressure-after.txt || true

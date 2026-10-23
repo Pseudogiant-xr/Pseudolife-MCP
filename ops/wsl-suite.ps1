@@ -1,7 +1,16 @@
 # Run this checkout's test suite inside WSL instead of on native Windows.
 #
-#   pwsh ops/wsl-suite.ps1                      # the full suite
-#   pwsh ops/wsl-suite.ps1 tests/test_bm25.py   # anything else pytest takes
+#   pwsh ops/wsl-suite.ps1                      # the full suite (xdist workers
+#                                               # sized to WSL's CPUs and memory;
+#                                               # PSEUDOLIFE_SUITE_WORKERS=1: one process)
+#   pwsh ops/wsl-suite.ps1 -q -n 2              # still the full suite: display
+#                                               # options and a worker choice
+#   pwsh ops/wsl-suite.ps1 tests/test_bm25.py   # anything else goes to pytest
+#                                               # unchanged (ops/wsl-suite.sh,
+#                                               # plan_run, has the contract)
+#   $env:PSEUDOLIFE_SUITE_PROFILE='1'           # also profile the run (the
+#                                               # profile stays in WSL's
+#                                               # ~/.pseudolife-mcp/suite-profiles)
 #
 # A full suite on native Windows starts Git Bash processes in bursts that
 # stalled mouse input on the maintainer's host (tests/suite_lock.py carries
@@ -18,9 +27,12 @@
 #
 # The lock a WSL run takes lives in the WSL home and cannot see a Windows
 # run's lock, which is why a host that adopts this refuses native Windows
-# full runs (PSEUDOLIFE_SUITE_WINDOWS / full-suite.windows). Every argument
-# goes to pytest unchanged; PSEUDOLIFE_WSL_DISTRO picks the distribution
-# (default: WSL's default one). The exit code is pytest's.
+# full runs (PSEUDOLIFE_SUITE_WINDOWS / full-suite.windows). Run with
+# `pwsh -File` (as above), every argument reaches ops/wsl-suite.sh unchanged,
+# `--` included (called from inside a PowerShell session, PowerShell drops a
+# `--`), and that script decides what pytest runs;
+# PSEUDOLIFE_WSL_DISTRO picks the distribution (default: WSL's default
+# one). The exit code is pytest's.
 #
 # The run logs in to the test Postgres with the test login file
 # (PSEUDOLIFE_TEST_PG_LOGIN_FILE, else ~/.pseudolife-mcp/test-pg.env, written
@@ -50,7 +62,8 @@ $forward = @(@(
     'PSEUDOLIFE_REQUIRE_TEST_POSTGRES', 'PSEUDOLIFE_TEST_EMBEDDER',
     'PSEUDOLIFE_SUITE_LOCK', 'PSEUDOLIFE_SUITE_SLOTS', 'PSEUDOLIFE_TEST_CUDA',
     'PSEUDOLIFE_SUITE_VENV', 'PSEUDOLIFE_SUITE_PYTHON', 'PSEUDOLIFE_SUITE_PRUNE',
-    'PSEUDOLIFE_SUITE_PRUNE_DAYS', 'PSEUDOLIFE_SUITE_KEEP', 'HF_HUB_OFFLINE'
+    'PSEUDOLIFE_SUITE_PRUNE_DAYS', 'PSEUDOLIFE_SUITE_KEEP', 'PSEUDOLIFE_SUITE_WORKERS',
+    'PSEUDOLIFE_SUITE_PROFILE', 'PSEUDOLIFE_SUITE_PROFILE_INTERVAL', 'HF_HUB_OFFLINE'
 ) | Where-Object { Test-Path "env:$_" })
 # The token file only when there is no token value: under /mnt/c it shows
 # loose permissions, and the board client refuses a credential file that is

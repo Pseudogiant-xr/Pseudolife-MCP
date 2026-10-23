@@ -306,7 +306,15 @@ async fn board_retry_registered_note_once_after_validated_call() {
     let home = Home::new();
     let runtime = runtime(&fixture, false);
     let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
-    fixture.wait("/attach", 1).await;
+    // The retry attaches only after the state file's durable write. On the
+    // Windows dev VM on 2026-10-19 that write took up to 3.1 s beside this
+    // binary's other tests, and the old 2 s observer failed 4 of 40 loops.
+    // Allow one production retry attempt; `startup` is slack for a second
+    // attempt, which reuses the saved state when a write outlasts the first.
+    let timing = pseudolife_stdio::board::Timing::default();
+    fixture
+        .wait_within("/attach", 1, timing.retry_attempt + timing.startup)
+        .await;
     *fixture.bank.lock().unwrap() = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".into();
     let call = forward(&board, false).await;
     assert!(!call.operation.headers.contains_key("x-pl-agent"));
@@ -350,8 +358,10 @@ async fn board_retry_permanent_startup_forwarding_is_not_retried() {
     let mut timing = fast(&runtime, &home, "1");
     // The permanent startup refusal uses the production client setup budget.
     timing.timing.startup = pseudolife_stdio::board::Timing::default().startup;
+    // Attach returns only after the refusal was classified. A retry would
+    // have been announced on stderr before attach returned, which the parent
+    // process refuses ("retried" above), so no sleep has to outwait one.
     let board = Board::attach_options(runtime.clone(), timing).await;
-    tokio::time::sleep(Duration::from_millis(140)).await;
     let call = forward(&board, true).await;
     assert!(!call.operation.headers.contains_key("x-pl-agent"));
     assert_eq!(fixture.count("/context"), 1);
@@ -373,9 +383,10 @@ async fn board_retry_permanent_later_refusal_stops_and_hints_once() {
     let runtime = runtime(&fixture, false);
     let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
     fixture.wait("/context", 2).await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The retry has stopped once a required call is no longer refused as
+    // pending; the stop and its hint are set together under one lock.
+    let call = unregistered(&board).await;
     assert_eq!(fixture.count("/context"), 2);
-    let call = forward(&board, true).await;
     assert!(!call.operation.headers.contains_key("x-pl-agent"));
     let mut result = rmcp::model::CallToolResult::success(vec![]);
     assert!(
@@ -408,9 +419,11 @@ async fn board_retry_close_cancels_hung_and_continuously_refused_attempts() {
         let runtime = runtime(&fixture, false);
         let board = attach(runtime.clone(), fast(&runtime, &home, "1"), gate.as_mut()).await;
         fixture.wait("/context", 2).await;
-        tokio::time::timeout(Duration::from_millis(100), board.close())
+        // A close that waited instead of cancelling would hang on the held
+        // attempt, or run the refusals out and register; both fail below.
+        tokio::time::timeout(Duration::from_secs(10), board.close())
             .await
-            .unwrap();
+            .expect("close waited for the retry instead of cancelling it");
         let count = fixture.count("/context");
         tokio::time::sleep(Duration::from_millis(120)).await;
         assert_eq!(fixture.count("/context"), count);
@@ -592,7 +605,10 @@ async fn board_retry_codex_late_refusal_explains_explicit_doorbell() {
     options.doorbell_setting = Some("1".into());
     let board = Board::attach_options(runtime, options).await;
     fixture.wait("coordination-start", 2).await;
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    // The refusal is handled once a required call is no longer refused as
+    // pending: the retry sets the mode and prints the doorbell line with no
+    // await between them, so the line is out before close can cancel it.
+    unregistered(&board).await;
     board.close().await;
     assert_eq!(fixture.count("/register"), 0);
 }
@@ -601,17 +617,31 @@ async fn board_retry_codex_late_refusal_explains_explicit_doorbell() {
 async fn board_retry_close_wins_late_transport_failure_without_another_attempt() {
     let fixture = Fixture::new(0);
     fixture.answer("context", outage("refused"));
-    fixture.answer(
-        "context",
-        Answer::json(503, serde_json::json!({})).delayed(Duration::from_millis(120)),
-    );
+    // The late failure is held until close has returned, so close can only
+    // return by cancelling the attempt, never by outwaiting it.
+    let (late, gate) = Answer::json(503, serde_json::json!({})).gated();
+    fixture.answer("context", late);
     let home = Home::new();
     let runtime = runtime(&fixture, false);
     let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
     fixture.wait("context", 2).await;
-    tokio::time::timeout(Duration::from_millis(100), board.close())
+    // Held, the attempt can end by itself only through its 5 s request
+    // timeout, a tokio timer. On paused time that timer is the only thing
+    // that can move the clock, so a close that outwaited the attempt instead
+    // of cancelling it shows as five virtual seconds, whatever the runner did.
+    // (close's state drain runs on spawn_blocking, which holds auto-advance
+    // off; were it moved to a plain thread, this check would need revisiting.)
+    tokio::time::pause();
+    let closing = tokio::time::Instant::now();
+    tokio::time::timeout(Duration::from_secs(10), board.close())
         .await
-        .unwrap();
+        .expect("close hung on the held attempt");
+    assert!(
+        closing.elapsed() < Duration::from_secs(1),
+        "close outwaited the held attempt instead of cancelling it"
+    );
+    tokio::time::resume();
+    gate.release();
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(fixture.count("context"), 2);
     assert_eq!(fixture.count("/register"), 0);
