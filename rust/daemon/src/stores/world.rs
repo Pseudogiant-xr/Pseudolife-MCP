@@ -97,6 +97,9 @@ pub struct WorldWrite<'a> {
     pub freshness_class: &'a str,
     pub retrieved_at: Option<f64>,
     pub content_hash: Option<&'a str>,
+    /// `source_doc_id` (the audit-snapshot restore carries one; the MCP
+    /// write never does).
+    pub source_doc_id: Option<i64>,
     pub now: f64,
     pub hlc: (i64, i64),
     pub writer_id: Option<&'a str>,
@@ -153,6 +156,48 @@ impl WorldStore {
         out
     }
 
+    /// The records `restore` brings back, without changing anything.
+    pub fn restore_picks(&self, entity: &str, attribute: Option<&str>) -> Vec<usize> {
+        let live: std::collections::HashSet<&SlotKey> = self.current.keys().collect();
+        crate::stores::lessons::restore_picks(
+            self.records
+                .iter()
+                .map(|r| (&r.key, r.status.as_str(), r.superseded_at, r.asserted_at)),
+            &live,
+            entity,
+            attribute,
+        )
+    }
+
+    /// `restore` (`world_cortex.py:284-315`): the newest retired record at
+    /// every slot of the entity (or the one slot) with no current record
+    /// becomes current, `superseded_at` cleared, its slot dirty; the current
+    /// index is rebuilt. Returns the restored record indexes.
+    pub fn restore(&mut self, entity: &str, attribute: Option<&str>) -> Vec<usize> {
+        let picks = self.restore_picks(entity, attribute);
+        for &i in &picks {
+            let r = &mut self.records[i];
+            r.status = "current".into();
+            r.superseded_at = None;
+            self.dirty_slots.insert(r.key.clone());
+        }
+        if !picks.is_empty() {
+            self.reindex();
+        }
+        picks
+    }
+
+    /// Append a current record and index it, its slot dirty (the curation
+    /// restore's record rebuilt from its audit snapshot). Returns its index.
+    pub fn push_current(&mut self, mut rec: WorldRecord) -> usize {
+        rec.refresh_derived();
+        self.dirty_slots.insert(rec.key.clone());
+        self.records.push(rec);
+        let i = self.records.len() - 1;
+        self.current.insert(self.records[i].key.clone(), i);
+        i
+    }
+
     /// `lookup`: the slot's current record.
     #[allow(dead_code)] // read API for `world_lookup` (the console) and the tests
     pub fn lookup(&self, entity: &str, attribute: &str) -> Option<&WorldRecord> {
@@ -200,6 +245,9 @@ impl WorldStore {
             }
             if let Some(h) = w.content_hash.filter(|h| !h.is_empty()) {
                 cur.content_hash = Some(h.to_string());
+            }
+            if let Some(id) = w.source_doc_id {
+                cur.source_doc_id = Some(id);
             }
             cur.tx_time = Some(t);
             cur.hlc_phys = Some(w.hlc.0);
@@ -262,7 +310,7 @@ impl WorldStore {
             freshness_class: fc.to_string(),
             retrieved_at: ra,
             content_hash: w.content_hash.map(str::to_string),
-            source_doc_id: None,
+            source_doc_id: w.source_doc_id,
             asserted_at: w.now,
             last_confirmed: w.now,
             supersedes_value: supersedes,
@@ -410,32 +458,54 @@ pub async fn sync_slot_rows(db: &Client, store: &WorldStore) -> Result<BTreeSet<
     if slots.is_empty() {
         return Ok(slots);
     }
+    crate::txn::run(db, |c| {
+        let slots = &slots;
+        async move { write_slot_rows(c, store, slots).await }
+    })
+    .await?;
+    Ok(slots)
+}
+
+/// `sync_world_slots` inside a transaction the caller holds (the curation
+/// restore's `slot_curation_transaction`). Returns the slots written.
+pub async fn sync_slot_rows_in(c: &Client, store: &WorldStore) -> Result<BTreeSet<SlotKey>> {
+    let slots = store.dirty_slots.clone();
+    if !slots.is_empty() {
+        write_slot_rows(c, store, &slots).await?;
+    }
+    Ok(slots)
+}
+
+/// `_replace_slot_rows` for `world_facts`, on a client inside a transaction:
+/// the slots' records in record order.
+async fn write_slot_rows(
+    c: &Client,
+    store: &WorldStore,
+    slots: &BTreeSet<SlotKey>,
+) -> Result<(), tokio_postgres::Error> {
     let rows: Vec<&WorldRecord> = store
         .records
         .iter()
         .filter(|r| slots.contains(&r.key))
         .collect();
-    crate::txn::run(db, |c| {
-        let (slots, rows) = (&slots, &rows);
-        async move {
-            let ents: Vec<&str> = slots.iter().map(|s| s.0.as_str()).collect();
-            let attrs: Vec<&str> = slots.iter().map(|s| s.1.as_str()).collect();
-            c.execute(
-                "DELETE FROM world_facts WHERE (entity_norm, attribute_norm) IN \
+    let ents: Vec<&str> = slots.iter().map(|s| s.0.as_str()).collect();
+    let attrs: Vec<&str> = slots.iter().map(|s| s.1.as_str()).collect();
+    c.execute(
+        "DELETE FROM world_facts WHERE (entity_norm, attribute_norm) IN \
                  (SELECT * FROM unnest($1::text[], $2::text[]))",
-                &[&ents, &attrs],
-            )
-            .await?;
-            for r in rows.iter() {
-                let embedding: Option<Vec<f32>> = r.embedding.as_deref().map(<[f32]>::to_vec);
-                let freshness = if r.freshness_class.is_empty() {
-                    "volatile"
-                } else {
-                    r.freshness_class.as_str()
-                };
-                let version = if r.version == 0 { 1 } else { r.version };
-                c.execute(
-                    "INSERT INTO world_facts (entity, attribute, entity_norm, attribute_norm, \
+        &[&ents, &attrs],
+    )
+    .await?;
+    for r in &rows {
+        let embedding: Option<Vec<f32>> = r.embedding.as_deref().map(<[f32]>::to_vec);
+        let freshness = if r.freshness_class.is_empty() {
+            "volatile"
+        } else {
+            r.freshness_class.as_str()
+        };
+        let version = if r.version == 0 { 1 } else { r.version };
+        c.execute(
+            "INSERT INTO world_facts (entity, attribute, entity_norm, attribute_norm, \
                      value, polarity, status, confidence, origin, support, provenance, \
                      asserted_at, last_confirmed, supersedes_value, superseded_by_value, \
                      superseded_at, embedding, source_url, source_quote, retrieved_at, \
@@ -444,46 +514,42 @@ pub async fn sync_slot_rows(db: &Client, store: &WorldStore) -> Result<BTreeSet<
                      $3, $4, $5, $6, $7, $8::float8, $9, $10, $11, $12, $13, $14, $15, $16, \
                      $17::real[]::vector, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, \
                      $28, $29, $30)",
-                    &[
-                        &r.entity,
-                        &r.attribute,
-                        &norm_key(&r.entity),
-                        &norm_key(&r.attribute),
-                        &r.value,
-                        &r.polarity,
-                        &r.status,
-                        &r.confidence,
-                        &ORIGIN,
-                        &json!([ORIGIN]),
-                        &json!([]),
-                        &r.asserted_at,
-                        &r.last_confirmed,
-                        &r.supersedes_value,
-                        &r.superseded_by_value,
-                        &r.superseded_at,
-                        &embedding,
-                        &r.source_url,
-                        &r.source_quote,
-                        &r.retrieved_at,
-                        &freshness,
-                        &r.content_hash,
-                        &r.source_doc_id,
-                        &r.tx_time,
-                        &r.valid_time,
-                        &r.hlc_phys,
-                        &r.hlc_logical,
-                        &r.writer_id,
-                        &r.session_id,
-                        &version,
-                    ],
-                )
-                .await?;
-            }
-            Ok::<_, tokio_postgres::Error>(())
-        }
-    })
-    .await?;
-    Ok(slots)
+            &[
+                &r.entity,
+                &r.attribute,
+                &norm_key(&r.entity),
+                &norm_key(&r.attribute),
+                &r.value,
+                &r.polarity,
+                &r.status,
+                &r.confidence,
+                &ORIGIN,
+                &json!([ORIGIN]),
+                &json!([]),
+                &r.asserted_at,
+                &r.last_confirmed,
+                &r.supersedes_value,
+                &r.superseded_by_value,
+                &r.superseded_at,
+                &embedding,
+                &r.source_url,
+                &r.source_quote,
+                &r.retrieved_at,
+                &freshness,
+                &r.content_hash,
+                &r.source_doc_id,
+                &r.tx_time,
+                &r.valid_time,
+                &r.hlc_phys,
+                &r.hlc_logical,
+                &r.writer_id,
+                &r.session_id,
+                &version,
+            ],
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -498,6 +564,7 @@ mod tests {
             freshness_class: "volatile",
             retrieved_at: None,
             content_hash: None,
+            source_doc_id: None,
             now,
             hlc,
             writer_id: Some("w"),

@@ -46,7 +46,7 @@ fn req_str<'a>(a: &'a Map<String, Value>, k: &str) -> &'a str {
 
 /// Run `body` detached from the request (a client disconnect must not cancel
 /// a half-applied write) under the writer lock, as Python's service lock.
-fn spawn_locked<'a, F, Fut>(
+pub(crate) fn spawn_locked<'a, F, Fut>(
     app: &'a crate::http::App,
     args: &Map<String, Value>,
     body: F,
@@ -135,7 +135,7 @@ async fn find_fact_slot_entity(client: &Client, key: &str) -> Result<Option<Stri
 /// write-dedup proposals (`propose_dupes` is false on these paths). Returns
 /// the node as Python's dict: `id`, `canonical`, `display`, `etype`, and
 /// `created`.
-async fn resolve_or_create(
+pub(crate) async fn resolve_or_create(
     client: &Client,
     name: &str,
     etype: Option<&str>,
@@ -188,7 +188,7 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str {
 }
 
 /// `service.graph_relate` (`service.py:7659-7713`).
-async fn relate(ready: &Ready, a: &Map<String, Value>) -> Result<Value, ToolError> {
+pub(crate) async fn relate(ready: &Ready, a: &Map<String, Value>) -> Result<Value, ToolError> {
     let client = ready.storage.client();
     let relation = req_str(a, "relation");
     let reg = registry(client).await?;

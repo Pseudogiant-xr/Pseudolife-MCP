@@ -956,11 +956,12 @@ class DimMismatch(Scenario):
 
 
 class StampedBank(Scenario):
-    """Future schema: Python downgrades; Rust deliberately refuses unchanged."""
+    """Future schema: both daemons refuse it before any DDL, with the same
+    message, and leave the bank as it was."""
     name = "stamped"
     settle = False
-    start_stages = ("principals",)  # Rust refuses the future schema
-    snapshot_settle = False  # timeline settles Python and observes Rust's schema refusal
+    start_stages = ("principals",)  # both refuse the future schema
+    snapshot_settle = False  # schema refusal never reaches healthy initialization
 
     def prepare_template(self, dsn: str) -> None:
         import psycopg
@@ -979,15 +980,17 @@ class StampedBank(Scenario):
         return [c]
 
     def timeline(self, procs, holders):
-        if "python" in procs:
-            wait_settled([procs["python"].port])
+        # Each side records init_refusal in its warmup, after its listener
+        # answers; /health says ok until then.
+        waiting = dict(procs)
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
-            answer = call(procs["rust"].port, "GET", "/health")
-            if answer.get("json", {}).get("init_refusal"):
+            waiting = {side: d for side, d in waiting.items()
+                       if not (call(d.port, "GET", "/health").get("json") or {}).get("init_refusal")}
+            if not waiting:
                 return self.cases()
             time.sleep(0.1)
-        raise RuntimeError("future-schema Rust startup did not refuse")
+        raise RuntimeError(f"future-schema startup did not refuse: {', '.join(sorted(waiting))}")
 
 
 class SeededBank(Scenario):
@@ -1745,15 +1748,15 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
         return row
     if c.get("future_schema_refusal"):
         from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
-        row["declared"] = "future-schema refusal: Python downgrades; Rust preserves the bank"
         body = rs.get("json", {})
         message = body.get("init_refusal", "")
         if rs["status"] != 503 or body.get("status") != "degraded" \
                 or "99" not in message or str(SCHEMA_META_VERSION) not in message \
                 or "newer than" not in message or "db" in body:
             row["diffs"].append("Rust must refuse future schema 99 before opening storage")
-        if py is not None and (py["status"] != 200 or py.get("json", {}).get("db") != "ok"):
-            row["diffs"].append("Python oracle must retain its recorded downgrade behavior")
+        if py is not None and (py["status"] != 503 or py.get("json", {}).get("status") != "degraded"
+                               or py.get("json", {}).get("init_refusal") != message):
+            row["diffs"].append("Python must refuse future schema 99 with the same message")
         for header, expected in [("content-type", "application/json; charset=utf-8"),
                                  ("cache-control", "no-store"), ("x-content-type-options", "nosniff")]:
             if rs["headers"].get(header) != expected:
@@ -1918,9 +1921,11 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
                 states[side] = {"unchanged_from_before": not changes}
     db_diffs = dbstate.diff(states["python"], states["rust"]) if len(states) == 2 else []
     if scn.name == "stamped":
-        # This declared divergence has an independent postcondition: Rust
-        # must leave every row/catalog entry identical to the prepared bank.
-        db_diffs = dbstate.diff(dbstate.normalize(before, DB_NONDETERMINISTIC, before), states["rust"])
+        # A refusal has an independent postcondition: each side must leave
+        # every row/catalog entry identical to the prepared bank.
+        prepared = dbstate.normalize(before, DB_NONDETERMINISTIC, before)
+        db_diffs = [f"{side} changed bank: {d}" for side in sorted(states)
+                    for d in dbstate.diff(prepared, states[side])]
     db_diffs += unchanged_diffs
     # A template seeded at record time holds run-specific values (pairing
     # hashes, seeding timestamps) a replay cannot reproduce: golden mode

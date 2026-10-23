@@ -104,10 +104,12 @@ Rust daemon; the test login (``pgdisposable``) for the banks.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import re
+import struct
 import sys
 import tempfile
 import time
@@ -144,7 +146,10 @@ CLOCK = {("entries", "ts"), ("entries", "superseded_at"), ("episodes", "started_
          ("entry_reinstatement_decisions", "decided_at"),
          ("lessons", "superseded_at"), ("edges", "superseded_at"),
          ("store_decisions", "decided_at"), ("slot_reads", "last_read_at"),
-         ("edges", "asserted_at"), ("relations", "created_at")}
+         ("edges", "asserted_at"), ("relations", "created_at"),
+         ("retrieval_events", "created_at"), ("edge_proposals", "created_at"),
+         ("edge_proposals", "decided_at"), ("entity_proposals", "decided_at"),
+         ("merge_decisions", "decided_at"), ("dismissed_pairs", "dismissed_at")}
 # Columns that are wall-clock only when written from the clock: a value
 # within RECENT_S of now keeps null-or-not, anything else compares exactly.
 RECENT_CLOCK = {("world_facts", "retrieved_at")}
@@ -152,7 +157,7 @@ RECENT_S = 86400.0
 # Record keys in tool answers holding wall-clock seconds.
 RESPONSE_CLOCK = {"asserted_at", "last_confirmed", "superseded_at", "tx_time", "valid_time",
                   "started_at", "ended_at"}
-RESPONSE_RECENT_CLOCK = {"retrieved_at"}
+RESPONSE_RECENT_CLOCK = {"retrieved_at", "decided_at"}
 # A response score's allowance: embeddings within the measured tolerance
 # move a 4-place cosine by at most one rounding unit.
 SCORE_TOLERANCE = 1.5e-4
@@ -160,7 +165,11 @@ SCORE_TOLERANCE = 1.5e-4
 # rounded to 4 places, so at most one rounding unit apart.
 COHESION_TOLERANCE = 1e-4
 # meta key -> paths (keys) inside its JSON value that are wall-clock.
-META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"}}
+META_CLOCK = {"capacity_true_drops": {"last_at"}, "active_session_pointer": {"ts"},
+              # automatic review decisions a human verdict retires
+              "automatic_review_decision_v1:d1": {"ended_at"},
+              "automatic_review_decision_v1:d2": {"ended_at"},
+              "automatic_review_decision_v1:d3": {"ended_at"}}
 EP_ID = re.compile(r"^[0-9a-f]{32}$")
 GENERIC = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 # store-cancellable is w2e_shutdown.py's control: over MCP every call runs
@@ -224,7 +233,23 @@ MUTANTS = ["store-tags-raw", "store-skip-session-episode", "store-no-hint", "sto
            "mcp-graph-redefine-builtin", "mcp-graph-inverse-unchecked",
            # memory_graph (spec GR1-GR10): caught by graph-read.
            "mcp-graph-no-relation-filter", "mcp-graph-tag-no-ambiguous",
-           "mcp-graph-facts-no-alias", "mcp-graph-no-labels"]
+           "mcp-graph-facts-no-alias", "mcp-graph-no-labels",
+           # memory_recall (spec RC1-RC16): caught by the recall-* scenarios.
+           "mcp-recall-seed-any", "mcp-recall-no-hub-gate", "mcp-recall-no-requery",
+           "mcp-recall-no-pin", "mcp-recall-no-annotate", "mcp-recall-flat-caps",
+           # memory_graph_review's list (spec RV2-RV5): caught by the
+           # review-list scenarios.
+           "mcp-review-dup-threshold", "mcp-review-no-merge-veto", "mcp-review-no-fold-swap",
+           "mcp-review-terminal-as-pending",
+           # memory_graph_review's decision actions (spec RV6-RV14): caught
+           # by review-actions.
+           "mcp-review-accept-no-fold", "mcp-review-accept-no-floor",
+           "mcp-review-dismiss-aliases", "mcp-review-reject-no-dismiss",
+           "mcp-review-propose-keep-violations", "mcp-review-pair-index-noop",
+           "mcp-review-analyzer-no-dismiss", "mcp-review-relate-state-miss",
+           # memory_graph_review's slot actions: caught by review-slots.
+           "mcp-review-slot-meta-noop", "mcp-review-slot-restore-oldest",
+           "mcp-review-slot-restore-over-live", "mcp-review-slot-no-decision"]
 
 
 # ── MCP client for the Python oracle ──────────────────────────────────────
@@ -1236,6 +1261,7 @@ def supersede(new_text, headers=(), **kw) -> dict:
 
 # Scenarios whose operations may include ``external`` writes.
 EXTERNAL_WRITES = {"supersede-branches", "reinstate", "consolidation-candidates",
+                   "review-list", "review-actions", "review-slots",
                    "consolidate-branches"}
 
 
@@ -2143,6 +2169,658 @@ SCENARIOS.update({
 })
 
 
+def recall(query, **kw) -> dict:
+    return tool("memory_recall", query=query, **kw)
+
+
+RECALL_SEED = [
+    store("The web app runs on host-1 in the main rack."),
+    store("Host-1 is a Dell server bought in 2021."),
+    store("Postgres stores the web app's sessions."),
+    store("The cache layer uses Redis on host-2."),
+    store("Disk failures on host-1 were fixed last spring."),
+    store("I like oat milk in my coffee."),
+    store("Host-1 vendor is Dell per the asset sheet."),
+    fact("Postgres", "port", "5432", distortion_tolerance="constraint"),
+    fact("Postgres", "version", "16"),
+    fact("Web App", "framework", "Django"),
+    fact("Host-1", "vendor", "Dell"),
+    # no asserted inverse pair (runs-on / hosts): Python orders their
+    # mirrors by string hash, and recall's edges carry no provenance to
+    # tell them apart (divergences.md, memory_recall)
+    relate("Web App", "uses", "host-1"),
+    relate("Web App", "depends-on", "Postgres"),
+    relate("Postgres", "depends-on", "host-1"),
+    relate("Web App", "uses", "Cache"),
+    relate("Cache", "uses", "Redis"),
+    relate("Redis", "stores-data-in", "host-2"),
+    relate("host-1", "part-of", "Rack A"),
+    relate("host-2", "part-of", "Rack A"),
+    relate("Rack A", "part-of", "Row 3"),
+    alias("Postgres", "pg"),
+    # the vendor fact rests on a memory corrected after it was confirmed
+    trace_sql("Host-1 vendor is Dell per the asset sheet.", "host-1", "vendor"),
+    supersede("Host-1 vendor is Lenovo per the new asset sheet.",
+              old_text="Host-1 vendor is Dell per the asset sheet."),
+]
+
+SCENARIOS.update({
+    "recall": {
+        "config": None,
+        "seed": RECALL_SEED,
+        "ops": [
+            # blank: the canned answer, no search
+            recall(""),
+            recall("   "),
+            # the walk from the query's own entities, compact and verbose
+            recall("What does the web app run on?"),
+            recall("What does the web app run on?", verbose=True),
+            # hop and seed-width clamps
+            recall("web app", hops=1),
+            recall("web app", hops=9),
+            recall("web app", hops=-3),
+            recall("web app", top_k=1),
+            recall("web app", top_k=10 ** 20),
+            # memory_search logs an over-range top_k as given too
+            search("web app", top_k=10 ** 20),
+            # a seed's constraint fact pinned first; an alias seed
+            recall("postgres settings", verbose=True),
+            recall("tell me about pg", verbose=True),
+            # a fact whose source was corrected carries re_verify
+            recall("host-1 vendor", verbose=True),
+            recall("host-1 vendor"),
+            # no entity in the query: the seed hits name one, or none
+            recall("Which server was bought in 2021?"),
+            recall("oat milk"),
+            # the walk follows writes
+            relate("Redis", "depends-on", "Disk"),
+            recall("What does the cache use?", verbose=True),
+        ],
+    },
+    "recall-wide": {
+        "config": None,
+        "seed": [
+            store("The switch hub links every rack leaf in the hall."),
+            *[relate("Switch Hub", "uses", f"Leaf {i:02d}") for i in range(12)],
+            relate("Leaf 00", "depends-on", "Deep Store"),
+            fact("Deep Store", "tier", "cold"),
+        ],
+        "ops": [
+            # 14 entities over three hops: the entity cap keeps a slot for
+            # the deepest hop, which a flat prefix would drop
+            recall("what hangs off the switch hub?", hops=3),
+            recall("what hangs off the switch hub?", hops=3, verbose=True),
+        ],
+    },
+    "recall-caps": {
+        "config": ("memory:\n  recall:\n    hub_floor: 2\n    hub_percentile: 50\n"
+                   "    expand_budget: 1\n    max_searches_per_hop: 1\n"
+                   "    max_total_searches: 2\n    skip_part_of_expansion: true\n"
+                   "    max_entities: 6\n"),
+        "seed": RECALL_SEED,
+        "ops": [
+            # the hub gate, the expansion budget, the per-hop and total
+            # search ceilings (truncated), part-of arrivals not re-queried,
+            # the entity ceiling
+            recall("What does the web app run on?", verbose=True),
+            recall("web app and host-1 and redis", hops=5),
+            recall("rack a", verbose=True),
+        ],
+    },
+    "recall-ceiling": {
+        "config": "memory:\n  recall:\n    max_total_searches: 2\n",
+        "seed": RECALL_SEED,
+        "ops": [
+            # the seed search and one re-query, then the ceiling: truncated,
+            # with searches_issued
+            recall("What does the web app run on?", verbose=True),
+            recall("What does the web app run on?"),
+        ],
+    },
+    "recall-ungated": {
+        "config": ("memory:\n  recall:\n    hub_gate: false\n    max_searches_per_hop: 0\n"
+                   "    max_total_searches: 0\n    time_budget_seconds: 0\n"
+                   "  cortex:\n    pin_constraints: false\n  traces:\n    enabled: false\n"),
+        "seed": RECALL_SEED,
+        "ops": [
+            # no gate, no ceilings, no pin, no trace annotation
+            recall("What does the web app run on?", verbose=True),
+            recall("postgres settings", verbose=True),
+            recall("host-1 vendor", verbose=True),
+        ],
+    },
+})
+
+
+def review(action="list", **kw) -> dict:
+    return tool("memory_graph_review", action=action, **kw)
+
+
+def eid(canonical: str) -> str:
+    return f"(SELECT id FROM entities WHERE canonical = '{canonical}')"
+
+
+REVIEW_SEED = [
+    # duplicates: a Jaccard 2/3 pair, a 0.6 pair a numeric substitution
+    # vetoes, a 0.5 pair below the threshold, a pair dismissed by hand
+    relate("payments ledger", "related-to", "Warehouse"),
+    relate("payments ledger prod", "related-to", "Warehouse"),
+    # an unfiled pair, a pair whose merge was decided, a file and its stem
+    relate("orbit station alpha", "related-to", "Ocean"),
+    relate("orbit station alpha two", "related-to", "Ocean"),
+    relate("harbor crane main", "related-to", "Ocean"),
+    relate("harbor crane main backup", "related-to", "Ocean"),
+    relate("tidecalc.py", "related-to", "Ocean"),
+    relate("tidecalc", "related-to", "Ocean"),
+    relate("alpha beta gamma ct200", "related-to", "Warehouse"),
+    relate("alpha beta gamma ct400", "related-to", "Warehouse"),
+    relate("red green blue", "related-to", "Warehouse"),
+    relate("red green yellow", "related-to", "Warehouse"),
+    relate("blue whale song", "related-to", "Ocean"),
+    relate("blue whale songs", "related-to", "Ocean"),
+    review("dismiss_pair", src="blue whale song", dst="blue whale songs"),
+    # test artifacts, a dubious edge, an orphan
+    relate("deploy-smoke run", "uses", "Warehouse"),
+    relate("noise agent", "uses", "Ocean", confidence=0.3, origin="agent"),
+    relate("Warehouse", "uses", "Ocean", confidence=0.0, origin="agent"),
+    alias("Lonely Node", "lonely-node-alias"),
+    # a lesson-minted pair (never unattributed)
+    outcome("ship the release", "success", about="release checklist"),
+    # source attribution for some nodes (only the dream writes it)
+    sql("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+        "SELECT id, 'claude-code', 1, 'derived', 0 FROM entities "
+        "WHERE canonical IN ('warehouse', 'payments-ledger', 'ocean')", after_stop=True),
+    sql("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, status, "
+        f"created_at) VALUES ('merge', {eid('harbor-crane-main')}, {eid('harbor-crane-main-backup')}, "
+        "0.75, 'write-dedup: d', 'rejected', 1)", after_stop=True),
+    # proposed links through the oracle's own tool (an unknown relation
+    # falls back to related-to; a self-pair and an empty side are skipped)
+    review("propose", proposals=[
+        {"src": "Warehouse", "relation": "depends-on", "dst": "Ocean", "similarity": 0.8,
+         "rationale": "shared tide tables"},
+        {"src": "red green blue", "relation": "colour-of", "dst": "Ocean"},
+        {"src": "Warehouse", "relation": "uses", "dst": "warehouse"},
+        {"src": "", "relation": "uses", "dst": "Ocean"},
+    ]),
+    # merge and junk proposals with judge votes (only the dream files them):
+    # one whose stored direction folds the busier node away, a relate
+    # verdict, a three-vote row, a second row on a shared node, a junk row
+    sql("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at, "
+        "judge_verdict, judge_confidence, judge_note, judge_model, judged_at) VALUES "
+        f"('merge', {eid('warehouse')}, {eid('red-green-yellow')}, 0.7, 'write-dedup: a', 1, "
+        "'accept', 0.9, 'same thing', 'judge-a', 2), "
+        f"('merge', {eid('red-green-blue')}, {eid('red-green-yellow')}, 0.5, 'write-dedup: b', 1, "
+        "'relate', 0.8, 'relate:related-to distinct colours', 'judge-a', 2)",
+        after_stop=True),
+    sql("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at, "
+        "judge_verdict, judge_confidence, judge_note, judge_model, judged_at, "
+        "judge2_verdict, judge2_confidence, judge2_model, judged2_at, "
+        "judge3_verdict, judge3_confidence, judge3_model, judged3_at) VALUES "
+        f"('merge', {eid('payments-ledger')}, {eid('payments-ledger-prod')}, 0.6667, 'analyzer-duplicate', 1, "
+        "'accept', 0.7, 'looks same | 2nd (judge-b): reject 0.6 [shadow] | 3rd (judge-c): accept 0.9',"
+        " 'judge-a', 2, 'reject', 0.6, 'judge-b', 3, 'accept', 0.9, 'judge-c', 4)",
+        after_stop=True),
+    sql("INSERT INTO entity_proposals (kind, entity_id, score, reason, created_at) VALUES "
+        f"('junk', {eid('noise-agent')}, 0.9, 'smoke-test residue', 1)", after_stop=True),
+    # a recent automatic decision in the audit index (the judges write it)
+    sql("INSERT INTO meta (key, value) VALUES ('automatic_review_decision_v1:d1', "
+        "'{\"version\": 1, \"decision_id\": \"d1\", \"queue\": \"merge\", \"action\": \"reject\", "
+        "\"state\": \"applied\", \"proposal_id\": 7, \"pair\": [\"a\", \"b\"], \"recorded_at\": 10.5, "
+        "\"ended_at\": null, \"end_reason\": null, \"secret\": \"not projected\"}') "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", after_stop=True),
+    sql("UPDATE meta SET value = jsonb_set(value, '{recent_ids}', '[\"gone\", \"d1\"]') "
+        "WHERE key = 'automatic_review_decisions_v1'", after_stop=True),
+    # an analyzer link proposal (its settlement closes the pair) and a filed
+    # relate proposal for the file/stem duplicate; explicit ids leave the
+    # sequence to the oracle's own proposals
+    sql("INSERT INTO edge_proposals (id, src_id, relation, dst_id, confidence, source, "
+        f"created_at) VALUES (500, {eid('red-green-blue')}, 'uses', {eid('harbor-crane-main')}, "
+        f"0.5, 'analyzer', 1), (501, {eid('tidecalc-py')}, 'implements', {eid('tidecalc')}, "
+        "0.7, 'deep-dream', 1)", after_stop=True),
+    # an earlier human decision in the merge audit
+    sql("INSERT INTO merge_decisions (proposal_id, entity_display, into_display, status, score, "
+        "reason, decided_by, decided_at) VALUES (99, 'Old A', 'Old B', 'accepted', 0.8, 'x', "
+        "'agent', 5), (98, 'Old C', NULL, 'rejected', NULL, 'junk keep: y', 'dream-judge', 6)",
+        after_stop=True),
+]
+
+# memory_graph_review's mutating actions (promoted from the live smoke the
+# implementation ran): every action, the batch form and each refusal.
+REVIEW_ACTIVE = (
+    "UPDATE meta SET value = jsonb_set(jsonb_set(value, '{active}', "
+    "'{\"merge:3\": {\"decision_id\": \"d1\", \"seq\": 1, \"queue\": \"merge\", "
+    "\"pair\": [\"a\", \"b\"]}, \"candidate:9\": {\"decision_id\": \"d2\", \"seq\": 2, "
+    "\"queue\": \"candidate\", \"pair\": [\"orbit-station-alpha\", "
+    "\"orbit-station-alpha-two\"]}, \"link:4\": {\"decision_id\": \"d3\", \"seq\": 3, "
+    "\"queue\": \"link\", \"pair\": [\"x\", \"y\"]}}'), '{next_seq}', '4.5') "
+    "WHERE key = 'automatic_review_decisions_v1'"
+)
+REVIEW_JUNK = (
+    "INSERT INTO entity_proposals (kind, entity_id, score, reason, created_at, "
+    "judge_verdict, judge_confidence, judge_model, judge_served_model) "
+    "SELECT 'junk', id, 0.8, NULL, 9, 'delete', 0.95, 'judge-a', 'served-a' "
+    "FROM entities WHERE canonical = 'deploy-smoke-run'"
+)
+REVIEW_OPS = [
+    review("propose", proposals=[
+        {"src": "Tide Gauge", "relation": "Runs On", "dst": "Harbor Host", "similarity": 0.3},
+        {"src": "llama-server", "relation": "runs-on", "dst": "postgres"},
+        {"src": None, "relation": "uses", "dst": "Ocean"},
+        {"src": "Warehouse", "relation": "depends-on", "dst": "Ocean"},
+        {"src": "Kelp Farm", "relation": "prefers", "dst": "Ocean", "similarity": "0.25",
+         "rationale": 7},
+        {"src": "Kelp Farm", "relation": "uses", "dst": "Ocean", "rationale": 1e16},
+    ]),
+    review("propose"),
+    review("propose", proposals=[]),
+    external(REVIEW_ACTIVE),
+    review("relate", src="tidecalc.py", relation="implements", dst="tidecalc"),
+    review("relate", src="a", relation="bogus-rel", dst="b"),
+    review("relate", src="x"),
+    review("dismiss_pair", src="orbit station alpha", dst="ORBIT STATION ALPHA TWO"),
+    review("dismiss_pair", src="orbit station alpha", dst="orbit station alpha"),
+    review("dismiss_pair", src="lonely-node-alias", dst="Lonely Node"),
+    review("dismiss_pair", src="  ", dst="Lonely Node"),
+    review("dismiss_pair", src="a"),
+    review("accept_link", proposal_id=1),
+    review("accept_link", proposal_ids=[2, 2, 999]),
+    review("reject_link", proposal_id=1),
+    review("reject_link", proposal_id=4),
+    review("reject_link", proposal_id=12345678901234567890),
+    review("reject_entity", proposal_id=3),
+    review("reject_entity", proposal_id=5),
+    review("reject_entity", proposal_id=1),
+    external(REVIEW_JUNK),
+    review("accept_junk", proposal_id=5),
+    review("accept_junk", proposal_id=6),
+    review("accept_merge", proposal_id=2),
+    review("accept_merge", proposal_ids="[4, 3]"),
+    review("accept_link"),
+    review("accept_merge", proposal_ids=[], proposal_id=None),
+    external("DELETE FROM meta WHERE key = 'automatic_review_decisions_v1'"),
+    review("dismiss_pair", src="harbor crane main", dst="tidecalc"),
+    # the analyzer row's settlement dismisses its pair; the filed relate
+    # proposal, decided, makes its duplicate terminal
+    review("accept_link", proposal_id=500),
+    review("reject_link", proposal_id=501),
+    review(),
+]
+
+SCENARIOS.update({
+    "review-list": {
+        "config": None,
+        "seed": REVIEW_SEED,
+        "ops": [
+            # every finding type, the automation states, the audits
+            review(),
+            review("list"),
+            # a scope narrows entities and edges; queued proposals stay
+            review("list", scope="claude-code"),
+            review("list", scope="all"),
+            review("list", scope="nobody"),
+            # the answer follows writes: a new dubious edge and alias, then a
+            # proposal the dream files behind the daemons' backs
+            relate("Ocean", "related-to", "Lonely Node", confidence=0.2, origin="agent"),
+            alias("Ocean", "sea"),
+            external("INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, "
+                     "created_at) SELECT 'merge', a.id, b.id, 0.61, 'write-dedup: c', 7 FROM "
+                     "entities a, entities b WHERE a.canonical = 'alpha-beta-gamma-ct200' AND "
+                     "b.canonical = 'alpha-beta-gamma-ct400'"),
+            review(),
+        ],
+    },
+    "review-actions": {
+        "config": None,
+        "seed": REVIEW_SEED,
+        "ops": REVIEW_OPS,
+    },
+    "review-list-gated": {
+        "config": "memory:\n  deep_dream:\n    judges_enabled: false\n",
+        "seed": REVIEW_SEED,
+        "ops": [review()],
+    },
+    "review-list-no-analyzer": {
+        "config": "memory:\n  deep_dream:\n    analyzer_file_duplicates: false\n",
+        "seed": REVIEW_SEED,
+        "ops": [review()],
+    },
+})
+
+
+# memory_graph_review's slot actions: dismiss_slot_pair and restore_slot
+# through every branch and refusal. World facts come from
+# memory_world_set; the seeding daemon's own memory_forget retires the ones
+# a compaction purge (an after-stop DELETE of the retired row) leaves only
+# as an audit snapshot. Lessons are SQL seeds (only the dream writes
+# lessons), with fixed stamps and, but for one pair, no embedding, and so
+# are the curated duplicate retirements (only the dream's curation writes
+# them): their evidence is curation_safety.snapshot_record's shape over
+# those rows (an embedding as its float32 digest), fingerprinted as
+# evidence_fingerprint fingerprints a plain dict.
+def slot_norm(s: str) -> str:
+    """``cortex._norm_key`` for the ASCII names below."""
+    return re.sub(r"[\s._\-/]+", "-", s.strip().casefold()).strip("-")
+
+
+def evidence_fp(record: dict) -> str:
+    """``curation_safety.evidence_fingerprint`` of a plain JSON dict."""
+    return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=False, allow_nan=False)
+                          .encode("utf-8")).hexdigest()
+
+
+def _lit(v) -> str:
+    if v is None:
+        return "NULL"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, (list, dict)):
+        return "'" + json.dumps(v).replace("'", "''") + "'::jsonb"
+    return "'" + str(v).replace("'", "''") + "'"
+
+
+SLOT_STAMP = 1700000000.0
+_SLOT_COMMON = ("entity", "attribute", "value", "polarity", "status", "confidence", "origin",
+                "support", "provenance", "asserted_at", "last_confirmed", "supersedes_value",
+                "superseded_by_value", "superseded_at", "tx_time", "valid_time", "hlc_phys",
+                "hlc_logical", "writer_id", "session_id", "version")
+
+
+def slot_embedding(seed: int) -> list[float]:
+    """A 1024-dim vector (the schema's ``vector(1024)``) whose components
+    are sixteenths, exact in float32, so pgvector, numpy and the daemon all
+    hold the same bytes."""
+    return [float(((i * seed) % 17) - 8) / 16 for i in range(1024)]
+
+
+def embedding_digest(values: list[float] | None) -> dict | None:
+    """``curation_safety._embedding_snapshot`` of a float32 vector."""
+    if values is None:
+        return None
+    return {"dtype": "float32", "shape": [len(values)],
+            "sha256": hashlib.sha256(struct.pack(f"<{len(values)}f", *values)).hexdigest()}
+
+
+def slot_lesson(task, aspect, lesson, *, status="current", about=None, polarity="+",
+                asserted=SLOT_STAMP, superseded_at=None, hlc_logical=0,
+                embedding=None) -> dict:
+    """A lessons row (its columns; ``embedding`` only when given)."""
+    extra = {} if embedding is None else {"embedding": embedding}
+    return {**extra, "entity": task, "attribute": aspect, "value": lesson, "polarity": polarity,
+            "status": status, "confidence": 0.8, "origin": "agent", "support": [],
+            "provenance": ["signal:1"], "asserted_at": asserted, "last_confirmed": asserted,
+            "supersedes_value": None, "superseded_by_value": None,
+            "superseded_at": superseded_at, "tx_time": asserted, "valid_time": asserted,
+            "hlc_phys": int(asserted * 1000), "hlc_logical": hlc_logical, "writer_id": "seed",
+            "session_id": None, "version": 1, "about": about, "outcome": "success"}
+
+
+def slot_world(entity, attribute, value, *, status="current", asserted=SLOT_STAMP,
+               superseded_at=None, hlc_logical=0, embedding=None) -> dict:
+    """A world_facts row (its columns; ``embedding`` only when given)."""
+    extra = {} if embedding is None else {"embedding": embedding}
+    return {**extra, "entity": entity, "attribute": attribute, "value": value, "polarity": "+",
+            "status": status, "confidence": 0.9, "origin": "source", "support": ["source"],
+            "provenance": [], "asserted_at": asserted, "last_confirmed": asserted,
+            "supersedes_value": None, "superseded_by_value": None,
+            "superseded_at": superseded_at, "tx_time": asserted, "valid_time": asserted,
+            "hlc_phys": int(asserted * 1000), "hlc_logical": hlc_logical, "writer_id": "seed",
+            "session_id": None, "version": 1, "source_url": "https://example.org/host",
+            "source_quote": value, "retrieved_at": SLOT_STAMP, "freshness_class": "evergreen",
+            "content_hash": None, "source_doc_id": None}
+
+
+def slot_row_sql(store: str, row: dict) -> dict:
+    """Seed-only: the row, after the seeding daemon stopped (its exit flush
+    rewrites the slots it holds)."""
+    table = "lessons" if store == "lesson" else "world_facts"
+    cols = dict(row, entity_norm=slot_norm(row["entity"]),
+                attribute_norm=slot_norm(row["attribute"]))
+    values = [("'[" + ",".join(repr(x) for x in v) + "]'::vector") if k == "embedding"
+              else _lit(v) for k, v in cols.items()]
+    return sql(f"INSERT INTO {table} ({', '.join(cols)}) "
+               f"VALUES ({', '.join(values)})", after_stop=True)
+
+
+def slot_snapshot(store: str, row: dict, **changes) -> dict:
+    """``snapshot_record(store, record)`` of the row as hydration holds it."""
+    row = dict(row, **changes)
+    en, an = slot_norm(row["entity"]), slot_norm(row["attribute"])
+    snap = {"store": store, "key": f"{en}|{an}", "entity_norm": en, "attribute_norm": an}
+    snap.update({k: row[k] for k in _SLOT_COMMON})
+    snap.update({k: row[k] for k in (("about", "outcome") if store == "lesson" else
+                                     ("source_url", "source_quote", "retrieved_at",
+                                      "freshness_class", "content_hash", "source_doc_id"))})
+    snap["embedding"] = embedding_digest(row.get("embedding"))
+    return snap
+
+
+def curated_retire(store: str, survivor: dict, loser: dict, *, keep="a", slot=None,
+                   decided_at=SLOT_STAMP + 500, loser_embedding=None) -> dict:
+    """Seed-only: a curated duplicate retirement's audit row
+    (``curation_safety._audit_snapshot``): the loser retired at
+    ``decided_at``, the pair's evidence, which side was kept, the loser's
+    vector (``_embedding_values``). ``slot`` names the row (by default the
+    loser's)."""
+    a, b = (survivor, loser) if keep == "a" else (loser, survivor)
+    retired = dict(loser, status="retired", superseded_at=decided_at)
+    record = dict(retired)
+    record.update({
+        "_curation_evidence_fingerprint": evidence_fp(loser),
+        "_curation_retired_fingerprint": evidence_fp(retired),
+        "_curation_duplicate": {"version": 1, "keep": keep, "a": a, "b": b,
+                                "a_fingerprint": evidence_fp(a),
+                                "b_fingerprint": evidence_fp(b),
+                                "loser_embedding": loser_embedding},
+    })
+    record.pop("embedding")
+    if store == "lesson":
+        record.update(task=record.pop("entity"), aspect=record.pop("attribute"),
+                      lesson=record.pop("value"))
+    en, an = slot or (loser["entity_norm"], loser["attribute_norm"])
+    return sql("INSERT INTO store_decisions (store, entity_norm, attribute_norm, action, "
+               f"decided_by, reason, record, decided_at) VALUES ('{store}', {_lit(en)}, "
+               f"{_lit(an)}, 'retire', 'dream-curation', 'duplicate', {_lit(record)}, "
+               f"{decided_at!r})", after_stop=True)
+
+
+def audit_only(store: str, entity_norm: str, attribute_norm: str, record: dict) -> dict:
+    """Seed-only: a retire audit row whose slot row compaction purged."""
+    return sql("INSERT INTO store_decisions (store, entity_norm, attribute_norm, action, "
+               f"decided_by, reason, record, decided_at) VALUES ('{store}', "
+               f"{_lit(entity_norm)}, {_lit(attribute_norm)}, 'retire', 'human', NULL, "
+               f"{_lit(record)}, {SLOT_STAMP + 10!r})", after_stop=True)
+
+
+CURATE_SURVIVOR = slot_lesson("Curate Keys", "Approach", "Rotate keys quarterly.")
+CURATE_LOSER = slot_lesson("Curate Keys", "Method", "Rotate keys every quarter.",
+                           about="vault", asserted=SLOT_STAMP + 100, hlc_logical=1)
+CURATE_PURGED = slot_lesson("Curate Keys", "Schedule", "Rotate keys each quarter.",
+                            asserted=SLOT_STAMP + 200, hlc_logical=2)
+CURATE_WINDOW = slot_lesson("Curate Keys", "Window", "Rotate keys in the window.",
+                            asserted=SLOT_STAMP + 300)
+CURATE_HOST = slot_world("Curate Host", "OS", "Debian 12")
+CURATE_HOST_LOSER = slot_world("Curate Host", "Operating System", "Debian 12 (bookworm)",
+                               asserted=SLOT_STAMP + 50, hlc_logical=1)
+# a world loser compaction purged, rebuilt from its evidence and vector
+CURATE_HOST_DISTRO = slot_world("Curate Host", "Distro", "Debian bookworm",
+                                asserted=SLOT_STAMP + 60, hlc_logical=2,
+                                embedding=slot_embedding(5))
+# a world pair whose retired row is edited behind the daemons' backs
+EDIT_HOST = slot_world("Edit Host", "OS", "Ubuntu 24.04")
+EDIT_HOST_LOSER = slot_world("Edit Host", "Operating System", "Ubuntu 24.04 LTS",
+                             asserted=SLOT_STAMP + 50, hlc_logical=1)
+# a lesson pair with vectors: the digests take part in every fingerprint
+EMBED_SURVIVOR = slot_lesson("Embed Keys", "Approach", "Pin the signing key id.",
+                             embedding=slot_embedding(3))
+EMBED_LOSER = slot_lesson("Embed Keys", "Method", "Pin the signing key identifier.",
+                          about="vault", asserted=SLOT_STAMP + 100, hlc_logical=1,
+                          embedding=slot_embedding(7))
+_L, _W = (lambda row, **kw: slot_snapshot("lesson", row, **kw),
+          lambda row, **kw: slot_snapshot("world", row, **kw))
+
+REVIEW_SLOTS_SEED = [
+    store("A note so the bank is not empty."),
+    # world facts the legacy restore brings back, and ones whose retired row
+    # a purge leaves only as an audit snapshot (a whole entity: mixed)
+    world_set("Rust", "edition", "2024", source_url="https://doc.rust-lang.org/"),
+    world_set("Rust", "latest stable version", "1.90.0", source_url="https://blog.rust-lang.org/"),
+    world_set("Python", "latest version", "3.13.0", source_url="https://www.python.org/"),
+    world_set("Kotlin", "latest version", "2.1.0", source_url="https://kotlinlang.org/"),
+    world_set("Kotlin", "edition", "K2", source_url="https://kotlinlang.org/docs/"),
+    forget("world", entity="Python"),
+    forget("world", entity="Kotlin"),
+    sql("DELETE FROM world_facts WHERE status = 'retired' AND (entity_norm = 'python' OR "
+        "(entity_norm = 'kotlin' AND attribute_norm = 'edition'))", after_stop=True),
+    # audit snapshots nothing else holds: an unsafe citation (rejected on
+    # rewrite) and one carrying a source document id
+    audit_only("world", "evil", "link", {
+        "entity": "Evil", "attribute": "link", "value": "click", "polarity": "+",
+        "status": "retired", "confidence": 0.7, "origin": "source",
+        "source_url": "javascript:alert(1)", "source_quote": "", "freshness_class": "volatile",
+        "retrieved_at": SLOT_STAMP, "content_hash": None, "source_doc_id": None,
+        "asserted_at": SLOT_STAMP, "last_confirmed": SLOT_STAMP}),
+    audit_only("world", "manual", "page-count", {
+        "entity": "Manual", "attribute": "page count", "value": "212", "polarity": "+",
+        "status": "retired", "confidence": 0, "origin": "source",
+        "source_url": "https://example.org/manual", "source_quote": "212 pages",
+        "freshness_class": "evergreen", "retrieved_at": SLOT_STAMP, "content_hash": "abc123",
+        "source_doc_id": 7, "asserted_at": SLOT_STAMP, "last_confirmed": SLOT_STAMP}),
+    # lessons: two retired records at one slot (the newer comes back), a
+    # live slot with a retired record, and lessons to forget and restore
+    # (an avoid lesson, an about that is a compound and gets no node)
+    slot_row_sql("lesson", slot_lesson("Rotate Keys", "Cadence", "Rotate keys yearly.",
+                                       status="retired", about="vault",
+                                       superseded_at=SLOT_STAMP + 100)),
+    slot_row_sql("lesson", slot_lesson("Rotate Keys", "Cadence", "Rotate keys quarterly.",
+                                       status="retired", about="vault",
+                                       asserted=SLOT_STAMP + 50,
+                                       superseded_at=SLOT_STAMP + 200)),
+    slot_row_sql("lesson", slot_lesson("Rotate Keys", "Owner",
+                                       "The security team owns rotation.")),
+    slot_row_sql("lesson", slot_lesson("Rotate Keys", "Owner", "The ops team owns rotation.",
+                                       status="retired", superseded_at=SLOT_STAMP + 150)),
+    slot_row_sql("lesson", slot_lesson("Ship Release", "Checklist",
+                                       "Skip the manual checklist.", polarity="-",
+                                       about="release checklist")),
+    slot_row_sql("lesson", slot_lesson("Ship Release", "Freeze", "Freeze merges a day ahead.",
+                                       about="pg+extractor")),
+    # curated duplicate retirements: the loser's row retired (or purged),
+    # a row naming another slot's loser, and evidence the survivor no
+    # longer matches; a world pair
+    slot_row_sql("lesson", CURATE_SURVIVOR),
+    slot_row_sql("lesson", dict(CURATE_LOSER, status="retired", superseded_at=SLOT_STAMP + 500)),
+    curated_retire("lesson", _L(CURATE_SURVIVOR), _L(CURATE_LOSER)),
+    curated_retire("lesson", _L(CURATE_SURVIVOR), _L(CURATE_PURGED), decided_at=SLOT_STAMP + 510),
+    curated_retire("lesson", _L(CURATE_SURVIVOR), _L(CURATE_LOSER),
+                   slot=("curate-keys", "owner"), decided_at=SLOT_STAMP + 520),
+    curated_retire("lesson", _L(CURATE_SURVIVOR, value="Rotate keys yearly."),
+                   _L(CURATE_WINDOW), keep="b", decided_at=SLOT_STAMP + 530),
+    slot_row_sql("world", CURATE_HOST),
+    slot_row_sql("world", dict(CURATE_HOST_LOSER, status="retired",
+                               superseded_at=SLOT_STAMP + 500)),
+    curated_retire("world", _W(CURATE_HOST), _W(CURATE_HOST_LOSER)),
+    curated_retire("world", _W(CURATE_HOST), _W(CURATE_HOST_DISTRO), decided_at=SLOT_STAMP + 540,
+                   loser_embedding=CURATE_HOST_DISTRO["embedding"]),
+    slot_row_sql("world", EDIT_HOST),
+    slot_row_sql("world", dict(EDIT_HOST_LOSER, status="retired",
+                               superseded_at=SLOT_STAMP + 500)),
+    curated_retire("world", _W(EDIT_HOST), _W(EDIT_HOST_LOSER)),
+    slot_row_sql("lesson", EMBED_SURVIVOR),
+    slot_row_sql("lesson", dict(EMBED_LOSER, status="retired", superseded_at=SLOT_STAMP + 500)),
+    curated_retire("lesson", _L(EMBED_SURVIVOR), _L(EMBED_LOSER),
+                   loser_embedding=EMBED_LOSER["embedding"]),
+]
+
+AUTO_MARKERS = (
+    "INSERT INTO meta (key, value) VALUES ('curation_auto_dismissals_v1', "
+    "'{\"m1\": {\"store\": \"lesson\", \"a\": {\"key\": \"rotate-keys|owner\"}, "
+    "\"b\": {\"key\": \"rotate-keys|cadence\"}}, \"m2\": {\"store\": \"world\", "
+    "\"a\": {\"key\": \"rotate-keys|cadence\"}, \"b\": {\"key\": \"rotate-keys|owner\"}}, "
+    "\"m3\": {\"store\": \"lesson\", \"a\": {\"key\": \"x|y\"}, \"b\": {\"key\": \"z|w\"}}, "
+    "\"m4\": {\"store\": \"world\", \"a\": {\"key\": \"x|y\"}, \"b\": null}}') "
+    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+)
+REVIEW_SLOTS_OPS = [
+    # dismiss_slot_pair: the argument refusals, a bad store, a pair that is
+    # one slot or has a blank component
+    review("dismiss_slot_pair", store="lesson", src="rotate keys|cadence"),
+    review("dismiss_slot_pair", store="", src="a|b", dst="c|d"),
+    review("dismiss_slot_pair", store="lesson", src="a|b|c", dst="c|d"),
+    review("dismiss_slot_pair", store="bogus", src="a|b", dst="c|d"),
+    review("dismiss_slot_pair", store="lesson", src="Rotate_Keys|CADENCE",
+           dst="rotate keys|cadence"),
+    review("dismiss_slot_pair", store="world", src="|x", dst="rust|edition"),
+    # the first verdict writes the (absent) markers back as {}; a repeat is
+    # not new; with markers, only the same store's same pair is dropped
+    review("dismiss_slot_pair", store="lesson", src="rotate keys|cadence",
+           dst="Rotate Keys|Owner"),
+    review("dismiss_slot_pair", store="lesson", src="Rotate Keys|Owner",
+           dst="rotate keys|cadence"),
+    external(AUTO_MARKERS),
+    # m1 dropped; m4 (another store, a null side) is never sorted
+    review("dismiss_slot_pair", store="lesson", src="rotate keys|owner",
+           dst="rotate keys|cadence"),
+    # a literal pipe is its own slot
+    review("dismiss_slot_pair", store="lesson", src="ci%7Ccd|deploy", dst="ci-cd|deploy"),
+    # the same store's broken marker raises (invalid_argument, rolled back)
+    review("dismiss_slot_pair", store="world", src="rust|edition",
+           dst="rust|latest stable version"),
+    # restore_slot: the argument refusals
+    review("restore_slot", store="bogus", src="rotate keys"),
+    review("restore_slot", store="lesson"),
+    review("restore_slot", store="world", src="a|b|c"),
+    # lessons: the newest retired record; a live slot; nothing retired
+    review("restore_slot", store="lesson", src="rotate keys|cadence"),
+    review("restore_slot", store="lesson", src="Rotate Keys|Owner"),
+    review("restore_slot", store="lesson", src="rotate keys"),
+    review("restore_slot", store="lesson", src="nobody"),
+    # a forgotten task comes back whole, its graph links with it
+    forget("lesson", entity="ship release"),
+    review("restore_slot", store="lesson", src="Ship Release"),
+    review("restore_slot", store="lesson", src="ship release|freeze"),
+    # world facts: a retired record; then the audit snapshots alone, mixed
+    # with a retired record, rejected, and carrying a source document
+    forget("world", entity="Rust", attribute="edition"),
+    review("restore_slot", store="world", src="rust|edition"),
+    review("restore_slot", store="world", src="rust|edition"),
+    review("restore_slot", store="world", src="python|latest version"),
+    review("restore_slot", store="world", src="kotlin"),
+    review("restore_slot", store="world", src="evil|link"),
+    review("restore_slot", store="world", src="manual"),
+    # curated duplicates: a whole entity is ambiguous; a row naming another
+    # loser; stale evidence; the retired loser; the purged loser rebuilt
+    # from its evidence; then the slot is live
+    review("restore_slot", store="lesson", src="curate keys"),
+    review("restore_slot", store="lesson", src="curate keys|owner"),
+    review("restore_slot", store="lesson", src="curate keys|window"),
+    review("restore_slot", store="lesson", src="curate keys|method"),
+    review("restore_slot", store="lesson", src="curate keys|schedule"),
+    review("restore_slot", store="lesson", src="curate keys|method"),
+    review("restore_slot", store="world", src="curate host|operating system"),
+    # a purged world loser rebuilt from its evidence, its vector with it
+    review("restore_slot", store="world", src="curate host|distro"),
+    # the retired row edited after the curated retire: the resident copy
+    # still matches, the locked row no longer carries the retired
+    # fingerprint
+    external("UPDATE world_facts SET source_quote = 'edited out of band' "
+             "WHERE entity_norm = 'edit-host' AND attribute_norm = 'operating-system' "
+             "AND status = 'retired'"),
+    review("restore_slot", store="world", src="edit host|operating system"),
+    # vectors on both sides: the digests are part of each fingerprint
+    review("restore_slot", store="lesson", src="embed keys|method"),
+    review(),
+]
+
+SCENARIOS.update({
+    "review-slots": {
+        "config": None,
+        "seed": REVIEW_SLOTS_SEED,
+        "ops": REVIEW_SLOTS_OPS,
+    },
+})
+
+
 def resolve_args(args: dict, dsn: str) -> dict:
     out = {}
     import psycopg
@@ -2595,6 +3273,65 @@ def graph_answer_free(v) -> None:
             graph_answer_free(x)
 
 
+# Search telemetry: the float leaves w2d_search.py compares within its
+# SCORE_TOL (scores and fusion inputs rest on the embeddings).
+EVENT_FLOAT_KEYS = {"score", "dense", "ce", "bm25", "slot", "recency", "margin"}
+EVENT_SCORE_TOL = 2e-4
+
+
+def _float_pair_free(x, y) -> None:
+    if isinstance(x, dict) and isinstance(y, dict):
+        for k in x.keys() & y.keys():
+            a, b = x[k], y[k]
+            if (k in EVENT_FLOAT_KEYS and isinstance(a, (int, float)) and isinstance(b, (int, float))
+                    and not isinstance(a, bool) and not isinstance(b, bool)
+                    and abs(a - b) <= EVENT_SCORE_TOL):
+                x[k] = y[k] = f"<{k}>"
+            else:
+                _float_pair_free(a, b)
+    elif isinstance(x, list) and isinstance(y, list):
+        for a, b in zip(x, y):
+            _float_pair_free(a, b)
+
+
+def events_diff(a: dict, b: dict) -> list[str]:
+    """The retrieval events both daemons log for a search, compared row by
+    row (matched by id) and field by field: the served entries' scores and
+    fusion inputs within w2d_search.py's tolerance, everything else exact.
+    Unlike w2d_search.py it aligns no score ties, so a declared tie swap
+    shows as a difference rather than passing."""
+    ea = a.get("rows", {}).get("public.retrieval_events")
+    eb = b.get("rows", {}).get("public.retrieval_events")
+    cols = ea.get("columns") or []
+    out = []
+    by_id = {r[0]: r for r in eb.get("rows", [])}
+    ids_a = {r[0] for r in ea.get("rows", [])}
+    for ra in ea.get("rows", []):
+        rb = by_id.get(ra[0])
+        if rb is None:
+            out.append(f"retrieval_events[{ra[0]}]: row only in python")
+            continue
+        for c, x, y in zip(cols, ra, rb):
+            x, y = json.loads(json.dumps(x)), json.loads(json.dumps(y))
+            if c == "served":
+                _float_pair_free(x, y)
+            out += [f"retrieval_events[{ra[0]}].{c}{d}" for d in w1a.diff_values(x, y)]
+    out += [f"retrieval_events[{i}]: row only in rust" for i in sorted(set(by_id) - ids_a)]
+    return out
+
+
+def state_and_events_diff(a: dict, b: dict) -> list[str]:
+    """``state_diff`` with the retrieval events compared by ``events_diff``
+    when both sides hold them (the inputs are left as they are)."""
+    ea = a.get("rows", {}).get("public.retrieval_events")
+    eb = b.get("rows", {}).get("public.retrieval_events")
+    if not (isinstance(ea, dict) and isinstance(eb, dict)) or ea.get("columns") != eb.get("columns"):
+        return state_diff(a, b)
+    rest = lambda s: {**s, "rows": {k: v for k, v in s["rows"].items()  # noqa: E731
+                                    if k != "public.retrieval_events"}}
+    return events_diff(a, b) + state_diff(rest(a), rest(b))
+
+
 def compare_response(py: dict, rs: dict, tol: dict, stats: dict) -> list[str]:
     a, b = generic_titles(json.loads(json.dumps(py))), generic_titles(json.loads(json.dumps(rs)))
     graph_answer_free(a)
@@ -2801,7 +3538,7 @@ def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
                 row["rust"] = rename_prefixes(row["rust"], er)
                 row["diffs"] += compare_response(row["python"], row["rust"], tol, stats)
             row["diffs"] += compare_numeric(np_, nr, tol, stats)
-            row["diffs"] += [f"db {d}" for d in state_diff(sp, sr)]
+            row["diffs"] += [f"db {d}" for d in state_and_events_diff(sp, sr)]
             steps.append(row)
             if record:
                 row["_python_state"], row["_python_numeric"] = sp, np_
@@ -2906,7 +3643,7 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
             if i:
                 # Recordings that predate a write table are compared on theirs.
                 got["rows"] = {k: v for k, v in got["rows"].items() if k in rec["state"]["rows"]}
-            row["diffs"] += [f"db {x}" for x in state_diff(rec["state"], got)]
+            row["diffs"] += [f"db {x}" for x in state_and_events_diff(rec["state"], got)]
             steps.append(row)
     finally:
         d.stop()

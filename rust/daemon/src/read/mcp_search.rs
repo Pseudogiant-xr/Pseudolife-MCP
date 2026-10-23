@@ -78,6 +78,7 @@ fn mcp_memory_search<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolF
         let req = Request {
             query: query.to_string(),
             top_k,
+            top_k_beyond: a.get("top_k").filter(|n| n.as_i64().is_none()).cloned(),
             sources: strings(a.get("sources")),
             bands,
             tags: strings(a.get("tags")),
