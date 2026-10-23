@@ -1,0 +1,376 @@
+{
+ "started": "2026-10-23T00:56:25.289868+00:00",
+ "checkout": "2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60",
+ "platform": "Windows 10 (10.0.26300)",
+ "driver_sha256": "a5a3110da091909213a1539d67098a582434b249279e5bd002de82b28a7c5d48",
+ "tree_changes": [
+  " M changelog.d/2026-10-23-rust-activation-rehearsal.md",
+  " M evals/results/rust-activation-rehearsal-20261023/README.md",
+  " M evals/results/rust-activation-rehearsal-20261023/windows.json",
+  " M rust/daemon/harness/rehearse_activation.py",
+  " M tests/test_rehearse_activation.py"
+ ],
+ "python": "3.11.9",
+ "schema_meta_version": 56,
+ "rust_shim_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40",
+ "rust_daemon_sha256": "1bf84352278998c14f461c92f3ddff108d5782c1206e808ffbfc128238b78f42",
+ "leg": "all",
+ "launcher": {
+  "launcher": "<scratch>\\bin\\pseudolife-mcp.exe",
+  "entry": {
+   "command": "<scratch>\\bin\\pseudolife-mcp.exe",
+   "env": {
+    "PSEUDOLIFE_WRITER_ID": "claude-desktop",
+    "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+    "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:58534",
+    "PSEUDOLIFE_MCP_TOKEN_FILE": "<scratch>\\credentials\\token"
+   }
+  },
+  "first": {
+   "want": "<scratch>\\runtimes\\000001",
+   "got": "<scratch>\\runtimes\\000001",
+   "exit": 0,
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000001 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "722a4ee4a6fb106226c5d51fa9ed98ddfea1bfbfc530802539d1571ef1989a99"
+  },
+  "activated": {
+   "want": "<scratch>\\runtimes\\000002",
+   "got": "<scratch>\\runtimes\\000002",
+   "exit": 0,
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
+  },
+  "rolled_back": {
+   "want": "<scratch>\\runtimes\\000004",
+   "got": "<scratch>\\runtimes\\000004",
+   "exit": 0,
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000004 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "e25f9206bcda394f49c57a1b0b08a7d78530e82a51f82d3bb987a73bd776fdc2"
+  },
+  "reverted": {
+   "want": "<scratch>\\runtimes\\000002",
+   "got": "<scratch>\\runtimes\\000002",
+   "exit": 0,
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
+  }
+ },
+ "bank": {
+  "metas": [
+   [
+    "python start 1",
+    {
+     "schema_version": 56,
+     "writer_lease_epoch": 1
+    }
+   ],
+   [
+    "rust start 1",
+    {
+     "schema_version": 56,
+     "writer_lease_epoch": 2
+    }
+   ],
+   [
+    "rust start 2",
+    {
+     "schema_version": 56,
+     "writer_lease_epoch": 3
+    }
+   ],
+   [
+    "python start 2 (rollback)",
+    {
+     "schema_version": 56,
+     "writer_lease_epoch": 4
+    }
+   ]
+  ],
+  "newer_bank": {
+   "stamped_before": "57",
+   "after_rust_refusal": 57,
+   "after_python_start": 56
+  }
+ },
+ "steps": [
+  {
+   "step": "python runtime installed",
+   "ok": true,
+   "runtime": "<scratch>\\runtimes\\000001",
+   "pip_tail": "\n[notice] A new release of pip is available: 24.0 -> 26.2.2\n[notice] To update, run: <scratch>\\runtimes\\000001\\Scripts\\python.exe -m pip install --upgrade pip\n"
+  },
+  {
+   "step": "launcher written by runtimes.ensure_launcher",
+   "ok": true,
+   "result": "written",
+   "launcher": "<scratch>\\bin\\pseudolife-mcp.exe"
+  },
+  {
+   "step": "client registered with the launcher as its command",
+   "ok": true,
+   "exit": 0,
+   "entry": {
+    "command": "<scratch>\\bin\\pseudolife-mcp.exe",
+    "env": {
+     "PSEUDOLIFE_WRITER_ID": "claude-desktop",
+     "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+     "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:58534",
+     "PSEUDOLIFE_MCP_TOKEN_FILE": "<scratch>\\credentials\\token"
+    }
+   },
+   "out": "ch>\\bin\\pseudolife-mcp.exe reads PSEUDOLIFE_MCP_TOKEN_FILE\nbackup: <scratch>\\claude_desktop_config.json.bak-20261023-115638\nentry: written (pseudolife-desktop -> <scratch>\\bin\\pseudolife-mcp.exe)\ntoken file: written <scratch>\\credentials\\token (owner-only; the shim reloads it per call)\nnext: fully quit Claude Desktop (tray/menu-bar icon, not just the window) and relaunch it so the new entry loads\n"
+  },
+  {
+   "step": "registered command runs the only runtime (000001, Python)",
+   "ok": true,
+   "want": "<scratch>\\runtimes\\000001",
+   "got": "<scratch>\\runtimes\\000001",
+   "exit": 0,
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000001 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "722a4ee4a6fb106226c5d51fa9ed98ddfea1bfbfc530802539d1571ef1989a99"
+  },
+  {
+   "step": "after installing the Rust shim as 000002 (and an incomplete 000003), the registered command runs 000002",
+   "ok": true,
+   "want": "<scratch>\\runtimes\\000002",
+   "got": "<scratch>\\runtimes\\000002",
+   "exit": 0,
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
+  },
+  {
+   "step": "python runtime installed",
+   "ok": true,
+   "runtime": "<scratch>\\runtimes\\000004",
+   "pip_tail": "\n[notice] A new release of pip is available: 24.0 -> 26.2.2\n[notice] To update, run: <scratch>\\runtimes\\000004\\Scripts\\python.exe -m pip install --upgrade pip\n"
+  },
+  {
+   "step": "a rollback install of the older code as 000004 is selected over the newer Rust runtime",
+   "ok": true,
+   "want": "<scratch>\\runtimes\\000004",
+   "got": "<scratch>\\runtimes\\000004",
+   "exit": 0,
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000004 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "e25f9206bcda394f49c57a1b0b08a7d78530e82a51f82d3bb987a73bd776fdc2"
+  },
+  {
+   "step": "removing 000004 falls back to the newest complete runtime, 000002",
+   "ok": true,
+   "want": "<scratch>\\runtimes\\000002",
+   "got": "<scratch>\\runtimes\\000002",
+   "exit": 0,
+   "stdout": "pseudolife-mcp 0.19.0\nruntime <scratch>\\runtimes\\000002 (source commit 2052d57eba20e4c0eac2a5cb28cfa11fc0a98d60)",
+   "answered_console_sha256": "57ed14e9dfa0b2ca250ebc3697e816327f2f58bf8531452a3c2e590614e2cc40"
+  },
+  {
+   "step": "Python daemon writes an entry and a fact",
+   "ok": true,
+   "store": {
+    "stored": true,
+    "surprise": 1.0,
+    "reason": null,
+    "cortex_promoted": 0
+   },
+   "fact_set": {
+    "action": "inserted",
+    "entity": "rehearsal",
+    "attribute": "written by",
+    "value": "python",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "asserted_at": 1792717019.3401773,
+    "last_confirmed": 1792717019.3401773,
+    "freshness_class": "evergreen",
+    "effective_confidence": 0.8,
+    "stale": false,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 1792717019.3401773,
+    "valid_time": 1792717019.3401773,
+    "writer_id": "unknown",
+    "session_id": null,
+    "age": "just now"
+   }
+  },
+  {
+   "step": "Python stop is clean",
+   "ok": true,
+   "exit": 0
+  },
+  {
+   "step": "Rust daemon reads Python's fact",
+   "ok": true
+  },
+  {
+   "step": "Rust daemon finds Python's entry",
+   "ok": true
+  },
+  {
+   "step": "Rust daemon writes an entry, supersedes the fact and sets a new one",
+   "ok": true,
+   "store": {
+    "stored": true,
+    "surprise": 0.0089,
+    "reason": null,
+    "cortex_promoted": 0
+   },
+   "fact_set": {
+    "action": "superseded",
+    "entity": "rehearsal",
+    "attribute": "written by",
+    "value": "rust",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "asserted_at": 1792717020.7711058,
+    "last_confirmed": 1792717020.7711058,
+    "freshness_class": "evergreen",
+    "effective_confidence": 0.8,
+    "stale": false,
+    "supersedes_value": "python",
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 1792717020.7711058,
+    "valid_time": 1792717020.7711058,
+    "writer_id": "unknown",
+    "session_id": null,
+    "age": "just now"
+   },
+   "new": {
+    "action": "inserted",
+    "entity": "rehearsal rust",
+    "attribute": "slot",
+    "value": "rust only",
+    "polarity": "+",
+    "status": "current",
+    "kind": "scalar",
+    "confidence": 0.8,
+    "origin": "agent",
+    "support": [
+     "agent"
+    ],
+    "provenance": [],
+    "asserted_at": 1792717020.8168736,
+    "last_confirmed": 1792717020.8168736,
+    "freshness_class": "evergreen",
+    "effective_confidence": 0.8,
+    "stale": false,
+    "supersedes_value": null,
+    "superseded_by_value": null,
+    "superseded_at": null,
+    "tx_time": 1792717020.8168736,
+    "valid_time": 1792717020.8168736,
+    "writer_id": "unknown",
+    "session_id": null,
+    "age": "just now"
+   }
+  },
+  {
+   "step": "Rust stop is clean",
+   "ok": true,
+   "exit": 0
+  },
+  {
+   "step": "after a restart the Rust daemon still reads its own writes",
+   "ok": true
+  },
+  {
+   "step": "a call through the registered client path (launcher -> Rust shim -> Rust daemon) reads the Rust-written fact",
+   "ok": true,
+   "result": {
+    "isError": false,
+    "value": {
+     "record": {
+      "entity": "rehearsal rust",
+      "attribute": "slot",
+      "value": "rust only",
+      "kind": "scalar",
+      "confidence": 0.8,
+      "origin": "agent",
+      "asserted_at": 1792717020.8168736,
+      "last_confirmed": 1792717020.8168736,
+      "age": "just now",
+      "freshness_class": "evergreen",
+      "stale": false,
+      "source_entries": []
+     },
+     "contenders": [],
+     "entity_ref": {
+      "entity_id": 2,
+      "canonical": "rehearsal-rust",
+      "etype": null,
+      "aliases": []
+     }
+    },
+    "initialize": "answered",
+    "error": null,
+    "exit": 0,
+    "stderr": " is pseudolife-mcp 0.19.0 but the daemon at http://127.0.0.1:58534 is 0.0.0 \u2014 run <scratch>\\bin\\pseudolife-mcp.exe update --clients-only --tag 0.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon (<scratch>\\bin\\pseudolife-mcp.exe update); then start a new session.\n"
+   },
+   "daemon_version": "0.0.0"
+  },
+  {
+   "step": "Rust stop is clean (2)",
+   "ok": true,
+   "exit": 0
+  },
+  {
+   "step": "after rollback the Python daemon reads the fact Rust superseded",
+   "ok": true
+  },
+  {
+   "step": "after rollback the Python daemon reads the fact Rust created",
+   "ok": true
+  },
+  {
+   "step": "after rollback the Python daemon finds the entry Rust stored",
+   "ok": true
+  },
+  {
+   "step": "after rollback the Python daemon still finds its own entry",
+   "ok": true
+  },
+  {
+   "step": "Python stop is clean (2)",
+   "ok": true,
+   "exit": 0
+  },
+  {
+   "step": "the Rust daemon refuses a bank stamped by a newer build",
+   "ok": true,
+   "exited": null,
+   "health": {
+    "status": "degraded",
+    "ready": false,
+    "pending": [
+     "init"
+    ],
+    "db": null
+   },
+   "stamp_after": 57,
+   "log_tail": "daemon: listening on 127.0.0.1:58534 (auth=true)\nwarmup init failed: Refusing to start: bank schema version 57 is newer than this build's schema version 56.\n"
+  },
+  {
+   "step": "the Python daemon leaves a newer build's stamp alone",
+   "ok": false,
+   "stamped_before": "57",
+   "after_python_start": 56
+  }
+ ],
+ "finished": "2026-10-23T00:57:16.064508+00:00",
+ "result": "fail"
+}

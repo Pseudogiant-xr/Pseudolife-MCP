@@ -38,7 +38,6 @@ tool's answers by value.
 |---|---|---|
 | `document_search` | W2-D | No reference-pool search service. |
 | `document_ingest` | W2-E | No parser/chunk/reference ingestion service. |
-| `memory_consolidate` | W3-H | No consolidation service. |
 
 The integration batch retains W2-G's refusal stubs for every tool except
 `memory_toolset` and, since their body registrations, `memory_store`,
@@ -51,7 +50,9 @@ The integration batch retains W2-G's refusal stubs for every tool except
 `memory_reinstate`, `memory_forget`, `memory_consolidation_candidates`,
 `memory_graph_relate`, `memory_graph_unrelate`, `memory_alias`,
 `memory_relation_define`, `memory_graph`, `memory_recall`,
-`memory_graph_review`, `memory_dream` (all but `deep` and `rollback`, below), `memory_agents` and `memory_message`. The two board tools
+`memory_graph_review` (all but two actions, below), `memory_consolidate`,
+`memory_dream` (all but `deep` and `rollback`, below), `memory_agents` and
+`memory_message`. The two board tools
 inherit W2F-CLOCK-RETRY and W2F-SHARED-HLC below (both affect `send`, on
 REST and MCP alike).
 
@@ -151,7 +152,7 @@ binding"). What it cannot or does not reproduce:
 
 | Item | Python | Rust | Owner |
 |---|---|---|---|
-| Future or malformed schema version | `storage/schema.py:1657-1662` overwrites the stored version with the build's version | refuses future versions and non-positive/non-integer version metadata before DDL, preserving all durable state | W3 PG-HYDRATE; required by the slice brief, retained for the maintainer's cutover decision |
+| Future or malformed schema version | refuses future versions and non-positive/non-integer version metadata before DDL, preserving all durable state (since 2026-10-23; it used to overwrite the stored version with the build's) | the same, with the same message | closed: no divergence; `run.py`'s `stamped` scenario requires both refusals and an unchanged bank on each side |
 | Remaining startup integration | CMS and canonical stores, dream tracking (writes `meta.dream_ack_secret_v1`), legacy import, HLC reseed and warmup search | complete entry seating, episodes, canonical loader inputs, resident cortex and identity metadata attach to cached Ready after all required loads; late HLC failure retains those stores with a pending flag and blocks returning Ready until clock-only retry succeeds; W2-D runs the warmup search; typed cortex currently reloads facts rather than adopting StartupState | W2-D/E (store adoption and clock ticking), W3-H (dream tracking), W3-J (legacy/file import) |
 | Episode start-time ties | startup loads episodes with `ORDER BY started_at`, without a tie key | uses the same query ordering; ties among equal start times follow the server's row order in both arms | W3 PG-HYDRATE; Python ordering retained |
 | Session-pointer or tombstone timestamp parse failures | fail before the embedder and resident-store abandon path; each initialization call retries parsing | fail inside required initialization and arm its retry backoff | W3 PG-HYDRATE; non-canonical metadata, declared divergence |
@@ -328,6 +329,11 @@ this increment does not claim the complete write boundary or cutover readiness.
 | `entry_mutation_lock` (session advisory locks per target id, held from before the transaction to after publication) | taken | not taken; the per-operation `pg_advisory_xact_lock` of `reinstate_entry` is | the leased single writer already serializes every entry mutation in one process; another writer cannot hold the bank |
 | The promotion walk after the replacement (`_consolidate_eligible`) | runs, as after any store | not run | the multi-band row above: the flat default never promotes |
 | File-mode corrections (unique exact text without row ids, `id_unavailable`, the file-signature recovery) | served | unreachable: the Rust daemon runs on PostgreSQL only | not ported |
+
+`memory_consolidate` (2026-10-19) runs the same correction body over a list
+of targets, so every row above applies to it as written (the
+`entry_mutation_lock` row over all of its target ids). It adds no divergence
+of its own.
 
 ### memory_forget (2026-10-19)
 

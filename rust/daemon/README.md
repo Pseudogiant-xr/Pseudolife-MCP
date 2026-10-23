@@ -197,3 +197,32 @@ The fixture requires the pinned ONNX packages used by the embedding CI row.
 CI reuses the schema step's selected executable with `--no-build`.
 `StartupState.clock_state()` exposes the high-water input and pending flag
 atomically; W2-E must not tick until the pending flag is false.
+
+## Activation and rollback rehearsal (on demand)
+
+`harness/rehearse_activation.py` checks, on disposable state only, what
+installed activation needs and no differential shows:
+
+- whether the executable a client registration names (the launcher) reaches
+  the intended runtime after an install, a rollback install and a removal;
+- whether a bank survives Python -> Rust -> restart -> Python with every
+  write still readable;
+- what each daemon does with a bank stamped by a newer build.
+
+It runs prebuilt binaries against one disposable bench database
+(`pgdisposable`), refuses to start a daemon on any other, and writes
+evidence JSON with machine paths replaced by placeholders:
+
+```bash
+python rust/daemon/harness/rehearse_activation.py \
+    --rust-shim <pseudolife-stdio[.exe]> --rust-daemon <pseudolife-daemon-static[.exe]> \
+    --out <evidence.json> [--leg launcher|bank|all]
+```
+
+Use a Python with the daemon's dependencies plus the ONNX fixture's pins
+(`onnx==1.22.0 onnxruntime==1.27.0 optimum==2.1.0 optimum-onnx==0.1.0`) and
+`mcp==2.2.0`. Use the default daemon build (`pseudolife-daemon-static` in
+CI's `rust-shim-<os>` artifact); the artifact's `pseudolife-daemon` carries
+test-only features. Nothing in CI runs it, because it starts both daemons and
+installs a runtime. `tests/test_rehearse_activation.py` pins its guards. The
+first run is `evals/results/rust-activation-rehearsal-20261023/`.

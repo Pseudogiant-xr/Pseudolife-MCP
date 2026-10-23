@@ -11,6 +11,7 @@ The ``vector`` extension is REQUIRED. Apache AGE is no longer used or probed.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Iterable
@@ -1142,6 +1143,73 @@ def _refuse_on_embedding_dim_mismatch(cur) -> None:
         )
 
 
+_RESTORE_HINT = (
+    "(`ops/restore.ps1 -Apply -BackupFile <dump>` or "
+    "`ops/restore.sh --apply --backup-file <dump>`)"
+)
+
+
+def _schema_version_refusal(stamp: str) -> str | None:
+    """The refusal for a bank whose ``meta.schema_version`` JSON text is
+    ``stamp``, or ``None`` when this build may open it.
+
+    A bank stamped by a newer build is refused rather than stamped down:
+    the trailing upsert in :func:`ensure_schema` would otherwise rewrite
+    the stamp to this build's version with no warning, so a rollback to an
+    older release crossed a schema boundary silently and the bank then
+    claimed a version its tables no longer match. A stamp that is not a
+    positive JSON integer was not written by Pseudolife and is refused too.
+    The Rust daemon refuses the same stamps with the same text
+    (``rust/daemon/src/storage/schema.rs``, ``version_refusal``).
+    """
+    try:
+        version = json.loads(stamp)
+    except ValueError:
+        version = None
+    if type(version) is int and not -(2**63) <= version < 2**63:
+        version = None  # beyond i64, as the Rust daemon reads it: malformed
+    if type(version) is int and version > SCHEMA_META_VERSION:
+        return (
+            f"Refusing to start: bank schema version {version} is newer than "
+            f"this build's schema version {SCHEMA_META_VERSION}. A newer "
+            "Pseudolife release upgraded this bank and this build cannot "
+            "serve it safely, so the bank was left untouched. Run that "
+            "release or a newer one (`pseudolife-mcp update`); to roll back "
+            "to this build instead, first restore the backup taken before "
+            f"that upgrade {_RESTORE_HINT}."
+        )
+    if type(version) is int and version >= 1:
+        return None
+    return (
+        "Refusing to start: bank schema_version must be a positive integer, "
+        f"but this bank's is {stamp}. Pseudolife never writes that value, so "
+        "the bank was left untouched. Restore the bank from a backup "
+        f"{_RESTORE_HINT}."
+    )
+
+
+def _refuse_on_future_or_malformed_version(cur) -> None:
+    """Refuse to start, before any DDL runs, on a bank whose schema stamp
+    this build must not touch (see :func:`_schema_version_refusal`).
+
+    A fresh install has no ``meta`` table and an unstamped bank has no
+    row: neither has anything to refuse.
+    """
+    cur.execute("SELECT to_regclass('public.meta')")
+    row = cur.fetchone()
+    if row is None or row[0] is None:
+        return
+    cur.execute(
+        "SELECT value::text FROM public.meta WHERE key = 'schema_version'"
+    )
+    row = cur.fetchone()
+    if row is None:
+        return
+    refusal = _schema_version_refusal(row[0])
+    if refusal is not None:
+        raise RuntimeError(refusal)
+
+
 def ensure_schema(conn) -> dict:
     """Create extensions + tables idempotently. Returns capability flags.
 
@@ -1151,7 +1219,10 @@ def ensure_schema(conn) -> dict:
 
     Refuses outright (``RuntimeError``, before any DDL runs) if the live
     bank's ``entries.embedding`` is already dimensioned but at a different
-    size than this build expects — see :func:`_refuse_on_embedding_dim_mismatch`.
+    size than this build expects — see :func:`_refuse_on_embedding_dim_mismatch`
+    — or if the bank is stamped by a newer build, or with a stamp that is
+    not a positive integer, which it leaves as it is — see
+    :func:`_refuse_on_future_or_malformed_version`.
     """
     # conn.transaction(): one atomic DDL transaction whether the caller's
     # connection is autocommit (the daemon's storage conn, H4) or classic
@@ -1159,8 +1230,13 @@ def ensure_schema(conn) -> dict:
     # connection in either mode.
     with conn.transaction(), conn.cursor() as cur:
         # Checked FIRST, before any DDL (including the lock/statement
-        # timeouts below) — a dim mismatch must abort before touching
-        # anything, not merely before the CREATE TABLE calls.
+        # timeouts below): the trailing schema_version upsert must never
+        # stamp a newer build's bank down to this build's version. Before
+        # the dimension guard, since a newer build may also have moved the
+        # embedding dimension, and then the newer build is the true cause.
+        _refuse_on_future_or_malformed_version(cur)
+        # Likewise before any DDL — a dim mismatch must abort before
+        # touching anything, not merely before the CREATE TABLE calls.
         _refuse_on_embedding_dim_mismatch(cur)
         # Bound every DDL statement so a stray lock holder surfaces as an
         # error instead of an indefinite hang (the v0.1 lesson, applied to
