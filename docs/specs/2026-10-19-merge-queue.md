@@ -72,9 +72,11 @@ divergence without blocking a merge or holding a pull request's checks open.
 
 ### Parity shards on a pull request
 
-Master pushes, the nightly, manual CI and merge groups run every parity
-suite. Since 2026-10-21 a pull request from any branch but `integrate/*`
-skips the candidate build and the matrix unless it changes CI or dependency
+The nightly, manual CI and merge groups run every parity suite, and a
+master push runs every one less the pairs its merged batch passed on the
+same tree (never `eval` or `judges`; `docs/dev/merge-batches.md`). Since
+2026-10-21 a pull request from any branch but `integrate/*` skips the
+candidate build and the matrix unless it changes CI or dependency
 inputs (`docs/dev/merge-batches.md`, "What CI runs where"). Any other pull
 request runs only the suites its diff reaches, and never fewer
 than the floor: `eval`, `cli`, `cli-daemon`, `cli-live` and `h5-w1a`. The

@@ -416,7 +416,7 @@ def check_executable_coverage(jobs):
 
 
 def workflow():
-    """rust.yml as a master push runs it: the scope-chosen parity matrix
+    """rust.yml as the nightly runs it: the scope-chosen parity matrix
     expanded to every suite (rust/ci/parity_scope.py; test_parity_scope.py
     pins the expressions and the per-pull-request selection)."""
     from parity_scope import resolve
@@ -915,7 +915,8 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     assert scope["runs-on"] == "ubuntu-latest" and "needs" not in scope
     assert scope["outputs"] == {"rust": "${{ steps.scope.outputs.rust }}",
                                 "full": "${{ steps.scope.outputs.full }}",
-                                "parity": "${{ steps.parity.outputs.parity }}"}
+                                "parity": "${{ steps.parity.outputs.parity }}",
+                                "batch_passed": "${{ steps.batch.outputs.passed }}"}
     checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["fetch-depth"] == 2
     gated = ("${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode %s) "
@@ -923,10 +924,14 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     # The candidate build also serves a stress loop; the rest is ordinary CI.
     # Only the candidate build (and through it the parity matrix) leaves an
     # ordinary pull request; the Rust job and image check are its fast lanes.
+    # The image check also leaves a master push whose merged batch passed it
+    # on the same tree (ops/ci_batch_passed.py); a failed scope runs it.
     for name, mode, full in (("rust", "== 'ci'", ""),
                              ("candidate", "!= 'wait-mail'",
                               " && needs.scope.outputs.full != 'false'"),
-                             ("daemon-image", "== 'ci'", "")):
+                             ("daemon-image", "== 'ci'",
+                              " && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), "
+                              "'Rust daemon / disposable image')")):
         assert jobs[name]["needs"] == "scope", name
         assert jobs[name]["if"] == gated % (mode, full), name
     # Parity checks and source mutants inherit the skip through their needs.

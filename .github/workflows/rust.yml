@@ -86,14 +86,32 @@ jobs:
     # (#782) queued the whole ~33-job matrix behind the account's 20-job cap.
     # No hosted step here reads docs outside rust/: the producer census only
     # reports docs drift, and the W2-D docs seed runs locally, not in CI.
+    #
+    # Master pushes (2026-10-24): a batch merges with a merge commit whose
+    # tree is its head's (ops/integrate.py merge refuses otherwise), so
+    # batch_passed lists the jobs that PASSED on the merged batch pull
+    # request's latest run of this workflow on that head
+    # (ops/ci_batch_passed.py; any failed check or API error lists none).
+    # A push then skips the image check and each parity pair (os, suite) on
+    # that list, and runs everything else: the Rust job (its nextest reads
+    # the event-selected oracle's package metadata, and it builds the debug
+    # bind fixture parity-live needs), the candidate build, parity-live
+    # (never run on a pull request), the eval and judges suites (they compare
+    # against the event-selected oracle, the merge base on a pull request
+    # and the pushed head on a push) and every pair the batch did not pass.
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'wait-mail'
     name: Scope
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       rust: ${{ steps.scope.outputs.rust }}
       full: ${{ steps.scope.outputs.full }}
       parity: ${{ steps.parity.outputs.parity }}
+      batch_passed: ${{ steps.batch.outputs.passed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -142,8 +160,9 @@ jobs:
           Write-Output "rust=$rust"
           "rust=$rust" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           exit 0
-      # The parity matrix (rust/ci/parity_scope.py). Master pushes, the
-      # nightly, manual CI and merge groups run every suite. A pull request
+      # The parity matrix (rust/ci/parity_scope.py). The nightly, manual CI
+      # and merge groups run every suite; a master push runs every suite less
+      # the pairs its merged batch passed (see below). A pull request
       # that scope marks full (one from integrate/*, or one changing CI or
       # dependency inputs; the others skip the matrix, see `full` above)
       # runs the floor (eval, cli, cli-daemon, cli-live, h5-w1a) plus the
@@ -154,11 +173,23 @@ jobs:
       # pull request skipped surfaces on the master push that merges it.
       # Before this, each pull request push queued 24 parity jobs behind the
       # account's 20-job cap.
+      # A master push leaves out the (os, suite) pairs its merged batch
+      # passed on the same tree (the batch step), except eval and judges.
+      - name: List the jobs the merged batch passed on this tree
+        id: batch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        # A crash leaves the output empty, which runs everything; failing
+        # here would fail the parity matrix closed instead.
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 ops/ci_batch_passed.py --workflow .github/workflows/rust.yml --github-output "$GITHUB_OUTPUT"
       - name: Choose the parity suites
         id: parity
         env:
           EVENT_NAME: ${{ github.event_name }}
-        run: python3 rust/ci/parity_scope.py --event "$EVENT_NAME" --github-output "$GITHUB_OUTPUT"
+          BATCH_PASSED: ${{ steps.batch.outputs.passed }}
+        run: python3 rust/ci/parity_scope.py --event "$EVENT_NAME" --batch-passed "$BATCH_PASSED" --github-output "$GITHUB_OUTPUT"
 
   rust:
     # Fail-safe: run unless scope affirmatively says skip. Ordinary CI only:
@@ -432,7 +463,9 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         # Every suite and its include values live in rust/ci/parity_scope.py,
         # which the scope job turns into this run's selection: all of them on
-        # master pushes, the nightly, manual CI and merge groups; on a pull
+        # the nightly, manual CI and merge groups; on a master push all but
+        # the pairs its merged batch passed on the same tree (never eval or
+        # judges); on a pull
         # request the floor plus what its diff reaches. Only the selected
         # suites' include entries come back: an entry matching no
         # combination would add a job of its own. parity-selfhosted takes
@@ -446,10 +479,10 @@ jobs:
         # resets on a cold shared runner (the 250 ms hook probe, early
         # refusals' RST; docs/specs/2026-10-19-merge-queue.md, "The required
         # Parity gate"). Linux keeps them required; hosted Windows runs
-        # them in parity-live, which reports and never gates.
-        exclude:
-          - os: windows-latest
-            suite: cli-live
+        # them in parity-live, which reports and never gates. That pair is
+        # parity_scope.STATIC_EXCLUDE, always in this list; a master push adds
+        # the pairs its merged batch passed on the same tree.
+        exclude: ${{ fromJSON(needs.scope.outputs.parity).exclude }}
         include: ${{ fromJSON(needs.scope.outputs.parity).include }}
     runs-on: ${{ matrix.os }}
     # Every cli and W1-C shard names its own budget beside its measurement
@@ -1380,7 +1413,9 @@ jobs:
   daemon-image:
     name: Rust daemon / disposable image
     needs: scope
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' }}
+    # A master push skips it when its merged batch passed it on the same
+    # tree: the batch's base-to-head image inputs are the push's.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'Rust daemon / disposable image') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
