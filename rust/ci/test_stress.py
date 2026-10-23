@@ -549,12 +549,22 @@ def test_a_cargo_iteration_gets_the_rust_jobs_setup_and_not_the_parity_lanes():
     loop = raw_workflow()["jobs"]["stress"]
     assert loop["env"] == {"STRESS_SELECTION": "${{ inputs.selection }}",
                            "STRESS_KIND": "${{ needs.stress-plan.outputs.kind }}"}
-    # The Rust job runs nextest with no PostgreSQL, no event oracle and only
-    # the Python SDK fixture dependency; a cargo iteration matches it.
-    for name in ("Install checkout and test dependencies", "Prepare disposable PostgreSQL",
-                 "Bind the event-selected Python oracle when the dispatch has one"):
+    # The Rust job runs nextest with no PostgreSQL and only the Python SDK
+    # fixture dependency; a cargo iteration matches it.
+    for name in ("Install checkout and test dependencies", "Prepare disposable PostgreSQL"):
         assert step_named(loop, name)["if"] == "env.STRESS_KIND != 'cargo'", name
     rust = raw_workflow()["jobs"]["rust"]
+    # The Rust job also exports the selected oracle's package metadata, which
+    # cli_version_contract reads (Codex review of 50ca4be5). It binds only
+    # where the event oracle does, so both steps stay best-effort here: on a
+    # branch the test that needs it fails rather than passing.
+    bind = step_named(loop, "Bind the event-selected Python oracle when the dispatch has one")
+    assert "if" not in bind and bind["continue-on-error"] is True
+    metadata = step_named(loop, "Prepare selected package metadata for the Rust identity contract")
+    assert metadata["if"] == "env.STRESS_KIND == 'cargo'" and metadata["continue-on-error"] is True
+    assert metadata["run"] == step_named(rust, "Prepare selected package metadata for the Rust identity contract")["run"]
+    names = [step.get("name") for step in loop["steps"]]
+    assert names.index(bind["name"]) < names.index(metadata["name"]) < names.index("Run the selection once")
     fixture = step_named(loop, "Install the Python SDK fixture dependency")
     assert fixture["if"] == "env.STRESS_KIND == 'cargo'"
     assert fixture["run"] == step_named(rust, "Install the Python SDK fixture dependency")["run"]

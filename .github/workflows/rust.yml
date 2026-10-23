@@ -1635,7 +1635,6 @@ jobs:
       # selections under evals/rust_port that call selected_oracle() need it,
       # and on a branch they fail with its "select the event oracle" error.
       - name: Bind the event-selected Python oracle when the dispatch has one
-        if: env.STRESS_KIND != 'cargo'
         continue-on-error: true
         shell: pwsh
         env:
@@ -1643,6 +1642,19 @@ jobs:
         run: |
           python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
           exit $LASTEXITCODE
+      # The Rust job's Nextest step has the selected package metadata, which
+      # cli_version_contract reads; it needs the oracle above, so on a branch
+      # it is skipped and that test fails rather than passing.
+      - name: Prepare selected package metadata for the Rust identity contract
+        if: env.STRESS_KIND == 'cargo'
+        continue-on-error: true
+        shell: pwsh
+        working-directory: .
+        run: |
+          $oracleMetadata = Join-Path $env:RUNNER_TEMP 'phase1-oracle-metadata'
+          python -m evals.rust_port.phase1_oracle --metadata-only --destination $oracleMetadata
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_PORT_ORACLE_ROOT=$oracleMetadata" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Prepare disposable PostgreSQL
         if: env.STRESS_KIND != 'cargo'
         timeout-minutes: 10
