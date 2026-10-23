@@ -80,7 +80,8 @@ def proxy_calls(monkeypatch, registry, provider, serve, dispatch, *, dispatch_er
 
 
 @pytest.mark.parametrize("action", ["send", "ack"])
-@pytest.mark.parametrize("failure", ["transport", "http_timeout", "deadline", "503", "slow"])
+@pytest.mark.parametrize("failure", ["transport", "http_timeout", "deadline", "503", "slow",
+                                     "malformed", "not_json"])
 def test_ordinary_message_recovers_existing_authority_check(tmp_path, monkeypatch, action, failure):
     from mcp import types
 
@@ -108,6 +109,12 @@ def test_ordinary_message_recovers_existing_authority_check(tmp_path, monkeypatc
                     raise httpx.ReadTimeout("private fixture timeout detail")
                 if failure == "503":
                     return httpx.Response(503, json={"error": "private fixture response"})
+                # An answer that cannot be read as a bank identity names no
+                # bank, so it is an outage, not a verdict (2026-10-23).
+                if failure == "malformed":
+                    return httpx.Response(200, json={"private": "fixture"})
+                if failure == "not_json":
+                    return httpx.Response(200, content=b"private fixture")
                 if failure == "deadline":
                     await asyncio.Event().wait()
                 # The production startup deadline is 3s, below context's 5s.
@@ -235,7 +242,9 @@ def test_startup_establishes_authority_before_read_only_validation(tmp_path):
     ("401", 1, "authentication"),
     ("403", 1, "authentication"),
     ("mismatch", 1, "bank or principal"),
-    ("malformed", 1, "bank or principal"),
+    ("other_bank", 1, "bank or principal"),
+    ("malformed", 2, "context_unreadable"),
+    ("not_json", 2, "context_unreadable"),
     ("credential_changed", 1, "credential"),
     ("credential_changed_retry", 2, "credential"),
     ("credential_changed_failed_retry", 2, "credential"),
@@ -277,8 +286,13 @@ def test_unresolved_authority_never_dispatches_or_replaces_mailbox(
                 if failure == "mismatch":
                     bank.principal = "different-fixture-principal"
                     return None
+                if failure == "other_bank":
+                    bank.bank_id = "22222222-2222-4222-8222-222222222222"
+                    return None
                 if failure == "malformed":
                     return httpx.Response(200, json={"private": "fixture"})
+                if failure == "not_json":
+                    return httpx.Response(200, content=b"private fixture")
                 if failure == "unexpected":
                     raise RuntimeError("private fixture unexpected detail")
                 return httpx.Response(int(failure), json={"error": "private fixture response"})
@@ -308,6 +322,7 @@ def test_unresolved_authority_never_dispatches_or_replaces_mailbox(
             finally:
                 bank.context_hook = None
                 bank.principal = "fixture-user"
+                bank.bank_id = "11111111-1111-4111-8111-111111111111"
                 bank.token = provider.token
                 if failure == "credential_unavailable":
                     del provider.snapshot

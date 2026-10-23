@@ -240,6 +240,11 @@
       "version": 55,
       "commit": "2caa40b4bf203f3419799f42763079590030cc83",
       "embedding_dimension": 1024
+    },
+    {
+      "version": 56,
+      "commit": "5767ab84d8e7b0078e964d55a153cb4d9a001757",
+      "embedding_dimension": 1024
     }
   ]
 }

@@ -11,8 +11,8 @@
 #                                            #   restore, start daemon, health.
 #   ops\restore.ps1 -Apply -StateArchive <pseudolife_state-*.tgz>
 #                                            # ALSO replace the daemon state
-#                                            # volume (ingested documents +
-#                                            # cortex/graph snapshots) from a
+#                                            # volume (cortex/graph snapshots,
+#                                            # pre-v57 documents) from a
 #                                            # backup.ps1 state tar. Opt-in:
 #                                            # a DB-only restore must not
 #                                            # clobber current state.
@@ -87,7 +87,7 @@ if ($StateArchive) {
     $newestState = Get-ChildItem (Join-Path $repo "data\backups") -Filter "pseudolife_state-*.tgz" -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($newestState) {
-        Write-Host "==> Note: state archives exist (newest: $($newestState.Name)); pass -StateArchive to restore ingested documents + cortex/graph snapshots too."
+        Write-Host "==> Note: state archives exist (newest: $($newestState.Name)); pass -StateArchive to restore the cortex/graph snapshots (and pre-v57 documents) too."
     }
 }
 
