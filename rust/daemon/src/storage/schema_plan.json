@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "source_sha256": "fefdfa22c8e9b898e9b8de54b8277daa89819c20803d571a57eac5a87e4ada3a",
+  "source_sha256": "84ea24f4da4ffa529eabaf9768e7de9d78945d990e1e9336bafbdecd8041a2cb",
   "schema_version": 56,
   "embedding_dimension": 1024,
   "embedding_probe": "SELECT atttypmod FROM pg_attribute WHERE attrelid = to_regclass('public.entries') AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",
@@ -8,6 +8,9 @@
   "steps": [
     {
       "op": "embedding_guard"
+    },
+    {
+      "op": "version_guard"
     },
     {
       "op": "sql",

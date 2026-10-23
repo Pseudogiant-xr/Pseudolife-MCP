@@ -425,6 +425,9 @@ class Update:
         self._warn = warn or (lambda line: print(f"WARNING: {line}", file=sys.stderr, flush=True))
         self.docker = docker_cmd()
         self.rollback_lines: list[str] = []
+        # The bank's schema version on the daemon this run replaces, when
+        # /health said; a deploy that moves it changes what a rollback takes.
+        self.schema_before: int | None = None
 
     # -- output ------------------------------------------------------------
     def step(self, text: str) -> None:
@@ -879,6 +882,14 @@ class Update:
             raise UpdateError("\n".join(lines))
         self.step(f"healthy. version={health.get('version')} schema={health.get('schema')} "
                   f"persist_errors={health.get('persist_errors')}")
+        before, after = self.schema_before, health.get("schema")
+        if self.rollback_lines and type(before) is int and type(after) is int and after > before:
+            # An older daemon refuses a bank stamped by a newer build, so an
+            # image-only rollback across a schema change no longer starts.
+            self.rollback_lines = self.rollback_lines + [
+                f"      This deploy moved the bank's schema from v{before} to v{after}, which the older daemon",
+                "      refuses: after rolling back the image, restore the backup taken above with",
+                "      ops/restore.ps1 -Apply -BackupFile <dump> (ops/restore.sh --apply --backup-file <dump>)."]
         if expect_version and health.get("version") != expect_version:
             lines = [f"the daemon reports version {health.get('version')}, not the {expect_version} that was pulled: "
                      f"the compose project's image setting won (check `docker compose config` for the daemon "
@@ -965,7 +976,9 @@ class Update:
             self.step("scaffolded ops/.env from ops/.env.example (all values commented)")
         compose = self._compose_args([compose_file, repo / "ops" / "docker-compose.override.yml"], env_file)
         self._compose_shown = compose
-        previous_digest = (self.daemon_health() or {}).get("hooks_digest")
+        before = self.daemon_health() or {}
+        previous_digest = before.get("hooks_digest")
+        self.schema_before = before.get("schema")
         self.backup(repo)
         image_tag = _compose_image_tag(compose_file)
         if not image_tag:
@@ -1107,6 +1120,7 @@ class Update:
             health = self.daemon_health()
             current = (health or {}).get("version") if isinstance((health or {}).get("version"), str) else None
             previous_digest = (health or {}).get("hooks_digest")
+            self.schema_before = (health or {}).get("schema")
         self.report.current = current
         if current is None:
             # /health silent (the daemon crashed, say): the image the container

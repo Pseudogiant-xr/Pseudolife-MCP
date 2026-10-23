@@ -110,6 +110,8 @@ pub async fn ensure_schema_in_transaction(client: &Client) -> Result<(), SchemaE
         match step["op"].as_str().unwrap() {
             "embedding_guard" => {
                 refuse_on_embedding_dim_mismatch(client).await?;
+            }
+            "version_guard" => {
                 if !crate::mutants::active("schema-future-allowed") {
                     refuse_future_or_malformed_version(client).await?;
                 }
@@ -158,15 +160,22 @@ pub async fn ensure_schema_in_transaction(client: &Client) -> Result<(), SchemaE
     Ok(())
 }
 
+const RESTORE_HINT: &str = "(`ops/restore.ps1 -Apply -BackupFile <dump>` or `ops/restore.sh --apply --backup-file <dump>`)";
+
+/// schema.py's `_schema_version_refusal`, word for word: a newer build's
+/// stamp is refused rather than stamped down, and so is a stamp that is not
+/// a positive JSON integer. `value` is the stamp's JSON text.
 fn version_refusal(value: &str) -> Option<String> {
     let parsed = serde_json::from_str::<serde_json::Value>(value).ok();
     let version = parsed.and_then(|v| v.as_i64());
     match version {
         Some(v) if v > SCHEMA_META_VERSION => Some(format!(
-            "Refusing to start: bank schema version {v} is newer than this build's schema version {SCHEMA_META_VERSION}."
+            "Refusing to start: bank schema version {v} is newer than this build's schema version {SCHEMA_META_VERSION}. A newer Pseudolife release upgraded this bank and this build cannot serve it safely, so the bank was left untouched. Run that release or a newer one (`pseudolife-mcp update`); to roll back to this build instead, first restore the backup taken before that upgrade {RESTORE_HINT}."
         )),
         Some(v) if v >= 1 => None,
-        _ => Some("Refusing to start: bank schema_version must be a positive integer.".into()),
+        _ => Some(format!(
+            "Refusing to start: bank schema_version must be a positive integer, but this bank's is {value}. Pseudolife never writes that value, so the bank was left untouched. Restore the bank from a backup {RESTORE_HINT}."
+        )),
     }
 }
 
@@ -222,6 +231,18 @@ mod tests {
         let message = version_refusal(&future.to_string()).unwrap();
         assert!(message.contains(&future.to_string()));
         assert!(message.contains(&SCHEMA_META_VERSION.to_string()));
+    }
+
+    #[test]
+    fn version_message_matches_python() {
+        // Expected text produced by schema.py's _schema_version_refusal;
+        // tests/test_schema_version_guard.py reads these two literals back.
+        let newer = format!(
+            "Refusing to start: bank schema version 999999 is newer than this build's schema version {SCHEMA_META_VERSION}. A newer Pseudolife release upgraded this bank and this build cannot serve it safely, so the bank was left untouched. Run that release or a newer one (`pseudolife-mcp update`); to roll back to this build instead, first restore the backup taken before that upgrade (`ops/restore.ps1 -Apply -BackupFile <dump>` or `ops/restore.sh --apply --backup-file <dump>`)."
+        );
+        assert_eq!(version_refusal("999999").unwrap(), newer);
+        let malformed = "Refusing to start: bank schema_version must be a positive integer, but this bank's is 0. Pseudolife never writes that value, so the bank was left untouched. Restore the bank from a backup (`ops/restore.ps1 -Apply -BackupFile <dump>` or `ops/restore.sh --apply --backup-file <dump>`).";
+        assert_eq!(version_refusal("0").unwrap(), malformed);
     }
 
     #[test]

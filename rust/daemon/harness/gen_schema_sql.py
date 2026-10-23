@@ -126,6 +126,10 @@ def statements(nodes, env, functions, top_level=False):
                 steps.append({"op": "sql", "sql": sql, "parameters": params})
             elif ast.unparse(call) == "_refuse_on_embedding_dim_mismatch(cur)":
                 steps.append({"op": "embedding_guard"})
+            elif ast.unparse(call) == "_refuse_on_future_or_malformed_version(cur)":
+                # Executed natively (schema.rs refuse_future_or_malformed_version);
+                # the message text is pinned on both sides by their tests.
+                steps.append({"op": "version_guard"})
             elif ast.unparse(call) == "_backfill_trace_invalidations(cur)":
                 helper = functions["_backfill_trace_invalidations"]
                 body = helper.body
