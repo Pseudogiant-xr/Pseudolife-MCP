@@ -300,35 +300,7 @@ pub(crate) async fn admit(
     // Capacity first (band.py:130-132): the victim is chosen before the new
     // entry exists.
     let band0 = cfg.bands[0].clone();
-    let cap = cfg
-        .band_specs
-        .first()
-        .map(|b| b.max_entries as i64)
-        .unwrap_or(i64::MAX);
-    let victim = {
-        let bank = ready.bank.read().expect("bank lock");
-        let held: Vec<usize> = (0..bank.entries.len())
-            .filter(|&i| bank.entries[i].band == band0)
-            .collect();
-        let score = |i: usize, t: f64| {
-            let e = &bank.entries[i];
-            let superseded = e.superseded_at.is_some() || retiring.contains(&e.id);
-            retention_score_as(e, superseded, t, cfg.retention_boost)
-        };
-        (held.len() as i64 >= cap && !held.is_empty()).then(|| {
-            let t = episodes::now();
-            let mut worst = held[0];
-            let mut worst_score = score(worst, t);
-            for &i in &held[1..] {
-                let s = score(i, t);
-                if s < worst_score {
-                    worst = i;
-                    worst_score = s;
-                }
-            }
-            worst
-        })
-    };
+    let victim = first_band_victim(ready, cfg, retiring);
 
     let mut entry = Entry {
         band: band0.clone(),
@@ -345,6 +317,9 @@ pub(crate) async fn admit(
         slots: found.slots.iter().map(Slot::to_json).collect(),
         authority: new.authority,
         distortion_tolerance: new.distortion,
+        // `MemoryEntry.dream_state` defaults to "pending", as the insert writes.
+        dream_state: (!crate::mutants::active("mcp-dream-store-not-pending"))
+            .then(|| "pending".into()),
         ..Default::default()
     };
     if let Some(i) = ws.log.stamp_target(new.session_key) {
@@ -371,6 +346,62 @@ pub(crate) async fn admit(
         victim,
         anchor,
     })))
+}
+
+/// `MIRASBand.store`'s capacity check on the first band (`band.py:130-132`,
+/// `_evict_one`): at capacity, the resident index of the entry with the
+/// lowest source-weighted retention score, as if every row in `retiring`
+/// were already retired.
+pub(crate) fn first_band_victim(
+    ready: &Ready,
+    cfg: &MemoryConfig,
+    retiring: &[i64],
+) -> Option<usize> {
+    let band0 = &cfg.bands[0];
+    let cap = cfg
+        .band_specs
+        .first()
+        .map(|b| b.max_entries as i64)
+        .unwrap_or(i64::MAX);
+    let bank = ready.bank.read().expect("bank lock");
+    let held: Vec<usize> = (0..bank.entries.len())
+        .filter(|&i| bank.entries[i].band == *band0)
+        .collect();
+    let score = |i: usize, t: f64| {
+        let e = &bank.entries[i];
+        let superseded = e.superseded_at.is_some() || retiring.contains(&e.id);
+        retention_score_as(e, superseded, t, cfg.retention_boost)
+    };
+    (held.len() as i64 >= cap && !held.is_empty()).then(|| {
+        let t = episodes::now();
+        let mut worst = held[0];
+        let mut worst_score = score(worst, t);
+        for &i in &held[1..] {
+            let s = score(i, t);
+            if s < worst_score {
+                worst = i;
+                worst_score = s;
+            }
+        }
+        worst
+    })
+}
+
+/// `_on_band_evict` for the first band's victim: a true drop (removed from
+/// the resident bank, its row deleted and counted; a failed delete is
+/// logged, never the store's failure).
+pub(crate) async fn evict_resident(ready: &Ready, idx: usize) {
+    let gone = ready.bank.write().expect("bank lock").remove(idx);
+    crate::read::stats::record_true_drop();
+    // Only the last band's overflow is a true drop; a deeper band would
+    // take the entry (not ported: see divergences).
+    if let Err(e) = delete_evicted(ready.storage.client(), &gone).await {
+        eprintln!("evict write-through failed: {e}");
+    }
+    eprintln!(
+        "capacity eviction true drop: entry_id={} source={:?}",
+        gone.id, gone.source
+    );
 }
 
 /// Append one store's per-band surprises to `_surprise_history`.
@@ -437,17 +468,7 @@ async fn cms_store(
     record_surprise(ws, cfg, &adm.per_band);
     let client = ready.storage.client();
     if let Some(idx) = adm.victim {
-        let gone = ready.bank.write().expect("bank lock").remove(idx);
-        crate::read::stats::record_true_drop();
-        // Only the last band's overflow is a true drop; a deeper band would
-        // take the entry (not ported: see divergences).
-        if let Err(e) = delete_evicted(client, &gone).await {
-            eprintln!("evict write-through failed: {e}");
-        }
-        eprintln!(
-            "capacity eviction true drop: entry_id={} source={:?}",
-            gone.id, gone.source
-        );
+        evict_resident(ready, idx).await;
     }
     let Admission {
         mut entry,

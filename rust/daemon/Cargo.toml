@@ -57,6 +57,7 @@ anyhow = "=1.0.104"
 hex = "=0.4.3"
 indexmap = "=2.14.2"
 reqwest.workspace = true
+hyper.workspace = true
 libc.workspace = true
 form_urlencoded = "=1.2.2"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "ndarray", "std"] }

@@ -4,9 +4,7 @@
 //! in `graph_review.rs`. The mutating actions (`propose`, `relate`,
 //! `dismiss_pair` and the five id actions) live in `graph_review_actions.rs`,
 //! the slot actions (`dismiss_slot_pair`, `restore_slot`) in
-//! `graph_review_slots.rs`. A lesson restore that would need the
-//! audit-snapshot fallback answers the declared `not_implemented` stub,
-//! byte for byte what an unregistered tool answers.
+//! `graph_review_slots.rs`.
 //!
 //! The list is read-only. Python takes the service lock in two blocks (the
 //! loads, then the decision audit) and runs the analyzer between them; this
@@ -28,7 +26,7 @@ use crate::service::Ready;
 use crate::storage::graph;
 
 #[path = "graph_review_actions.rs"]
-mod actions;
+pub(crate) mod actions;
 #[path = "graph_review_slots.rs"]
 mod slots;
 
@@ -49,14 +47,6 @@ fn internal(e: impl std::fmt::Display) -> ToolError {
 /// The tools this module serves on `/mcp` (`mcp::dispatch::registry`).
 pub fn mcp_tools() -> Vec<(&'static str, crate::mcp::dispatch::ToolFn)> {
     vec![(TOOL, mcp_memory_graph_review)]
-}
-
-/// The refusal an unregistered tool answers (`dispatch::not_implemented`),
-/// as a body error: `envelope::error_payload` renders it to the same object.
-fn unserved() -> ToolError {
-    let stub = crate::mcp::dispatch::not_implemented(TOOL);
-    let message = stub["message"].as_str().unwrap_or_default();
-    ToolError::refused("not_implemented", message.strip_prefix("not_implemented: "))
 }
 
 fn mcp_memory_graph_review<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
@@ -702,28 +692,6 @@ fn automation(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn unserved_actions_answer_the_unregistered_stub() {
-        // `envelope::error_payload` renders a refusal with a bare code and no
-        // extras as `{"error": code, "message": "code: detail"}`: the stub.
-        let stub = crate::mcp::dispatch::not_implemented(TOOL);
-        let ToolError::Refused {
-            code,
-            detail: Some(detail),
-            param: None,
-            accepted: None,
-            action: None,
-        } = unserved()
-        else {
-            panic!("not a bare refusal");
-        };
-        let payload = json!({"error": code, "message": format!("{code}: {detail}")});
-        assert_eq!(
-            serde_json::to_string(&payload).unwrap(),
-            serde_json::to_string(&stub).unwrap()
-        );
-    }
 
     #[test]
     fn decision_index_reads_like_python() {

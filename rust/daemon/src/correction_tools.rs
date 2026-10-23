@@ -1,9 +1,12 @@
-//! `memory_supersede` and `memory_reinstate` (spec CO1-CO10, RI1-RI9):
-//! `mcp_server.memory_supersede` → `service.supersede` →
-//! `_apply_correction_locked`, and `mcp_server.memory_reinstate` →
-//! `service.reinstate` → `PostgresStorage.reinstate_entry`.
+//! `memory_supersede`, `memory_consolidate` and `memory_reinstate` (spec
+//! CO1-CO10, CN1-CN7, RI1-RI9): `mcp_server.memory_supersede` →
+//! `service.supersede` and `mcp_server.memory_consolidate` →
+//! `service.consolidate`, both `_apply_correction_locked` over the targets
+//! `_resolve_correction_targets_locked` resolves, and
+//! `mcp_server.memory_reinstate` → `service.reinstate` →
+//! `PostgresStorage.reinstate_entry`.
 //!
-//! A correction retires its target and stores the replacement in one
+//! A correction retires its targets and stores the replacement in one
 //! transaction (`_stage_correction_locked` under `storage.transaction()`),
 //! then publishes the result to the resident bank. Python stages a clone of
 //! the bank, commits, and publishes the clone; this daemon builds the new
@@ -54,6 +57,7 @@ pub fn mcp_tools() -> Vec<(&'static str, crate::mcp::dispatch::ToolFn)> {
     vec![
         ("memory_supersede", mcp_memory_supersede),
         ("memory_reinstate", mcp_memory_reinstate),
+        ("memory_consolidate", mcp_memory_consolidate),
     ]
 }
 
@@ -112,17 +116,19 @@ fn int_value(v: &Value) -> (bool, Option<i64>) {
     }
 }
 
-/// `_resolve_correction_targets_locked` (`service.py:3104-3199`) for one
-/// selector: the target, or the no-op answer. No write, no retrieval effect.
-async fn resolve_target(
+/// `_resolve_correction_targets_locked` (`service.py:3104-3199`): every
+/// selector resolved, or the no-op answer. Exactly one of `texts` and `ids`
+/// is given; a list is deduplicated in first-seen order (`dict.fromkeys`),
+/// and every selector's error is reported. No write, no retrieval effect.
+async fn resolve_targets(
     ready: &Ready,
     cfg: &MemoryConfig,
-    old_text: Option<&str>,
-    entry_id: Option<&Value>,
-) -> Result<Target, Value> {
-    let by_id = match (old_text, entry_id) {
-        (Some(_), None) => false,
-        (None, Some(_)) => true,
+    texts: Option<&[Value]>,
+    ids: Option<&[Value]>,
+) -> Result<Vec<Target>, Value> {
+    let (by_id, selectors) = match (texts, ids) {
+        (Some(t), None) => (false, t),
+        (None, Some(i)) => (true, i),
         _ => {
             return Err(noop(
                 "invalid_selector",
@@ -131,20 +137,30 @@ async fn resolve_target(
             ));
         }
     };
-    let mut id = None;
-    if let Some(v) = entry_id {
-        let (positive, fits) = int_value(v);
-        if !positive {
+    if selectors.is_empty() {
+        return Err(noop(
+            "empty_input",
+            "No correction targets supplied.",
+            vec![],
+        ));
+    }
+    if by_id {
+        if selectors.iter().any(|v| !v.is_number() || !int_value(v).0) {
             return Err(noop(
                 "invalid_selector",
                 "Entry IDs must be positive integers, not coerced values.",
                 vec![],
             ));
         }
-        id = fits;
-    }
-    if let Some(t) = old_text
-        && py_strip(t).is_empty()
+    } else if selectors.iter().any(|v| !v.is_string()) {
+        return Err(noop(
+            "invalid_selector",
+            "Exact-text targets must be strings.",
+            vec![],
+        ));
+    } else if selectors
+        .iter()
+        .any(|v| py_strip(v.as_str().unwrap_or_default()).is_empty())
     {
         return Err(noop(
             "empty_input",
@@ -152,88 +168,100 @@ async fn resolve_target(
             vec![],
         ));
     }
+    let mut distinct: Vec<&Value> = Vec::with_capacity(selectors.len());
+    for v in selectors {
+        if crate::mutants::active("mcp-consolidate-no-dedupe") || !distinct.contains(&v) {
+            distinct.push(v);
+        }
+    }
 
-    let outcome: Result<Target, Map<String, Value>> = {
+    let mut selected: Vec<Target> = Vec::new();
+    let mut errors: Vec<Value> = Vec::new();
+    let mut ambiguous_holder = false;
+    {
         let bank = ready.bank.read().expect("bank lock");
         // Python walks `band.entries` band by band; the bank is one list.
         let band_pos = |name: &str| cfg.bands.iter().position(|b| b == name).unwrap_or(0);
-        let mut matches: Vec<usize> = (0..bank.entries.len())
-            .filter(|&i| {
-                let e = &bank.entries[i];
-                if by_id {
-                    id == Some(e.id)
-                } else {
-                    old_text == Some(e.text.as_str())
-                }
-            })
-            .collect();
-        matches.sort_by_key(|&i| (band_pos(&bank.entries[i].band), i));
-        let live: Vec<usize> = matches
-            .iter()
-            .copied()
-            .filter(|&i| bank.entries[i].superseded_at.is_none())
-            .collect();
-        let mut error = Map::new();
-        if by_id {
-            error.insert("entry_id".into(), entry_id.cloned().unwrap_or(Value::Null));
-        } else {
-            error.insert("text".into(), json!(old_text));
-        }
-        // A retired twin is history, not a rival target, for an exact text;
-        // an id must map to exactly one resident.
-        let ambiguous = if by_id {
-            matches.len() != 1
-        } else {
-            live.len() > 1 && !crate::mutants::active("mcp-supersede-text-first-live")
-        };
-        if matches.is_empty() {
-            error.insert("reason".into(), json!("target_not_found"));
-            Err(error)
-        } else if ambiguous {
-            error.insert("reason".into(), json!("ambiguous_target"));
-            let candidates: Vec<Value> = matches
-                .iter()
-                .map(|&i| {
+        for value in distinct {
+            let id = if by_id { int_value(value).1 } else { None };
+            let mut matches: Vec<usize> = (0..bank.entries.len())
+                .filter(|&i| {
                     let e = &bank.entries[i];
-                    json!({
-                        "id": e.id,
-                        "source": e.source,
-                        "episode_id": e.episode_id,
-                        "superseded": e.superseded_at.is_some(),
-                    })
+                    if by_id {
+                        id == Some(e.id)
+                    } else {
+                        value.as_str() == Some(e.text.as_str())
+                    }
                 })
                 .collect();
-            error.insert("candidates".into(), Value::Array(candidates));
-            Err(error)
-        } else if live.is_empty() {
-            error.insert("reason".into(), json!("target_superseded"));
+            matches.sort_by_key(|&i| (band_pos(&bank.entries[i].band), i));
+            let live: Vec<usize> = matches
+                .iter()
+                .copied()
+                .filter(|&i| bank.entries[i].superseded_at.is_none())
+                .collect();
+            let mut error = Map::new();
             error.insert(
-                "superseded_by_text".into(),
-                json!(bank.entries[matches[0]].superseded_by_text),
+                if by_id { "entry_id" } else { "text" }.into(),
+                value.clone(),
             );
-            Err(error)
-        } else {
-            let e = &bank.entries[live[0]];
-            Ok(Target {
-                id: e.id,
-                text: e.text.clone(),
-                authority: e.authority.clone(),
-                distortion: e.distortion_tolerance.clone(),
-            })
+            // A retired twin is history, not a rival target, for an exact
+            // text; an id must map to exactly one resident.
+            let ambiguous = if by_id {
+                matches.len() != 1
+            } else {
+                live.len() > 1 && !crate::mutants::active("mcp-supersede-text-first-live")
+            };
+            if matches.is_empty() {
+                error.insert("reason".into(), json!("target_not_found"));
+                errors.push(Value::Object(error));
+            } else if ambiguous {
+                error.insert("reason".into(), json!("ambiguous_target"));
+                let candidates: Vec<Value> = matches
+                    .iter()
+                    .map(|&i| {
+                        let e = &bank.entries[i];
+                        json!({
+                            "id": e.id,
+                            "source": e.source,
+                            "episode_id": e.episode_id,
+                            "superseded": e.superseded_at.is_some(),
+                        })
+                    })
+                    .collect();
+                error.insert("candidates".into(), Value::Array(candidates));
+                errors.push(Value::Object(error));
+            } else if live.is_empty() {
+                error.insert("reason".into(), json!("target_superseded"));
+                error.insert(
+                    "superseded_by_text".into(),
+                    json!(bank.entries[matches[0]].superseded_by_text),
+                );
+                errors.push(Value::Object(error));
+            } else {
+                let e = &bank.entries[live[0]];
+                selected.push(Target {
+                    id: e.id,
+                    text: e.text.clone(),
+                    authority: e.authority.clone(),
+                    distortion: e.distortion_tolerance.clone(),
+                });
+            }
         }
-    };
-    let target = match outcome {
-        Ok(t) => t,
-        Err(error) => {
-            let reason = error["reason"].as_str().unwrap_or_default().to_string();
-            return Err(noop(&reason, RESOLVE_NOTE, vec![Value::Object(error)]));
+        if errors.is_empty() {
+            ambiguous_holder = selected
+                .iter()
+                .any(|t| bank.entries.iter().filter(|e| e.id == t.id).count() != 1);
         }
-    };
-    let holders = {
-        let bank = ready.bank.read().expect("bank lock");
-        bank.entries.iter().filter(|e| e.id == target.id).count()
-    };
-    if holders != 1 {
+    }
+    if !errors.is_empty() {
+        let reason = errors[0]["reason"].as_str().unwrap_or_default().to_string();
+        if crate::mutants::active("mcp-consolidate-first-error-only") {
+            errors.truncate(1);
+        }
+        return Err(noop(&reason, RESOLVE_NOTE, errors));
+    }
+    if ambiguous_holder {
         return Err(noop(
             "ambiguous_target",
             "A selected row ID has multiple resident entries; retry after recovery.",
@@ -242,9 +270,10 @@ async fn resolve_target(
     }
 
     // A failed insert can leave a phantom row id resident; never correct it.
-    let ids = vec![target.id];
+    let ids: Vec<i64> = selected.iter().map(|t| t.id).collect();
+    let probe = ids.clone();
     let rows = crate::txn::with_client(ready.storage.client(), |c| async move {
-        c.query("SELECT id FROM entries WHERE id = ANY($1)", &[&ids])
+        c.query("SELECT id FROM entries WHERE id = ANY($1)", &[&probe])
             .await
     })
     .await;
@@ -256,14 +285,19 @@ async fn resolve_target(
         ));
     };
     let existing: HashSet<i64> = rows.iter().map(|r| r.get(0)).collect();
-    if !existing.contains(&target.id) {
+    let missing: Vec<Value> = ids
+        .iter()
+        .filter(|id| !existing.contains(id))
+        .map(|id| json!({"entry_id": id, "reason": "target_unavailable"}))
+        .collect();
+    if !missing.is_empty() {
         return Err(noop(
             "target_unavailable",
             "Selected rows are no longer persisted; reselect after recovery.",
-            vec![json!({"entry_id": target.id, "reason": "target_unavailable"})],
+            missing,
         ));
     }
-    Ok(target)
+    Ok(selected)
 }
 
 /// Why a correction transaction did not commit.
@@ -323,9 +357,23 @@ fn derived_rows(ready: &Ready, traces: &[(String, String, i64)]) -> Vec<Value> {
         .collect()
 }
 
-/// `memory_supersede` on the MCP surface: bound arguments and the caller's
-/// session into the body, which runs to completion in its own task.
-fn mcp_memory_supersede<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
+/// A correction tool's service body: `supersede` or `consolidate`.
+type CorrectionBody = for<'b> fn(
+    &'b Arc<Ready>,
+    &'b MemoryConfig,
+    &'b Caller,
+    &'b Map<String, Value>,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<Value, ToolError>> + Send + 'b>,
+>;
+
+/// Run a correction body to completion in its own task, detached from the
+/// request, with the bound arguments and the caller's session.
+fn spawn_correction<'a>(
+    app: &'a crate::http::App,
+    call: ToolCall<'a>,
+    body: CorrectionBody,
+) -> ToolFuture<'a> {
     Box::pin(async move {
         let ready = app.service.ensure_init().await.map_err(internal)?;
         let caller = Caller {
@@ -337,14 +385,24 @@ fn mcp_memory_supersede<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> To
         let r2 = ready.clone();
         ready
             .writes
-            .spawn(async move { supersede(&r2, &cfg, &caller, &args).await })
+            .spawn(async move { body(&r2, &cfg, &caller, &args).await })
             .await
             .map_err(internal)?
     })
 }
 
-/// `service.supersede` (`service.py:3201-3229`) through
-/// `_apply_correction_under_mutation_lock_locked` (`:2927-3102`).
+/// `memory_supersede` on the MCP surface.
+fn mcp_memory_supersede<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
+    spawn_correction(app, call, |r, c, w, a| Box::pin(supersede(r, c, w, a)))
+}
+
+/// `memory_consolidate` on the MCP surface.
+fn mcp_memory_consolidate<'a>(app: &'a crate::http::App, call: ToolCall<'a>) -> ToolFuture<'a> {
+    spawn_correction(app, call, |r, c, w, a| Box::pin(consolidate(r, c, w, a)))
+}
+
+/// `service.supersede` (`service.py:3201-3229`): one target, by id or exact
+/// text, source `correction`, no tags, the derived slots reported.
 async fn supersede(
     ready: &Arc<Ready>,
     cfg: &MemoryConfig,
@@ -360,21 +418,122 @@ async fn supersede(
             vec![],
         ));
     }
-    let old_text = args.get("old_text").and_then(Value::as_str);
-    let entry_id = args.get("entry_id").filter(|v| !v.is_null());
-    let target = match resolve_target(ready, cfg, old_text, entry_id).await {
+    // `[old_text] if old_text is not None else None`, and the same for the id.
+    let old_text: Option<Vec<Value>> = args
+        .get("old_text")
+        .filter(|v| !v.is_null())
+        .map(|v| vec![v.clone()]);
+    let entry_id: Option<Vec<Value>> = args
+        .get("entry_id")
+        .filter(|v| !v.is_null())
+        .map(|v| vec![v.clone()]);
+    let targets = match resolve_targets(ready, cfg, old_text.as_deref(), entry_id.as_deref()).await
+    {
         Ok(t) => t,
         Err(answer) => return Ok(answer),
     };
+    let correction = Correction {
+        source: "correction",
+        tags: Vec::new(),
+        report_derivations: true,
+    };
+    apply_correction(ready, cfg, &mut ws, caller, targets, new_text, correction).await
+}
 
+/// `service.consolidate` (`service.py:7462-7519`): a list of targets, by ids
+/// or exact texts, source `consolidation` unless the caller's is truthy, the
+/// caller's tags, no derived-slot report.
+async fn consolidate(
+    ready: &Arc<Ready>,
+    cfg: &MemoryConfig,
+    caller: &Caller,
+    args: &Map<String, Value>,
+) -> Result<Value, ToolError> {
+    let mut ws = ready.write.lock().await;
+    let new_text = py_strip(args.get("new_text").and_then(Value::as_str).unwrap_or(""));
+    if new_text.is_empty() {
+        return Ok(noop(
+            "empty_input",
+            "Replacement text must be non-empty.",
+            vec![],
+        ));
+    }
+    let replaces = args.get("replaces").filter(|v| !v.is_null());
+    let entry_ids = args.get("entry_ids").filter(|v| !v.is_null());
+    // The binding admits only lists; `service.py:3118-3120` still checks.
+    if let (Some(v), None) | (None, Some(v)) = (replaces, entry_ids)
+        && !v.is_array()
+    {
+        return Ok(noop(
+            "invalid_selector",
+            "Correction targets must be a list.",
+            vec![],
+        ));
+    }
+    fn slice(v: Option<&Value>) -> Option<&[Value]> {
+        v.map(|v| v.as_array().map_or(&[][..], Vec::as_slice))
+    }
+    let targets = match resolve_targets(ready, cfg, slice(replaces), slice(entry_ids)).await {
+        Ok(t) => t,
+        Err(answer) => return Ok(answer),
+    };
+    // `source or "consolidation"`: an empty source takes the default.
+    let source = match args.get("source").and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => s,
+        _ if crate::mutants::active("mcp-consolidate-default-source") => "correction",
+        _ => "consolidation",
+    };
+    let correction = Correction {
+        source,
+        tags: store::normalize_tags(args.get("tags")),
+        report_derivations: crate::mutants::active("mcp-consolidate-derived-keys"),
+    };
+    apply_correction(ready, cfg, &mut ws, caller, targets, new_text, correction).await
+}
+
+/// What distinguishes one correction tool's store from another's.
+struct Correction<'a> {
+    source: &'a str,
+    tags: Vec<String>,
+    /// `report_derivations`: read the derived slots and answer them.
+    report_derivations: bool,
+}
+
+/// `_apply_correction_under_mutation_lock_locked` (`service.py:2927-3102`):
+/// retire every target and store the replacement in one transaction, then
+/// publish to the resident bank. The caller holds the service lock (`ws`).
+async fn apply_correction(
+    ready: &Arc<Ready>,
+    cfg: &MemoryConfig,
+    ws: &mut crate::episodes::WriteState,
+    caller: &Caller,
+    targets: Vec<Target>,
+    new_text: &str,
+    correction: Correction<'_>,
+) -> Result<Value, ToolError> {
     // `_inherited_labels` (`service.py:682-692`): the new text's own label
     // wins its axis, else the strictest label across the replaced entries.
+    let parents = if crate::mutants::active("mcp-consolidate-labels-first-only") {
+        &targets[..1]
+    } else {
+        &targets[..]
+    };
     let authority = crate::labels::infer_authority(new_text)
         .map(str::to_string)
-        .or_else(|| strictest([target.authority.as_deref()].into_iter(), &AUTHORITY_RANK));
+        .or_else(|| {
+            strictest(
+                parents.iter().map(|t| t.authority.as_deref()),
+                &AUTHORITY_RANK,
+            )
+        });
     let distortion = crate::labels::infer_distortion_tolerance(new_text)
         .map(str::to_string)
-        .or_else(|| strictest([target.distortion.as_deref()].into_iter(), &DISTORTION_RANK));
+        .or_else(|| {
+            strictest(
+                parents.iter().map(|t| t.distortion.as_deref()),
+                &DISTORTION_RANK,
+            )
+        });
     let embedder = ready.embedder.clone();
     let owned = new_text.to_string();
     let row = tokio::task::spawn_blocking(move || embedder.embed(&owned))
@@ -382,12 +541,12 @@ async fn supersede(
         .map_err(internal)?
         .map_err(internal)?;
     let session = ws.resolve_session(caller).map_err(ToolError::Invalid)?;
-    let ids = vec![target.id];
+    let ids: Vec<i64> = targets.iter().map(|t| t.id).collect();
     let new = NewEntry {
         text: new_text,
         row,
-        source: "correction",
-        tags: Vec::new(),
+        source: correction.source,
+        tags: correction.tags,
         session_key: session.as_deref(),
         attribution: None,
         authority,
@@ -396,7 +555,13 @@ async fn supersede(
     // `stamp = time.time()` precedes the replacement's store (`ts`).
     let stamp = episodes::now();
     let bypass = !crate::mutants::active("mcp-supersede-surprise-gate");
-    let admission = match store::admit(ready, cfg, &ws, new, bypass, &ids)
+    // The capacity victim is chosen with every target already retired.
+    let retiring = if crate::mutants::active("mcp-consolidate-victim-first-only") {
+        &ids[..1]
+    } else {
+        &ids[..]
+    };
+    let admission = match store::admit(ready, cfg, ws, new, bypass, retiring)
         .await
         .map_err(from_store)?
     {
@@ -410,12 +575,12 @@ async fn supersede(
             (
                 e.id,
                 e.source.clone(),
-                e.superseded_at.is_some() || ids.contains(&e.id),
+                e.superseded_at.is_some() || retiring.contains(&e.id),
             )
         })
     });
 
-    let traces_on = cfg.traces_enabled;
+    let read_derived = cfg.traces_enabled && correction.report_derivations;
     let client = ready.storage.client();
     let committed = {
         let (ids, adm, victim) = (&ids, admission.as_ref(), victim.as_ref());
@@ -429,11 +594,10 @@ async fn supersede(
                 )
                 .await?;
             let found: HashSet<i64> = rows.iter().map(|r| r.get(0)).collect();
-            let missing: Vec<String> = ids
-                .iter()
-                .filter(|i| !found.contains(i))
-                .map(i64::to_string)
-                .collect();
+            let mut absent: Vec<i64> = ids.iter().copied().filter(|i| !found.contains(i)).collect();
+            absent.sort_unstable();
+            absent.dedup();
+            let missing: Vec<String> = absent.iter().map(i64::to_string).collect();
             let retired: Vec<String> = rows
                 .iter()
                 .filter(|r| r.get::<_, Option<f64>>(1).is_some())
@@ -469,7 +633,7 @@ async fn supersede(
                 )
                 .await?;
             }
-            let traces: Vec<(String, String, i64)> = if traces_on {
+            let traces: Vec<(String, String, i64)> = if read_derived {
                 c.query(
                     "SELECT entity_norm, attribute_norm, entry_id FROM memory_traces \
                      WHERE entry_id = ANY($1) ORDER BY entity_norm, attribute_norm, entry_id",
@@ -506,7 +670,7 @@ async fn supersede(
     let mut adm = admission.expect("a committed correction stored its replacement");
 
     // Publication: what the staged bank holds after commit.
-    store::record_surprise(&mut ws, cfg, &adm.per_band);
+    store::record_surprise(ws, cfg, &adm.per_band);
     {
         let mut bank = ready.bank.write().expect("bank lock");
         if let Some((vid, vsource, _)) = &victim {
@@ -531,20 +695,23 @@ async fn supersede(
     }
     ws.interaction_count += 1;
 
-    let derived = derived_rows(ready, &traces);
-    let total = derived.len();
-    let capped: Vec<Value> = derived.into_iter().take(DERIVED_FLAGGED_CAP).collect();
-    let truncated = capped.len() < total;
-    Ok(json!({
-        "superseded_count": 1,
-        "superseded_texts": [target.text],
-        "superseded_ids": ids,
-        "new_memory_stored": true,
-        "new_memory_surprise": round4(adm.overall),
-        "derived_flagged": capped,
-        "derived_flagged_total": total,
-        "derived_flagged_truncated": truncated,
-    }))
+    let texts: Vec<String> = targets.into_iter().map(|t| t.text).collect();
+    let mut out = Map::new();
+    out.insert("superseded_count".into(), json!(texts.len()));
+    out.insert("superseded_texts".into(), json!(texts));
+    out.insert("superseded_ids".into(), json!(ids));
+    out.insert("new_memory_stored".into(), json!(true));
+    out.insert("new_memory_surprise".into(), json!(round4(adm.overall)));
+    if correction.report_derivations {
+        let derived = derived_rows(ready, &traces);
+        let total = derived.len();
+        let capped: Vec<Value> = derived.into_iter().take(DERIVED_FLAGGED_CAP).collect();
+        let truncated = capped.len() < total;
+        out.insert("derived_flagged".into(), json!(capped));
+        out.insert("derived_flagged_total".into(), json!(total));
+        out.insert("derived_flagged_truncated".into(), json!(truncated));
+    }
+    Ok(Value::Object(out))
 }
 
 // ── memory_reinstate ─────────────────────────────────────────────────────

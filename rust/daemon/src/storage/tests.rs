@@ -14,6 +14,30 @@ fn repr_matches_python() {
         py_repr("caf\u{e9}\u{a0}\u{2028}"),
         "'caf\u{e9}\\xa0\\u2028'"
     );
+    // Python 3.11 escapes unassigned (U+0378, U+1FFFF) and private-use
+    // (U+E000) code points, and keeps a Unicode 14 addition (U+1FAE8 is
+    // unassigned there, U+1F979 is assigned).
+    assert_eq!(
+        py_repr("\u{378}\u{e000}\u{1ffff}\u{1f979}\u{1fae8}"),
+        "'\\u0378\\ue000\\U0001ffff\u{1f979}\\U0001fae8'"
+    );
+}
+
+#[test]
+fn printable_table_matches_cpython() {
+    use sha2::{Digest, Sha256};
+    let mut bits = Vec::with_capacity(0x110000);
+    for n in 0u32..0x110000 {
+        let nonprintable = match char::from_u32(n) {
+            Some(c) => !py_printable(c),
+            None => true, // the surrogates: category Cs
+        };
+        bits.push(u8::from(nonprintable));
+    }
+    assert_eq!(
+        hex::encode(Sha256::digest(&bits)),
+        crate::py_repr_unicode14::NONPRINTABLE_SHA256
+    );
 }
 
 #[test]

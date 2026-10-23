@@ -21,12 +21,10 @@
 //!   the lesson graph link, then the slot save; the resident store changes
 //!   before its writes commit, as Python's does.
 //!
-//! The audit-snapshot fallback (`_restore_from_snapshot`, `5390-5440`), for
-//! retired slots whose row compaction purged, is served for world facts
-//! through the `world_write` body. For lessons it needs `lesson_write`,
-//! which the daemon does not serve (the dream is its only writer), so a
-//! lesson restore that would reach it is refused before any write, as an
-//! unserved action is.
+//! The audit-snapshot fallback (`_restore_from_snapshot`, `5553-5604`), for
+//! retired slots whose row compaction purged, rewrites each snapshot
+//! through the store's own writer: `world_write` for world facts and
+//! `lesson_write` (`crate::lesson_write`) for lessons.
 
 // The bodies raise `ToolError` as the action modules do (`internal`).
 #![allow(clippy::result_large_err)]
@@ -40,6 +38,9 @@ use tokio_postgres::Client;
 use super::actions::{dismiss_pair_body, in_txn, py_dict, py_int, reads, set_meta_body};
 use super::{get_meta, internal, py_json, py_truthy, py_type};
 use crate::episodes::{Caller, WriteState};
+#[cfg(test)]
+use crate::lesson_write::compound_halves;
+use crate::lesson_write::link_lesson_graph;
 use crate::mcp::dispatch::ToolError;
 use crate::pyjson::py_str;
 use crate::service::{Ready, Service};
@@ -503,7 +504,7 @@ async fn restore(
         return Ok(out);
     }
     match store {
-        Store::Lesson => restore_lessons(svc, ready, entity, attribute).await,
+        Store::Lesson => restore_lessons(svc, ready, w, entity, attribute).await,
         Store::World => restore_world(svc, ready, w, entity, attribute).await,
     }
 }
@@ -519,50 +520,12 @@ struct Restored {
     entry: Value,
 }
 
-/// Whether `lesson_restore`'s audit-snapshot fallback would see a slot,
-/// predicted before the legacy restore over the resident store and the
-/// entity's latest decision per slot (`latest`, any action). The restore
-/// turns the picked slots live and writes each a restore row at `now`,
-/// which becomes the slot's latest decision unless a decision there is
-/// dated after `now` (an equal date loses to the restore row's newer id).
-/// `retired_slots` then keeps the remaining retires, newest first, cut to
-/// a hundred, and the fallback takes those of the entity (or the aspect)
-/// with a record whose slot is not live (`service.py:5476-5520`).
-fn lesson_fallback_predicted(
-    store: &LessonStore,
-    latest: Vec<Decision>,
-    task: &str,
-    aspect: Option<&str>,
-    now: f64,
-) -> bool {
-    let ne = norm_key(task);
-    let na = aspect.map(norm_key);
-    let restored: HashSet<SlotKey> = store
-        .restore_picks(task, aspect)
-        .into_iter()
-        .map(|i| store.records[i].key.clone())
-        .collect();
-    let mut live: HashSet<SlotKey> = store
-        .current_records()
-        .filter(|r| r.key.0 == ne && na.as_ref().is_none_or(|a| r.key.1 == *a))
-        .map(|r| r.key.clone())
-        .collect();
-    live.extend(restored.iter().cloned());
-    let after: Vec<Decision> = latest
-        .into_iter()
-        .filter(|d| {
-            !(restored.contains(&(d.entity_norm.clone(), d.attribute_norm.clone()))
-                && now >= d.decided_at)
-        })
-        .collect();
-    !fallback_snaps(retired_only(after), na.as_deref(), &live).is_empty()
-}
-
-/// The lesson legacy path. The snapshot fallback is not served: when the
-/// slots it would rewrite exist, the call is refused before any write.
+/// The lesson legacy path, then the audit-snapshot fallback for the retired
+/// slots it could not cover (`service.lesson_restore`).
 async fn restore_lessons(
     svc: &Service,
     ready: &Ready,
+    w: &Writer<'_>,
     task: &str,
     aspect: Option<&str>,
 ) -> Result<Value, ToolError> {
@@ -570,12 +533,6 @@ async fn restore_lessons(
     let ne = norm_key(task);
     let na = aspect.map(norm_key);
     let now = crate::episodes::now();
-    // Refused before any write: the decisions are read, the resident store
-    // only borrowed.
-    let latest = latest_slot_decisions(client, Store::Lesson, &ne).await?;
-    if lesson_fallback_predicted(&ready.lessons.snapshot(), latest, task, aspect, now) {
-        return Err(super::unserved());
-    }
     let recs: Vec<Restored> = ready.lessons.write(|l| {
         l.restore(task, aspect)
             .into_iter()
@@ -601,21 +558,33 @@ async fn restore_lessons(
         }
         crate::forget_tools::save_lessons(svc, ready).await?;
     }
-    let live = ready
+    let live: HashSet<SlotKey> = ready
         .lessons
         .snapshot()
         .current_records()
-        .any(|r| r.key.0 == ne && na.as_ref().is_none_or(|a| r.key.1 == *a));
+        .filter(|r| r.key.0 == ne && na.as_ref().is_none_or(|a| r.key.1 == *a))
+        .map(|r| r.key.clone())
+        .collect();
+    let snaps = fallback_snaps(
+        retired_slots(client, Store::Lesson, &ne).await?,
+        na.as_deref(),
+        &live,
+    );
     let entries: Vec<Value> = recs.into_iter().map(|r| r.entry).collect();
     let n = entries.len();
+    let fallback = if snaps.is_empty() {
+        Vec::new()
+    } else {
+        lessons_from_snapshots(svc, ready, w, &snaps).await?
+    };
     Ok(restore_result(
         Store::Lesson,
         task,
         aspect,
         n,
         entries,
-        Vec::new(),
-        live,
+        fallback,
+        !live.is_empty(),
     ))
 }
 
@@ -759,6 +728,113 @@ fn opt_int(v: Option<&Value>) -> Result<Option<i64>, ToolError> {
     }
 }
 
+/// A snapshot's record as a dict, or the error Python's `rec["..."]`
+/// raises on what else a truthy record can be.
+fn snapshot_dict(d: &Decision) -> Result<&Map<String, Value>, ToolError> {
+    match &d.record {
+        Some(Value::Object(rec)) => Ok(rec),
+        Some(Value::Array(_)) => Err(ToolError::Invalid(
+            "list indices must be integers or slices, not str".into(),
+        )),
+        Some(Value::String(_)) => Err(ToolError::Invalid(
+            "string indices must be integers, not 'str'".into(),
+        )),
+        other => Err(ToolError::Invalid(format!(
+            "'{}' object is not subscriptable",
+            other.as_ref().map_or("NoneType", py_type)
+        ))),
+    }
+}
+
+/// `rec.get(k) or None` for a provenance or support list: its strings.
+fn str_list(rec: &Map<String, Value>, k: &str) -> Result<Vec<String>, ToolError> {
+    match rec.get(k) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|v| match v {
+                Value::String(s) => Ok(s.clone()),
+                other => Err(internal(format!(
+                    "unsupported {k} item of type '{}' in the audit snapshot",
+                    py_type(other)
+                ))),
+            })
+            .collect(),
+        Some(v) if py_truthy(v) => Err(internal(format!(
+            "unsupported {k} of type '{}' in the audit snapshot",
+            py_type(v)
+        ))),
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// `_restore_from_snapshot` for lessons: each snapshot re-written through
+/// `lesson_write` (one embedding, HLC tick, graph link and slot save each;
+/// `lesson_write` never rejects), then one restore audit row per slot
+/// (`reason="from audit snapshot"`, the verbatim record). Returns the
+/// snapshots' records.
+async fn lessons_from_snapshots(
+    svc: &Service,
+    ready: &Ready,
+    w: &Writer<'_>,
+    snaps: &[Decision],
+) -> Result<Vec<Value>, ToolError> {
+    for d in snaps {
+        let rec = snapshot_dict(d)?;
+        let task = str_key(rec, "task")?;
+        let aspect = str_key(rec, "aspect")?;
+        let lesson = str_key(rec, "lesson")?;
+        let about = match rec.get("about") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(v) => {
+                return Err(internal(format!(
+                    "unsupported about of type '{}' in the audit snapshot",
+                    py_type(v)
+                )));
+            }
+        };
+        let outcome = str_field(rec, "outcome", Some("success"))?.unwrap_or_default();
+        let polarity = str_field(rec, "polarity", Some("+"))?.unwrap_or_default();
+        let confidence = float_or(rec.get("confidence"), 0.6)?;
+        let origin = str_field(rec, "origin", Some("agent"))?.unwrap_or_default();
+        let provenance = str_list(rec, "provenance")?;
+        let support = str_list(rec, "support")?;
+        let args = crate::lesson_write::LessonWriteArgs {
+            task: &task,
+            aspect: &aspect,
+            lesson: &lesson,
+            about: about.as_deref(),
+            outcome: &outcome,
+            polarity: &polarity,
+            confidence,
+            origin: &origin,
+            provenance: &provenance,
+            support: &support,
+        };
+        if !crate::mutants::active("mcp-dream-stage-snapshot-restore-skipped") {
+            crate::lesson_write::lesson_write(svc, ready, w.ws, w.caller, w.writer, &args).await?;
+        }
+    }
+    let now = crate::episodes::now();
+    for d in snaps {
+        let key = (d.entity_norm.clone(), d.attribute_norm.clone());
+        let record = d.record.clone().unwrap_or(Value::Null);
+        write_restore_decision(
+            ready,
+            Store::Lesson,
+            &key,
+            Some("from audit snapshot"),
+            &record,
+            now,
+        )
+        .await?;
+    }
+    Ok(snaps
+        .iter()
+        .map(|d| d.record.clone().unwrap_or(Value::Null))
+        .collect())
+}
+
 /// `_restore_from_snapshot` for world facts: each snapshot re-written
 /// through `world_write` (one embedding, HLC tick and slot save each; an
 /// unsafe `source_url` is rejected and skipped), then one restore audit row
@@ -851,107 +927,6 @@ async fn world_from_snapshots(
         .iter()
         .map(|d| d.record.clone().unwrap_or(Value::Null))
         .collect())
-}
-
-// ── the lesson graph link (service._link_lesson_graph) ───────────────────
-
-/// `graph_consolidation._compound_halves`: split at the first spaced `/`
-/// or any `+`; both halves non-empty with ASCII alphanumeric content, and
-/// neither ending in a dot-extension.
-pub(super) fn compound_halves(name: &str) -> Option<(String, String)> {
-    let space = crate::stores::cortex::py_isspace;
-    let chars: Vec<(usize, char)> = name.char_indices().collect();
-    let mut found = None;
-    for (k, &(i, c)) in chars.iter().enumerate() {
-        if space(c)
-            && chars.get(k + 1).map(|x| x.1) == Some('/')
-            && chars.get(k + 2).is_some_and(|x| space(x.1))
-        {
-            found = Some((i, chars.get(k + 3).map_or(name.len(), |x| x.0)));
-            break;
-        }
-        if c == '+' {
-            found = Some((i, i + 1));
-            break;
-        }
-    }
-    let (start, end) = found?;
-    let strip = |s: &str| s.trim_matches(space).to_string();
-    let (a, b) = (strip(&name[..start]), strip(&name[end..]));
-    if a.is_empty() || b.is_empty() {
-        return None;
-    }
-    let alnum = |s: &str| s.chars().any(|c| c.is_ascii_alphanumeric());
-    if !alnum(&a) || !alnum(&b) {
-        return None;
-    }
-    if file_extension(&a) || file_extension(&b) {
-        return None;
-    }
-    Some((a, b))
-}
-
-/// `re.search(r"\.[A-Za-z0-9]{1,4}$", s)`: `$` also matches before a final
-/// newline.
-fn file_extension(s: &str) -> bool {
-    let at_end = |t: &str| {
-        t.rfind('.').is_some_and(|p| {
-            let tail = &t[p + 1..];
-            (1..=4).contains(&tail.len()) && tail.chars().all(|c| c.is_ascii_alphanumeric())
-        })
-    };
-    at_end(s) || s.strip_suffix('\n').is_some_and(at_end)
-}
-
-/// `_link_lesson_graph(task, about, polarity)`: the task-type entity, the
-/// `about` object unless it is blank, the task itself, junk or a compound,
-/// and the `prefers` / `avoids` edge between them.
-async fn link_lesson_graph(
-    client: &Client,
-    task: &str,
-    about: Option<&str>,
-    polarity: &str,
-) -> Result<(), ToolError> {
-    use crate::storage::graph::{self, norm_name};
-    let tn = norm_name(task);
-    if tn.is_empty() {
-        return Ok(());
-    }
-    let id_of = |node: &Value| {
-        node.get("id")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| internal("entity without an id"))
-    };
-    let tid = id_of(
-        &crate::graph_write_tools::resolve_or_create(client, task, Some("task-type")).await?,
-    )?;
-    let Some(about) = about.filter(|a| !a.is_empty()) else {
-        return Ok(());
-    };
-    let an = norm_name(about);
-    if an.is_empty() || an == tn {
-        return Ok(());
-    }
-    if crate::junk_names::junk_name_reason(about).is_some() || compound_halves(about).is_some() {
-        return Ok(());
-    }
-    let oid = id_of(&crate::graph_write_tools::resolve_or_create(client, about, None).await?)?;
-    let relation = if polarity == "-" { "avoids" } else { "prefers" };
-    graph::upsert_edge(
-        client,
-        graph::Edge {
-            src_id: tid,
-            relation,
-            dst_id: oid,
-            confidence: 0.7,
-            origin: Some("action"),
-            revive: true,
-            source_entry_ids: &[],
-        },
-    )
-    .await
-    .map_err(internal)?;
-    Ok(())
 }
 
 // ── curation evidence (curation_safety.py) ───────────────────────────────

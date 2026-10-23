@@ -1,14 +1,14 @@
 //! The set-valued slot primitives (`memory/cortex.py`
 //! `CortexStore.add_member` 754-1032, `_insert_member` 1034-1081,
-//! `remove_member` 1083-1135) for the inputs `memory_set_add` and
-//! `memory_set_remove` pass: no support tier, no provenance, never `dream`.
+//! `remove_member` 1083-1135).
 //!
-//! Not ported because no MCP call reaches them: the assistant-origin guards
+//! `memory_set_add` and `memory_set_remove` pass no support tier, no
+//! provenance and never `dream`. The assistant-origin guards
 //! (`support="assistant"`, `cortex.py:891` and `:995`), the conversion tier
-//! guard (needs a support tier, `:897`), the dream direct-write guard and
-//! tier mark (`dream=True`, `:901`, `:1029`), and the removal refusal
-//! (needs a support tier or `dream`, `:1121-1128`). `set_members.rs` never passes
-//! those inputs.
+//! guard (`:897`), the dream direct-write guard and tier mark (`dream=True`,
+//! `:901`, `:1029`), provenance, and the removal refusal (`:1121-1128`) are
+//! ported for the dream's member ops, which reach them through
+//! `set_members::set_add` and `set_members::set_remove`.
 
 use std::sync::{Arc, LazyLock};
 
@@ -16,7 +16,10 @@ use regex::Regex;
 use serde_json::{Value, json};
 
 use super::cortex::{CortexRecord, CortexStore, SlotKey, py_isspace, slot_key};
-use super::cortex_write::{FactWrite, LogAnchor, LogRow, norm_value, py_max, py_min};
+use super::cortex_write::{
+    FactWrite, LogAnchor, LogRow, add_unique, clean_prov, direct_backed, mark_new_record,
+    mark_tier, norm_support, norm_value, py_max, py_min, rank, union_prov,
+};
 use crate::labels::Resolved;
 
 /// `MEMBER_DEDUP_COSINE` (`cortex.py:157`).
@@ -58,7 +61,7 @@ pub fn member_cosine(member: Option<&[f32]>, emb: &[f32]) -> f64 {
     f64::from(sum_products(m, emb) / denom)
 }
 
-/// One `memory_set_add`, as `service.set_add` hands it to `add_member`.
+/// One member add, as `service.set_add` hands it to `add_member`.
 pub struct MemberWrite<'a> {
     pub entity: &'a str,
     pub attribute: &'a str,
@@ -70,12 +73,26 @@ pub struct MemberWrite<'a> {
     pub hlc: (i64, i64),
     pub writer_id: Option<String>,
     pub session_id: Option<String>,
+    /// `support` as passed (`set_add`'s `origin`): the guards read it
+    /// normalised, but a new member row stores it verbatim
+    /// (`_insert_member(..., support=support)`, `cortex.py:1028`).
+    pub support: Option<String>,
+    /// The incoming provenance as passed (`_clean_prov` runs at each use).
+    pub provenance: Vec<String>,
+    /// A dream member op.
+    pub dream: bool,
 }
 
 impl MemberWrite<'_> {
+    /// `_norm_support(support)`.
+    fn sup(&self) -> Option<&'static str> {
+        norm_support(self.support.as_deref())
+    }
+
     /// The write as `add_member` hands it to `_contend` and
-    /// `_settle_matching_contender`: no support tier, the `evergreen`
-    /// default class, both labels inherited.
+    /// `_settle_matching_contender`: the normalised tier, the cleaned
+    /// provenance, the `evergreen` default class, no stance, both labels
+    /// inherited.
     fn as_fact(&self, slot_embedding: Option<Arc<[f32]>>) -> FactWrite<'_> {
         FactWrite {
             entity: self.entity,
@@ -84,7 +101,7 @@ impl MemberWrite<'_> {
             embedding: self.embedding.clone(),
             slot_embedding,
             confidence: self.confidence,
-            support: None,
+            support: self.sup(),
             now: self.now,
             hlc: self.hlc,
             writer_id: self.writer_id.clone(),
@@ -92,6 +109,10 @@ impl MemberWrite<'_> {
             freshness_class: "evergreen".into(),
             authority: Resolved::Inherit,
             distortion_tolerance: Resolved::Inherit,
+            provenance: clean_prov(&self.provenance),
+            stance: None,
+            force_contend: false,
+            dream: self.dream,
         }
     }
 }
@@ -229,8 +250,23 @@ impl CortexStore {
         self.push_member(rec);
     }
 
-    /// `add_member` (`cortex.py:754-1032`) for the inputs `memory_set_add`
-    /// passes (`support=None`, no provenance, `dream=False`).
+    /// The guarded add equals the current scalar (`cortex.py:875-882`,
+    /// `:915-923`): confirm it (last_confirmed, provenance, support and
+    /// confidence; tx_time, hlc and writer are not advanced).
+    fn confirm_scalar_by_member(&mut self, idx: usize, w: &MemberWrite<'_>) -> MemberOutcome {
+        let conf = self.confirmed_confidence(self.records[idx].confidence, w.confidence);
+        let cur = &mut self.records[idx];
+        cur.last_confirmed = w.now;
+        union_prov(cur, &w.provenance);
+        if let Some(sup) = w.sup() {
+            mark_tier(cur, sup, w.dream);
+            add_unique(&mut cur.support, sup);
+        }
+        cur.confidence = conf;
+        outcome("confirmed", Some(idx))
+    }
+
+    /// `add_member` (`cortex.py:754-1032`).
     pub fn add_member(&mut self, w: &MemberWrite<'_>) -> MemberOutcome {
         let key = slot_key(w.entity, w.attribute);
         let nv = norm_value(w.member);
@@ -238,26 +274,44 @@ impl CortexStore {
             // Rejected before touching any state.
             return outcome("member_invalid", None);
         }
+        let sup = w.sup();
         if let Some(idx) = self.current.get(&key).copied() {
             if is_aggregate_value(&self.records[idx].value) {
                 // A number-led total is protected, never converted.
                 self.dirty_slots.insert(key.clone());
                 if nv == norm_value(&self.records[idx].value) {
-                    // The same total re-asserted: confirm the scalar
-                    // (confidence and last_confirmed only).
-                    let conf =
-                        self.confirmed_confidence(self.records[idx].confidence, w.confidence);
-                    let cur = &mut self.records[idx];
-                    cur.last_confirmed = w.now;
-                    cur.confidence = conf;
-                    return outcome("confirmed", Some(idx));
+                    return self.confirm_scalar_by_member(idx, w);
                 }
                 let slot_embedding = self.records[idx].slot_embedding.clone();
                 let parked = self.contend(
-                    idx,
+                    Some(idx),
                     &w.as_fact(slot_embedding),
                     "member_add_blocked_aggregate",
                 );
+                return outcome(parked.action, Some(parked.record));
+            }
+            let cur_origin = self.records[idx].origin();
+            let assistant_blocked = sup == Some("assistant") && cur_origin != "assistant";
+            let tier_blocked =
+                sup.is_some() && self.protect_provenance && rank(sup) < rank(Some(cur_origin));
+            let direct_blocked =
+                w.dream && self.protect_provenance && direct_backed(Some(&self.records[idx]));
+            if assistant_blocked || tier_blocked || direct_blocked {
+                // The one-way conversion never runs against a value this
+                // add may not change; it parks (or confirms an equal value).
+                self.dirty_slots.insert(key.clone());
+                if nv == norm_value(&self.records[idx].value) {
+                    return self.confirm_scalar_by_member(idx, w);
+                }
+                let reason = if assistant_blocked {
+                    "member_add_blocked_assistant"
+                } else if tier_blocked {
+                    "member_add_blocked_tier"
+                } else {
+                    "member_add_blocked_direct"
+                };
+                let slot_embedding = self.records[idx].slot_embedding.clone();
+                let parked = self.contend(Some(idx), &w.as_fact(slot_embedding), reason);
                 return outcome(parked.action, Some(parked.record));
             }
             if !crate::mutants::active("mcp-set-add-no-convert") {
@@ -276,9 +330,29 @@ impl CortexStore {
                 self.dirty_slots.insert(key.clone());
                 let m = &mut self.records[i];
                 m.last_confirmed = w.now;
+                union_prov(m, &w.provenance);
+                // The confirming tier accumulates (a dream confirm only on
+                // an exact match); an assistant corroboration never does.
+                if let Some(sup) = sup.filter(|s| *s != "assistant")
+                    && (same_norm || !w.dream)
+                {
+                    mark_tier(m, sup, w.dream);
+                    add_unique(&mut m.support, sup);
+                }
                 m.confidence = py_min(1.0, py_max(m.confidence, w.confidence));
                 return outcome("member_confirmed", Some(i));
             }
+        }
+        if sup == Some("assistant")
+            && members
+                .iter()
+                .any(|&i| self.records[i].origin() != "assistant")
+        {
+            // Joining a set another tier built changes it: park,
+            // currentless (`cortex.py:995-1009`).
+            self.dirty_slots.insert(key.clone());
+            let parked = self.contend(None, &w.as_fact(None), "member_add_blocked_assistant");
+            return outcome(parked.action, Some(parked.record));
         }
         if members.len() >= MAX_CURRENT_MEMBERS {
             // Logged against the rejected value itself; nothing is dirty.
@@ -315,20 +389,30 @@ impl CortexStore {
         );
         rec.writer_id = w.writer_id.clone();
         rec.session_id = w.session_id.clone();
+        rec.provenance = clean_prov(&w.provenance);
+        if let Some(raw) = w.support.as_ref().filter(|s| !s.is_empty()) {
+            rec.support = vec![raw.clone()];
+        }
+        mark_new_record(&mut rec, sup, w.dream);
         let i = self.push_member(rec);
         self.settle_matching_contender(&key, i, &w.as_fact(None));
         outcome("member_added", Some(i))
     }
 
-    /// `remove_member` (`cortex.py:1083-1135`) for the inputs
-    /// `memory_set_remove` passes (`support=None`, `dream=False`): retract
-    /// the first current member whose normalised value matches.
+    /// `remove_member` (`cortex.py:1083-1135`): retract the first current
+    /// member whose normalised value matches. `support` is the retracting
+    /// tier as passed; an assistant retraction of another tier's member, a
+    /// lower-tier retraction under `protect_provenance`, or a dream
+    /// retraction of a direct-backed member is refused with nothing
+    /// mutated (`member_remove_refused`, the target record).
     pub fn remove_member(
         &mut self,
         entity: &str,
         attribute: &str,
         member: &str,
         now: f64,
+        support: Option<&str>,
+        dream: bool,
     ) -> MemberOutcome {
         let key = slot_key(entity, attribute);
         let nv = norm_value(member);
@@ -339,6 +423,14 @@ impl CortexStore {
         let Some(pos) = pos else {
             return outcome("member_not_found", None);
         };
+        let target = &self.records[self.members[&key][pos]];
+        let sup = norm_support(support);
+        if (sup == Some("assistant") && target.origin() != "assistant")
+            || (sup.is_some() && self.protect_provenance && rank(sup) < rank(Some(target.origin())))
+            || (dream && self.protect_provenance && direct_backed(Some(target)))
+        {
+            return outcome("member_remove_refused", Some(self.members[&key][pos]));
+        }
         if crate::mutants::active("mcp-set-remove-noop") {
             let i = self.members[&key][pos];
             return outcome("member_removed", Some(i));
@@ -385,6 +477,9 @@ mod tests {
             hlc: ((t * 1000.0) as i64, 0),
             writer_id: Some("w".into()),
             session_id: None,
+            support: None,
+            provenance: Vec::new(),
+            dream: false,
         }
     }
 
@@ -439,7 +534,7 @@ mod tests {
         let mut s = CortexStore::default();
         let r = s.add_member(&add("box", "tags", " \u{1c} ", vec![1.0], 1.0));
         assert_eq!(r, outcome("member_invalid", None));
-        let r = s.remove_member("box", "tags", "x", 2.0);
+        let r = s.remove_member("box", "tags", "x", 2.0, None, false);
         assert_eq!(r, outcome("member_not_found", None));
         assert!(s.records.is_empty() && s.dirty_slots.is_empty() && !s.meta_dirty);
     }
