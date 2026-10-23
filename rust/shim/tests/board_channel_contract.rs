@@ -8,6 +8,18 @@ use pseudolife_stdio::{
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 const OTHER: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+/// Options for a test that needs registration done but is not about its
+/// budgets: startup and probe become a hang guard, so attach (or a Codex
+/// thread's first call) returns as soon as registration completes and the
+/// test goes on from that event, not from the 3 s / 2 s defaults. The
+/// Windows dev VM missed those defaults in 3 of 20 runs of this binary at
+/// b361ea26 and a hosted runner did in batch #916 (#917), as the sibling
+/// test did in afff98d4.
+fn registered(mut options: pseudolife_stdio::board::Options) -> pseudolife_stdio::board::Options {
+    options.timing.startup = Duration::from_secs(30);
+    options.timing.probe = Duration::from_secs(30);
+    options
+}
 async fn prepared(board: &Board, meta: Value) -> pseudolife_stdio::board::PreparedCall {
     let Preparation::Forward(call) = board
         .prepare_call(
@@ -30,7 +42,7 @@ async fn board_channel_metadata_lazy_multi_thread_parent_and_invalid_matrix() {
     let process_session = runtime.session.uid.clone();
     let board = Board::attach_options(
         runtime.clone(),
-        board_fixture::options(&runtime, &home, "1"),
+        registered(board_fixture::options(&runtime, &home, "1")),
     )
     .await;
     assert_eq!(fixture.count("/register"), 0);
@@ -100,7 +112,7 @@ async fn board_channel_parent_parameter_fallback_and_registry_failure_hints_pres
     let runtime = board_fixture::runtime(&fixture, true);
     let board = Board::attach_options(
         runtime.clone(),
-        board_fixture::options(&runtime, &home, "1"),
+        registered(board_fixture::options(&runtime, &home, "1")),
     )
     .await;
     let call=prepared(&board,json!({"threadId":BANK,"x-codex-turn-metadata":{"thread_id":BANK,"thread_source":"subagent","parent_thread_id":OTHER}})).await;
@@ -227,9 +239,11 @@ async fn board_channel_default_opt_out_no_bearer_and_failed_checkin_matrix() {
             );
             let home = Home::new();
             let runtime = board_fixture::runtime(&fixture, codex);
-            let board =
-                Board::attach_options(runtime.clone(), board_fixture::options(&runtime, &home, ""))
-                    .await;
+            let board = Board::attach_options(
+                runtime.clone(),
+                registered(board_fixture::options(&runtime, &home, "")),
+            )
+            .await;
             assert_eq!(board.board_checkin().await, ready);
             assert_eq!(fixture.count("/register"), usize::from(ready && !codex));
             if codex {
@@ -291,7 +305,7 @@ async fn board_channel_fixed_state_refusal_and_missing_reused_bridge_fall_back_p
         let fixture = Fixture::new(0);
         let home = Home::new();
         let runtime = runtime(&fixture, true);
-        let mut options = options(&runtime, &home, "1");
+        let mut options = registered(options(&runtime, &home, "1"));
         if mode == "fixed" {
             options.state = Some(home.0.join("fixed.json"));
         } else {
@@ -364,9 +378,7 @@ async fn board_channel_bounded_probe_and_explicit_codex_checkin() {
         // Registration is the subject here, not its budgets: give the check
         // and the thread registration room for a loaded runner (200x on the
         // Windows dev VM under CPU load missed the 3 s default 6 times).
-        let mut options = board_fixture::options(&runtime, &home, "1");
-        options.timing.startup = Duration::from_secs(30);
-        options.timing.probe = Duration::from_secs(30);
+        let options = registered(board_fixture::options(&runtime, &home, "1"));
         let board = Board::attach_options(runtime.clone(), options).await;
         assert_eq!(board.board_checkin().await, ready);
         assert_eq!(fixture.count("coordination-start"), 1);
@@ -381,14 +393,18 @@ async fn board_channel_eager_channel_keeps_adapter_and_wake_capability() {
     let fixture = Fixture::new(0);
     let home = Home::new();
     let runtime = board_fixture::runtime(&fixture, true);
-    let options = pseudolife_stdio::board::Options::from_lookup(&runtime, true, |key| match key {
-        "PSEUDOLIFE_AGENT_COORDINATION" => Some("1".into()),
-        "PSEUDOLIFE_AGENT_WAKE" => Some("1".into()),
-        "PSEUDOLIFE_AGENT_STATE_DIR" => Some(home.0.join("agents").to_string_lossy().into()),
-        "PSEUDOLIFE_DIGEST_DIR" => Some(home.0.join("digests").to_string_lossy().into()),
-        "CLAUDE_CODE_SESSION_ID" => Some(BANK.into()),
-        _ => None,
-    });
+    let options = registered(pseudolife_stdio::board::Options::from_lookup(
+        &runtime,
+        true,
+        |key| match key {
+            "PSEUDOLIFE_AGENT_COORDINATION" => Some("1".into()),
+            "PSEUDOLIFE_AGENT_WAKE" => Some("1".into()),
+            "PSEUDOLIFE_AGENT_STATE_DIR" => Some(home.0.join("agents").to_string_lossy().into()),
+            "PSEUDOLIFE_DIGEST_DIR" => Some(home.0.join("digests").to_string_lossy().into()),
+            "CLAUDE_CODE_SESSION_ID" => Some(BANK.into()),
+            _ => None,
+        },
+    ));
     assert!(!options.codex);
     let board = Board::attach_options(runtime, options).await;
     assert_eq!(fixture.count("/register"), 1);
@@ -544,7 +560,11 @@ async fn board_channel_cached_hint_finish_performs_no_network_and_preserves_resu
                     let runtime = board_fixture::runtime(&fixture, false);
                     let board = Board::attach_options(
                         runtime.clone(),
-                        board_fixture::options(&runtime, &home, if enabled { "1" } else { "0" }),
+                        registered(board_fixture::options(
+                            &runtime,
+                            &home,
+                            if enabled { "1" } else { "0" },
+                        )),
                     )
                     .await;
                     let call = prepared(&board, json!({})).await;
