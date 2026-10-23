@@ -14,9 +14,9 @@ const OTHER: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 /// arrives and the test goes on from that event, not from the 3 s startup /
 /// 2 s probe defaults. The Windows dev VM missed the startup default in 3
 /// of 20 runs of this binary at b361ea26, and a hosted runner did in batch
-/// #916 (#917), as the sibling test did in afff98d4. 30 s matches
-/// `Timing::retry_attempt`, production's bound for the same registration
-/// when it is retried.
+/// #916 (#917), as the sibling test did in afff98d4. 30 s is a hang guard
+/// borrowing the magnitude of `Timing::retry_attempt`, production's bound
+/// on a retried process registration.
 fn registered(mut options: pseudolife_stdio::board::Options) -> pseudolife_stdio::board::Options {
     options.timing.startup = Duration::from_secs(30);
     options.timing.probe = Duration::from_secs(30);
@@ -293,7 +293,10 @@ async fn board_channel_refused_default_and_no_bearer_are_quiet() {
             instructions_note: String::new(),
             cache: None,
         });
-        let board = Board::attach_options(runtime.clone(), options(&runtime, &home, "")).await;
+        // The 401 must be what keeps it quiet: a probe that missed its
+        // budget is quiet too, without ever reading the refusal.
+        let board =
+            Board::attach_options(runtime.clone(), registered(options(&runtime, &home, ""))).await;
         assert!(!board.board_checkin().await);
         assert_eq!(fixture.count("coordination-start"), usize::from(!bare));
         assert_eq!(fixture.count("/register"), 0);
